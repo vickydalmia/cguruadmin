@@ -1,5 +1,5 @@
 {
-  "name": "cguruadmin",
+  "name": "couponzguru",
   "version": "0.1.0",
   "private": true,
   "description": "A Strapi application",
@@ -15,9 +15,11 @@
     "upgrade:dry": "npx @strapi/upgrade latest --dry"
   },
   "dependencies": {
-    "@strapi/plugin-cloud": "5.35.0",
-    "@strapi/plugin-users-permissions": "5.35.0",
-    "@strapi/strapi": "5.35.0",
+    "@strapi/plugin-cloud": "5.39.0",
+    "@strapi/plugin-users-permissions": "5.39.0",
+    "@strapi/provider-email-amazon-ses": "^5.39.0",
+    "@strapi/provider-upload-aws-s3": "^5.39.0",
+    "@strapi/strapi": "5.39.0",
     "pg": "8.8.0",
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
@@ -35,7 +37,7 @@
     "npm": ">=6.0.0"
   },
   "strapi": {
-    "uuid": "dd3541ba-451c-4c56-aa89-8d8cd30ef762",
-    "installId": "2835a306bb535aa7bb92c0fd41162e0bec0b060cb3affae8dd8d8f6617a9d65f"
+    "uuid": "a34c3190-29d2-4586-b0df-6bd5826df0c5",
+    "installId": "c75df01dccb5cef60d8944d5f16fc7ac5c1cebe0e0766abfc694857486fd147f"
   }
 }
