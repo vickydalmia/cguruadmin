@@ -41,17 +41,7 @@ WORKDIR /opt/app
 
 RUN addgroup -g 1001 -S strapi && adduser -u 1001 -S strapi -G strapi
 
-COPY --from=build --chown=strapi:strapi /opt/app/package.json ./
-COPY --from=build --chown=strapi:strapi /opt/app/yarn.lock ./
-COPY --from=build --chown=strapi:strapi /opt/app/node_modules ./node_modules
-COPY --from=build --chown=strapi:strapi /opt/app/dist ./dist
-COPY --from=build --chown=strapi:strapi /opt/app/dist/config ./config
-COPY --from=build --chown=strapi:strapi /opt/app/database ./database
-COPY --from=build --chown=strapi:strapi /opt/app/public ./public
-COPY --from=build --chown=strapi:strapi /opt/app/src ./src
-COPY --from=build --chown=strapi:strapi /opt/app/favicon.png ./
-COPY --from=build --chown=strapi:strapi /opt/app/types ./types
-
+COPY --from=build --chown=strapi:strapi /opt/app ./
 RUN mkdir -p .tmp .cache .config && chown -R strapi:strapi /opt/app
 
 USER strapi
