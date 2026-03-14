@@ -1,0 +1,40 @@
+{
+  "kind": "collectionType",
+  "collectionName": "unique_coupon_pools",
+  "info": {
+    "singularName": "unique-coupon-pool",
+    "pluralName": "unique-coupon-pools",
+    "displayName": "Unique Coupon Pool",
+    "description": "Pools of unique coupon codes that can be redeemed one-at-a-time"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true,
+      "unique": true
+    },
+    "totalCodes": {
+      "type": "integer",
+      "default": 0
+    },
+    "usedCodes": {
+      "type": "integer",
+      "default": 0
+    },
+    "codes": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::unique-code.unique-code",
+      "mappedBy": "pool"
+    },
+    "coupons": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::coupon.coupon",
+      "mappedBy": "uniqueCouponPool"
+    }
+  }
+}

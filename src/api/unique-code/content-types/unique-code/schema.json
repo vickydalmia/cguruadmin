@@ -1,0 +1,44 @@
+{
+  "kind": "collectionType",
+  "collectionName": "unique_codes",
+  "info": {
+    "singularName": "unique-code",
+    "pluralName": "unique-codes",
+    "displayName": "Unique Code",
+    "description": "Individual unique coupon codes managed by pools"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {
+    "content-manager": {
+      "visible": false
+    },
+    "content-type-builder": {
+      "visible": false
+    }
+  },
+  "attributes": {
+    "code": {
+      "type": "string",
+      "required": true
+    },
+    "isUsed": {
+      "type": "boolean",
+      "default": false
+    },
+    "usedAt": {
+      "type": "datetime"
+    },
+    "version": {
+      "type": "integer",
+      "default": 0
+    },
+    "pool": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::unique-coupon-pool.unique-coupon-pool",
+      "inversedBy": "codes"
+    }
+  }
+}
