@@ -1,0 +1,23 @@
+{
+  "name": "unique-coupon",
+  "version": "1.0.0",
+  "description": "Manage unique coupon code pools with race-condition safe redemption",
+  "strapi": {
+    "name": "unique-coupon",
+    "displayName": "Unique Coupon",
+    "description": "Manage unique coupon code pools with race-condition safe redemption",
+    "kind": "plugin"
+  },
+  "scripts": {
+    "build": "strapi-plugin build",
+    "watch": "strapi-plugin watch",
+    "verify": "strapi-plugin verify"
+  },
+  "peerDependencies": {
+    "@strapi/strapi": "^5.0.0"
+  },
+  "devDependencies": {
+    "@strapi/sdk-plugin": "^5.0.0",
+    "typescript": "^5.0.0"
+  }
+}
