@@ -1,4 +1,5 @@
 import controllers from './controllers';
+import policies from './policies';
 import routes from './routes';
 import services from './services';
 
@@ -13,6 +14,7 @@ export default {
     // Cleanup phase
   },
   controllers,
+  policies,
   routes,
   services,
 };

@@ -4,7 +4,7 @@ export default [
     path: '/redeem',
     handler: 'unique-coupon.redeem',
     config: {
-      policies: [],
+      policies: ['plugin::unique-coupon.rate-limit'],
       auth: false,
     },
   },
