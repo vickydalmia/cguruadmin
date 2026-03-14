@@ -1,0 +1,36 @@
+name: couponzguru
+
+services:
+  strapi:
+    image: ${APP_IMAGE:?APP_IMAGE is required}:${APP_IMAGE_TAG:?APP_IMAGE_TAG is required}
+    restart: unless-stopped
+    init: true
+    user: "1001:1001"
+    read_only: true
+    env_file:
+      - ./.env.production
+    environment:
+      NODE_ENV: production
+    ports:
+      - "127.0.0.1:${APP_PORT:-1337}:1337"
+    tmpfs:
+      - /opt/app/.tmp:uid=1001,gid=1001
+      - /opt/app/.cache:uid=1001,gid=1001
+      - /tmp:uid=1001,gid=1001
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:1337/_health').then((r)=>process.exit(r.status===204?0:1)).catch(()=>process.exit(1))
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
