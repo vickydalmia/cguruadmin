@@ -60,4 +60,4 @@ USER strapi
 
 EXPOSE 1337
 
-CMD ["yarn", "start"]
+CMD ["node", "node_modules/@strapi/strapi/bin/strapi.js", "start"]

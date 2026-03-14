@@ -12,11 +12,11 @@ set -euo pipefail
 # Prerequisites:
 #   - docker and docker compose installed
 #   - logged into ghcr.io (docker login ghcr.io)
-#   - compose.prod.yml in the current directory
-#   - .env.production in the current directory
+#   - docker.compose.yml in the current directory
+#   - .env in the current directory
 ###############################################################################
 
-COMPOSE_FILE="compose.prod.yml"
+COMPOSE_FILE="docker.compose.yml"
 HEALTH_ATTEMPTS=24
 HEALTH_INTERVAL=5
 
@@ -26,13 +26,13 @@ err() { printf '\033[1;31m[deploy]\033[0m %s\n' "$*" >&2; }
 # ── Read image name from compose or env ──────────────────────────────────────
 
 if [ -z "${APP_IMAGE:-}" ]; then
-  if [ -f ".env.production" ]; then
-    APP_IMAGE=$(grep -E '^APP_IMAGE=' .env.production | cut -d= -f2- || true)
+  if [ -f ".env" ]; then
+    APP_IMAGE=$(grep -E '^APP_IMAGE=' .env | cut -d= -f2- || true)
   fi
 fi
 
 if [ -z "${APP_IMAGE:-}" ]; then
-  err "APP_IMAGE is not set. Export it or add it to .env.production"
+  err "APP_IMAGE is not set. Export it or add it to .env"
   err "  export APP_IMAGE=ghcr.io/owner/repo"
   exit 1
 fi
@@ -51,8 +51,8 @@ if [ ! -f "${COMPOSE_FILE}" ]; then
   exit 1
 fi
 
-if [ ! -f ".env.production" ]; then
-  err ".env.production not found in $(pwd)"
+if [ ! -f ".env" ]; then
+  err ".env not found in $(pwd)"
   exit 1
 fi
 

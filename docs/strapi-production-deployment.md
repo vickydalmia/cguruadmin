@@ -332,13 +332,38 @@ Important:
 
 ## 6. Log the droplet into GHCR
 
-Run this once on the droplet as the deploy user:
+### Create a personal access token (classic)
+
+1. Go to [GitHub Settings > Developer settings > Personal access tokens > Tokens (classic)](https://github.com/settings/tokens)
+2. Click **Generate new token (classic)**
+3. Name it something like `droplet-ghcr-pull`
+4. Set expiration (or no expiration for a server token)
+5. Select only the `read:packages` scope
+6. Generate and copy the token
+
+### Log in on the droplet
+
+SSH into the droplet as the deploy user and run:
 
 ```bash
-printf '%s' 'YOUR_GHCR_PULL_TOKEN' | docker login ghcr.io -u 'YOUR_GHCR_PULL_USERNAME' --password-stdin
+echo 'YOUR_TOKEN' | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
 ```
 
-This stores pull credentials for the deploy user so the workflow can run `docker compose pull`.
+Replace `YOUR_GITHUB_USERNAME` with your GitHub username and `YOUR_TOKEN` with the token you just created.
+
+Expected output:
+
+```
+Login Succeeded
+```
+
+Verify it works:
+
+```bash
+docker pull ghcr.io/YOUR_ORG/cguruadmin:latest
+```
+
+This only needs to be done once. Docker stores the credentials in `~/.docker/config.json`.
 
 ## 7. Configure Nginx as the load balancer
 
