@@ -16,7 +16,11 @@ services:
     tmpfs:
       - /opt/app/.tmp:uid=1001,gid=1001
       - /opt/app/.cache:uid=1001,gid=1001
+      - /opt/app/.config:uid=1001,gid=1001
       - /tmp:uid=1001,gid=1001
+    # Optional: mount CA for DB SSL (set DATABASE_SSL_CA_PATH=/opt/app/certs/ca.crt)
+    # volumes:
+    #   - ./certs/ca-certificate.crt:/opt/app/certs/ca.crt:ro
     healthcheck:
       test:
         - CMD

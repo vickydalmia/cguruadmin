@@ -296,7 +296,10 @@ DATABASE_CLIENT=postgres
 DATABASE_URL=postgres://strapi:change-me-password@your-do-db-host.db.ondigitalocean.com:25060/strapi?sslmode=require
 DATABASE_SCHEMA=public
 DATABASE_SSL=true
-DATABASE_SSL_REJECT_UNAUTHORIZED=false
+# Use CA for proper verification (recommended). See "Database SSL CA" below.
+# DATABASE_SSL_CA_PATH=/opt/app/certs/ca.crt
+# DATABASE_SSL_CA=<base64-encoded CA>
+DATABASE_SSL_REJECT_UNAUTHORIZED=true
 DATABASE_POOL_MIN=2
 DATABASE_POOL_MAX=10
 DATABASE_CONNECTION_TIMEOUT=60000
@@ -329,6 +332,16 @@ Important:
 - `TRUST_PROXY=true` is required because Nginx sits in front of Strapi.
 - DigitalOcean Managed PostgreSQL uses port `25060` and requires SSL.
 - Keep `APP_PORT=1337` unless you also change the upstream port in `deploy/site.nginx.conf`.
+
+### Database SSL CA (DigitalOcean managed DB)
+
+DigitalOcean managed PostgreSQL uses a CA certificate. For proper verification (instead of `DATABASE_SSL_REJECT_UNAUTHORIZED=false`), provide the CA:
+
+1. **Option A – file path**: Download the CA from the DO database dashboard, place it on the droplet (e.g. `deploy/certs/ca-certificate.crt`), uncomment the `volumes` block in `deploy/compose.prod.yml`, and set `DATABASE_SSL_CA_PATH=/opt/app/certs/ca.crt`.
+2. **Option B – base64 in env**: Encode the CA with `base64 -w 0 ca-certificate.crt` and set `DATABASE_SSL_CA=<output>` in `.env.production`.
+3. **Option C – raw PEM**: Set `DATABASE_SSL_CA` to the PEM content with `\n` for newlines.
+
+With a valid CA, keep `DATABASE_SSL_REJECT_UNAUTHORIZED=true`.
 
 ## 6. Log the droplet into GHCR
 
