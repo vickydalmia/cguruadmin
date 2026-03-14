@@ -7,15 +7,36 @@ function readCA(env: Core.Config.Shared.ConfigParams['env']): string | undefined
   if (caPath && fs.existsSync(caPath)) {
     return fs.readFileSync(caPath, 'utf8');
   }
-  const raw = env('DATABASE_SSL_CA', '');
+  const raw = (env('DATABASE_SSL_CA', '') || '').trim().replace(/\s/g, '');
   if (!raw) return undefined;
   if (raw.startsWith('-----BEGIN')) return raw;
-  return Buffer.from(raw, 'base64').toString('utf8');
+  try {
+    return Buffer.from(raw, 'base64').toString('utf8');
+  } catch {
+    return undefined;
+  }
+}
+
+/** Strip sslmode from DATABASE_URL so pg-connection-string doesn't override our ssl config */
+function connectionUrlWithoutSslMode(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const u = new URL(url);
+    u.searchParams.delete('sslmode');
+    u.searchParams.delete('sslrootcert');
+    u.searchParams.delete('uselibpqcompat');
+    return u.toString();
+  } catch {
+    return url;
+  }
 }
 
 const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Database => {
   const client = env('DATABASE_CLIENT', 'sqlite');
   const ca = readCA(env);
+  const dbUrl = ca
+    ? connectionUrlWithoutSslMode(env('DATABASE_URL'))
+    : env('DATABASE_URL');
 
   const connections = {
     mysql: {
@@ -38,7 +59,7 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Database 
     },
     postgres: {
       connection: {
-        connectionString: env('DATABASE_URL'),
+        connectionString: dbUrl,
         host: env('DATABASE_HOST', 'localhost'),
         port: env.int('DATABASE_PORT', 5432),
         database: env('DATABASE_NAME', 'strapi'),

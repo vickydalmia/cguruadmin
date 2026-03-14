@@ -14,10 +14,22 @@ services:
     ports:
       - "127.0.0.1:${APP_PORT:-1337}:1337"
     tmpfs:
-      - /opt/app/.tmp:uid=1001,gid=1001
-      - /opt/app/.cache:uid=1001,gid=1001
-      - /opt/app/.config:uid=1001,gid=1001
-      - /tmp:uid=1001,gid=1001
+      - type: tmpfs
+        target: /opt/app/.tmp
+        tmpfs:
+          mode: 0o01777
+      - type: tmpfs
+        target: /opt/app/.cache
+        tmpfs:
+          mode: 0o01777
+      - type: tmpfs
+        target: /opt/app/.config
+        tmpfs:
+          mode: 0o01777
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          mode: 0o01777
     # Optional: mount CA for DB SSL (set DATABASE_SSL_CA_PATH=/opt/app/certs/ca.crt)
     # volumes:
     #   - ./certs/ca-certificate.crt:/opt/app/certs/ca.crt:ro

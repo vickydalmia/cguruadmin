@@ -58,13 +58,12 @@ The runtime configuration is also updated in:
 
 ### Dockerfile stages
 
-The `Dockerfile` uses a multi-stage build on `node:24-bookworm-slim`:
+The `Dockerfile` uses a multi-stage build on `node:22-alpine`:
 
 | Stage | Purpose |
 | --- | --- |
-| `base` | Slim Node 24 image, enables Corepack + Yarn 1.22 |
-| `build` | Installs all deps (dev + prod), compiles native addons, runs `yarn build`, then prunes dev dependencies |
-| `runtime` | Copies only production `node_modules` and build artifacts, creates a custom `strapi` user (UID 1001), runs as non-root |
+| `build` | Alpine + build deps (gcc, vips-dev, etc.), installs deps, runs `yarn build`, then prunes to production-only |
+| `runtime` | Slim Alpine + vips runtime, copies production `node_modules` and build artifacts, creates custom `strapi` user (UID 1001), runs as non-root |
 
 The runtime image does not contain build tools (python3, make, g++), dev dependencies, or source TypeScript -- only what Strapi needs to run.
 
@@ -338,7 +337,7 @@ Important:
 DigitalOcean managed PostgreSQL uses a CA certificate. For proper verification (instead of `DATABASE_SSL_REJECT_UNAUTHORIZED=false`), provide the CA:
 
 1. **Option A – file path**: Download the CA from the DO database dashboard, place it on the droplet (e.g. `deploy/certs/ca-certificate.crt`), uncomment the `volumes` block in `deploy/compose.prod.yml`, and set `DATABASE_SSL_CA_PATH=/opt/app/certs/ca.crt`.
-2. **Option B – base64 in env**: Encode the CA with `base64 -w 0 ca-certificate.crt` and set `DATABASE_SSL_CA=<output>` in `.env.production`.
+2. **Option B – base64 in env**: Encode the CA (see [Appendix A §1](#1-database-ssl-self-signed-certificate-error) for commands) and set `DATABASE_SSL_CA=<output>` in `.env.production`. Do not copy the zsh `%` prompt if it appears at the end.
 3. **Option C – raw PEM**: Set `DATABASE_SSL_CA` to the PEM content with `\n` for newlines.
 
 With a valid CA, keep `DATABASE_SSL_REJECT_UNAUTHORIZED=true`.
@@ -455,6 +454,9 @@ Verify manually:
 ```bash
 # Container should show "healthy"
 docker compose -f compose.prod.yml ps
+
+# Check logs (last 200 lines)
+docker compose -f compose.prod.yml logs --tail=200 strapi
 
 # Should return HTTP 204
 curl -I http://127.0.0.1:1337/_health
@@ -596,6 +598,7 @@ Common causes:
 - unreachable PostgreSQL host or blocked firewall
 - wrong `PUBLIC_URL`
 - missing `APP_KEYS` or JWT secrets
+- **Database SSL:** `self-signed certificate in certificate chain` → provide the CA via `DATABASE_SSL_CA` or `DATABASE_SSL_CA_PATH` (see [Appendix A §1](#1-database-ssl-self-signed-certificate-error))
 
 ### Uploads work but previews fail
 
@@ -764,3 +767,112 @@ cd /opt/couponzguru
 - TLSv1 and TLSv1.1 are disabled; only TLSv1.2 and TLSv1.3 are allowed.
 - Force PostgreSQL in production to avoid accidental SQLite fallback.
 - Prefer a private bucket and signed URLs unless public assets are intentional.
+
+---
+
+## Appendix A: Debug fixes and implementation notes
+
+This section documents fixes applied during deployment debugging. Use it when troubleshooting similar issues or understanding why certain choices were made.
+
+### 1. Database SSL: self-signed certificate error
+
+**Problem:** Connecting to DigitalOcean managed PostgreSQL fails with `self-signed certificate in certificate chain` when `DATABASE_SSL_REJECT_UNAUTHORIZED=true`.
+
+**Why:** DO managed DB uses a CA certificate. Node’s TLS stack rejects the server cert unless the CA is trusted. Setting `DATABASE_SSL_REJECT_UNAUTHORIZED=false` works but disables verification and is insecure.
+
+**Fix:** Add CA support in `config/database.ts` via a `readCA()` helper that:
+
+- Reads from `DATABASE_SSL_CA_PATH` if the file exists
+- Otherwise uses `DATABASE_SSL_CA` (raw PEM or base64-encoded)
+
+With a valid CA, keep `DATABASE_SSL_REJECT_UNAUTHORIZED=true` for proper verification.
+
+**Base64 CA generation:**
+
+```bash
+# Linux (GNU base64)
+base64 -w 0 ca-certificate.crt
+
+# macOS (BSD base64)
+base64 -i ca-certificate.crt | tr -d '\n'
+
+# Cross-platform
+base64 < ca-certificate.crt | tr -d '\n'
+```
+
+**Copy tip:** In zsh, a `%` at the end of the output is the shell prompt (no trailing newline), not part of the base64 string. Do not include it when copying into `DATABASE_SSL_CA`. To avoid it: `base64 < ca-certificate.crt | tr -d '\n'; echo`
+
+---
+
+### 2. Dockerfile: Node base and Strapi startup
+
+**Problem:** Strapi in Docker may fail to start or hit Corepack/Node compatibility issues.
+
+**Fix:**
+
+- Use `node:22-alpine` as base (per Strapi Docker docs)
+- Install `vips` in build and runtime for image processing
+- Copy `dist/config` → `config` so the compiled `.js` config is used at runtime
+- Set `HOME=/opt/app` and create `.tmp`, `.cache`, `.config` for Strapi
+- Use CMD: `node node_modules/@strapi/strapi/bin/strapi.js start` instead of `strapi start` to avoid Corepack
+
+---
+
+### 3. Dockerfile: Custom user and hardening
+
+**Problem:** Running as root inside the container is a security risk.
+
+**Fix:**
+
+- Create `strapi` user (UID/GID 1001) in the runtime stage
+- `USER strapi` before `CMD`
+- Compose enforces `user: "1001:1001"` and `no-new-privileges:true`
+
+---
+
+### 4. Compose: Read-only filesystem
+
+**Problem:** Strapi needs writable dirs for `.tmp`, `.cache`, `.config`, and `/tmp`.
+
+**Fix:**
+
+- `read_only: true` on the container
+- Mount writable `tmpfs` for `/opt/app/.tmp`, `/opt/app/.cache`, `/opt/app/.config`, `/tmp` with `uid=1001,gid=1001`
+
+---
+
+### 5. Compose: Optional CA volume for DB SSL
+
+**Problem:** When using `DATABASE_SSL_CA_PATH`, the CA file must exist inside the container.
+
+**Fix:** Optional volume in `compose.prod.yml`:
+
+```yaml
+# volumes:
+#   - ./certs/ca-certificate.crt:/opt/app/certs/ca.crt:ro
+```
+
+Uncomment and set `DATABASE_SSL_CA_PATH=/opt/app/certs/ca.crt` in `.env.production`.
+
+---
+
+### 6. Deployment: Manual deploy only
+
+**Problem:** Deploying from GitHub Actions requires storing SSH keys and server credentials in GitHub, which increases risk.
+
+**Fix:**
+
+- Workflow only builds and pushes images to GHCR
+- Deploy is manual: SSH to the droplet and run `./deploy.sh`
+- Droplet logs into GHCR with a classic PAT (`read:packages` only)
+- All production secrets stay on the droplet
+
+---
+
+### 7. config/database.ts: Files updated
+
+The following files were changed for deployment:
+
+- `config/database.ts` – CA support (`readCA`, `DATABASE_SSL_CA_PATH`, `DATABASE_SSL_CA`)
+- `config/server.ts`, `config/plugins.ts`, `config/middlewares.ts` – production settings
+- `.env.example` – CA options and production defaults
