@@ -1,0 +1,32 @@
+{
+  "kind": "singleType",
+  "collectionName": "globals",
+  "info": {
+    "singularName": "global",
+    "pluralName": "globals",
+    "displayName": "Global Settings"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "headerCode": {
+      "type": "text"
+    },
+    "footerCode": {
+      "type": "text"
+    },
+    "amazonTopBanner": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": ["images"]
+    },
+    "amazonTopBannerLink": {
+      "type": "string"
+    },
+    "enableAmazonDeal": {
+      "type": "boolean",
+      "default": false
+    }
+  }
+}

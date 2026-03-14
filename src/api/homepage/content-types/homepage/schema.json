@@ -1,0 +1,28 @@
+{
+  "kind": "singleType",
+  "collectionName": "homepages",
+  "info": {
+    "singularName": "homepage",
+    "pluralName": "homepages",
+    "displayName": "Homepage"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "attributes": {
+    "sliderEnabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "sliderSlides": {
+      "type": "component",
+      "repeatable": true,
+      "component": "homepage.slider-slide"
+    },
+    "seo": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.seo"
+    }
+  }
+}
