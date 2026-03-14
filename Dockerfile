@@ -46,7 +46,6 @@ COPY --from=build --chown=strapi:strapi /opt/app/package.json ./
 COPY --from=build --chown=strapi:strapi /opt/app/yarn.lock ./
 COPY --from=build --chown=strapi:strapi /opt/app/node_modules ./node_modules
 COPY --from=build --chown=strapi:strapi /opt/app/dist ./dist
-COPY --from=build --chown=strapi:strapi /opt/app/build ./build
 COPY --from=build --chown=strapi:strapi /opt/app/config ./config
 COPY --from=build --chown=strapi:strapi /opt/app/database ./database
 COPY --from=build --chown=strapi:strapi /opt/app/public ./public
