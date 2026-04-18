@@ -439,14 +439,14 @@ export interface ApiBankBank extends Struct.CollectionTypeSchema {
     singularName: 'bank';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
-    coupons: Schema.Attribute.Relation<'oneToMany', 'api::coupon.coupon'>;
+    coupons: Schema.Attribute.Relation<'manyToMany', 'api::coupon.coupon'>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    deals: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'>;
+    deals: Schema.Attribute.Relation<'manyToMany', 'api::deal.deal'>;
     description: Schema.Attribute.RichText;
     faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     faqs: Schema.Attribute.Component<'shared.faq-item', true>;
@@ -457,6 +457,22 @@ export interface ApiBankBank extends Struct.CollectionTypeSchema {
     logoAlt: Schema.Attribute.String;
     name: Schema.Attribute.String & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
+    ratingAverage: Schema.Attribute.Decimal &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 5;
+          min: 0;
+        },
+        number
+      >;
+    ratingCount: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 0;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<0>;
     seo: Schema.Attribute.Component<'shared.seo', false>;
     shortDescription: Schema.Attribute.Text;
     slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
@@ -475,14 +491,14 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
     singularName: 'brand';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
-    coupons: Schema.Attribute.Relation<'oneToMany', 'api::coupon.coupon'>;
+    coupons: Schema.Attribute.Relation<'manyToMany', 'api::coupon.coupon'>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    deals: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'>;
+    deals: Schema.Attribute.Relation<'manyToMany', 'api::deal.deal'>;
     description: Schema.Attribute.RichText;
     faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     faqs: Schema.Attribute.Component<'shared.faq-item', true>;
@@ -493,6 +509,22 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
     logoAlt: Schema.Attribute.String;
     name: Schema.Attribute.String & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
+    ratingAverage: Schema.Attribute.Decimal &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 5;
+          min: 0;
+        },
+        number
+      >;
+    ratingCount: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 0;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<0>;
     seo: Schema.Attribute.Component<'shared.seo', false>;
     shortDescription: Schema.Attribute.Text;
     slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
@@ -511,14 +543,14 @@ export interface ApiCategoryCategory extends Struct.CollectionTypeSchema {
     singularName: 'category';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
-    coupons: Schema.Attribute.Relation<'oneToMany', 'api::coupon.coupon'>;
+    coupons: Schema.Attribute.Relation<'manyToMany', 'api::coupon.coupon'>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    deals: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'>;
+    deals: Schema.Attribute.Relation<'manyToMany', 'api::deal.deal'>;
     description: Schema.Attribute.RichText;
     faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     faqs: Schema.Attribute.Component<'shared.faq-item', true>;
@@ -531,6 +563,22 @@ export interface ApiCategoryCategory extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     name: Schema.Attribute.String & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
+    ratingAverage: Schema.Attribute.Decimal &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 5;
+          min: 0;
+        },
+        number
+      >;
+    ratingCount: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 0;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<0>;
     seo: Schema.Attribute.Component<'shared.seo', false>;
     shortDescription: Schema.Attribute.Text;
     slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
@@ -549,15 +597,23 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
     singularName: 'coupon';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
-    affiliateLink: Schema.Attribute.String;
-    bank: Schema.Attribute.Relation<'manyToOne', 'api::bank.bank'>;
-    brand: Schema.Attribute.Relation<'manyToOne', 'api::brand.brand'>;
-    category: Schema.Attribute.Relation<'manyToOne', 'api::category.category'>;
-    code: Schema.Attribute.String;
+    affiliateLink: Schema.Attribute.Text;
+    banks: Schema.Attribute.Relation<'manyToMany', 'api::bank.bank'>;
+    brands: Schema.Attribute.Relation<'manyToMany', 'api::brand.brand'>;
+    categories: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::category.category'
+    >;
+    code: Schema.Attribute.Text;
     content: Schema.Attribute.RichText;
+    contentStatus: Schema.Attribute.Enumeration<
+      ['published', 'scheduled', 'expired']
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'published'>;
     couponType: Schema.Attribute.Enumeration<['static', 'unique']> &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<'static'>;
@@ -574,13 +630,9 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
       'api::coupon.coupon'
     > &
       Schema.Attribute.Private;
-    offerType: Schema.Attribute.Enumeration<
-      ['fashion', 'travel', 'electronics', 'food', 'exclusive', 'newly_added']
-    >;
     publishedAt: Schema.Attribute.DateTime;
-    seo: Schema.Attribute.Component<'shared.seo', false>;
-    slug: Schema.Attribute.UID<'title'> & Schema.Attribute.Required;
-    store: Schema.Attribute.Relation<'manyToOne', 'api::store.store'>;
+    scheduledAt: Schema.Attribute.DateTime;
+    stores: Schema.Attribute.Relation<'manyToMany', 'api::store.store'>;
     tags: Schema.Attribute.Relation<'manyToMany', 'api::tag.tag'>;
     title: Schema.Attribute.String & Schema.Attribute.Required;
     uniqueCouponPool: Schema.Attribute.Relation<
@@ -602,14 +654,22 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     singularName: 'deal';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
-    affiliateLink: Schema.Attribute.String;
-    bank: Schema.Attribute.Relation<'manyToOne', 'api::bank.bank'>;
-    brand: Schema.Attribute.Relation<'manyToOne', 'api::brand.brand'>;
-    category: Schema.Attribute.Relation<'manyToOne', 'api::category.category'>;
+    affiliateLink: Schema.Attribute.Text;
+    banks: Schema.Attribute.Relation<'manyToMany', 'api::bank.bank'>;
+    brands: Schema.Attribute.Relation<'manyToMany', 'api::brand.brand'>;
+    categories: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::category.category'
+    >;
     content: Schema.Attribute.RichText;
+    contentStatus: Schema.Attribute.Enumeration<
+      ['published', 'scheduled', 'expired']
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'published'>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -623,14 +683,10 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'> &
       Schema.Attribute.Private;
     mrp: Schema.Attribute.Decimal;
-    offerType: Schema.Attribute.Enumeration<
-      ['fashion', 'travel', 'electronics', 'food', 'exclusive', 'newly_added']
-    >;
     publishedAt: Schema.Attribute.DateTime;
     salePrice: Schema.Attribute.Decimal;
-    seo: Schema.Attribute.Component<'shared.seo', false>;
-    slug: Schema.Attribute.UID<'title'> & Schema.Attribute.Required;
-    store: Schema.Attribute.Relation<'manyToOne', 'api::store.store'>;
+    scheduledAt: Schema.Attribute.DateTime;
+    stores: Schema.Attribute.Relation<'manyToMany', 'api::store.store'>;
     tags: Schema.Attribute.Relation<'manyToMany', 'api::tag.tag'>;
     title: Schema.Attribute.String & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
@@ -711,14 +767,14 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
     singularName: 'store';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
-    coupons: Schema.Attribute.Relation<'oneToMany', 'api::coupon.coupon'>;
+    coupons: Schema.Attribute.Relation<'manyToMany', 'api::coupon.coupon'>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    deals: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'>;
+    deals: Schema.Attribute.Relation<'manyToMany', 'api::deal.deal'>;
     description: Schema.Attribute.RichText;
     faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     faqs: Schema.Attribute.Component<'shared.faq-item', true>;
@@ -730,6 +786,22 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
     logoAlt: Schema.Attribute.String;
     name: Schema.Attribute.String & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
+    ratingAverage: Schema.Attribute.Decimal &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 5;
+          min: 0;
+        },
+        number
+      >;
+    ratingCount: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 0;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<0>;
     seo: Schema.Attribute.Component<'shared.seo', false>;
     shortDescription: Schema.Attribute.Text;
     slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
@@ -781,10 +853,10 @@ export interface ApiUniqueCodeUniqueCode extends Struct.CollectionTypeSchema {
   };
   pluginOptions: {
     'content-manager': {
-      visible: false;
+      visible: true;
     };
     'content-type-builder': {
-      visible: false;
+      visible: true;
     };
   };
   attributes: {

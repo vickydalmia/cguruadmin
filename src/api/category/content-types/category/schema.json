@@ -8,7 +8,7 @@
     "description": "Product categories (Electronics, Fashion, Travel, Food)"
   },
   "options": {
-    "draftAndPublish": true
+    "draftAndPublish": false
   },
   "attributes": {
     "name": {
@@ -29,19 +29,31 @@
     "icon": {
       "type": "media",
       "multiple": false,
-      "allowedTypes": ["images"]
+      "allowedTypes": [
+        "images"
+      ]
+    },
+    "ratingAverage": {
+      "type": "decimal",
+      "min": 0,
+      "max": 5
+    },
+    "ratingCount": {
+      "type": "integer",
+      "default": 0,
+      "min": 0
     },
     "coupons": {
       "type": "relation",
-      "relation": "oneToMany",
+      "relation": "manyToMany",
       "target": "api::coupon.coupon",
-      "mappedBy": "category"
+      "mappedBy": "categories"
     },
     "deals": {
       "type": "relation",
-      "relation": "oneToMany",
+      "relation": "manyToMany",
       "target": "api::deal.deal",
-      "mappedBy": "category"
+      "mappedBy": "categories"
     },
     "faqEnabled": {
       "type": "boolean",

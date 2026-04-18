@@ -8,7 +8,7 @@
     "description": "E-commerce stores (Amazon, Flipkart, Myntra, etc.)"
   },
   "options": {
-    "draftAndPublish": true
+    "draftAndPublish": false
   },
   "attributes": {
     "name": {
@@ -29,10 +29,22 @@
     "logo": {
       "type": "media",
       "multiple": false,
-      "allowedTypes": ["images"]
+      "allowedTypes": [
+        "images"
+      ]
     },
     "logoAlt": {
       "type": "string"
+    },
+    "ratingAverage": {
+      "type": "decimal",
+      "min": 0,
+      "max": 5
+    },
+    "ratingCount": {
+      "type": "integer",
+      "default": 0,
+      "min": 0
     },
     "isCjEnabled": {
       "type": "boolean",
@@ -40,15 +52,15 @@
     },
     "coupons": {
       "type": "relation",
-      "relation": "oneToMany",
+      "relation": "manyToMany",
       "target": "api::coupon.coupon",
-      "mappedBy": "store"
+      "mappedBy": "stores"
     },
     "deals": {
       "type": "relation",
-      "relation": "oneToMany",
+      "relation": "manyToMany",
       "target": "api::deal.deal",
-      "mappedBy": "store"
+      "mappedBy": "stores"
     },
     "faqEnabled": {
       "type": "boolean",

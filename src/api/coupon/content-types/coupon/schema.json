@@ -8,16 +8,12 @@
     "description": "Coupon codes (static and unique) for stores, banks, categories, and brands"
   },
   "options": {
-    "draftAndPublish": true
+    "draftAndPublish": false
   },
+  "pluginOptions": {},
   "attributes": {
     "title": {
       "type": "string",
-      "required": true
-    },
-    "slug": {
-      "type": "uid",
-      "targetField": "title",
       "required": true
     },
     "content": {
@@ -27,13 +23,16 @@
       "type": "text"
     },
     "code": {
-      "type": "string"
+      "type": "text"
     },
     "couponType": {
       "type": "enumeration",
-      "enum": ["static", "unique"],
+      "required": true,
       "default": "static",
-      "required": true
+      "enum": [
+        "static",
+        "unique"
+      ]
     },
     "uniqueCouponPool": {
       "type": "relation",
@@ -45,42 +44,53 @@
       "type": "boolean",
       "default": false
     },
-    "offerType": {
-      "type": "enumeration",
-      "enum": ["fashion", "travel", "electronics", "food", "exclusive", "newly_added"]
-    },
     "image": {
       "type": "media",
       "multiple": false,
-      "allowedTypes": ["images"]
+      "allowedTypes": [
+        "images"
+      ]
     },
     "affiliateLink": {
-      "type": "string"
+      "type": "text"
     },
     "expiresAt": {
       "type": "datetime"
     },
-    "store": {
+    "scheduledAt": {
+      "type": "datetime"
+    },
+    "contentStatus": {
+      "type": "enumeration",
+      "required": true,
+      "default": "published",
+      "enum": [
+        "published",
+        "scheduled",
+        "expired"
+      ]
+    },
+    "stores": {
       "type": "relation",
-      "relation": "manyToOne",
+      "relation": "manyToMany",
       "target": "api::store.store",
       "inversedBy": "coupons"
     },
-    "bank": {
+    "banks": {
       "type": "relation",
-      "relation": "manyToOne",
+      "relation": "manyToMany",
       "target": "api::bank.bank",
       "inversedBy": "coupons"
     },
-    "category": {
+    "categories": {
       "type": "relation",
-      "relation": "manyToOne",
+      "relation": "manyToMany",
       "target": "api::category.category",
       "inversedBy": "coupons"
     },
-    "brand": {
+    "brands": {
       "type": "relation",
-      "relation": "manyToOne",
+      "relation": "manyToMany",
       "target": "api::brand.brand",
       "inversedBy": "coupons"
     },
@@ -89,11 +99,6 @@
       "relation": "manyToMany",
       "target": "api::tag.tag",
       "inversedBy": "coupons"
-    },
-    "seo": {
-      "type": "component",
-      "repeatable": false,
-      "component": "shared.seo"
     }
   }
 }

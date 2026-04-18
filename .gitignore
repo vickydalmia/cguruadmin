@@ -129,3 +129,24 @@ dist
 build
 .strapi-updater.json
 .strapi-cloud.json
+
+wordpress
+wordpress/**
+
+############################
+# Migration
+############################
+
+migration/.env.migration
+migration/.checkpoints/
+migration/node_modules/
+migration/dist/
+migration/*.log
+
+############################
+# Local Codex / Claude files
+############################
+
+.agents/skills/
+.claude/skills/
+skills-lock.json

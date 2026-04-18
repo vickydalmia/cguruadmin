@@ -8,16 +8,12 @@
     "description": "Product deals with pricing, images, and affiliate links"
   },
   "options": {
-    "draftAndPublish": true
+    "draftAndPublish": false
   },
+  "pluginOptions": {},
   "attributes": {
     "title": {
       "type": "string",
-      "required": true
-    },
-    "slug": {
-      "type": "uid",
-      "targetField": "title",
       "required": true
     },
     "content": {
@@ -29,8 +25,10 @@
     "dealImage": {
       "type": "media",
       "multiple": false,
-      "allowedTypes": ["images"],
-      "required": true
+      "required": true,
+      "allowedTypes": [
+        "images"
+      ]
     },
     "salePrice": {
       "type": "decimal"
@@ -45,37 +43,46 @@
       "type": "boolean",
       "default": false
     },
-    "offerType": {
-      "type": "enumeration",
-      "enum": ["fashion", "travel", "electronics", "food", "exclusive", "newly_added"]
-    },
     "affiliateLink": {
-      "type": "string"
+      "type": "text"
     },
     "expiresAt": {
       "type": "datetime"
     },
-    "store": {
+    "scheduledAt": {
+      "type": "datetime"
+    },
+    "contentStatus": {
+      "type": "enumeration",
+      "required": true,
+      "default": "published",
+      "enum": [
+        "published",
+        "scheduled",
+        "expired"
+      ]
+    },
+    "stores": {
       "type": "relation",
-      "relation": "manyToOne",
+      "relation": "manyToMany",
       "target": "api::store.store",
       "inversedBy": "deals"
     },
-    "bank": {
+    "banks": {
       "type": "relation",
-      "relation": "manyToOne",
+      "relation": "manyToMany",
       "target": "api::bank.bank",
       "inversedBy": "deals"
     },
-    "category": {
+    "categories": {
       "type": "relation",
-      "relation": "manyToOne",
+      "relation": "manyToMany",
       "target": "api::category.category",
       "inversedBy": "deals"
     },
-    "brand": {
+    "brands": {
       "type": "relation",
-      "relation": "manyToOne",
+      "relation": "manyToMany",
       "target": "api::brand.brand",
       "inversedBy": "deals"
     },
@@ -89,11 +96,6 @@
       "relation": "manyToMany",
       "target": "api::tag.tag",
       "inversedBy": "deals"
-    },
-    "seo": {
-      "type": "component",
-      "repeatable": false,
-      "component": "shared.seo"
     }
   }
 }

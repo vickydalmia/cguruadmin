@@ -8,7 +8,7 @@
     "description": "Brands (Nike, Samsung, Apple, Levi's)"
   },
   "options": {
-    "draftAndPublish": true
+    "draftAndPublish": false
   },
   "attributes": {
     "name": {
@@ -29,22 +29,34 @@
     "logo": {
       "type": "media",
       "multiple": false,
-      "allowedTypes": ["images"]
+      "allowedTypes": [
+        "images"
+      ]
     },
     "logoAlt": {
       "type": "string"
     },
+    "ratingAverage": {
+      "type": "decimal",
+      "min": 0,
+      "max": 5
+    },
+    "ratingCount": {
+      "type": "integer",
+      "default": 0,
+      "min": 0
+    },
     "coupons": {
       "type": "relation",
-      "relation": "oneToMany",
+      "relation": "manyToMany",
       "target": "api::coupon.coupon",
-      "mappedBy": "brand"
+      "mappedBy": "brands"
     },
     "deals": {
       "type": "relation",
-      "relation": "oneToMany",
+      "relation": "manyToMany",
       "target": "api::deal.deal",
-      "mappedBy": "brand"
+      "mappedBy": "brands"
     },
     "faqEnabled": {
       "type": "boolean",

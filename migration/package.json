@@ -1,0 +1,32 @@
+{
+  "name": "couponzguru-migration",
+  "version": "1.0.0",
+  "description": "WordPress to Strapi 5 migration for CouponzGuru",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "migrate": "tsx src/index.ts",
+    "migrate:phase": "tsx src/index.ts --phase"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.600.0",
+    "@aws-sdk/lib-storage": "^3.600.0",
+    "@paralleldrive/cuid2": "^2.2.2",
+    "dotenv": "^16.4.5",
+    "mysql2": "^3.11.0",
+    "p-limit": "^6.1.0",
+    "pg": "^8.12.0",
+    "php-serialize": "^5.0.1",
+    "sharp": "^0.33.4",
+    "ssh2": "^1.17.0",
+    "winston": "^3.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.0",
+    "@types/ssh2": "^1.15.5",
+    "tsx": "^4.15.0",
+    "typescript": "^5.5.0"
+  }
+}
