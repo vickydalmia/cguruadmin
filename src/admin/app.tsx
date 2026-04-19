@@ -1,3 +1,5 @@
+import Logo from './extensions/logo-icon.svg';
+
 import type { StrapiApp } from '@strapi/strapi/admin';
 import { useFetchClient, useForm } from '@strapi/strapi/admin';
 import type { PanelComponent } from '@strapi/content-manager/strapi-admin';
@@ -460,10 +462,35 @@ const RelationMultiSelectPanel: PanelComponent = ({ model, documentId }) => {
 
 export default {
   config: {
-    locales: [],
+    auth: { // Replace the Strapi logo in auth (login) views
+      logo: Logo,
+    },
+    menu: { // Replace the Strapi logo in the main navigation
+      logo: Logo,
+    },
+    locales: ['en'],
+    translations: {
+      en: {
+        'Auth.form.welcome.title': 'Welcome to CouponzGuru',
+        'Auth.form.welcome.subtitle': 'Log in to your account'
+      },
+    }
   },
   bootstrap(app: StrapiApp) {
     const apis = (app.getPlugin('content-manager') as any).apis;
     apis.addEditViewSidePanel([RelationMultiSelectPanel]);
+
+    if (typeof document !== 'undefined') {
+      const rewrite = () => {
+        if (document.title.includes('Strapi')) {
+          document.title = document.title.replace(/Strapi/g, 'CouponzGuru');
+        }
+      };
+      rewrite();
+      const titleEl = document.querySelector('title');
+      if (titleEl) {
+        new MutationObserver(rewrite).observe(titleEl, { childList: true });
+      }
+    }
   },
 };
