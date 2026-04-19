@@ -6,6 +6,7 @@ import {
   ensureTermMapping,
   getTagMapping,
   getPoolMappingByName,
+  getUserMapping,
 } from "../utils/id-maps.js";
 import { resolveMediaRef } from "../utils/media-resolver.js";
 import {
@@ -15,7 +16,7 @@ import {
   linkMedia,
 } from "../utils/strapi-insert.js";
 import { computeMigrationStatus } from "../utils/content-status.js";
-import { clean, cleanSlug, cleanCode } from "../utils/sanitize.js";
+import { clean, cleanCode } from "../utils/sanitize.js";
 import {
   normalizeWpDate,
   normalizeWpLocalDate,
@@ -34,6 +35,7 @@ interface WpPost {
   post_modified: string | null;
   post_modified_gmt: string | null;
   post_status: string;
+  post_author: number;
 }
 
 interface PostMeta {
@@ -49,7 +51,7 @@ export async function runCoupons(): Promise<void> {
            CASE WHEN CAST(p.post_date_gmt AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_date_gmt AS CHAR) END AS post_date_gmt,
            CASE WHEN CAST(p.post_modified AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_modified AS CHAR) END AS post_modified,
            CASE WHEN CAST(p.post_modified_gmt AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_modified_gmt AS CHAR) END AS post_modified_gmt,
-           p.post_status
+           p.post_status, p.post_author
     FROM wp_posts p
     WHERE p.post_type = 'post'
       AND p.post_status IN ('publish', 'future')
@@ -107,14 +109,17 @@ export async function runCoupons(): Promise<void> {
           expiresAt,
         });
 
+        const authorId = getUserMapping(post.post_author) ?? null;
+
         const result = await pgQuery<{ id: number }>(
           `INSERT INTO "coupons" (
             "document_id", "title", "content", "excerpt",
             "code", "coupon_type", "is_popular",
             "affiliate_link", "expires_at", "scheduled_at", "content_status",
-            "published_at", "created_at", "updated_at", "locale"
+            "published_at", "created_at", "updated_at", "locale",
+            "created_by_id", "updated_by_id"
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
           )
           ON CONFLICT ("document_id") DO NOTHING
           RETURNING id`,
@@ -134,6 +139,8 @@ export async function runCoupons(): Promise<void> {
             createdAt,
             updatedAt,
             null,
+            authorId,
+            authorId,
           ]
         );
 

@@ -124,7 +124,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     };
     const dealsQuery = await sanitizeDocumentQuery(strapi, ctx, 'api::deal.deal', {
       filters,
-      populate: ['dealImage', 'tags', 'displayStore', 'stores', 'banks', 'categories', 'brands'],
+      populate: ['dealImage', 'tags', 'stores', 'banks', 'categories', 'brands'],
       sort: [{ isPopular: 'desc' }, { publishedAt: 'desc' }, { updatedAt: 'desc' }],
       start: (page - 1) * pageSize,
       limit: pageSize,
@@ -172,7 +172,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     };
     const dealsQuery = await sanitizeDocumentQuery(strapi, ctx, 'api::deal.deal', {
       filters,
-      populate: ['dealImage', 'displayStore', 'stores', 'tags'],
+      populate: ['dealImage', 'stores', 'tags'],
       sort: [{ publishedAt: 'desc' }, { updatedAt: 'desc' }],
       start: (page - 1) * pageSize,
       limit: pageSize,

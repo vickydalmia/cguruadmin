@@ -33,6 +33,8 @@ export const config = {
   },
   pg: {
     connectionString: required("PG_CONNECTION_STRING"),
+    caCertPath: optional("PG_CA_CERT_PATH").replace(/^~/, os.homedir()),
+    rejectUnauthorized: optional("PG_SSL_REJECT_UNAUTHORIZED", "true") === "true",
   },
   s3: {
     bucket: optional("S3_BUCKET"),

@@ -90,6 +90,21 @@ export async function runVerification(): Promise<void> {
     logger.warn("Skipping code count check (table not found)");
   }
 
+  // Users (migrated admin users — authors of published/future posts)
+  const [wpAuthors] = await wpQuery<{ c: number }>(`
+    SELECT COUNT(DISTINCT post_author) AS c FROM wp_posts
+    WHERE post_type = 'post' AND post_status IN ('publish', 'future')
+  `);
+  const [pgUsers] = await pgQuery<{ c: number }>(
+    `SELECT COUNT(*) AS c FROM admin_users WHERE document_id LIKE 'wp\\_%' ESCAPE '\\'`
+  );
+  checks.push({
+    entity: "Users",
+    wpCount: wpAuthors.c,
+    pgCount: pgUsers.c,
+    match: wpAuthors.c == pgUsers.c,
+  });
+
   // Print count results
   for (const check of checks) {
     const status = check.match ? "PASS" : "FAIL";
@@ -99,7 +114,36 @@ export async function runVerification(): Promise<void> {
     );
   }
 
-  // 2. Relationship integrity
+  // 2. User role + creator-backfill checks
+  logger.info("\n--- Users & Creator Backfill ---");
+
+  const [unEditored] = await pgQuery<{ c: number }>(`
+    SELECT COUNT(*) AS c
+    FROM admin_users u
+    LEFT JOIN admin_users_roles_lnk l ON l.user_id = u.id
+    LEFT JOIN admin_roles r ON r.id = l.role_id
+    WHERE u.document_id LIKE 'wp\\_%' ESCAPE '\\'
+      AND (r.code IS NULL OR r.code <> 'strapi-editor')
+  `);
+  logger.info(
+    `  Migrated users missing Editor role: ${unEditored.c} ${unEditored.c > 0 ? "(⚠ review)" : "✓"}`
+  );
+
+  const [couponsNoCreator] = await pgQuery<{ c: number }>(
+    `SELECT COUNT(*) AS c FROM coupons WHERE document_id LIKE 'wp\\_%' ESCAPE '\\' AND created_by_id IS NULL`
+  );
+  logger.info(
+    `  Coupons with NULL created_by: ${couponsNoCreator.c} (non-zero OK if author was skipped)`
+  );
+
+  const [dealsNoCreator] = await pgQuery<{ c: number }>(
+    `SELECT COUNT(*) AS c FROM deals WHERE document_id LIKE 'wp\\_%' ESCAPE '\\' AND created_by_id IS NULL`
+  );
+  logger.info(
+    `  Deals with NULL created_by: ${dealsNoCreator.c} (non-zero OK if author was skipped)`
+  );
+
+  // 3. Relationship integrity
   logger.info("\n--- Relationship Integrity ---");
 
   // Coupons without any taxonomy relation

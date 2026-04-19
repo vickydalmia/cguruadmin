@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "fs";
+import path from "path";
 import pg from "pg";
 import { config } from "../config.js";
 
@@ -5,10 +7,23 @@ const { Pool } = pg;
 
 let pool: pg.Pool | null = null;
 
+function buildSslConfig(): pg.PoolConfig["ssl"] {
+  const { caCertPath, rejectUnauthorized } = config.pg;
+  if (!caCertPath) return false;
+  const resolved = path.isAbsolute(caCertPath)
+    ? caCertPath
+    : path.resolve(process.cwd(), caCertPath);
+  if (!existsSync(resolved)) {
+    throw new Error(`PG CA cert not found at ${resolved}`);
+  }
+  return { ca: readFileSync(resolved, "utf8"), rejectUnauthorized };
+}
+
 export function getPgPool(): pg.Pool {
   if (!pool) {
     pool = new Pool({
       connectionString: config.pg.connectionString,
+      ssl: buildSslConfig(),
       max: 10,
     });
   }

@@ -5,6 +5,7 @@ import {
   setPostMapping,
   ensureTermMapping,
   getTagMapping,
+  getUserMapping,
 } from "../utils/id-maps.js";
 import { resolveMediaRef } from "../utils/media-resolver.js";
 import {
@@ -14,7 +15,7 @@ import {
   linkMedia,
 } from "../utils/strapi-insert.js";
 import { computeMigrationStatus } from "../utils/content-status.js";
-import { clean, cleanSlug } from "../utils/sanitize.js";
+import { clean, cleanCode } from "../utils/sanitize.js";
 import {
   normalizeWpDate,
   normalizeWpLocalDate,
@@ -36,13 +37,14 @@ export async function runDeals(): Promise<void> {
     post_modified: string | null;
     post_modified_gmt: string | null;
     post_status: string;
+    post_author: number;
   }>(`
     SELECT p.ID, p.post_title, p.post_name, p.post_content, p.post_excerpt,
            CASE WHEN CAST(p.post_date AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_date AS CHAR) END AS post_date,
            CASE WHEN CAST(p.post_date_gmt AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_date_gmt AS CHAR) END AS post_date_gmt,
            CASE WHEN CAST(p.post_modified AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_modified AS CHAR) END AS post_modified,
            CASE WHEN CAST(p.post_modified_gmt AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_modified_gmt AS CHAR) END AS post_modified_gmt,
-           p.post_status
+           p.post_status, p.post_author
     FROM wp_posts p
     JOIN wp_postmeta pm ON p.ID = pm.post_id AND pm.meta_key = 'is_deal' AND pm.meta_value = 'yes'
     WHERE p.post_type = 'post'
@@ -101,14 +103,17 @@ export async function runDeals(): Promise<void> {
           expiresAt,
         });
 
+        const authorId = getUserMapping(post.post_author) ?? null;
+
         const result = await pgQuery<{ id: number }>(
           `INSERT INTO "deals" (
-            "document_id", "title", "content", "excerpt",
+            "document_id", "title", "content", "excerpt", "code",
             "sale_price", "mrp", "discount",
             "is_popular", "affiliate_link", "expires_at", "scheduled_at", "content_status",
-            "published_at", "created_at", "updated_at", "locale"
+            "published_at", "created_at", "updated_at", "locale",
+            "created_by_id", "updated_by_id"
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
           )
           ON CONFLICT ("document_id") DO NOTHING
           RETURNING id`,
@@ -117,6 +122,7 @@ export async function runDeals(): Promise<void> {
             clean(post.post_title) || post.post_title,
             content,
             clean(post.post_excerpt),
+            cleanCode(meta.code),
             salePrice,
             mrp,
             clean(meta.deal_discount),
@@ -129,6 +135,8 @@ export async function runDeals(): Promise<void> {
             createdAt,
             updatedAt,
             null,
+            authorId,
+            authorId,
           ]
         );
 
@@ -147,50 +155,43 @@ export async function runDeals(): Promise<void> {
 
         // Wire taxonomy relations
         const orderByType = new Map<string, number>();
+        const linkedIdsByTable = new Map<string, Set<number>>();
+
+        const linkTerm = async (termId: number): Promise<void> => {
+          const ref = await ensureTermMapping(termId);
+          if (!ref) return;
+          const linkInfo = getDealLinkTable(ref.table);
+          if (!linkInfo) return;
+          let linked = linkedIdsByTable.get(linkInfo.table);
+          if (!linked) {
+            linked = new Set();
+            linkedIdsByTable.set(linkInfo.table, linked);
+          }
+          if (linked.has(ref.id)) return;
+          linked.add(ref.id);
+          const ord = (orderByType.get(ref.table) || 0) + 1;
+          orderByType.set(ref.table, ord);
+          await insertLink(linkInfo.table, {
+            [linkInfo.dealCol]: entityId,
+            [linkInfo.termCol]: ref.id,
+            deal_ord: ord,
+          });
+        };
 
         if (primaryTermId) {
-          const ref = await ensureTermMapping(primaryTermId);
-          if (ref) {
-            const linkInfo = getDealLinkTable(ref.table);
-            if (linkInfo) {
-              const ord = (orderByType.get(ref.table) || 0) + 1;
-              orderByType.set(ref.table, ord);
-              await insertLink(linkInfo.table, {
-                [linkInfo.dealCol]: entityId,
-                [linkInfo.termCol]: ref.id,
-                deal_ord: ord,
-              });
-            }
-          }
+          await linkTerm(primaryTermId);
         }
 
         for (const termId of relations) {
           if (termId === primaryTermId) continue;
-          const ref = await ensureTermMapping(termId);
-          if (!ref) continue;
-          const linkInfo = getDealLinkTable(ref.table);
-          if (linkInfo) {
-            const ord = (orderByType.get(ref.table) || 0) + 1;
-            orderByType.set(ref.table, ord);
-            await insertLink(linkInfo.table, {
-              [linkInfo.dealCol]: entityId,
-              [linkInfo.termCol]: ref.id,
-              deal_ord: ord,
-            });
-          }
+          await linkTerm(termId);
         }
 
-        // Wire displayStore
+        // Merge deal_store meta into stores relation (dedup against taxonomy-linked stores)
         if (meta.deal_store) {
           const storeTermId = parseInt(meta.deal_store, 10);
           if (!isNaN(storeTermId)) {
-            const storeRef = await ensureTermMapping(storeTermId);
-            if (storeRef && storeRef.table === "stores") {
-              await insertLink("deals_display_store_lnk", {
-                deal_id: entityId,
-                store_id: storeRef.id,
-              });
-            }
+            await linkTerm(storeTermId);
           }
         }
 

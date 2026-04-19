@@ -15,6 +15,7 @@ import { runTaxonomies } from "./phases/03-taxonomies.js";
 import { runTags } from "./phases/04-tags.js";
 import { runPools } from "./phases/05-pools.js";
 import { runCodes } from "./phases/06-codes.js";
+import { runUsers } from "./phases/06a-users.js";
 import { runCoupons } from "./phases/07-coupons.js";
 import { runDeals } from "./phases/08-deals.js";
 import { runSeoBackfill } from "./phases/09-seo-backfill.js";
@@ -35,6 +36,7 @@ const phases: Phase[] = [
   { name: "04-tags", fn: runTags },
   { name: "05-pools", fn: runPools },
   { name: "06-codes", fn: runCodes },
+  { name: "06a-users", fn: runUsers },
   { name: "07-coupons", fn: runCoupons },
   { name: "08-deals", fn: runDeals },
   { name: "09-seo-backfill", fn: runSeoBackfill },
@@ -62,7 +64,7 @@ async function main(): Promise<void> {
       "coupons_stores_lnk", "coupons_brands_lnk", "coupons_categories_lnk", "coupons_banks_lnk",
       "coupons_tags_lnk", "coupons_unique_coupon_pool_lnk",
       "deals_stores_lnk", "deals_brands_lnk", "deals_categories_lnk", "deals_banks_lnk",
-      "deals_tags_lnk", "deals_display_store_lnk",
+      "deals_tags_lnk",
       "unique_codes_pool_lnk",
       "files_related_mph",
       // Component join tables
@@ -85,6 +87,21 @@ async function main(): Promise<void> {
       }
     }
     logger.info("Tables truncated");
+
+    // Remove only migration-created admin users (wp_<hash> document_id prefix)
+    // so the super admin account survives --clean.
+    try {
+      await pool.query(
+        `DELETE FROM "admin_users_roles_lnk"
+         WHERE user_id IN (SELECT id FROM "admin_users" WHERE document_id LIKE 'wp\\_%' ESCAPE '\\')`
+      );
+      const del = await pool.query(
+        `DELETE FROM "admin_users" WHERE document_id LIKE 'wp\\_%' ESCAPE '\\'`
+      );
+      logger.info(`Removed ${del.rowCount ?? 0} migrated admin_users`);
+    } catch (err: any) {
+      logger.warn(`Could not clean migrated admin_users: ${err.message}`);
+    }
 
     // Clear S3 bucket to avoid orphan files
     await clearS3Bucket();

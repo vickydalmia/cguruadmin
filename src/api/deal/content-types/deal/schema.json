@@ -22,6 +22,9 @@
     "excerpt": {
       "type": "text"
     },
+    "code": {
+      "type": "text"
+    },
     "dealImage": {
       "type": "media",
       "multiple": false,
@@ -85,11 +88,6 @@
       "relation": "manyToMany",
       "target": "api::brand.brand",
       "inversedBy": "deals"
-    },
-    "displayStore": {
-      "type": "relation",
-      "relation": "manyToOne",
-      "target": "api::store.store"
     },
     "tags": {
       "type": "relation",

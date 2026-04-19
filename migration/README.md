@@ -145,7 +145,7 @@ Migrates published WordPress posts (where `is_deal` is not `'yes'`) into the `co
 
 ### Phase 08 — Deals
 
-Migrates deal posts (`is_deal='yes'`) into the `deals` table. Same relationship wiring as coupons, plus deal-specific fields: `mrp`, `sale_price`, `discount`, `dealImage`, and `displayStore`.
+Migrates deal posts (`is_deal='yes'`) into the `deals` table. Same relationship wiring as coupons, plus deal-specific fields: `mrp`, `sale_price`, `discount`, and `dealImage`. The `deal_store` meta is merged into the `stores` relation (deduplicated against taxonomy-linked stores).
 
 ### Phase 09 — SEO Backfill
 
@@ -216,7 +216,7 @@ All WordPress posts with `post_type='post'` and `post_status='publish'` are spli
 | `deal_sale_price` | `sale_price` | Decimal |
 | `deal_discount` | `discount` | String |
 | `deal_image` | `dealImage` | Media link (falls back to `image`) |
-| `deal_store` | `displayStore` | Link to stores via term ID |
+| `deal_store` | `stores` | Merged into `stores` relation (dedup against taxonomy terms) |
 
 ### Taxonomy Relationship Wiring
 
