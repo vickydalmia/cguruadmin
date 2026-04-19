@@ -601,27 +601,12 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
   };
   attributes: {
     affiliateLink: Schema.Attribute.Text;
-    banks: Schema.Attribute.Relation<'manyToMany', 'api::bank.bank'> &
-      Schema.Attribute.SetPluginOptions<{
-        'content-manager': {
-          visible: false;
-        };
-      }>;
-    brands: Schema.Attribute.Relation<'manyToMany', 'api::brand.brand'> &
-      Schema.Attribute.SetPluginOptions<{
-        'content-manager': {
-          visible: false;
-        };
-      }>;
+    banks: Schema.Attribute.Relation<'manyToMany', 'api::bank.bank'>;
+    brands: Schema.Attribute.Relation<'manyToMany', 'api::brand.brand'>;
     categories: Schema.Attribute.Relation<
       'manyToMany',
       'api::category.category'
-    > &
-      Schema.Attribute.SetPluginOptions<{
-        'content-manager': {
-          visible: false;
-        };
-      }>;
+    >;
     code: Schema.Attribute.Text;
     content: Schema.Attribute.RichText;
     contentStatus: Schema.Attribute.Enumeration<
@@ -647,18 +632,8 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
     scheduledAt: Schema.Attribute.DateTime;
-    stores: Schema.Attribute.Relation<'manyToMany', 'api::store.store'> &
-      Schema.Attribute.SetPluginOptions<{
-        'content-manager': {
-          visible: false;
-        };
-      }>;
-    tags: Schema.Attribute.Relation<'manyToMany', 'api::tag.tag'> &
-      Schema.Attribute.SetPluginOptions<{
-        'content-manager': {
-          visible: false;
-        };
-      }>;
+    stores: Schema.Attribute.Relation<'manyToMany', 'api::store.store'>;
+    tags: Schema.Attribute.Relation<'manyToMany', 'api::tag.tag'>;
     title: Schema.Attribute.String & Schema.Attribute.Required;
     uniqueCouponPool: Schema.Attribute.Relation<
       'manyToOne',
@@ -683,27 +658,12 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
   };
   attributes: {
     affiliateLink: Schema.Attribute.Text;
-    banks: Schema.Attribute.Relation<'manyToMany', 'api::bank.bank'> &
-      Schema.Attribute.SetPluginOptions<{
-        'content-manager': {
-          visible: false;
-        };
-      }>;
-    brands: Schema.Attribute.Relation<'manyToMany', 'api::brand.brand'> &
-      Schema.Attribute.SetPluginOptions<{
-        'content-manager': {
-          visible: false;
-        };
-      }>;
+    banks: Schema.Attribute.Relation<'manyToMany', 'api::bank.bank'>;
+    brands: Schema.Attribute.Relation<'manyToMany', 'api::brand.brand'>;
     categories: Schema.Attribute.Relation<
       'manyToMany',
       'api::category.category'
-    > &
-      Schema.Attribute.SetPluginOptions<{
-        'content-manager': {
-          visible: false;
-        };
-      }>;
+    >;
     code: Schema.Attribute.Text;
     content: Schema.Attribute.RichText;
     contentStatus: Schema.Attribute.Enumeration<
@@ -726,18 +686,8 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     publishedAt: Schema.Attribute.DateTime;
     salePrice: Schema.Attribute.Decimal;
     scheduledAt: Schema.Attribute.DateTime;
-    stores: Schema.Attribute.Relation<'manyToMany', 'api::store.store'> &
-      Schema.Attribute.SetPluginOptions<{
-        'content-manager': {
-          visible: false;
-        };
-      }>;
-    tags: Schema.Attribute.Relation<'manyToMany', 'api::tag.tag'> &
-      Schema.Attribute.SetPluginOptions<{
-        'content-manager': {
-          visible: false;
-        };
-      }>;
+    stores: Schema.Attribute.Relation<'manyToMany', 'api::store.store'>;
+    tags: Schema.Attribute.Relation<'manyToMany', 'api::tag.tag'>;
     title: Schema.Attribute.String & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
