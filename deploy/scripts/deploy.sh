@@ -38,7 +38,11 @@ fi
 
 read_env() {
   local key="$1"
-  grep -E "^${key}=" "${ENV_FILE}" | tail -n 1 | cut -d= -f2- || true
+  # Strip CR (CRLF files) and surrounding quotes so values like
+  # APP_IMAGE="ghcr.io/..." or Windows-edited env files don't corrupt the
+  # compose image ref / health-check URL.
+  grep -E "^${key}=" "${ENV_FILE}" | tail -n 1 | cut -d= -f2- \
+    | tr -d '\r' | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/" || true
 }
 
 compose() {

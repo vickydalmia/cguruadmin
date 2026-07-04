@@ -248,15 +248,10 @@ async function fillHomepageOverrides(strapi: Core.Strapi): Promise<void> {
 
 export default {
   register({ strapi }: { strapi: Core.Strapi }) {
-    strapi.server.routes([
-      {
-        method: 'GET',
-        path: '/_health',
-        handler(ctx) {
-          ctx.status = 204;
-        },
-      },
-    ]);
+    // NOTE: no custom /_health route — Strapi core already serves /_health
+    // (all methods, 204, no auth) and registers it BEFORE this lifecycle,
+    // so a route here would be dead code. The docker healthcheck and
+    // deploy.sh curl both hit the built-in.
 
     strapi.documents.use(async (context: any, next: any) => {
       // Offer changes: capture relations BEFORE the write. For deletes the
