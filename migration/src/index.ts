@@ -104,7 +104,45 @@ async function main(): Promise<void> {
       // Media (only migration-created records)
       "files",
     ];
+
+    // Fetch every existing public table once so we can (a) auto-discover the
+    // nested component join tables (components_*_cmps) and relation link tables
+    // (*_lnk) that Strapi shortens/auto-generates — phase 13 in particular
+    // creates many whose exact names are hard to enumerate by hand — and
+    // (b) filter the explicit list down to tables that actually exist, so we
+    // never warn on legitimately-absent tables (e.g. globals_cmps: the global
+    // single type has no component fields, so Strapi never creates it).
+    // The prefix allowlist deliberately excludes admin_/up_/strapi_/core
+    // tables so we never wipe admin roles or plugin permissions.
+    const OWNED_PREFIXES = [
+      "components_", "homepages_", "menus_", "footers_", "globals_",
+      "coupons_", "deals_", "stores_", "brands_", "categories_", "banks_",
+      "tags_", "unique_codes_", "unique_coupon_pools_",
+    ];
+    let existingTables = new Set<string>();
+    try {
+      const rows = await pool.query<{ table_name: string }>(
+        `SELECT table_name FROM information_schema.tables
+         WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`
+      );
+      existingTables = new Set(rows.rows.map((r) => r.table_name));
+      for (const name of existingTables) {
+        if (
+          (name.endsWith("_cmps") || name.endsWith("_lnk")) &&
+          OWNED_PREFIXES.some((p) => name.startsWith(p)) &&
+          !tablesToTruncate.includes(name)
+        ) {
+          tablesToTruncate.push(name);
+        }
+      }
+    } catch (err: any) {
+      logger.warn(`Could not enumerate tables: ${err.message}`);
+    }
+
     for (const table of tablesToTruncate) {
+      // Skip tables that don't exist (e.g. component join tables for single
+      // types with no components) — only when we successfully listed tables.
+      if (existingTables.size > 0 && !existingTables.has(table)) continue;
       try {
         await pool.query(`TRUNCATE TABLE "${table}" RESTART IDENTITY CASCADE`);
       } catch (err: any) {

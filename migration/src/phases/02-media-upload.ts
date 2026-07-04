@@ -159,7 +159,10 @@ export async function uploadMediaOnDemand(attachmentId: number): Promise<number 
       // Upload to S3
       const client = getS3Client();
       const rootPath = config.s3.rootPath ? `${config.s3.rootPath}/` : "";
-      let uploadBuffer: Buffer = fs.readFileSync(filePath);
+      // Pre-optimization source bytes — kept for AVIF twin generation, which
+      // encodes from the highest-quality input available.
+      const sourceBuffer: Buffer = fs.readFileSync(filePath);
+      let uploadBuffer: Buffer = sourceBuffer;
 
       // Optimize supported raster formats: bake orientation, cap at 1920px,
       // convert jpeg/png → webp, recompress webp/avif/tiff. gif/svg/other
@@ -187,12 +190,31 @@ export async function uploadMediaOnDemand(attachmentId: number): Promise<number 
       const imageFolder = `${slug}-${hash.slice(0, 8)}`;
       const s3Key = `${rootPath}${imageFolder}/${slug}${ext}`;
 
+      // `mime` for non-optimized files comes straight from WP metadata
+      // (post_mime_type), which a compromised source could set to
+      // image/svg+xml or text/html. An SVG (or HTML) served inline is stored
+      // XSS. Optimized rasters carry a sharp-derived mime and are safe to
+      // serve inline; anything else is forced to download instead of render.
+      const safeToRenderInline = optimized !== null || mime.startsWith("image/");
+      const isSvgOrMarkup =
+        mime === "image/svg+xml" || mime === "text/html" || /\.svg$/i.test(ext);
+      let contentType = mime;
+      let contentDisposition: string | undefined;
+      if (isSvgOrMarkup || !safeToRenderInline) {
+        contentType = "application/octet-stream";
+        contentDisposition = `attachment; filename="${slug}${ext}"`;
+        logger.warn(
+          `Media ${item.fileName} (${mime}) served as attachment to prevent inline script execution`
+        );
+      }
+
       await client.send(
         new PutObjectCommand({
           Bucket: config.s3.bucket,
           Key: s3Key,
           Body: uploadBuffer,
-          ContentType: mime,
+          ContentType: contentType,
+          ContentDisposition: contentDisposition,
           CacheControl: "public, max-age=31536000, immutable",
         })
       );
@@ -214,6 +236,7 @@ export async function uploadMediaOnDemand(attachmentId: number): Promise<number 
             nameBase: slug,
             urlPrefix,
             keyPrefix: `${rootPath}${imageFolder}/`,
+            avifSource: sourceBuffer,
           }
         );
         for (const variant of uploads) {
@@ -299,12 +322,24 @@ export async function clearS3Bucket(): Promise<void> {
     return;
   }
 
+  // Refuse to run with an empty prefix: that would delete EVERY object in the
+  // bucket, including anything not created by this migration. Require an
+  // explicit S3_ROOT_PATH to scope the deletion.
+  const rootPath = config.s3.rootPath?.trim();
+  if (!rootPath) {
+    logger.warn(
+      "S3_ROOT_PATH is empty — refusing to clear the entire bucket. " +
+        "Set S3_ROOT_PATH (e.g. 'uploads') to scope --clean cleanup."
+    );
+    return;
+  }
+
   const client = getS3Client();
-  const prefix = config.s3.rootPath ? `${config.s3.rootPath}/` : "";
+  const prefix = `${rootPath}/`;
   let deleted = 0;
   let continuationToken: string | undefined;
 
-  logger.info(`Clearing S3 bucket ${config.s3.bucket} (prefix: ${prefix || "/"})`);
+  logger.info(`Clearing S3 bucket ${config.s3.bucket} (prefix: ${prefix})`);
 
   do {
     const listResponse = await client.send(

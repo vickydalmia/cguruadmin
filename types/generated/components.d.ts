@@ -366,7 +366,6 @@ export interface HomepageSliderSlide extends Struct.ComponentSchema {
     altText: Schema.Attribute.String;
     desktopImage: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
     link: Schema.Attribute.String;
-    mobileImage: Schema.Attribute.Media<'images'>;
     order: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
   };
 }
@@ -418,7 +417,7 @@ export interface SharedFaqItem extends Struct.ComponentSchema {
     icon: 'question-circle';
   };
   attributes: {
-    answer: Schema.Attribute.Text & Schema.Attribute.Required;
+    answer: Schema.Attribute.Text;
     question: Schema.Attribute.String & Schema.Attribute.Required;
   };
 }

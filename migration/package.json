@@ -20,6 +20,7 @@
     "p-limit": "^6.1.0",
     "pg": "^8.12.0",
     "php-serialize": "^5.0.1",
+    "sanitize-html": "^2.13.0",
     "sharp": "^0.33.4",
     "ssh2": "^1.17.0",
     "winston": "^3.13.0"
@@ -28,6 +29,7 @@
     "@types/bcrypt": "^5.0.2",
     "@types/node": "^20.14.0",
     "@types/pg": "^8.11.0",
+    "@types/sanitize-html": "^2.13.0",
     "@types/ssh2": "^1.15.5",
     "tsx": "^4.15.0",
     "typescript": "^5.9.3"

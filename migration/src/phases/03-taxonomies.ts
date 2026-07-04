@@ -11,7 +11,7 @@ import {
   insertComponent,
   linkMedia,
 } from "../utils/strapi-insert.js";
-import { clean, cleanSlug } from "../utils/sanitize.js";
+import { clean, cleanHtml, cleanSlug } from "../utils/sanitize.js";
 import { logger } from "../utils/logger.js";
 
 interface WpTerm {
@@ -249,7 +249,7 @@ async function insertTerm(
     documentId,
     clean(term.name) || term.name,
     slug,
-    clean(term.description),
+    cleanHtml(term.description),
     clean(term.short_desc),
     ...(isCategory ? [] : [clean(term.image_alt)]),
     ratingAverage,

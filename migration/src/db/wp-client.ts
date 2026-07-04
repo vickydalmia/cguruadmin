@@ -3,6 +3,7 @@ import ssh2 from "ssh2";
 import type { Client as SSHClientType } from "ssh2";
 
 const { Client: SSHClient, utils: sshUtils } = ssh2;
+import { createHash } from "crypto";
 import { readFileSync, existsSync } from "fs";
 import net from "net";
 import { config } from "../config.js";
@@ -59,6 +60,35 @@ async function createSSHTunnel(): Promise<number> {
       host: config.ssh.host,
       port: config.ssh.port,
       username: config.ssh.user,
+      // ssh2 accepts ANY host key by default — a silent MITM risk when the
+      // tunnel carries WP DB credentials and the full site dump. Verify the
+      // server key against the pinned fingerprint, failing closed. If no
+      // fingerprint is configured, log the presented one loudly so the
+      // operator can pin it, and refuse to continue rather than trust blindly.
+      hostVerifier: (key: Buffer): boolean => {
+        const presented = `SHA256:${createHash("sha256")
+          .update(key)
+          .digest("base64")
+          .replace(/=+$/, "")}`;
+        const expected = config.ssh.hostFingerprint;
+        if (!expected) {
+          logger.error(
+            `SSH host key not verified. Presented fingerprint: ${presented}. ` +
+              `Set SSH_HOST_FINGERPRINT in .env.migration to this value (after ` +
+              `confirming it out-of-band) to enable the tunnel.`
+          );
+          return false;
+        }
+        if (presented !== expected.trim()) {
+          logger.error(
+            `SSH host key mismatch — possible MITM. Expected ${expected.trim()}, ` +
+              `got ${presented}. Aborting.`
+          );
+          return false;
+        }
+        logger.info(`SSH host key verified (${presented})`);
+        return true;
+      },
     };
 
     // Offer both auth methods: the agent socket alone is not enough when it

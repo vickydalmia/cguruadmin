@@ -7,72 +7,68 @@
     "displayName": "Homepage"
   },
   "options": {
-    "draftAndPublish": true
+    "draftAndPublish": false
   },
+  "pluginOptions": {},
   "attributes": {
-    "sliderEnabled": {
-      "type": "boolean",
-      "default": true
-    },
-    "sliderSlides": {
-      "type": "component",
-      "repeatable": true,
-      "component": "homepage.slider-slide"
+    "title": {
+      "type": "string",
+      "default": "Homepage"
     },
     "hero": {
       "type": "component",
-      "repeatable": false,
-      "component": "home.hero-section"
+      "component": "home.hero-section",
+      "repeatable": false
     },
     "topOffers": {
       "type": "component",
-      "repeatable": false,
-      "component": "home.top-offers"
+      "component": "home.top-offers",
+      "repeatable": false
     },
     "popularStores": {
       "type": "component",
-      "repeatable": false,
-      "component": "home.popular-stores"
+      "component": "home.popular-stores",
+      "repeatable": false
     },
     "topDeals": {
       "type": "component",
-      "repeatable": false,
-      "component": "home.deal-list"
+      "component": "home.deal-list",
+      "repeatable": false
     },
     "cgExclusive": {
       "type": "component",
-      "repeatable": false,
-      "component": "home.cg-exclusive"
+      "component": "home.cg-exclusive",
+      "repeatable": false
     },
     "exploreDeals": {
       "type": "component",
-      "repeatable": false,
-      "component": "home.explore-deals"
+      "component": "home.explore-deals",
+      "repeatable": false
     },
     "newlyAdded": {
       "type": "component",
-      "repeatable": false,
-      "component": "home.newly-added"
+      "component": "home.newly-added",
+      "repeatable": false
     },
     "dealsByBrand": {
       "type": "component",
-      "repeatable": false,
-      "component": "home.deal-list"
+      "component": "home.deal-list",
+      "repeatable": false
     },
     "bankOffers": {
       "type": "component",
-      "repeatable": false,
-      "component": "home.bank-offers"
+      "component": "home.bank-offers",
+      "repeatable": false
     },
     "howItWorks": {
       "type": "component",
-      "repeatable": false,
-      "component": "home.how-it-works"
+      "component": "home.how-it-works",
+      "repeatable": false
     },
     "faq": {
       "type": "component",
-      "repeatable": false,
-      "component": "home.faq-block"
+      "component": "home.faq-block",
+      "repeatable": false
     },
     "latestInsightsEnabled": {
       "type": "boolean",
@@ -80,8 +76,8 @@
     },
     "seo": {
       "type": "component",
-      "repeatable": false,
-      "component": "shared.seo"
+      "component": "shared.seo",
+      "repeatable": false
     }
   }
 }

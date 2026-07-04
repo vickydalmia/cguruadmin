@@ -130,8 +130,8 @@ build
 .strapi-updater.json
 .strapi-cloud.json
 
-wordpress
-wordpress/**
+# Local WordPress export (DB dump + uploads) — never commit, contains secrets
+/wordpress/
 
 ############################
 # Migration

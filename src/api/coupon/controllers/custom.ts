@@ -272,10 +272,10 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const safeBrands = sanitizedBrands as Array<{ name: string; slug: string }>;
 
     return ctx.send({
-      stores: safeStores.map((s) => ({ name: s.name, link: `/${s.slug}`, type: 'store' })),
-      banks: safeBanks.map((b) => ({ name: b.name, link: `/${b.slug}`, type: 'bank' })),
-      categories: safeCategories.map((c) => ({ name: c.name, link: `/${c.slug}`, type: 'category' })),
-      brands: safeBrands.map((b) => ({ name: b.name, link: `/${b.slug}`, type: 'brand' })),
+      stores: safeStores.map((s) => ({ name: s.name, link: `/${s.slug}/`, type: 'store' })),
+      banks: safeBanks.map((b) => ({ name: b.name, link: `/${b.slug}/`, type: 'bank' })),
+      categories: safeCategories.map((c) => ({ name: c.name, link: `/${c.slug}/`, type: 'category' })),
+      brands: safeBrands.map((b) => ({ name: b.name, link: `/${b.slug}/`, type: 'brand' })),
     });
   },
 });

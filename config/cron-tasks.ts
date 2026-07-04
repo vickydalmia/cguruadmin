@@ -1,7 +1,12 @@
 import { computeContentStatus } from '../src/utils/content-status';
+import { enqueue } from '../src/static-deployment/queue';
 
-// The frontend is a static build; status flips only become visible after a
-// rebuild, so ping the CI build hook whenever the scheduler changes anything.
+// NOTE on rebuilds: the scheduler flips offers through the Document Service,
+// so every update below passes through the documents middleware in
+// src/index.ts — which enqueues the correct surgical rebuild scope (the
+// offer's related entity pages + homepage) automatically. No explicit
+// enqueue is needed here. BUILD_HOOK_URL remains as an optional external
+// ping (e.g. future CI) — unset it when unused.
 async function triggerRebuild(strapi: any) {
   const buildHookUrl = process.env.BUILD_HOOK_URL?.trim();
   if (!buildHookUrl) return;
@@ -70,6 +75,18 @@ export default {
     },
     options: {
       rule: "*/5 * * * *",
+    },
+  },
+
+  // Nightly full rebuild: the consistency net for everything surgical builds
+  // deliberately leave stale (nav labels after entity renames, scopes lost to
+  // restarts). See cguru-ui/docs/deployment-runbook.md §8.
+  nightlyFullRebuild: {
+    task: async ({ strapi }: { strapi: any }) => {
+      enqueue(strapi, { full: true }, 'nightly consistency build');
+    },
+    options: {
+      rule: "30 3 * * *",
     },
   },
 };

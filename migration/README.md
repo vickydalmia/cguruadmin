@@ -48,8 +48,21 @@ WP_DB_USER=root
 WP_DB_PASSWORD=
 WP_DB_NAME=couponzguru
 
+# SSH tunnel to the WP DB (optional; set SSH_HOST to enable)
+SSH_HOST=
+SSH_PORT=22
+SSH_USER=
+SSH_PRIVATE_KEY_PATH=~/.ssh/id_ed25519
+SSH_PRIVATE_KEY_PASSPHRASE=
+# REQUIRED when SSH_HOST is set — pins the server host key (MITM protection).
+# Get it: ssh-keyscan -t ed25519 <host> | ssh-keygen -lf -   (use the SHA256:... part)
+SSH_HOST_FINGERPRINT=
+
 # Strapi PostgreSQL
 PG_CONNECTION_STRING=postgres://strapi:strapi@127.0.0.1:5432/strapi
+# Remote DBs use TLS by default; set a CA path to also verify the chain.
+PG_CA_CERT_PATH=
+PG_SSL_REJECT_UNAUTHORIZED=true
 
 # AWS S3 (leave S3_BUCKET empty to use local file records)
 S3_BUCKET=
@@ -116,7 +129,7 @@ Queries all WordPress image attachments. Builds an in-memory catalog with file p
 
 ### Phase 02 — Media Upload to S3
 
-Uploads inventoried images to S3 with configurable concurrency. Deduplicates by SHA-256 hash. Before upload, supported raster images (jpeg/png/webp/avif/tiff) are optimized: EXIF orientation baked in, downscaled to fit 1920×1920, jpeg/png converted to webp, and webp/avif/tiff re-compressed at quality 80. Strapi-style responsive variants (`thumbnail`/`small`/`medium`/`large`) are generated and uploaded alongside the original, and recorded in the `files.formats` JSON column. gif/svg/other formats pass through untouched (`formats` stays NULL). Creates corresponding records in the Strapi `files` table with CloudFront URLs, dimensions, and provider metadata. See [Media / S3 Pipeline](#media--s3-pipeline) for details.
+Uploads inventoried images to S3 with configurable concurrency. Deduplicates by SHA-256 hash. Before upload, supported raster images (jpeg/png/webp/avif/tiff) are optimized: EXIF orientation baked in, downscaled to fit 1920×1920, jpeg/png converted to webp, and webp/avif/tiff re-compressed at quality 80. Strapi-style responsive variants (`thumbnail`/`small`/`medium`/`large`) are generated and uploaded alongside the original, and recorded in the `files.formats` JSON column. For webp originals, AVIF "twin" variants (`original_avif`/`small_avif`/`medium_avif`/`large_avif`, quality 60, effort 3) are also encoded — from the pre-optimization source bytes for best quality — and merged into `formats`. gif/svg/other formats pass through untouched (`formats` stays NULL). Creates corresponding records in the Strapi `files` table with CloudFront URLs, dimensions, and provider metadata. See [Media / S3 Pipeline](#media--s3-pipeline) for details.
 
 ### Phase 03 — Taxonomies
 
@@ -173,7 +186,7 @@ Only posts present in the persisted ID maps (i.e., actually migrated) are touche
 Seeds the four Strapi single types the frontend needs:
 
 - `global` — header/footer codes, Amazon deal toggle, and the Amazon top banner (attachment resolved via the media map) from WP ACF option keys (`options_header_code`, `options_footer_code`, etc.).
-- `homepage` — created as a **draft + published pair** (draftAndPublish is enabled), with the full component tree cloned for both versions. Curated sections: hero banners from the `options_slider_features` ACF repeater, hero products / topDeals / dealsByBrand from migrated deals, cgExclusive / newlyAdded from coupons by `offer_type`, popularStores from `options_featured_stores` (fallback: top stores by published-coupon count), exploreDeals tabs by fuzzy category slug match, bankOffers by published-coupon count, plus How It Works and FAQ copy mirrored from the frontend.
+- `homepage` — created as a **single published row** (draftAndPublish is disabled on all four singles — homepage, menu, footer, global — they are publish-only), with the full component tree built once. Also seeds `title: "Homepage"` for the admin entry header. Curated sections: hero banners from the `options_slider_features` ACF repeater, hero products / topDeals / dealsByBrand from migrated deals, cgExclusive / newlyAdded from coupons by `offer_type`, popularStores from `options_featured_stores` (fallback: top stores by published-coupon count), exploreDeals tabs by fuzzy category slug match, bankOffers by published-coupon count, plus How It Works and FAQ copy mirrored from the frontend.
 - `menu` — topStores relation (same curated store list), one category section per explore category with its top stores, and the fixed extra nav items.
 - `footer` — link sections, social links, countries, and partner card mirrored from the frontend `footer-data.ts`; Popular Stores labels are resolved to real store relations where a matching store name exists.
 
@@ -181,17 +194,21 @@ All component and relation link table names are verified against `information_sc
 
 ### Phase 14 — Media Optimize (backfill)
 
-Optimizes already-migrated S3 images that predate the optimization pipeline. Candidates are `files` rows with `provider='aws-s3'`, `formats IS NULL`, and an optimizable MIME type (jpeg/png/webp/avif/tiff). For each candidate (5 in parallel):
+Runs two passes over already-migrated S3 images.
+
+**Pass 1 — full optimize backfill.** Candidates are `files` rows with `provider='aws-s3'`, `formats IS NULL`, and an optimizable MIME type (jpeg/png/webp/avif/tiff). For each candidate (5 in parallel):
 
 1. **Source bytes** — resolved from the local `WP_UPLOADS_DIR` tree via a `sha256(file)[0:16] → path` map (cached in `.checkpoints/media-hash-map.json` keyed by mtime + size so re-runs don't rehash), falling back to downloading the current S3 object.
-2. **Optimize** — same pipeline as Phase 02: orientation baked, max 1920px, jpeg/png → webp, quality 80.
-3. **Upload** — the optimized original (new `.webp` key when converted) plus all responsive variants.
+2. **Optimize** — same pipeline as Phase 02: orientation baked, max 1920px, jpeg/png → webp, quality 80. AVIF twins are encoded from the raw source bytes for webp results.
+3. **Upload** — the optimized original (new `.webp` key when converted) plus all responsive variants (including AVIF twins).
 4. **Update** — a single `UPDATE files SET formats, ext, mime, url, width, height, size, provider_metadata, updated_at` as the **last** step, so a crash leaves the row eligible for the next run (row-level resume via the `formats IS NULL` predicate).
 5. **Cleanup** — the superseded S3 object is deleted when the key changed (jpeg/png → webp), unless `--keep-originals` is passed:
 
 ```bash
 npm run migrate -- --phase 14-media-optimize --keep-originals
 ```
+
+**Pass 2 — add-AVIF-only backfill.** Candidates are rows that already have `formats` but no `original_avif` key (`formats::jsonb ? 'original_avif'` is false) with MIME webp/jpeg/png. For each row, the source is resolved the same way (local hash map, then S3 object via `provider_metadata.key`), true dimensions are read via `sharp` metadata (falling back to the row's stored width/height), AVIF twins (`original_avif`/`small_avif`/`medium_avif`/`large_avif`) are encoded and uploaded next to the existing variants, and the new keys are merged into the existing JSON with a single `UPDATE files SET formats = formats || $new`. Idempotent via the missing-`original_avif` predicate; `--keep-originals` is a no-op for this pass.
 
 Fails fast with a clear error if the `files` table is empty (run a full migration first).
 

@@ -11,6 +11,10 @@
     "draftAndPublish": false
   },
   "attributes": {
+    "title": {
+      "type": "string",
+      "default": "Footer"
+    },
     "sections": {
       "type": "component",
       "repeatable": true,

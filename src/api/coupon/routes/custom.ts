@@ -4,7 +4,12 @@ export default {
       method: 'GET',
       path: '/search',
       handler: 'custom.search',
-      config: { auth: false },
+      config: {
+        auth: false,
+        middlewares: [
+          { name: 'global::rate-limit', config: { maxRequests: 30, windowMs: 60_000 } },
+        ],
+      },
     },
     {
       method: 'GET',

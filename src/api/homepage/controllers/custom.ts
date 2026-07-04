@@ -61,16 +61,15 @@ const dealRef = {
   },
 };
 
-const sliderSlides = {
-  populate: { desktopImage: true, mobileImage: true },
+const bannerSlides = {
+  populate: { desktopImage: true },
 };
 
 const HOMEPAGE_POPULATE = {
   seo: { populate: { ogImage: true } },
-  sliderSlides,
   hero: {
     populate: {
-      banners: sliderSlides,
+      banners: bannerSlides,
       products: { populate: { deal: dealRef, imageOverride: true } },
     },
   },
@@ -220,13 +219,13 @@ async function sanitizeOutput(strapi: Core.Strapi, ctx: any, uid: string, data: 
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   async homepageFull(ctx) {
+    // Homepage has draftAndPublish disabled — every entry is live; no status filter.
     const homepage = await strapi.documents('api::homepage.homepage').findFirst({
-      status: 'published',
       populate: HOMEPAGE_POPULATE as any,
     });
 
     if (!homepage) {
-      return ctx.notFound('Homepage not published');
+      return ctx.notFound('Homepage not found');
     }
 
     const sanitized = await sanitizeOutput(strapi, ctx, 'api::homepage.homepage', homepage);

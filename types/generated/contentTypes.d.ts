@@ -26,6 +26,11 @@ export interface AdminApiToken extends Struct.CollectionTypeSchema {
       Schema.Attribute.SetMinMaxLength<{
         minLength: 1;
       }>;
+    adminPermissions: Schema.Attribute.Relation<
+      'oneToMany',
+      'admin::permission'
+    >;
+    adminUserOwner: Schema.Attribute.Relation<'manyToOne', 'admin::user'>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -39,6 +44,9 @@ export interface AdminApiToken extends Struct.CollectionTypeSchema {
         minLength: 1;
       }>;
     expiresAt: Schema.Attribute.DateTime;
+    kind: Schema.Attribute.Enumeration<['content-api', 'admin']> &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'content-api'>;
     lastUsedAt: Schema.Attribute.DateTime;
     lifespan: Schema.Attribute.BigInteger;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
@@ -56,7 +64,6 @@ export interface AdminApiToken extends Struct.CollectionTypeSchema {
     >;
     publishedAt: Schema.Attribute.DateTime;
     type: Schema.Attribute.Enumeration<['read-only', 'full-access', 'custom']> &
-      Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<'read-only'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -134,6 +141,7 @@ export interface AdminPermission extends Struct.CollectionTypeSchema {
         minLength: 1;
       }>;
     actionParameters: Schema.Attribute.JSON & Schema.Attribute.DefaultTo<{}>;
+    apiToken: Schema.Attribute.Relation<'manyToOne', 'admin::api-token'>;
     conditions: Schema.Attribute.JSON & Schema.Attribute.DefaultTo<[]>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -241,6 +249,7 @@ export interface AdminSession extends Struct.CollectionTypeSchema {
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'admin::session'> &
       Schema.Attribute.Private;
+    metadata: Schema.Attribute.JSON & Schema.Attribute.Private;
     origin: Schema.Attribute.String &
       Schema.Attribute.Required &
       Schema.Attribute.Private;
@@ -385,6 +394,8 @@ export interface AdminUser extends Struct.CollectionTypeSchema {
     };
   };
   attributes: {
+    apiTokens: Schema.Attribute.Relation<'oneToMany', 'admin::api-token'> &
+      Schema.Attribute.Private;
     blocked: Schema.Attribute.Boolean &
       Schema.Attribute.Private &
       Schema.Attribute.DefaultTo<false>;
@@ -732,6 +743,7 @@ export interface ApiFooterFooter extends Struct.SingleTypeSchema {
     publishedAt: Schema.Attribute.DateTime;
     sections: Schema.Attribute.Component<'footer.link-section', true>;
     socialLinks: Schema.Attribute.Component<'footer.social-link', true>;
+    title: Schema.Attribute.String & Schema.Attribute.DefaultTo<'Footer'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -765,6 +777,8 @@ export interface ApiGlobalGlobal extends Struct.SingleTypeSchema {
     > &
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
+    title: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Global Settings'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -779,7 +793,7 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
     singularName: 'homepage';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
     bankOffers: Schema.Attribute.Component<'home.bank-offers', false>;
@@ -804,8 +818,7 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
     popularStores: Schema.Attribute.Component<'home.popular-stores', false>;
     publishedAt: Schema.Attribute.DateTime;
     seo: Schema.Attribute.Component<'shared.seo', false>;
-    sliderEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
-    sliderSlides: Schema.Attribute.Component<'homepage.slider-slide', true>;
+    title: Schema.Attribute.String & Schema.Attribute.DefaultTo<'Homepage'>;
     topDeals: Schema.Attribute.Component<'home.deal-list', false>;
     topOffers: Schema.Attribute.Component<'home.top-offers', false>;
     updatedAt: Schema.Attribute.DateTime;
@@ -837,6 +850,7 @@ export interface ApiMenuMenu extends Struct.SingleTypeSchema {
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::menu.menu'> &
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
+    title: Schema.Attribute.String & Schema.Attribute.DefaultTo<'Menu'>;
     topStores: Schema.Attribute.Relation<'oneToMany', 'api::store.store'>;
     topStoresViewAllUrl: Schema.Attribute.String &
       Schema.Attribute.DefaultTo<'/stores/'>;
@@ -948,7 +962,9 @@ export interface ApiUniqueCodeUniqueCode extends Struct.CollectionTypeSchema {
     };
   };
   attributes: {
-    code: Schema.Attribute.String & Schema.Attribute.Required;
+    code: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Private;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -967,8 +983,10 @@ export interface ApiUniqueCodeUniqueCode extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    usedAt: Schema.Attribute.DateTime;
-    version: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    usedAt: Schema.Attribute.DateTime & Schema.Attribute.Private;
+    version: Schema.Attribute.Integer &
+      Schema.Attribute.Private &
+      Schema.Attribute.DefaultTo<0>;
   };
 }
 
@@ -988,7 +1006,8 @@ export interface ApiUniqueCouponPoolUniqueCouponPool
     codes: Schema.Attribute.Relation<
       'oneToMany',
       'api::unique-code.unique-code'
-    >;
+    > &
+      Schema.Attribute.Private;
     coupons: Schema.Attribute.Relation<'oneToMany', 'api::coupon.coupon'>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &

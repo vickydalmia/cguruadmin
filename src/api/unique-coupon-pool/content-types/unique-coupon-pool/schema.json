@@ -28,7 +28,8 @@
       "type": "relation",
       "relation": "oneToMany",
       "target": "api::unique-code.unique-code",
-      "mappedBy": "pool"
+      "mappedBy": "pool",
+      "private": true
     },
     "coupons": {
       "type": "relation",

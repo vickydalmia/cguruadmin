@@ -11,6 +11,10 @@
     "draftAndPublish": false
   },
   "attributes": {
+    "title": {
+      "type": "string",
+      "default": "Menu"
+    },
     "topStores": {
       "type": "relation",
       "relation": "oneToMany",

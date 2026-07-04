@@ -21,18 +21,21 @@
   "attributes": {
     "code": {
       "type": "string",
-      "required": true
+      "required": true,
+      "private": true
     },
     "isUsed": {
       "type": "boolean",
       "default": false
     },
     "usedAt": {
-      "type": "datetime"
+      "type": "datetime",
+      "private": true
     },
     "version": {
       "type": "integer",
-      "default": 0
+      "default": 0,
+      "private": true
     },
     "pool": {
       "type": "relation",

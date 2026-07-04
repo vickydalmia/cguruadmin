@@ -80,6 +80,19 @@ export async function runMediaInventory(): Promise<void> {
     }
 
     const localPath = path.join(config.wpUploadsDir, relativePath);
+
+    // relativePath comes from the WP-controlled attachment guid; a crafted
+    // "../../.." would escape the uploads dir and pull an arbitrary file into
+    // the media library. Reject anything that resolves outside wpUploadsDir.
+    const uploadsRoot = path.resolve(config.wpUploadsDir);
+    if (
+      path.resolve(localPath) !== uploadsRoot &&
+      !path.resolve(localPath).startsWith(uploadsRoot + path.sep)
+    ) {
+      logger.warn(`Skipping attachment with out-of-bounds path: ${relativePath}`);
+      continue;
+    }
+
     const exists = fs.existsSync(localPath);
 
     if (exists) {
@@ -172,6 +185,17 @@ function buildMediaItem(att: {
   }
 
   const localPath = path.join(config.wpUploadsDir, relativePath);
+
+  // Guard against path traversal via a crafted WP guid (see the inventory loop).
+  const uploadsRoot = path.resolve(config.wpUploadsDir);
+  if (
+    path.resolve(localPath) !== uploadsRoot &&
+    !path.resolve(localPath).startsWith(uploadsRoot + path.sep)
+  ) {
+    logger.warn(`Skipping attachment with out-of-bounds path: ${relativePath}`);
+    return undefined;
+  }
+
   const exists = fs.existsSync(localPath);
   const fileName = path.basename(relativePath);
 

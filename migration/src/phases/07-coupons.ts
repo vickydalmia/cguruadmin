@@ -16,7 +16,7 @@ import {
   linkMedia,
 } from "../utils/strapi-insert.js";
 import { computeMigrationStatus } from "../utils/content-status.js";
-import { clean, cleanCode } from "../utils/sanitize.js";
+import { clean, cleanCode, cleanHtml } from "../utils/sanitize.js";
 import {
   normalizeWpDate,
   normalizeWpLocalDate,
@@ -90,7 +90,7 @@ export async function runCoupons(): Promise<void> {
         const documentId = generateDocumentId(`coupon:${post.ID}`);
         const isUnique = meta.unique_coupon === "1" || meta.unique_coupon === "true";
         const uniqueCouponPoolName = clean(meta.unique_coupon_name);
-        const content = clean(stripShortcodes(post.post_content));
+        const content = cleanHtml(stripShortcodes(post.post_content));
         const createdAt =
           normalizeWpDate(post.post_date_gmt) ||
           normalizeWpLocalDate(post.post_date) ||

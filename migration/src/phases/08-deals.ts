@@ -15,7 +15,7 @@ import {
   linkMedia,
 } from "../utils/strapi-insert.js";
 import { computeMigrationStatus } from "../utils/content-status.js";
-import { clean, cleanCode } from "../utils/sanitize.js";
+import { clean, cleanCode, cleanHtml } from "../utils/sanitize.js";
 import {
   normalizeWpDate,
   normalizeWpLocalDate,
@@ -80,7 +80,7 @@ export async function runDeals(): Promise<void> {
       try {
         const documentId = generateDocumentId(`deal:${post.ID}`);
         const content = post.post_content
-          ? clean(post.post_content.replace(/\[\/?\w+[^\]]*\]/g, ""))
+          ? cleanHtml(post.post_content.replace(/\[\/?\w+[^\]]*\]/g, ""))
           : null;
         const createdAt =
           normalizeWpDate(post.post_date_gmt) ||

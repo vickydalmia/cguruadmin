@@ -8,13 +8,10 @@
     "desktopImage": {
       "type": "media",
       "multiple": false,
-      "allowedTypes": ["images"],
-      "required": true
-    },
-    "mobileImage": {
-      "type": "media",
-      "multiple": false,
-      "allowedTypes": ["images"]
+      "required": true,
+      "allowedTypes": [
+        "images"
+      ]
     },
     "link": {
       "type": "string"

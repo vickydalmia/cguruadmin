@@ -24,6 +24,10 @@ export const config = {
     user: optional("SSH_USER"),
     privateKeyPath: optional("SSH_PRIVATE_KEY_PATH").replace(/^~/, os.homedir()),
     passphrase: optional("SSH_PRIVATE_KEY_PASSPHRASE"),
+    // Expected server host-key fingerprint, e.g. "SHA256:abc123...". When set,
+    // the tunnel rejects any server whose key does not match (MITM protection).
+    // Get it with: ssh-keyscan -t ed25519 <host> | ssh-keygen -lf -
+    hostFingerprint: optional("SSH_HOST_FINGERPRINT"),
   },
   wp: {
     host: optional("WP_DB_HOST", "127.0.0.1"),

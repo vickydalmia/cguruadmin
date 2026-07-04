@@ -23,10 +23,11 @@ export default (_config: unknown, { strapi: _strapi }: { strapi: any }) => {
   return async (ctx: any, next: () => Promise<void>) => {
     cleanup();
 
-    const ip: string =
-      ctx.request.ip ||
-      ctx.request.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
-      'unknown';
+    // Use the koa-resolved client IP (honors TRUST_PROXY / X-Forwarded-For per
+    // config/server.ts). Do NOT read raw X-Forwarded-For — it is
+    // client-spoofable and lets an attacker rotate the header to bypass the
+    // limit and drain a coupon pool.
+    const ip: string = ctx.request.ip || 'unknown';
 
     const now = Date.now();
     const entry = requestCounts.get(ip);

@@ -466,6 +466,7 @@ async function seedGlobal(summary: string[]): Promise<void> {
 
   const row: Record<string, any> = {
     document_id: documentId,
+    title: "Global Settings",
     header_code: clean(opts.get("options_header_code") ?? null),
     footer_code: clean(opts.get("options_footer_code") ?? null),
     enable_amazon_deal: opts.get("options_enable_amazon_deal") === "1",
@@ -516,7 +517,6 @@ async function seedGlobal(summary: string[]): Promise<void> {
 
 interface Banner {
   desktopFileId: number;
-  mobileFileId: number | null;
   link: string | null;
   alt: string | null;
 }
@@ -578,17 +578,10 @@ async function seedHomepage(
   const now = new Date().toISOString();
   const documentId = generateDocumentId("homepage-singleton");
 
-  // draftAndPublish=true → two rows sharing document_id
-  const draftId = await insertRow("homepages", {
+  // draftAndPublish=false → single published row
+  const homepageId = await insertRow("homepages", {
     document_id: documentId,
-    latest_insights_enabled: false,
-    published_at: null,
-    created_at: now,
-    updated_at: now,
-    locale: null,
-  });
-  const publishedId = await insertRow("homepages", {
-    document_id: documentId,
+    title: "Homepage",
     latest_insights_enabled: false,
     published_at: now,
     created_at: now,
@@ -596,14 +589,10 @@ async function seedHomepage(
     locale: null,
   });
 
-  // Component/link rows must exist for BOTH versions
-  const sectionCounts = await buildHomepageTree(draftId, data, true);
-  await buildHomepageTree(publishedId, data, false);
+  const sectionCounts = await buildHomepageTree(homepageId, data, true);
 
-  logger.info("homepage seeded (draft + published)");
-  summary.push(
-    `homepage: seeded draft+published — ${sectionCounts.join(", ")}`
-  );
+  logger.info("homepage seeded");
+  summary.push(`homepage: seeded — ${sectionCounts.join(", ")}`);
 }
 
 async function gatherHomepageData(
@@ -819,10 +808,9 @@ async function buildHomepageTree(
           "banners",
           i + 1
         );
+        // mobileImage was removed from homepage.slider-slide — responsive
+        // sizing now comes from the upload-time variants of desktopImage.
         await linkMedia(b.desktopFileId, slideId, "homepage.slider-slide", "desktopImage");
-        if (b.mobileFileId) {
-          await linkMedia(b.mobileFileId, slideId, "homepage.slider-slide", "mobileImage");
-        }
         bannerCount++;
       }
     } else {
@@ -1222,8 +1210,9 @@ async function parseSliderBanners(): Promise<Banner[]> {
       !k.includes("alt") &&
       !k.includes("caption") &&
       !k.includes("title");
+    // mobileImage was removed from homepage.slider-slide (responsive sizing
+    // comes from upload-time variants) — WP mobile-slide subfields are ignored.
     const desktopRef = pick(subs, (k) => !k.includes("mobile") && isImageKey(k));
-    const mobileRef = pick(subs, (k) => k.includes("mobile") && isImageKey(k));
     const link = pick(subs, (k) => k.includes("link") || k.includes("url"));
     const alt = pick(subs, (k) => k.includes("alt") || k.includes("caption"));
 
@@ -1234,11 +1223,9 @@ async function parseSliderBanners(): Promise<Banner[]> {
       );
       continue;
     }
-    const mobileFileId = mobileRef ? await resolveMediaRef(mobileRef) : undefined;
 
     banners.push({
       desktopFileId,
-      mobileFileId: mobileFileId ?? null,
       link: clean(link ?? null),
       alt: clean(alt ?? null),
     });
@@ -1379,6 +1366,7 @@ async function seedMenu(
   const now = new Date().toISOString();
   const menuId = await insertRow("menus", {
     document_id: generateDocumentId("menu-singleton"),
+    title: "Menu",
     top_stores_view_all_url: "/stores/",
     published_at: now,
     created_at: now,
@@ -1521,6 +1509,7 @@ async function seedFooter(summary: string[]): Promise<void> {
   const now = new Date().toISOString();
   const footerId = await insertRow("footers", {
     document_id: generateDocumentId("footer-singleton"),
+    title: "Footer",
     badge_text: FOOTER_BADGE,
     copyright_text: FOOTER_COPYRIGHT,
     published_at: now,

@@ -12,16 +12,31 @@ let pool: pg.Pool | null = null;
 // inside one transaction without threading the client through every helper.
 const txStorage = new AsyncLocalStorage<pg.PoolClient>();
 
-function buildSslConfig(): pg.PoolConfig["ssl"] {
-  const { caCertPath, rejectUnauthorized } = config.pg;
-  if (!caCertPath) return false;
-  const resolved = path.isAbsolute(caCertPath)
-    ? caCertPath
-    : path.resolve(process.cwd(), caCertPath);
-  if (!existsSync(resolved)) {
-    throw new Error(`PG CA cert not found at ${resolved}`);
+function isLocalHost(connectionString: string): boolean {
+  try {
+    const host = new URL(connectionString).hostname;
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return false;
   }
-  return { ca: readFileSync(resolved, "utf8"), rejectUnauthorized };
+}
+
+function buildSslConfig(): pg.PoolConfig["ssl"] {
+  const { caCertPath, rejectUnauthorized, connectionString } = config.pg;
+  if (caCertPath) {
+    const resolved = path.isAbsolute(caCertPath)
+      ? caCertPath
+      : path.resolve(process.cwd(), caCertPath);
+    if (!existsSync(resolved)) {
+      throw new Error(`PG CA cert not found at ${resolved}`);
+    }
+    return { ca: readFileSync(resolved, "utf8"), rejectUnauthorized };
+  }
+  // No CA cert: plaintext is only acceptable to a loopback host. For any
+  // remote/managed Postgres, default to TLS so the DB password and data are
+  // not sent in cleartext (set PG_CA_CERT_PATH to also verify the chain).
+  if (isLocalHost(connectionString)) return false;
+  return { rejectUnauthorized };
 }
 
 export function getPgPool(): pg.Pool {
