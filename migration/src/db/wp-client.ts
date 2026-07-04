@@ -1,12 +1,15 @@
 import mysql from "mysql2/promise";
-import { Client as SSHClient } from "ssh2";
+import ssh2 from "ssh2";
+import type { Client as SSHClientType } from "ssh2";
+
+const { Client: SSHClient, utils: sshUtils } = ssh2;
 import { readFileSync, existsSync } from "fs";
 import net from "net";
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
 
 let pool: mysql.Pool | null = null;
-let sshClient: SSHClient | null = null;
+let sshClient: SSHClientType | null = null;
 let localServer: net.Server | null = null;
 let tunnelPort: number | null = null;
 
@@ -58,11 +61,34 @@ async function createSSHTunnel(): Promise<number> {
       username: config.ssh.user,
     };
 
-    // Prefer ssh-agent, fall back to private key file
+    // Offer both auth methods: the agent socket alone is not enough when it
+    // has no identities loaded, and an encrypted key file needs a passphrase.
+    // ssh2 is non-interactive — an encrypted key with no passphrase is fatal
+    // at connect time, so only pass the key when it can actually be used.
     if (process.env.SSH_AUTH_SOCK) {
       connectOpts.agent = process.env.SSH_AUTH_SOCK;
-    } else if (config.ssh.privateKeyPath && existsSync(config.ssh.privateKeyPath)) {
-      connectOpts.privateKey = readFileSync(config.ssh.privateKeyPath);
+    }
+    if (config.ssh.privateKeyPath && existsSync(config.ssh.privateKeyPath)) {
+      const keyData = readFileSync(config.ssh.privateKeyPath);
+      const parsed = sshUtils.parseKey(keyData, config.ssh.passphrase || undefined);
+
+      if (parsed instanceof Error) {
+        logger.warn(
+          `Skipping private key ${config.ssh.privateKeyPath} (${parsed.message}). ` +
+            `Load it into your agent with "ssh-add ${config.ssh.privateKeyPath}" ` +
+            `or set SSH_PRIVATE_KEY_PASSPHRASE in .env.migration.`
+        );
+      } else {
+        connectOpts.privateKey = keyData;
+        if (config.ssh.passphrase) {
+          connectOpts.passphrase = config.ssh.passphrase;
+        }
+      }
+    }
+    if (!connectOpts.agent && !connectOpts.privateKey) {
+      logger.warn(
+        "No SSH auth available: agent socket missing and no usable private key file"
+      );
     }
 
     ssh.connect(connectOpts);

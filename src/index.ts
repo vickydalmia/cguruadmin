@@ -46,10 +46,73 @@ async function hideRelationsFromContentManager(strapi: Core.Strapi): Promise<voi
   }
 }
 
+// All site content is public; make sure the public role can read it so the
+// static-site build and browser flows work on any fresh environment.
+// Intentional: this re-grants on every boot, so revoking one of these read
+// permissions in the admin UI will not stick across a restart — remove the
+// action from this list instead. Same applies to ensureUploadSettings below.
+const PUBLIC_READ_ACTIONS = [
+  ...['store', 'brand', 'category', 'bank', 'tag', 'coupon', 'deal'].flatMap(
+    (name) => [`api::${name}.${name}.find`, `api::${name}.${name}.findOne`]
+  ),
+  ...['homepage', 'global', 'menu', 'footer'].map(
+    (name) => `api::${name}.${name}.find`
+  ),
+];
+
+async function ensurePublicReadPermissions(strapi: Core.Strapi): Promise<void> {
+  const publicRole = await strapi
+    .query('plugin::users-permissions.role')
+    .findOne({ where: { type: 'public' } });
+
+  if (!publicRole) {
+    strapi.log.warn('[permissions] public role not found; skipping grant');
+    return;
+  }
+
+  let granted = 0;
+  for (const action of PUBLIC_READ_ACTIONS) {
+    const existing = await strapi
+      .query('plugin::users-permissions.permission')
+      .findOne({ where: { action, role: publicRole.id } });
+
+    if (!existing) {
+      await strapi
+        .query('plugin::users-permissions.permission')
+        .create({ data: { action, role: publicRole.id } });
+      granted += 1;
+    }
+  }
+
+  if (granted > 0) {
+    strapi.log.info(`[permissions] granted ${granted} public read permissions`);
+  }
+}
+
+// Media Library settings live in the DB plugin store (not file config).
+// Ensure responsive formats + optimization + orientation are on everywhere.
+async function ensureUploadSettings(strapi: Core.Strapi): Promise<void> {
+  const uploadService: any = strapi.plugin('upload').service('upload');
+  const current = (await uploadService.getSettings()) ?? {};
+  const desired = {
+    ...current,
+    sizeOptimization: true,
+    responsiveDimensions: true,
+    autoOrientation: true,
+  };
+
+  if (JSON.stringify(desired) !== JSON.stringify(current)) {
+    await uploadService.setSettings(desired);
+    strapi.log.info('[upload] enabled sizeOptimization/responsiveDimensions/autoOrientation');
+  }
+}
+
 export default {
   register(/* { strapi }: { strapi: Core.Strapi } */) {},
 
   async bootstrap({ strapi }: { strapi: Core.Strapi }) {
     await hideRelationsFromContentManager(strapi);
+    await ensurePublicReadPermissions(strapi);
+    await ensureUploadSettings(strapi);
   },
 };

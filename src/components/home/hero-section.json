@@ -1,0 +1,24 @@
+{
+  "collectionName": "components_home_hero_sections",
+  "info": {
+    "displayName": "Hero Section",
+    "icon": "picture"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "banners": {
+      "type": "component",
+      "repeatable": true,
+      "component": "homepage.slider-slide"
+    },
+    "products": {
+      "type": "component",
+      "repeatable": true,
+      "component": "home.hero-product",
+      "max": 4
+    }
+  }
+}

@@ -19,6 +19,65 @@
       "repeatable": true,
       "component": "homepage.slider-slide"
     },
+    "hero": {
+      "type": "component",
+      "repeatable": false,
+      "component": "home.hero-section"
+    },
+    "topOffers": {
+      "type": "component",
+      "repeatable": false,
+      "component": "home.top-offers"
+    },
+    "popularStores": {
+      "type": "component",
+      "repeatable": false,
+      "component": "home.popular-stores"
+    },
+    "topDeals": {
+      "type": "component",
+      "repeatable": false,
+      "component": "home.deal-list"
+    },
+    "cgExclusive": {
+      "type": "component",
+      "repeatable": false,
+      "component": "home.cg-exclusive"
+    },
+    "exploreDeals": {
+      "type": "component",
+      "repeatable": false,
+      "component": "home.explore-deals"
+    },
+    "newlyAdded": {
+      "type": "component",
+      "repeatable": false,
+      "component": "home.newly-added"
+    },
+    "dealsByBrand": {
+      "type": "component",
+      "repeatable": false,
+      "component": "home.deal-list"
+    },
+    "bankOffers": {
+      "type": "component",
+      "repeatable": false,
+      "component": "home.bank-offers"
+    },
+    "howItWorks": {
+      "type": "component",
+      "repeatable": false,
+      "component": "home.how-it-works"
+    },
+    "faq": {
+      "type": "component",
+      "repeatable": false,
+      "component": "home.faq-block"
+    },
+    "latestInsightsEnabled": {
+      "type": "boolean",
+      "default": false
+    },
     "seo": {
       "type": "component",
       "repeatable": false,

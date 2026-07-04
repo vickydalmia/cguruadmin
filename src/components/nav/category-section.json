@@ -1,0 +1,23 @@
+{
+  "collectionName": "components_nav_category_sections",
+  "info": {
+    "displayName": "Category Section",
+    "icon": "folder"
+  },
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true
+    },
+    "category": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::category.category"
+    },
+    "links": {
+      "type": "component",
+      "repeatable": true,
+      "component": "nav.link"
+    }
+  }
+}

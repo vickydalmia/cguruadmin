@@ -603,6 +603,7 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
     affiliateLink: Schema.Attribute.Text;
     banks: Schema.Attribute.Relation<'manyToMany', 'api::bank.bank'>;
     brands: Schema.Attribute.Relation<'manyToMany', 'api::brand.brand'>;
+    cashbackItems: Schema.Attribute.Component<'shared.chip', true>;
     categories: Schema.Attribute.Relation<
       'manyToMany',
       'api::category.category'
@@ -630,6 +631,9 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
       'api::coupon.coupon'
     > &
       Schema.Attribute.Private;
+    offerType: Schema.Attribute.Enumeration<
+      ['exclusive', 'newly_added', 'electronics', 'fashion', 'travel', 'food']
+    >;
     publishedAt: Schema.Attribute.DateTime;
     scheduledAt: Schema.Attribute.DateTime;
     stores: Schema.Attribute.Relation<'manyToMany', 'api::store.store'>;
@@ -660,6 +664,7 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     affiliateLink: Schema.Attribute.Text;
     banks: Schema.Attribute.Relation<'manyToMany', 'api::bank.bank'>;
     brands: Schema.Attribute.Relation<'manyToMany', 'api::brand.brand'>;
+    cashbackItems: Schema.Attribute.Component<'shared.chip', true>;
     categories: Schema.Attribute.Relation<
       'manyToMany',
       'api::category.category'
@@ -683,12 +688,50 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'> &
       Schema.Attribute.Private;
     mrp: Schema.Attribute.Decimal;
+    offerType: Schema.Attribute.Enumeration<
+      ['exclusive', 'newly_added', 'electronics', 'fashion', 'travel', 'food']
+    >;
+    primaryStore: Schema.Attribute.Relation<'manyToOne', 'api::store.store'>;
     publishedAt: Schema.Attribute.DateTime;
     salePrice: Schema.Attribute.Decimal;
     scheduledAt: Schema.Attribute.DateTime;
     stores: Schema.Attribute.Relation<'manyToMany', 'api::store.store'>;
     tags: Schema.Attribute.Relation<'manyToMany', 'api::tag.tag'>;
     title: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiFooterFooter extends Struct.SingleTypeSchema {
+  collectionName: 'footers';
+  info: {
+    description: 'Footer link sections, socials, countries, partner card';
+    displayName: 'Footer';
+    pluralName: 'footers';
+    singularName: 'footer';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    badgeText: Schema.Attribute.String;
+    copyrightText: Schema.Attribute.String;
+    countries: Schema.Attribute.Component<'footer.country', true>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::footer.footer'
+    > &
+      Schema.Attribute.Private;
+    partnerCard: Schema.Attribute.Component<'footer.partner-card', false>;
+    publishedAt: Schema.Attribute.DateTime;
+    sections: Schema.Attribute.Component<'footer.link-section', true>;
+    socialLinks: Schema.Attribute.Component<'footer.social-link', true>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -739,19 +782,64 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
     draftAndPublish: true;
   };
   attributes: {
+    bankOffers: Schema.Attribute.Component<'home.bank-offers', false>;
+    cgExclusive: Schema.Attribute.Component<'home.cg-exclusive', false>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    dealsByBrand: Schema.Attribute.Component<'home.deal-list', false>;
+    exploreDeals: Schema.Attribute.Component<'home.explore-deals', false>;
+    faq: Schema.Attribute.Component<'home.faq-block', false>;
+    hero: Schema.Attribute.Component<'home.hero-section', false>;
+    howItWorks: Schema.Attribute.Component<'home.how-it-works', false>;
+    latestInsightsEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
       'api::homepage.homepage'
     > &
       Schema.Attribute.Private;
+    newlyAdded: Schema.Attribute.Component<'home.newly-added', false>;
+    popularStores: Schema.Attribute.Component<'home.popular-stores', false>;
     publishedAt: Schema.Attribute.DateTime;
     seo: Schema.Attribute.Component<'shared.seo', false>;
     sliderEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     sliderSlides: Schema.Attribute.Component<'homepage.slider-slide', true>;
+    topDeals: Schema.Attribute.Component<'home.deal-list', false>;
+    topOffers: Schema.Attribute.Component<'home.top-offers', false>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiMenuMenu extends Struct.SingleTypeSchema {
+  collectionName: 'menus';
+  info: {
+    description: 'Site navigation: top stores dropdown, category sections, extra links';
+    displayName: 'Menu';
+    pluralName: 'menus';
+    singularName: 'menu';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    categoriesTitle: Schema.Attribute.String;
+    categoriesViewAllUrl: Schema.Attribute.String;
+    categorySections: Schema.Attribute.Component<'nav.category-section', true>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    extraItems: Schema.Attribute.Component<'nav.link', true>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<'oneToMany', 'api::menu.menu'> &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    topStores: Schema.Attribute.Relation<'oneToMany', 'api::store.store'>;
+    topStoresViewAllUrl: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'/stores/'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1439,8 +1527,10 @@ declare module '@strapi/strapi' {
       'api::category.category': ApiCategoryCategory;
       'api::coupon.coupon': ApiCouponCoupon;
       'api::deal.deal': ApiDealDeal;
+      'api::footer.footer': ApiFooterFooter;
       'api::global.global': ApiGlobalGlobal;
       'api::homepage.homepage': ApiHomepageHomepage;
+      'api::menu.menu': ApiMenuMenu;
       'api::store.store': ApiStoreStore;
       'api::tag.tag': ApiTagTag;
       'api::unique-code.unique-code': ApiUniqueCodeUniqueCode;

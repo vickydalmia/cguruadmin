@@ -19,6 +19,9 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
       ? {
           upload: {
             config: {
+              // Responsive format sizes generated on upload (originals are
+              // capped at 1920 by src/extensions/upload — no 1920 breakpoint).
+              breakpoints: { large: 1000, medium: 750, small: 500 },
               provider: 'aws-s3',
               providerOptions: {
                 baseUrl: s3BaseUrl,

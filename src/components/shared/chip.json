@@ -1,0 +1,13 @@
+{
+  "collectionName": "components_shared_chips",
+  "info": {
+    "displayName": "Chip",
+    "icon": "bulletList"
+  },
+  "attributes": {
+    "label": {
+      "type": "string",
+      "required": true
+    }
+  }
+}

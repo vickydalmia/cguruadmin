@@ -142,6 +142,13 @@ migration/.checkpoints/
 migration/node_modules/
 migration/dist/
 migration/*.log
+.astro/
+
+############################
+# npm (repo uses yarn)
+############################
+
+package-lock.json
 
 ############################
 # Local Codex / Claude files

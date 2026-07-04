@@ -1,6 +1,6 @@
 import { createId } from "@paralleldrive/cuid2";
 import { createHash } from "crypto";
-import { getPgPool } from "../db/pg-client.js";
+import { pgQuery } from "../db/pg-client.js";
 import { logger } from "./logger.js";
 
 export function generateDocumentId(sourceKey?: string): string {
@@ -15,12 +15,11 @@ export async function getEntityIdByDocumentId(
   table: string,
   documentId: string
 ): Promise<number | null> {
-  const pool = getPgPool();
-  const result = await pool.query(
+  const rows = await pgQuery<{ id: number }>(
     `SELECT id FROM "${table}" WHERE "document_id" = $1 LIMIT 1`,
     [documentId]
   );
-  return result.rows[0]?.id ?? null;
+  return rows[0]?.id ?? null;
 }
 
 /**
@@ -34,7 +33,6 @@ export async function batchInsert<T extends Record<string, any>>(
 ): Promise<Array<T & { id: number }>> {
   if (rows.length === 0) return [];
 
-  const pool = getPgPool();
   const columns = Object.keys(rows[0]);
   const results: Array<T & { id: number }> = [];
 
@@ -68,8 +66,8 @@ export async function batchInsert<T extends Record<string, any>>(
     `;
 
     try {
-      const result = await pool.query(sql, values);
-      results.push(...(result.rows as Array<T & { id: number }>));
+      const inserted = await pgQuery<T & { id: number }>(sql, values);
+      results.push(...inserted);
     } catch (err: any) {
       logger.error(
         `Batch insert into ${table} failed (chunk ${i / chunkSize}): ${err.message}`
@@ -104,10 +102,9 @@ export async function insertComponent(
   componentType: string,
   order: number = 1
 ): Promise<number> {
-  const pool = getPgPool();
   const cmpTable = `${entityTable}_cmps`;
 
-  const existingLink = await pool.query<{ cmp_id: number }>(
+  const existingLink = await pgQuery<{ cmp_id: number }>(
     `
       SELECT "cmp_id"
       FROM "${cmpTable}"
@@ -119,8 +116,8 @@ export async function insertComponent(
     `,
     [entityId, field, componentType, order]
   );
-  if (existingLink.rows[0]?.cmp_id) {
-    return existingLink.rows[0].cmp_id;
+  if (existingLink[0]?.cmp_id) {
+    return existingLink[0].cmp_id;
   }
 
   // Insert component row
@@ -133,15 +130,15 @@ export async function insertComponent(
     VALUES (${placeholders.join(", ")})
     RETURNING id
   `;
-  const compResult = await pool.query(insertSql, values);
-  const componentId = compResult.rows[0].id;
+  const compResult = await pgQuery<{ id: number }>(insertSql, values);
+  const componentId = compResult[0].id;
 
   // Link via entity's component join table
   const linkSql = `
     INSERT INTO "${cmpTable}" ("entity_id", "cmp_id", "component_type", "field", "order")
     VALUES ($1, $2, $3, $4, $5)
   `;
-  await pool.query(linkSql, [entityId, componentId, componentType, field, order]);
+  await pgQuery(linkSql, [entityId, componentId, componentType, field, order]);
 
   return componentId;
 }
@@ -153,7 +150,6 @@ export async function insertLink(
   linkTable: string,
   columns: Record<string, number>
 ): Promise<void> {
-  const pool = getPgPool();
   const cols = Object.keys(columns);
   const vals = cols.map((c) => columns[c]);
   const placeholders = cols.map((_, i) => `$${i + 1}`);
@@ -163,7 +159,7 @@ export async function insertLink(
     VALUES (${placeholders.join(", ")})
     ON CONFLICT DO NOTHING
   `;
-  await pool.query(sql, vals);
+  await pgQuery(sql, vals);
 }
 
 /**
@@ -176,11 +172,10 @@ export async function linkMedia(
   field: string,
   order: number = 1
 ): Promise<void> {
-  const pool = getPgPool();
   const sql = `
     INSERT INTO "files_related_mph" ("file_id", "related_id", "related_type", "field", "order")
     VALUES ($1, $2, $3, $4, $5)
     ON CONFLICT DO NOTHING
   `;
-  await pool.query(sql, [fileId, relatedId, relatedType, field, order]);
+  await pgQuery(sql, [fileId, relatedId, relatedType, field, order]);
 }

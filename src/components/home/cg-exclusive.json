@@ -1,0 +1,22 @@
+{
+  "collectionName": "components_home_cg_exclusives",
+  "info": {
+    "displayName": "CG Exclusive Section",
+    "icon": "star"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string"
+    },
+    "items": {
+      "type": "component",
+      "repeatable": true,
+      "component": "home.exclusive-item",
+      "max": 4
+    }
+  }
+}

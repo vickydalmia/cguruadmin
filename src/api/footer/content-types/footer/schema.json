@@ -1,0 +1,41 @@
+{
+  "kind": "singleType",
+  "collectionName": "footers",
+  "info": {
+    "singularName": "footer",
+    "pluralName": "footers",
+    "displayName": "Footer",
+    "description": "Footer link sections, socials, countries, partner card"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "sections": {
+      "type": "component",
+      "repeatable": true,
+      "component": "footer.link-section"
+    },
+    "socialLinks": {
+      "type": "component",
+      "repeatable": true,
+      "component": "footer.social-link"
+    },
+    "countries": {
+      "type": "component",
+      "repeatable": true,
+      "component": "footer.country"
+    },
+    "partnerCard": {
+      "type": "component",
+      "repeatable": false,
+      "component": "footer.partner-card"
+    },
+    "badgeText": {
+      "type": "string"
+    },
+    "copyrightText": {
+      "type": "string"
+    }
+  }
+}

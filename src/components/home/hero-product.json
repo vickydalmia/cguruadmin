@@ -1,0 +1,25 @@
+{
+  "collectionName": "components_home_hero_products",
+  "info": {
+    "displayName": "Hero Product",
+    "icon": "shoppingCart"
+  },
+  "attributes": {
+    "deal": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::deal.deal"
+    },
+    "titleOverride": {
+      "type": "string"
+    },
+    "imageOverride": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": ["images"]
+    },
+    "linkOverride": {
+      "type": "string"
+    }
+  }
+}

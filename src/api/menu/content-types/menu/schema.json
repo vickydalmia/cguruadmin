@@ -1,0 +1,40 @@
+{
+  "kind": "singleType",
+  "collectionName": "menus",
+  "info": {
+    "singularName": "menu",
+    "pluralName": "menus",
+    "displayName": "Menu",
+    "description": "Site navigation: top stores dropdown, category sections, extra links"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "topStores": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::store.store"
+    },
+    "topStoresViewAllUrl": {
+      "type": "string",
+      "default": "/stores/"
+    },
+    "categoriesTitle": {
+      "type": "string"
+    },
+    "categoriesViewAllUrl": {
+      "type": "string"
+    },
+    "categorySections": {
+      "type": "component",
+      "repeatable": true,
+      "component": "nav.category-section"
+    },
+    "extraItems": {
+      "type": "component",
+      "repeatable": true,
+      "component": "nav.link"
+    }
+  }
+}

@@ -20,7 +20,15 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Middlewar
       },
     },
   },
-  'strapi::cors',
+  {
+    name: 'strapi::cors',
+    config: {
+      // Browser-issued requests from the static site: /api/search and
+      // /plugin/unique-coupon/redeem. Add production origins via CORS_ORIGINS.
+      origin: env.array('CORS_ORIGINS', ['http://localhost:4321']),
+      headers: ['Content-Type', 'Authorization'],
+    },
+  },
   'strapi::poweredBy',
   'strapi::query',
   'strapi::body',

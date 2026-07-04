@@ -1,0 +1,21 @@
+{
+  "collectionName": "components_home_faq_blocks",
+  "info": {
+    "displayName": "FAQ Section",
+    "icon": "question"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string"
+    },
+    "items": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.faq-item"
+    }
+  }
+}

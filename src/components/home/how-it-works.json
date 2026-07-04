@@ -1,0 +1,28 @@
+{
+  "collectionName": "components_home_how_it_works",
+  "info": {
+    "displayName": "How It Works Section",
+    "icon": "information"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string"
+    },
+    "steps": {
+      "type": "component",
+      "repeatable": true,
+      "component": "home.step",
+      "max": 3
+    },
+    "features": {
+      "type": "component",
+      "repeatable": true,
+      "component": "home.why-feature",
+      "max": 4
+    }
+  }
+}

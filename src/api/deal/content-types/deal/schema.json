@@ -46,6 +46,27 @@
       "type": "boolean",
       "default": false
     },
+    "offerType": {
+      "type": "enumeration",
+      "enum": [
+        "exclusive",
+        "newly_added",
+        "electronics",
+        "fashion",
+        "travel",
+        "food"
+      ]
+    },
+    "cashbackItems": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.chip"
+    },
+    "primaryStore": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::store.store"
+    },
     "affiliateLink": {
       "type": "text"
     },

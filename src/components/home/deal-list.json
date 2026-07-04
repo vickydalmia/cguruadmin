@@ -1,0 +1,21 @@
+{
+  "collectionName": "components_home_deal_lists",
+  "info": {
+    "displayName": "Deal List Section",
+    "icon": "priceTag"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string"
+    },
+    "deals": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::deal.deal"
+    }
+  }
+}

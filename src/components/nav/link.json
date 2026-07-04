@@ -1,0 +1,33 @@
+{
+  "collectionName": "components_nav_links",
+  "info": {
+    "displayName": "Nav Link",
+    "icon": "link"
+  },
+  "attributes": {
+    "label": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    },
+    "store": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::store.store"
+    },
+    "category": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::category.category"
+    },
+    "featured": {
+      "type": "boolean",
+      "default": false
+    },
+    "bold": {
+      "type": "boolean",
+      "default": false
+    }
+  }
+}

@@ -21,6 +21,9 @@ import { runDeals } from "./phases/08-deals.js";
 import { runSeoBackfill } from "./phases/09-seo-backfill.js";
 import { runVerification } from "./phases/10-verify.js";
 import { runCopyUsedMedia } from "./phases/11-copy-used-media.js";
+import { runOfferBackfill } from "./phases/12-offer-backfill.js";
+import { runSiteContent } from "./phases/13-site-content.js";
+import { runMediaOptimize } from "./phases/14-media-optimize.js";
 
 interface Phase {
   name: string;
@@ -42,6 +45,9 @@ const phases: Phase[] = [
   { name: "09-seo-backfill", fn: runSeoBackfill },
   { name: "10-verify", fn: runVerification, skipCheckpoint: true },
   { name: "11-copy-used-media", fn: runCopyUsedMedia },
+  { name: "12-offer-backfill", fn: runOfferBackfill },
+  { name: "13-site-content", fn: runSiteContent },
+  { name: "14-media-optimize", fn: runMediaOptimize },
 ];
 
 async function main(): Promise<void> {
@@ -69,13 +75,32 @@ async function main(): Promise<void> {
       "files_related_mph",
       // Component join tables
       "stores_cmps", "brands_cmps", "categories_cmps", "banks_cmps",
+      // Single-type component joins (phase 13 seeds these; without truncation
+      // a re-run sees stale rows and skips seeding)
+      "homepages_cmps", "menus_cmps", "footers_cmps", "globals_cmps",
       // Component data tables
       "components_shared_seos", "components_shared_faq_items",
+      "components_shared_chips",
+      "components_homepage_slider_slides",
+      "components_home_hero_sections", "components_home_hero_products",
+      "components_home_top_offers", "components_home_top_offer_items",
+      "components_home_popular_stores", "components_home_deal_lists",
+      "components_home_cg_exclusives", "components_home_exclusive_items",
+      "components_home_explore_deals", "components_home_explore_tabs",
+      "components_home_newly_addeds", "components_home_coupon_card_items",
+      "components_home_bank_offers", "components_home_bank_offer_items",
+      "components_home_how_it_works", "components_home_steps",
+      "components_home_why_features", "components_home_faq_blocks",
+      "components_nav_links", "components_nav_category_sections",
+      "components_footer_link_sections", "components_footer_social_links",
+      "components_footer_countries", "components_footer_partner_cards",
       // Entity tables
       "coupons", "deals",
       "unique_codes", "unique_coupon_pools",
       "tags",
       "stores", "brands", "categories", "banks",
+      // Single types (re-seeded by phase 13)
+      "homepages", "menus", "footers", "globals",
       // Media (only migration-created records)
       "files",
     ];

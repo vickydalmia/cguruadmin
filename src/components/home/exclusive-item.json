@@ -1,0 +1,22 @@
+{
+  "collectionName": "components_home_exclusive_items",
+  "info": {
+    "displayName": "CG Exclusive Item",
+    "icon": "star"
+  },
+  "attributes": {
+    "coupon": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::coupon.coupon"
+    },
+    "bannerOverride": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": ["images"]
+    },
+    "titleOverride": {
+      "type": "string"
+    }
+  }
+}

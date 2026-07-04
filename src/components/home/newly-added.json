@@ -1,0 +1,22 @@
+{
+  "collectionName": "components_home_newly_addeds",
+  "info": {
+    "displayName": "Newly Added Stores Section",
+    "icon": "plus"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string"
+    },
+    "items": {
+      "type": "component",
+      "repeatable": true,
+      "component": "home.coupon-card-item",
+      "max": 4
+    }
+  }
+}

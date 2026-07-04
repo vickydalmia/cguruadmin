@@ -1,0 +1,21 @@
+{
+  "collectionName": "components_footer_partner_cards",
+  "info": {
+    "displayName": "Partner Card",
+    "icon": "handHeart"
+  },
+  "attributes": {
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "text"
+    },
+    "ctaLabel": {
+      "type": "string"
+    },
+    "ctaUrl": {
+      "type": "string"
+    }
+  }
+}

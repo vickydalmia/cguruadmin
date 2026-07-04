@@ -1,0 +1,22 @@
+{
+  "collectionName": "components_home_explore_deals",
+  "info": {
+    "displayName": "Explore Deals Section",
+    "icon": "grid"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string"
+    },
+    "tabs": {
+      "type": "component",
+      "repeatable": true,
+      "component": "home.explore-tab",
+      "max": 8
+    }
+  }
+}

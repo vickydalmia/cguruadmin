@@ -1,0 +1,21 @@
+{
+  "collectionName": "components_home_steps",
+  "info": {
+    "displayName": "How It Works Step",
+    "icon": "arrowRight"
+  },
+  "attributes": {
+    "kind": {
+      "type": "enumeration",
+      "enum": ["store", "copy", "payments"],
+      "required": true
+    },
+    "title": {
+      "type": "string",
+      "required": true
+    },
+    "description": {
+      "type": "text"
+    }
+  }
+}

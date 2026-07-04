@@ -104,7 +104,7 @@ Logs are written to:
 
 ## Migration Phases
 
-The migration runs 11 sequential phases (00–10). Each phase checkpoints on completion so the process can resume after interruption.
+The migration runs sequential phases (00–14). Each phase checkpoints on completion so the process can resume after interruption.
 
 ### Phase 00 — Preflight
 
@@ -116,7 +116,7 @@ Queries all WordPress image attachments. Builds an in-memory catalog with file p
 
 ### Phase 02 — Media Upload to S3
 
-Uploads inventoried images to S3 with configurable concurrency. Deduplicates by SHA-256 hash. Creates corresponding records in the Strapi `files` table with CloudFront URLs, dimensions, and provider metadata. See [Media / S3 Pipeline](#media--s3-pipeline) for details.
+Uploads inventoried images to S3 with configurable concurrency. Deduplicates by SHA-256 hash. Before upload, supported raster images (jpeg/png/webp/avif/tiff) are optimized: EXIF orientation baked in, downscaled to fit 1920×1920, jpeg/png converted to webp, and webp/avif/tiff re-compressed at quality 80. Strapi-style responsive variants (`thumbnail`/`small`/`medium`/`large`) are generated and uploaded alongside the original, and recorded in the `files.formats` JSON column. gif/svg/other formats pass through untouched (`formats` stays NULL). Creates corresponding records in the Strapi `files` table with CloudFront URLs, dimensions, and provider metadata. See [Media / S3 Pipeline](#media--s3-pipeline) for details.
 
 ### Phase 03 — Taxonomies
 
@@ -154,6 +154,46 @@ Scans all six entity tables for rows missing an SEO component. Attempts to fill 
 ### Phase 10 — Verification
 
 Compares record counts between source and destination, checks relationship integrity, validates slug uniqueness, reports SEO coverage percentages, and runs sample spot checks. Never checkpointed — always runs. Failures are logged but non-fatal.
+
+### Phase 11 — Copy Used Media
+
+Copies only the media files actually referenced by entities (via `files_related_mph`) into Strapi's `public/uploads` directory (local-provider files only).
+
+### Phase 12 — Offer Backfill
+
+Backfills two newly-added Strapi fields from WordPress data:
+
+- `offer_type` on `coupons` and `deals` from the `offer_type` postmeta key. Valid values: `exclusive`, `newly_added`, `electronics`, `fashion`, `travel`, `food` — anything else is skipped and the field stays null.
+- The `deal.primaryStore` manyToOne relation from the ACF `deal_store` postmeta key (a store term ID, plain or PHP-serialized). Links are written to the Strapi link table (detected at runtime via `information_schema`, expected name `deals_primary_store_lnk`) with delete-then-insert semantics so re-runs never leave stale rows.
+
+Only posts present in the persisted ID maps (i.e., actually migrated) are touched. If the `offer_type` columns or the link table don't exist yet (Strapi schema not migrated), the phase logs a warning and skips that part gracefully.
+
+### Phase 13 — Site Content
+
+Seeds the four Strapi single types the frontend needs:
+
+- `global` — header/footer codes, Amazon deal toggle, and the Amazon top banner (attachment resolved via the media map) from WP ACF option keys (`options_header_code`, `options_footer_code`, etc.).
+- `homepage` — created as a **draft + published pair** (draftAndPublish is enabled), with the full component tree cloned for both versions. Curated sections: hero banners from the `options_slider_features` ACF repeater, hero products / topDeals / dealsByBrand from migrated deals, cgExclusive / newlyAdded from coupons by `offer_type`, popularStores from `options_featured_stores` (fallback: top stores by published-coupon count), exploreDeals tabs by fuzzy category slug match, bankOffers by published-coupon count, plus How It Works and FAQ copy mirrored from the frontend.
+- `menu` — topStores relation (same curated store list), one category section per explore category with its top stores, and the fixed extra nav items.
+- `footer` — link sections, social links, countries, and partner card mirrored from the frontend `footer-data.ts`; Popular Stores labels are resolved to real store relations where a matching store name exists.
+
+All component and relation link table names are verified against `information_schema` before writing; anything missing (schema not migrated yet) is skipped with a clear warning. Each single type is skipped entirely if its table already has a row, so re-runs are safe.
+
+### Phase 14 — Media Optimize (backfill)
+
+Optimizes already-migrated S3 images that predate the optimization pipeline. Candidates are `files` rows with `provider='aws-s3'`, `formats IS NULL`, and an optimizable MIME type (jpeg/png/webp/avif/tiff). For each candidate (5 in parallel):
+
+1. **Source bytes** — resolved from the local `WP_UPLOADS_DIR` tree via a `sha256(file)[0:16] → path` map (cached in `.checkpoints/media-hash-map.json` keyed by mtime + size so re-runs don't rehash), falling back to downloading the current S3 object.
+2. **Optimize** — same pipeline as Phase 02: orientation baked, max 1920px, jpeg/png → webp, quality 80.
+3. **Upload** — the optimized original (new `.webp` key when converted) plus all responsive variants.
+4. **Update** — a single `UPDATE files SET formats, ext, mime, url, width, height, size, provider_metadata, updated_at` as the **last** step, so a crash leaves the row eligible for the next run (row-level resume via the `formats IS NULL` predicate).
+5. **Cleanup** — the superseded S3 object is deleted when the key changed (jpeg/png → webp), unless `--keep-originals` is passed:
+
+```bash
+npm run migrate -- --phase 14-media-optimize --keep-originals
+```
+
+Fails fast with a clear error if the `files` table is empty (run a full migration first).
 
 ---
 

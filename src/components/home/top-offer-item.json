@@ -1,0 +1,26 @@
+{
+  "collectionName": "components_home_top_offer_items",
+  "info": {
+    "displayName": "Top Offer Item",
+    "icon": "gift"
+  },
+  "attributes": {
+    "coupon": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::coupon.coupon"
+    },
+    "banner": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": ["images"],
+      "required": true
+    },
+    "offerTextOverride": {
+      "type": "string"
+    },
+    "linkOverride": {
+      "type": "string"
+    }
+  }
+}

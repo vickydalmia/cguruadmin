@@ -1,0 +1,22 @@
+{
+  "collectionName": "components_home_coupon_card_items",
+  "info": {
+    "displayName": "Coupon Card Item",
+    "icon": "ticket"
+  },
+  "attributes": {
+    "coupon": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::coupon.coupon"
+    },
+    "cardImage": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": ["images"]
+    },
+    "titleOverride": {
+      "type": "string"
+    }
+  }
+}

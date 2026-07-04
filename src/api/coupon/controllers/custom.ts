@@ -15,6 +15,14 @@ const PLURAL_FIELD: Record<string, string> = {
 
 const visibilityFilters = () => publishedOnlyFilters();
 
+// Categories carry `icon`; stores/banks/brands carry `logo`. Object-style
+// populate is validated strictly, so only reference fields that exist.
+const entityPopulate = (entityType: string) => ({
+  [entityType === 'category' ? 'icon' : 'logo']: true,
+  faqs: true,
+  seo: { populate: { ogImage: true } },
+});
+
 function contentType(strapi: Core.Strapi, uid: string) {
   return strapi.contentType(uid as any) as any;
 }
@@ -53,7 +61,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const apiId = `api::${entityType}.${entityType}` as any;
     const entityQuery = await sanitizeDocumentQuery(strapi, ctx, apiId, {
       filters: { slug },
-      populate: ['logo', 'faqs', 'icon'],
+      populate: entityPopulate(entityType),
       limit: 1,
     });
 
@@ -71,7 +79,16 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     };
     const couponsQuery = await sanitizeDocumentQuery(strapi, ctx, 'api::coupon.coupon', {
       filters,
-      populate: ['image', 'tags', 'stores', 'banks', 'categories', 'brands'],
+      populate: {
+        image: true,
+        tags: true,
+        stores: true,
+        banks: true,
+        categories: true,
+        brands: true,
+        cashbackItems: true,
+        uniqueCouponPool: { fields: ['name'] },
+      },
       sort: [{ isPopular: 'desc' }, { publishedAt: 'desc' }, { updatedAt: 'desc' }],
       start: (page - 1) * pageSize,
       limit: pageSize,
@@ -106,7 +123,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const apiId = `api::${entityType}.${entityType}` as any;
     const entityQuery = await sanitizeDocumentQuery(strapi, ctx, apiId, {
       filters: { slug },
-      populate: ['logo', 'icon'],
+      populate: entityPopulate(entityType),
       limit: 1,
     });
 
@@ -124,7 +141,16 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     };
     const dealsQuery = await sanitizeDocumentQuery(strapi, ctx, 'api::deal.deal', {
       filters,
-      populate: ['dealImage', 'tags', 'stores', 'banks', 'categories', 'brands'],
+      populate: {
+        dealImage: true,
+        tags: true,
+        stores: true,
+        banks: true,
+        categories: true,
+        brands: true,
+        cashbackItems: true,
+        primaryStore: true,
+      },
       sort: [{ isPopular: 'desc' }, { publishedAt: 'desc' }, { updatedAt: 'desc' }],
       start: (page - 1) * pageSize,
       limit: pageSize,

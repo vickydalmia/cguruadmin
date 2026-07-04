@@ -23,6 +23,7 @@ export const config = {
     port: parseInt(optional("SSH_PORT", "22")),
     user: optional("SSH_USER"),
     privateKeyPath: optional("SSH_PRIVATE_KEY_PATH").replace(/^~/, os.homedir()),
+    passphrase: optional("SSH_PRIVATE_KEY_PASSPHRASE"),
   },
   wp: {
     host: optional("WP_DB_HOST", "127.0.0.1"),

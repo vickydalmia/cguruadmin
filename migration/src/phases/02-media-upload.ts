@@ -13,10 +13,24 @@ import { setMediaMapping, getMediaMapping } from "../utils/id-maps.js";
 import { generateDocumentId } from "../utils/strapi-insert.js";
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
+import {
+  optimizeOriginal,
+  generateStrapiFormats,
+  slugifyFileName,
+} from "../utils/image-optimizer.js";
+
+/** MIME types that go through optimizeOriginal (resize/webp/recompress). */
+const OPTIMIZABLE_MIMES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/avif",
+  "image/tiff",
+]);
 
 let s3Client: S3Client | null = null;
 
-function getS3Client(): S3Client {
+export function getS3Client(): S3Client {
   if (!s3Client) {
     const s3Config: any = {
       region: config.s3.region,
@@ -34,9 +48,12 @@ function getS3Client(): S3Client {
   return s3Client;
 }
 
-function hashFile(filePath: string): string {
-  const content = fs.readFileSync(filePath);
+export function hashBuffer(content: Buffer): string {
   return crypto.createHash("sha256").update(content).digest("hex").substring(0, 16);
+}
+
+function hashFile(filePath: string): string {
+  return hashBuffer(fs.readFileSync(filePath));
 }
 
 function getExtension(fileName: string): string {
@@ -122,10 +139,17 @@ export async function uploadMediaOnDemand(attachmentId: number): Promise<number 
     }
 
     const fileStats = fs.statSync(filePath);
-    const ext = getExtension(item.fileName);
-    const nameWithoutExt = path.basename(item.fileName, ext);
-    const { width, height } = await getImageDimensions(filePath, item.mimeType);
+    const sourceExt = getExtension(item.fileName);
+    const nameWithoutExt = path.basename(item.fileName, sourceExt);
     const documentId = generateDocumentId();
+
+    // Final file attributes — start with the source values, replaced by the
+    // optimized output when optimization applies (S3 uploads only).
+    let ext = sourceExt;
+    let mime = item.mimeType;
+    let { width, height } = await getImageDimensions(filePath, item.mimeType);
+    let sizeInBytes = fileStats.size;
+    let formatsJson: Record<string, any> | null = null;
 
     let fileUrl: string;
     let provider: string;
@@ -135,23 +159,78 @@ export async function uploadMediaOnDemand(attachmentId: number): Promise<number 
       // Upload to S3
       const client = getS3Client();
       const rootPath = config.s3.rootPath ? `${config.s3.rootPath}/` : "";
-      const s3Key = `${rootPath}${hash}_${nameWithoutExt}${ext}`;
-      const fileBuffer = fs.readFileSync(filePath);
+      let uploadBuffer: Buffer = fs.readFileSync(filePath);
+
+      // Optimize supported raster formats: bake orientation, cap at 1920px,
+      // convert jpeg/png → webp, recompress webp/avif/tiff. gif/svg/other
+      // return null and pass through untouched (formats stays NULL).
+      const optimized = OPTIMIZABLE_MIMES.has(item.mimeType)
+        ? await optimizeOriginal(uploadBuffer)
+        : null;
+      if (optimized) {
+        uploadBuffer = optimized.buffer;
+        ext = optimized.ext;
+        mime = optimized.mime;
+        width = optimized.width;
+        height = optimized.height;
+        sizeInBytes = optimized.sizeInBytes;
+      }
+
+      // SEO-friendly layout: one folder per image so the original and all
+      // generated variants live together, keyword-first filenames, and the
+      // short content hash in the folder segment keeps URLs immutable:
+      //   uploads/myntra-coupon-codes-a1b2c3d4/myntra-coupon-codes.webp
+      //   uploads/myntra-coupon-codes-a1b2c3d4/large_myntra-coupon-codes.webp
+      // NOTE: hash stays the sha256(source bytes)[0:16] of the ORIGINAL file
+      // so dedupe/idempotency is untouched; only the extension may change.
+      const slug = slugifyFileName(nameWithoutExt);
+      const imageFolder = `${slug}-${hash.slice(0, 8)}`;
+      const s3Key = `${rootPath}${imageFolder}/${slug}${ext}`;
 
       await client.send(
         new PutObjectCommand({
           Bucket: config.s3.bucket,
           Key: s3Key,
-          Body: fileBuffer,
-          ContentType: item.mimeType,
+          Body: uploadBuffer,
+          ContentType: mime,
           CacheControl: "public, max-age=31536000, immutable",
         })
       );
 
       // Strapi's S3 provider stores the full URL when baseUrl is configured
-      fileUrl = config.s3.baseUrl
-        ? `${config.s3.baseUrl.replace(/\/+$/, "")}/${s3Key}`
-        : `https://${config.s3.bucket}.s3.${config.s3.region}.amazonaws.com/${s3Key}`;
+      const urlPrefix = config.s3.baseUrl
+        ? config.s3.baseUrl.replace(/\/+$/, "")
+        : `https://${config.s3.bucket}.s3.${config.s3.region}.amazonaws.com`;
+
+      if (optimized && width && height) {
+        const { formatsJson: generated, uploads } = await generateStrapiFormats(
+          optimized.buffer,
+          {
+            width,
+            height,
+            ext,
+            mime,
+            hashBase: slug,
+            nameBase: slug,
+            urlPrefix,
+            keyPrefix: `${rootPath}${imageFolder}/`,
+          }
+        );
+        for (const variant of uploads) {
+          await client.send(
+            new PutObjectCommand({
+              Bucket: config.s3.bucket,
+              Key: variant.key,
+              Body: variant.buffer,
+              ContentType: variant.contentType,
+              CacheControl: "public, max-age=31536000, immutable",
+            })
+          );
+        }
+        formatsJson = generated;
+      }
+
+      fileUrl = `${urlPrefix}/${s3Key}`;
       provider = "aws-s3";
       providerMetadata = JSON.stringify({ key: s3Key });
     } else {
@@ -165,10 +244,10 @@ export async function uploadMediaOnDemand(attachmentId: number): Promise<number 
     const result = await pgQuery<{ id: number }>(
       `INSERT INTO files (
         document_id, name, alternative_text, caption, width, height,
-        ext, mime, size, hash, url, provider, provider_metadata, folder_path,
-        created_at, updated_at, published_at
+        formats, ext, mime, size, hash, url, provider, provider_metadata,
+        folder_path, created_at, updated_at, published_at
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW(), NOW()
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW(), NOW()
       ) RETURNING id`,
       [
         documentId,
@@ -177,9 +256,10 @@ export async function uploadMediaOnDemand(attachmentId: number): Promise<number 
         item.postTitle || null,
         width,
         height,
+        formatsJson ? JSON.stringify(formatsJson) : null,
         ext,
-        item.mimeType,
-        parseFloat((fileStats.size / 1024).toFixed(2)),
+        mime,
+        parseFloat((sizeInBytes / 1024).toFixed(2)),
         hash,
         fileUrl,
         provider,

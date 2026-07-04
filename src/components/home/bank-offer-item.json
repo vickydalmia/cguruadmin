@@ -1,0 +1,22 @@
+{
+  "collectionName": "components_home_bank_offer_items",
+  "info": {
+    "displayName": "Bank Offer Item",
+    "icon": "landscape"
+  },
+  "attributes": {
+    "bank": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::bank.bank"
+    },
+    "iconKind": {
+      "type": "enumeration",
+      "enum": ["corporate", "account", "wallet", "rupee"],
+      "default": "corporate"
+    },
+    "subtitle": {
+      "type": "string"
+    }
+  }
+}

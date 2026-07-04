@@ -1,0 +1,26 @@
+{
+  "collectionName": "components_home_popular_stores",
+  "info": {
+    "displayName": "Popular Stores Section",
+    "icon": "store"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string"
+    },
+    "featuredStore": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::store.store"
+    },
+    "stores": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::store.store"
+    }
+  }
+}

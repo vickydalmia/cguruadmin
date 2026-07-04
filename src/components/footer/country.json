@@ -1,0 +1,22 @@
+{
+  "collectionName": "components_footer_countries",
+  "info": {
+    "displayName": "Country",
+    "icon": "globe"
+  },
+  "attributes": {
+    "code": {
+      "type": "string",
+      "required": true
+    },
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "flag": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": ["images"]
+    }
+  }
+}

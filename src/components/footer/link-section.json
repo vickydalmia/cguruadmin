@@ -1,0 +1,18 @@
+{
+  "collectionName": "components_footer_link_sections",
+  "info": {
+    "displayName": "Footer Link Section",
+    "icon": "folder"
+  },
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true
+    },
+    "links": {
+      "type": "component",
+      "repeatable": true,
+      "component": "nav.link"
+    }
+  }
+}

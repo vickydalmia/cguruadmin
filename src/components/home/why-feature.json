@@ -1,0 +1,18 @@
+{
+  "collectionName": "components_home_why_features",
+  "info": {
+    "displayName": "Why Feature",
+    "icon": "check"
+  },
+  "attributes": {
+    "kind": {
+      "type": "enumeration",
+      "enum": ["verified", "update", "store", "block"],
+      "required": true
+    },
+    "label": {
+      "type": "string",
+      "required": true
+    }
+  }
+}
