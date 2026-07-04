@@ -23,8 +23,9 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Middlewar
   {
     name: 'strapi::cors',
     config: {
-      // Browser-issued requests from the static site: /api/search and
-      // /plugin/unique-coupon/redeem. Add production origins via CORS_ORIGINS.
+      // Direct browser-to-CMS access is not needed for the beta/production site:
+      // search/redeem go through the public site's ISR gateway proxy. Add
+      // origins only for trusted direct-CMS browser clients such as local dev.
       origin: env.array('CORS_ORIGINS', ['http://localhost:4321']),
       headers: ['Content-Type', 'Authorization'],
     },

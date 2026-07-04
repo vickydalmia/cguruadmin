@@ -35,7 +35,6 @@ function runBuild(strapi: Core.Strapi, job: RebuildJob, frontendDir: string): Pr
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       STRAPI_URL: 'http://127.0.0.1:1337',
-      PUBLIC_STRAPI_URL: process.env.PUBLIC_STRAPI_URL || process.env.PUBLIC_URL || '',
       STRAPI_MEDIA_URL: process.env.STRAPI_MEDIA_URL || '',
       PUBLIC_SITE_URL: process.env.PUBLIC_SITE_URL || '',
       PUBLIC_ALLOW_INDEXING: 'true',

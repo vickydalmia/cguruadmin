@@ -28,7 +28,7 @@ flowchart LR
 
 - `Dockerfile`
 - `.dockerignore`
-- `deploy/compose.prod.yml`
+- `deploy/docker.compose.yml`
 - `deploy/scripts/deploy.sh`
 - `deploy/nginx.conf`
 - `deploy/site.nginx.conf`
@@ -106,7 +106,7 @@ You need the following before starting:
 - A domain name pointing to the Nginx load balancer
 - A DigitalOcean Managed PostgreSQL database
 - An S3-compatible object storage bucket
-- DNS ready for the Strapi public URL, for example `cms.example.com`
+- DNS ready for the Strapi public URL, for example `cms.couponzguru.com`
 
 ## 1. Prepare production infrastructure
 
@@ -143,7 +143,7 @@ Recommended:
 - use a private bucket unless public assets are intentional
 - enable versioning
 - enable bucket lifecycle rules
-- leave `S3_ACL` blank for providers that do not support ACLs, such as Cloudflare R2
+- serve public media through `media.couponzguru.com`
 
 ## 2. Configure GitHub
 
@@ -252,7 +252,7 @@ The expected runtime layout is:
 
 ```text
 /opt/couponzguru/
-├── compose.prod.yml      # copied from repo deploy/compose.prod.yml
+├── docker.compose.yml      # copied from repo deploy/docker.compose.yml
 ├── deploy.sh             # copied from repo deploy/scripts/deploy.sh
 └── .env.production       # manually created, stays on server
 ```
@@ -260,7 +260,7 @@ The expected runtime layout is:
 Copy the deployment files from the repo:
 
 ```bash
-scp deploy/compose.prod.yml deploy/scripts/deploy.sh user@droplet:/opt/couponzguru/
+scp deploy/docker.compose.yml deploy/scripts/deploy.sh user@droplet:/opt/couponzguru/
 ```
 
 The `.env.production` file stays only on the droplet and is never committed.
@@ -277,10 +277,11 @@ Example:
 
 ```dotenv
 NODE_ENV=production
+APP_IMAGE=ghcr.io/OWNER/REPO
 HOST=0.0.0.0
 PORT=1337
 APP_PORT=1337
-PUBLIC_URL=https://cms.example.com
+PUBLIC_URL=https://cms.couponzguru.com
 TRUST_PROXY=true
 TRANSFER_REMOTE_ENABLED=false
 
@@ -308,26 +309,35 @@ S3_ACCESS_KEY_ID=change-me-access-key
 S3_ACCESS_SECRET=change-me-secret-key
 S3_BUCKET=change-me-bucket
 S3_REGION=ap-south-1
-S3_ENDPOINT=
 S3_FORCE_PATH_STYLE=false
-S3_BASE_URL=https://cdn.example.com
-S3_ROOT_PATH=
-S3_ACL=private
-S3_SIGNED_URL_EXPIRES=900
+S3_BASE_URL=https://media.couponzguru.com
+S3_ROOT_PATH=uploads
 S3_PREVENT_OVERWRITE=true
 S3_CHECKSUM_ALGORITHM=CRC64NVME
-S3_ENCRYPTION_TYPE=AES256
-S3_KMS_KEY_ID=
 S3_MULTIPART_PART_SIZE=10485760
 S3_MULTIPART_QUEUE_SIZE=4
-S3_OBJECT_TAG_APPLICATION=couponzguru
-UPLOAD_CSP_SOURCES=https://cdn.example.com,https://bucket.s3.ap-south-1.amazonaws.com
+UPLOAD_CSP_SOURCES=https://media.couponzguru.com,https://bucket.s3.ap-south-1.amazonaws.com
+
+CORS_ORIGINS=
+REBUILD_ENABLED=true
+REBUILD_MODE=redis
+ISR_GATEWAY_URL=http://<ASTRO_PRIVATE_IP>:3010
+ISR_REVALIDATE_SECRET=change-me-same-as-gateway
+STRAPI_MEDIA_URL=https://media.couponzguru.com
+
+# Static fallback / DR snapshots only:
+# FRONTEND_DIR=/opt/cguru-ui
+# SITE_BUCKET=
+# CLOUDFRONT_DISTRIBUTION_ID=
+# PUBLIC_SITE_URL=https://beta.couponzguru.com
 ```
 
 Important:
 
 - `DATABASE_CLIENT` must be `postgres` in production.
 - `PUBLIC_URL` must be the final HTTPS URL exposed to the public.
+- `PUBLIC_SITE_URL` is not required for Redis ISR mode; use it only for static fallback/DR builds.
+- `CORS_ORIGINS` can stay empty for beta/production because public browser search/redeem calls go through the ISR gateway proxy.
 - `TRUST_PROXY=true` is required because Nginx sits in front of Strapi.
 - DigitalOcean Managed PostgreSQL uses port `25060` and requires SSL.
 - Keep `APP_PORT=1337` unless you also change the upstream port in `deploy/site.nginx.conf`.
@@ -336,7 +346,7 @@ Important:
 
 DigitalOcean managed PostgreSQL uses a CA certificate. For proper verification (instead of `DATABASE_SSL_REJECT_UNAUTHORIZED=false`), provide the CA:
 
-1. **Option A – file path**: Download the CA from the DO database dashboard, place it on the droplet (e.g. `deploy/certs/ca-certificate.crt`), uncomment the `volumes` block in `deploy/compose.prod.yml`, and set `DATABASE_SSL_CA_PATH=/opt/app/certs/ca.crt`.
+1. **Option A – file path**: Download the CA from the DO database dashboard, place it on the droplet (e.g. `deploy/certs/ca-certificate.crt`), uncomment the `volumes` block in `deploy/docker.compose.yml`, and set `DATABASE_SSL_CA_PATH=/opt/app/certs/ca.crt`.
 2. **Option B – base64 in env**: Encode the CA (see [Appendix A §1](#1-database-ssl-self-signed-certificate-error) for commands) and set `DATABASE_SSL_CA=<output>` in `.env.production`. Do not copy the zsh `%` prompt if it appears at the end.
 3. **Option C – raw PEM**: Set `DATABASE_SSL_CA` to the PEM content with `\n` for newlines.
 
@@ -416,6 +426,50 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
+### Public API hardening
+
+`cms.couponzguru.com` is public only for Strapi admin/login. The visitor-facing
+website must not call CMS APIs directly. Public requests to CMS content APIs
+should return `403`; Astro reads Strapi through the CMS droplet private IP.
+
+The provided `deploy/site.nginx.conf` blocks these public paths:
+
+```nginx
+location ^~ /api/ {
+    return 403;
+}
+
+location ^~ /unique-coupon/ {
+    return 403;
+}
+```
+
+Keep those blocks before the catch-all `location /`.
+
+Private API access still needs to work from the Astro droplet:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" \
+  http://<CMS_PRIVATE_IP>:1337/api/homepage-full
+```
+
+Expected from the Astro droplet:
+
+```text
+200
+```
+
+Expected from a laptop or any public network:
+
+```text
+timeout / connection refused
+```
+
+If the Strapi container is bound only to `127.0.0.1`, add a private-only nginx
+listener on the CMS droplet private IP, or bind the container port to the CMS
+private interface and restrict port `1337` to `<ASTRO_PRIVATE_IP>` in the
+DigitalOcean firewall. Do not open port `1337` to the public internet.
+
 ### Install the Nginx templates
 
 Copy the templates into place:
@@ -440,10 +494,7 @@ sudo systemctl reload nginx
 From `/opt/couponzguru`:
 
 ```bash
-# Set the image (only needed once, or add APP_IMAGE to .env.production)
-export APP_IMAGE=ghcr.io/OWNER/REPO
-
-# Deploy the latest tag
+# Deploy the latest tag from APP_IMAGE in .env.production
 ./deploy.sh
 ```
 
@@ -453,19 +504,19 @@ Verify manually:
 
 ```bash
 # Container should show "healthy"
-docker compose -f compose.prod.yml ps
+docker compose --env-file .env.production -f docker.compose.yml ps
 
 # Check logs (last 200 lines)
-docker compose -f compose.prod.yml logs --tail=200 strapi
+docker compose --env-file .env.production -f docker.compose.yml logs --tail=200 strapi
 
 # Should return HTTP 204
 curl -I http://127.0.0.1:1337/_health
 
 # Confirm the container runs as the strapi user (uid=1001)
-docker compose -f compose.prod.yml exec strapi id
+docker compose --env-file .env.production -f docker.compose.yml exec strapi id
 
 # Verify through the load balancer
-curl -I https://cms.example.com/_health
+curl -I https://cms.couponzguru.com/_health
 ```
 
 ## 9. How it works
@@ -497,7 +548,7 @@ SSH into the droplet, go to `/opt/couponzguru`, and run:
 
 The script:
 
-1. Validates `compose.prod.yml` and `.env.production` exist
+1. Validates `docker.compose.yml` and `.env.production` exist
 2. Pulls the image
 3. Starts the container
 4. Waits for the health check to pass (up to 120s)
@@ -520,8 +571,8 @@ The standard production deployment process is:
 After every release, verify:
 
 - the GitHub Actions workflow completed successfully
-- `docker compose -f compose.prod.yml ps` shows `strapi` as healthy
-- `https://cms.example.com/_health` returns `204`
+- `docker compose --env-file .env.production -f docker.compose.yml ps` shows `strapi` as healthy
+- `https://cms.couponzguru.com/_health` returns `204`
 - the admin panel loads at the expected public URL
 - a media upload succeeds and is stored in the S3-compatible bucket
 - uploaded media previews load correctly in the admin panel
@@ -531,8 +582,8 @@ Useful commands:
 
 ```bash
 cd /opt/couponzguru
-docker compose -f compose.prod.yml ps
-docker compose -f compose.prod.yml logs --tail=200 strapi
+docker compose --env-file .env.production -f docker.compose.yml ps
+docker compose --env-file .env.production -f docker.compose.yml logs --tail=200 strapi
 docker image ls 'ghcr.io/*'
 ```
 
@@ -587,7 +638,7 @@ Check:
 
 ```bash
 cd /opt/couponzguru
-docker compose -f compose.prod.yml logs --tail=200 strapi
+docker compose --env-file .env.production -f docker.compose.yml logs --tail=200 strapi
 ```
 
 Common causes:
@@ -629,42 +680,42 @@ Check:
 
 Check:
 
-- `PUBLIC_URL=https://cms.example.com`
+- `PUBLIC_URL=https://cms.couponzguru.com`
 - `TRUST_PROXY=true`
 - DNS points to the Nginx load balancer
 - Nginx upstream block includes the correct backend IPs and ports
 
 ## 15. Docker commands reference
 
-All commands assume you are in the deployment directory (`/opt/couponzguru`) and `APP_IMAGE` / `APP_IMAGE_TAG` are exported.
+All commands assume you are in the deployment directory (`/opt/couponzguru`) and `.env.production` contains `APP_IMAGE`.
 
 ### Service lifecycle
 
 ```bash
 # Start the service
-docker compose -f compose.prod.yml up -d strapi
+docker compose --env-file .env.production -f docker.compose.yml up -d strapi
 
 # Stop the service (keeps container)
-docker compose -f compose.prod.yml stop strapi
+docker compose --env-file .env.production -f docker.compose.yml stop strapi
 
 # Stop and remove the container
-docker compose -f compose.prod.yml down
+docker compose --env-file .env.production -f docker.compose.yml down
 
 # Restart the service
-docker compose -f compose.prod.yml restart strapi
+docker compose --env-file .env.production -f docker.compose.yml restart strapi
 
 # Force recreate (new container from same image)
-docker compose -f compose.prod.yml up -d --force-recreate strapi
+docker compose --env-file .env.production -f docker.compose.yml up -d --force-recreate strapi
 ```
 
 ### Health and status
 
 ```bash
 # Show service status and health
-docker compose -f compose.prod.yml ps
+docker compose --env-file .env.production -f docker.compose.yml ps
 
 # Check health via container inspect
-docker compose -f compose.prod.yml ps -q strapi | xargs docker inspect --format='{{.State.Health.Status}}'
+docker compose --env-file .env.production -f docker.compose.yml ps -q strapi | xargs docker inspect --format='{{.State.Health.Status}}'
 
 # Quick loopback health check
 curl -I http://127.0.0.1:1337/_health
@@ -674,20 +725,20 @@ curl -I http://127.0.0.1:1337/_health
 
 ```bash
 # Last 200 lines
-docker compose -f compose.prod.yml logs --tail=200 strapi
+docker compose --env-file .env.production -f docker.compose.yml logs --tail=200 strapi
 
 # Follow live logs
-docker compose -f compose.prod.yml logs -f strapi
+docker compose --env-file .env.production -f docker.compose.yml logs -f strapi
 
 # Logs since a specific time
-docker compose -f compose.prod.yml logs --since=1h strapi
+docker compose --env-file .env.production -f docker.compose.yml logs --since=1h strapi
 ```
 
 ### Image management
 
 ```bash
 # Pull the latest tagged image
-docker compose -f compose.prod.yml pull strapi
+docker compose --env-file .env.production -f docker.compose.yml pull strapi
 
 # List all GHCR images on the droplet
 docker image ls 'ghcr.io/*'
@@ -703,19 +754,19 @@ docker system prune -af
 
 ```bash
 # Open a shell inside the running container
-docker compose -f compose.prod.yml exec strapi /bin/sh
+docker compose --env-file .env.production -f docker.compose.yml exec strapi /bin/sh
 
 # Run a one-off command in a new container
-docker compose -f compose.prod.yml run --rm strapi node -e "console.log(process.env.NODE_ENV)"
+docker compose --env-file .env.production -f docker.compose.yml run --rm strapi node -e "console.log(process.env.NODE_ENV)"
 
 # Check which user the container runs as
-docker compose -f compose.prod.yml exec strapi id
+docker compose --env-file .env.production -f docker.compose.yml exec strapi id
 
 # Check container resource usage
 docker stats --no-stream
 
 # Inspect the full container config
-docker compose -f compose.prod.yml ps -q strapi | xargs docker inspect
+docker compose --env-file .env.production -f docker.compose.yml ps -q strapi | xargs docker inspect
 ```
 
 ### Deploy and rollback
@@ -845,7 +896,7 @@ base64 < ca-certificate.crt | tr -d '\n'
 
 **Problem:** When using `DATABASE_SSL_CA_PATH`, the CA file must exist inside the container.
 
-**Fix:** Optional volume in `compose.prod.yml`:
+**Fix:** Optional volume in `docker.compose.yml`:
 
 ```yaml
 # volumes:

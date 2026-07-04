@@ -248,6 +248,16 @@ async function fillHomepageOverrides(strapi: Core.Strapi): Promise<void> {
 
 export default {
   register({ strapi }: { strapi: Core.Strapi }) {
+    strapi.server.routes([
+      {
+        method: 'GET',
+        path: '/_health',
+        handler(ctx) {
+          ctx.status = 204;
+        },
+      },
+    ]);
+
     strapi.documents.use(async (context: any, next: any) => {
       // Offer changes: capture relations BEFORE the write. For deletes the
       // doc disappears entirely; for updates a relation may be REMOVED — the

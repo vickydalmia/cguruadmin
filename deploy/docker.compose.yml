@@ -7,7 +7,7 @@ services:
     init: true
     user: "1001:1001"
     env_file:
-      - ./.env.production
+      - ${ENV_FILE:-.env.production}
     environment:
       NODE_ENV: production
     ports:
