@@ -1,5 +1,30 @@
 export default {
   routes: [
+    // Global listings of ALL published offers/deals (core find is disabled).
+    {
+      method: 'GET',
+      path: '/offers',
+      handler: 'custom.getAllOffers',
+      config: {
+        auth: false,
+        middlewares: [
+          { name: 'global::rate-limit', config: { maxRequests: 60, windowMs: 60_000 } },
+          { name: 'global::cache', config: { ttlMs: 60_000 } },
+        ],
+      },
+    },
+    {
+      method: 'GET',
+      path: '/deals',
+      handler: 'custom.getAllDeals',
+      config: {
+        auth: false,
+        middlewares: [
+          { name: 'global::rate-limit', config: { maxRequests: 60, windowMs: 60_000 } },
+          { name: 'global::cache', config: { ttlMs: 60_000 } },
+        ],
+      },
+    },
     {
       method: 'GET',
       path: '/search',
