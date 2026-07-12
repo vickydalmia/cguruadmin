@@ -23,7 +23,9 @@
     "amazonTopBanner": {
       "type": "media",
       "multiple": false,
-      "allowedTypes": ["images"]
+      "allowedTypes": [
+        "images"
+      ]
     },
     "amazonTopBannerLink": {
       "type": "string"
@@ -31,6 +33,16 @@
     "enableAmazonDeal": {
       "type": "boolean",
       "default": false
+    },
+    "telegramCta": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.telegram-cta"
+    },
+    "newsletter": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.newsletter"
     }
   }
 }

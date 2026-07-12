@@ -1,0 +1,17 @@
+{
+  "collectionName": "components_home_latest_insights",
+  "info": {
+    "displayName": "Latest Insights Section",
+    "icon": "feather"
+  },
+  "attributes": {
+    "heading": {
+      "type": "string"
+    },
+    "viewAllCta": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.cta"
+    }
+  }
+}

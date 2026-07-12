@@ -96,6 +96,7 @@ export interface HomeBankOffers extends Struct.ComponentSchema {
         },
         number
       >;
+    viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
   };
 }
 
@@ -115,6 +116,7 @@ export interface HomeCgExclusive extends Struct.ComponentSchema {
         },
         number
       >;
+    viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
   };
 }
 
@@ -125,7 +127,7 @@ export interface HomeCouponCardItem extends Struct.ComponentSchema {
     icon: 'ticket';
   };
   attributes: {
-    cardImage: Schema.Attribute.Media<'images'>;
+    cardImage: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
     coupon: Schema.Attribute.Relation<'oneToOne', 'api::coupon.coupon'>;
     titleOverride: Schema.Attribute.String;
   };
@@ -141,6 +143,7 @@ export interface HomeDealList extends Struct.ComponentSchema {
     deals: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'>;
     enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     heading: Schema.Attribute.String;
+    viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
   };
 }
 
@@ -173,6 +176,7 @@ export interface HomeExploreDeals extends Struct.ComponentSchema {
         },
         number
       >;
+    viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
   };
 }
 
@@ -186,6 +190,7 @@ export interface HomeExploreTab extends Struct.ComponentSchema {
     category: Schema.Attribute.Relation<'oneToOne', 'api::category.category'>;
     deals: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'>;
     labelOverride: Schema.Attribute.String;
+    viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
   };
 }
 
@@ -261,6 +266,18 @@ export interface HomeHowItWorks extends Struct.ComponentSchema {
   };
 }
 
+export interface HomeLatestInsights extends Struct.ComponentSchema {
+  collectionName: 'components_home_latest_insights';
+  info: {
+    displayName: 'Latest Insights Section';
+    icon: 'feather';
+  };
+  attributes: {
+    heading: Schema.Attribute.String;
+    viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
+  };
+}
+
 export interface HomeNewlyAdded extends Struct.ComponentSchema {
   collectionName: 'components_home_newly_addeds';
   info: {
@@ -277,6 +294,21 @@ export interface HomeNewlyAdded extends Struct.ComponentSchema {
         },
         number
       >;
+    viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
+  };
+}
+
+export interface HomePopularSearches extends Struct.ComponentSchema {
+  collectionName: 'components_home_popular_searches';
+  info: {
+    displayName: 'Popular Searches Section';
+    icon: 'search';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Popular Searches'>;
+    links: Schema.Attribute.Component<'nav.link', true>;
   };
 }
 
@@ -291,6 +323,7 @@ export interface HomePopularStores extends Struct.ComponentSchema {
     featuredStore: Schema.Attribute.Relation<'oneToOne', 'api::store.store'>;
     heading: Schema.Attribute.String;
     stores: Schema.Attribute.Relation<'oneToMany', 'api::store.store'>;
+    viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
   };
 }
 
@@ -338,6 +371,7 @@ export interface HomeTopOffers extends Struct.ComponentSchema {
         },
         number
       >;
+    viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
   };
 }
 
@@ -366,6 +400,7 @@ export interface HomepageSliderSlide extends Struct.ComponentSchema {
     altText: Schema.Attribute.String;
     desktopImage: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
     link: Schema.Attribute.String;
+    mobileImage: Schema.Attribute.Media<'images'>;
     order: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
   };
 }
@@ -410,6 +445,18 @@ export interface SharedChip extends Struct.ComponentSchema {
   };
 }
 
+export interface SharedCta extends Struct.ComponentSchema {
+  collectionName: 'components_shared_ctas';
+  info: {
+    displayName: 'CTA';
+    icon: 'cursor';
+  };
+  attributes: {
+    label: Schema.Attribute.String;
+    url: Schema.Attribute.String;
+  };
+}
+
 export interface SharedFaqItem extends Struct.ComponentSchema {
   collectionName: 'components_shared_faq_items';
   info: {
@@ -419,6 +466,20 @@ export interface SharedFaqItem extends Struct.ComponentSchema {
   attributes: {
     answer: Schema.Attribute.Text;
     question: Schema.Attribute.String & Schema.Attribute.Required;
+  };
+}
+
+export interface SharedNewsletter extends Struct.ComponentSchema {
+  collectionName: 'components_shared_newsletters';
+  info: {
+    displayName: 'Newsletter';
+    icon: 'envelop';
+  };
+  attributes: {
+    ctaLabel: Schema.Attribute.String;
+    description: Schema.Attribute.Text;
+    disclaimer: Schema.Attribute.String;
+    heading: Schema.Attribute.String;
   };
 }
 
@@ -433,6 +494,21 @@ export interface SharedSeo extends Struct.ComponentSchema {
     metaDescription: Schema.Attribute.Text;
     metaTitle: Schema.Attribute.String;
     ogImage: Schema.Attribute.Media<'images'>;
+  };
+}
+
+export interface SharedTelegramCta extends Struct.ComponentSchema {
+  collectionName: 'components_shared_telegram_ctas';
+  info: {
+    displayName: 'Telegram CTA';
+    icon: 'paperPlane';
+  };
+  attributes: {
+    ctaLabel: Schema.Attribute.String;
+    ctaUrl: Schema.Attribute.String;
+    description: Schema.Attribute.Text;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String;
   };
 }
 
@@ -455,7 +531,9 @@ declare module '@strapi/strapi' {
       'home.hero-product': HomeHeroProduct;
       'home.hero-section': HomeHeroSection;
       'home.how-it-works': HomeHowItWorks;
+      'home.latest-insights': HomeLatestInsights;
       'home.newly-added': HomeNewlyAdded;
+      'home.popular-searches': HomePopularSearches;
       'home.popular-stores': HomePopularStores;
       'home.step': HomeStep;
       'home.top-offer-item': HomeTopOfferItem;
@@ -465,8 +543,11 @@ declare module '@strapi/strapi' {
       'nav.category-section': NavCategorySection;
       'nav.link': NavLink;
       'shared.chip': SharedChip;
+      'shared.cta': SharedCta;
       'shared.faq-item': SharedFaqItem;
+      'shared.newsletter': SharedNewsletter;
       'shared.seo': SharedSeo;
+      'shared.telegram-cta': SharedTelegramCta;
     }
   }
 }

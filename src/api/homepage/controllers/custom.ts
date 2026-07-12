@@ -60,7 +60,7 @@ const dealRef = {
 };
 
 const bannerSlides = {
-  populate: { desktopImage: true },
+  populate: { desktopImage: true, mobileImage: true },
 };
 
 const HOMEPAGE_POPULATE = {
@@ -72,25 +72,32 @@ const HOMEPAGE_POPULATE = {
     },
   },
   topOffers: {
-    populate: { items: { populate: { coupon: couponRef, banner: true } } },
+    populate: { viewAllCta: true, items: { populate: { coupon: couponRef, banner: true } } },
   },
   popularStores: {
-    populate: { featuredStore: storeRef, stores: storeRef },
+    populate: { viewAllCta: true, featuredStore: storeRef, stores: storeRef },
   },
-  topDeals: { populate: { deals: dealRef } },
+  topDeals: { populate: { viewAllCta: true, deals: dealRef } },
   cgExclusive: {
-    populate: { items: { populate: { coupon: couponRef, bannerOverride: true } } },
+    populate: { viewAllCta: true, items: { populate: { coupon: couponRef, bannerOverride: true } } },
   },
   exploreDeals: {
-    populate: { tabs: { populate: { category: categoryRef, deals: dealRef } } },
+    populate: {
+      viewAllCta: true,
+      tabs: { populate: { viewAllCta: true, category: categoryRef, deals: dealRef } },
+    },
   },
   newlyAdded: {
-    populate: { items: { populate: { coupon: couponRef, cardImage: true } } },
+    populate: { viewAllCta: true, items: { populate: { coupon: couponRef, cardImage: true } } },
   },
-  dealsByBrand: { populate: { deals: dealRef } },
-  bankOffers: { populate: { items: { populate: { bank: bankRef } } } },
+  dealsByBrand: { populate: { viewAllCta: true, deals: dealRef } },
+  bankOffers: { populate: { viewAllCta: true, items: { populate: { bank: bankRef } } } },
   howItWorks: { populate: { steps: true, features: true } },
   faq: { populate: { items: true } },
+  popularSearches: {
+    populate: { links: { populate: { store: storeRef, category: categoryRef } } },
+  },
+  latestInsights: { populate: { viewAllCta: true } },
 } as const;
 
 const MENU_POPULATE = {
@@ -113,7 +120,11 @@ const FOOTER_POPULATE = {
   partnerCard: true,
 } as const;
 
-const GLOBAL_POPULATE = { amazonTopBanner: true } as const;
+const GLOBAL_POPULATE = {
+  amazonTopBanner: true,
+  telegramCta: true,
+  newsletter: true,
+} as const;
 
 const isPublished = (offer: any) => offer?.contentStatus === 'published';
 

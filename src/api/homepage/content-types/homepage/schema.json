@@ -70,6 +70,16 @@
       "component": "home.faq-block",
       "repeatable": false
     },
+    "popularSearches": {
+      "type": "component",
+      "repeatable": false,
+      "component": "home.popular-searches"
+    },
+    "latestInsights": {
+      "type": "component",
+      "repeatable": false,
+      "component": "home.latest-insights"
+    },
     "latestInsightsEnabled": {
       "type": "boolean",
       "default": false

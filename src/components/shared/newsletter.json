@@ -1,0 +1,21 @@
+{
+  "collectionName": "components_shared_newsletters",
+  "info": {
+    "displayName": "Newsletter",
+    "icon": "envelop"
+  },
+  "attributes": {
+    "heading": {
+      "type": "string"
+    },
+    "description": {
+      "type": "text"
+    },
+    "ctaLabel": {
+      "type": "string"
+    },
+    "disclaimer": {
+      "type": "string"
+    }
+  }
+}

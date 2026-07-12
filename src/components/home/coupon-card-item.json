@@ -13,7 +13,10 @@
     "cardImage": {
       "type": "media",
       "multiple": false,
-      "allowedTypes": ["images"]
+      "required": true,
+      "allowedTypes": [
+        "images"
+      ]
     },
     "titleOverride": {
       "type": "string"

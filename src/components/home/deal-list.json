@@ -12,6 +12,11 @@
     "heading": {
       "type": "string"
     },
+    "viewAllCta": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.cta"
+    },
     "deals": {
       "type": "relation",
       "relation": "oneToMany",

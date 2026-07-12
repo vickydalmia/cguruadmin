@@ -1,0 +1,25 @@
+{
+  "collectionName": "components_shared_telegram_ctas",
+  "info": {
+    "displayName": "Telegram CTA",
+    "icon": "paperPlane"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string"
+    },
+    "description": {
+      "type": "text"
+    },
+    "ctaLabel": {
+      "type": "string"
+    },
+    "ctaUrl": {
+      "type": "string"
+    }
+  }
+}

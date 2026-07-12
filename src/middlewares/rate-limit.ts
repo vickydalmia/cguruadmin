@@ -9,10 +9,30 @@ import type { Core } from '@strapi/strapi';
  * Per-instance only; behind multiple nodes each holds its own window. Use a
  * shared store (Redis) if strict global limits are required. Configure with:
  * { maxRequests?: number, windowMs?: number }.
+ *
+ * RATE_LIMIT_TRUSTED_IPS (comma-separated exact IPs, or prefixes ending in
+ * '.') bypasses the limiter entirely — set it to the Astro origin's VPC
+ * private IP so ISR warm-up/revalidate bursts are never throttled. It is
+ * matched against the raw TCP socket address, NOT ctx.request.ip: with
+ * TRUST_PROXY=true the koa-resolved IP comes from X-Forwarded-For, which a
+ * public client can spoof to impersonate the VPC — the socket address cannot.
  */
 interface Window {
   count: number;
   resetAt: number;
+}
+
+const TRUSTED_IPS = (process.env.RATE_LIMIT_TRUSTED_IPS ?? '')
+  .split(',')
+  .map((entry) => entry.trim())
+  .filter(Boolean);
+
+function isTrustedSocket(remoteAddress: string | undefined): boolean {
+  if (!remoteAddress || TRUSTED_IPS.length === 0) return false;
+  const ip = remoteAddress.replace(/^::ffff:/, ''); // IPv4-mapped IPv6
+  return TRUSTED_IPS.some((trusted) =>
+    trusted.endsWith('.') ? ip.startsWith(trusted) : ip === trusted,
+  );
 }
 
 export default (
@@ -25,6 +45,10 @@ export default (
   let lastCleanup = Date.now();
 
   return async (ctx: any, next: () => Promise<void>) => {
+    if (isTrustedSocket(ctx.req?.socket?.remoteAddress)) {
+      return next();
+    }
+
     const now = Date.now();
 
     // Periodic sweep of expired windows to bound memory.

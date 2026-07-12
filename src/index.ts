@@ -1,7 +1,9 @@
 import type { Core } from '@strapi/strapi';
+import { HOMEPAGE_IMAGE_RULES, imageRuleDescription } from './constants/homepage-images';
 import { purgeResponseCaches } from './middlewares/cache';
 import { destroyRebuildQueue, enqueue, type ScopeRequest } from './static-deployment/queue';
 import { computeScope, preDeleteScope } from './static-deployment/scopes';
+import { validateHomepageImages } from './utils/homepage-image-validation';
 
 const HIDE_FROM_EDIT: Record<string, string[]> = {
   'api::deal.deal': ['stores', 'brands', 'categories', 'banks', 'tags'],
@@ -140,6 +142,11 @@ const COMPONENT_ENTRY_TITLES: Record<string, string> = {
   'home.bank-offers': 'heading',
   'home.how-it-works': 'heading',
   'home.faq-block': 'heading',
+  'home.popular-searches': 'heading',
+  'home.latest-insights': 'heading',
+  'shared.cta': 'label',
+  'shared.telegram-cta': 'heading',
+  'shared.newsletter': 'heading',
   'nav.link': 'label',
   'nav.category-section': 'title',
   'footer.link-section': 'title',
@@ -171,6 +178,53 @@ async function ensureComponentEntryTitles(strapi: Core.Strapi): Promise<void> {
     } catch (err: any) {
       strapi.log.warn(
         `[content-manager] failed to set entry title for ${uid}: ${err?.message ?? err}`
+      );
+    }
+  }
+}
+
+// Field help text under each size-enforced homepage media field, derived from
+// HOMEPAGE_IMAGE_RULES so the enforced size and the admin instruction can
+// never drift apart. Same DB config store + config-as-code approach as the
+// entry titles above.
+const COMPONENT_FIELD_DESCRIPTIONS: Record<string, Record<string, string>> = {};
+for (const rule of HOMEPAGE_IMAGE_RULES) {
+  (COMPONENT_FIELD_DESCRIPTIONS[rule.componentUid] ??= {})[rule.field] =
+    imageRuleDescription(rule);
+}
+COMPONENT_FIELD_DESCRIPTIONS['homepage.slider-slide'].mobileImage +=
+  ' Optional — when empty, the desktop image is cropped on mobile.';
+
+async function ensureComponentFieldDescriptions(strapi: Core.Strapi): Promise<void> {
+  const service: any = strapi.plugin('content-manager').service('components');
+  if (!service) return;
+
+  for (const [uid, fields] of Object.entries(COMPONENT_FIELD_DESCRIPTIONS)) {
+    try {
+      const component = service.findComponent(uid);
+      if (!component) continue;
+
+      const config = await service.findConfiguration(component);
+      const metadatas = { ...(config.metadatas ?? {}) };
+      let changed = false;
+
+      for (const [field, description] of Object.entries(fields)) {
+        if (!strapi.components[uid as any]?.attributes?.[field]) {
+          strapi.log.warn(`[content-manager] ${uid} has no field "${field}" — description skipped`);
+          continue;
+        }
+        const prev = metadatas[field] ?? {};
+        if (prev.edit?.description === description) continue;
+        metadatas[field] = { ...prev, edit: { ...(prev.edit ?? {}), description } };
+        changed = true;
+      }
+
+      if (!changed) continue;
+      await service.updateConfiguration(component, { ...config, metadatas });
+      strapi.log.info(`[content-manager] field descriptions set for ${uid}`);
+    } catch (err: any) {
+      strapi.log.warn(
+        `[content-manager] field descriptions for ${uid} failed: ${err?.message ?? err}`
       );
     }
   }
@@ -254,6 +308,16 @@ export default {
     // deploy.sh curl both hit the built-in.
 
     strapi.documents.use(async (context: any, next: any) => {
+      // Homepage section images must match their Figma sizes exactly — reject
+      // the save before any side effect (ISR enqueue, cache purge, override
+      // fill). Already-attached files are grandfathered inside the validator.
+      if (
+        context.uid === 'api::homepage.homepage' &&
+        ['create', 'update'].includes(context.action)
+      ) {
+        await validateHomepageImages(strapi, context.params?.data);
+      }
+
       // Offer changes: capture relations BEFORE the write. For deletes the
       // doc disappears entirely; for updates a relation may be REMOVED — the
       // removed store/bank/category/brand page must also rebuild, so the
@@ -322,6 +386,7 @@ export default {
     await ensurePublicReadPermissions(strapi);
     await ensureUploadSettings(strapi);
     await ensureComponentEntryTitles(strapi);
+    await ensureComponentFieldDescriptions(strapi);
     await ensureSingleTypeEntryTitles(strapi);
 
     strapi.log.info(

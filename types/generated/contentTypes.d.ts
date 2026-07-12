@@ -774,7 +774,9 @@ export interface ApiGlobalGlobal extends Struct.SingleTypeSchema {
       'api::global.global'
     > &
       Schema.Attribute.Private;
+    newsletter: Schema.Attribute.Component<'shared.newsletter', false>;
     publishedAt: Schema.Attribute.DateTime;
+    telegramCta: Schema.Attribute.Component<'shared.telegram-cta', false>;
     title: Schema.Attribute.String &
       Schema.Attribute.DefaultTo<'Global Settings'>;
     updatedAt: Schema.Attribute.DateTime;
@@ -804,6 +806,7 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
     faq: Schema.Attribute.Component<'home.faq-block', false>;
     hero: Schema.Attribute.Component<'home.hero-section', false>;
     howItWorks: Schema.Attribute.Component<'home.how-it-works', false>;
+    latestInsights: Schema.Attribute.Component<'home.latest-insights', false>;
     latestInsightsEnabled: Schema.Attribute.Boolean &
       Schema.Attribute.DefaultTo<false>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
@@ -813,6 +816,7 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
     > &
       Schema.Attribute.Private;
     newlyAdded: Schema.Attribute.Component<'home.newly-added', false>;
+    popularSearches: Schema.Attribute.Component<'home.popular-searches', false>;
     popularStores: Schema.Attribute.Component<'home.popular-stores', false>;
     publishedAt: Schema.Attribute.DateTime;
     seo: Schema.Attribute.Component<'shared.seo', false>;
