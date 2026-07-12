@@ -9,7 +9,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getMediaInventory, getOrLoadMediaItem } from "./01-media-inventory.js";
 import { pgQuery } from "../db/pg-client.js";
-import { setMediaMapping, getMediaMapping } from "../utils/id-maps.js";
+import { setMediaMapping } from "../utils/id-maps.js";
 import { generateDocumentId } from "../utils/strapi-insert.js";
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
@@ -52,10 +52,6 @@ export function hashBuffer(content: Buffer): string {
   return crypto.createHash("sha256").update(content).digest("hex").substring(0, 16);
 }
 
-function hashFile(filePath: string): string {
-  return hashBuffer(fs.readFileSync(filePath));
-}
-
 function getExtension(fileName: string): string {
   const ext = path.extname(fileName);
   return ext.startsWith(".") ? ext : `.${ext}`;
@@ -75,8 +71,33 @@ async function getImageDimensions(
   }
 }
 
+/** Everything content rewriting needs to point at an uploaded file. */
+export interface UploadedFileRecord {
+  id: number;
+  url: string;
+  formats: Record<string, any> | null;
+  width: number | null;
+  height: number | null;
+}
+
+function parseFormats(value: unknown): Record<string, any> | null {
+  if (!value) return null;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return value as Record<string, any>;
+}
+
 // Cache of hash → strapi file id (to avoid duplicate uploads)
 const existingHashes = new Map<string, number>();
+// Cache of file id → record (url/formats/dimensions), filled lazily by
+// getFileRecordById and by fresh inserts — eagerly loading formats jsonb for
+// the whole files table would waste memory on records never referenced.
+const fileRecords = new Map<number, UploadedFileRecord>();
 let hashCacheLoaded = false;
 
 async function loadHashCache(): Promise<void> {
@@ -88,6 +109,30 @@ async function loadHashCache(): Promise<void> {
     existingHashes.set(row.hash, row.id);
   }
   hashCacheLoaded = true;
+}
+
+export async function getFileRecordById(
+  fileId: number
+): Promise<UploadedFileRecord | undefined> {
+  const cached = fileRecords.get(fileId);
+  if (cached) return cached;
+  const rows = await pgQuery<{
+    id: number;
+    url: string;
+    formats: unknown;
+    width: number | null;
+    height: number | null;
+  }>(`SELECT id, url, formats, width, height FROM files WHERE id = $1`, [fileId]);
+  if (!rows[0]) return undefined;
+  const record: UploadedFileRecord = {
+    id: rows[0].id,
+    url: rows[0].url,
+    formats: parseFormats(rows[0].formats),
+    width: rows[0].width,
+    height: rows[0].height,
+  };
+  fileRecords.set(record.id, record);
+  return record;
 }
 
 let uploadStats = { uploaded: 0, skipped: 0, failed: 0 };
@@ -111,44 +156,98 @@ export async function runMediaUpload(): Promise<void> {
   logger.info(`Media inventory has ${inventory.size} items — uploads will happen on-demand when referenced`);
 }
 
+/** Source descriptor for a direct-from-disk upload (no attachment ID needed). */
+export interface DiskUploadSource {
+  localPath: string;
+  fileName: string;
+  mimeType: string;
+  altText?: string | null;
+  caption?: string | null;
+}
+
+// In-flight uploads keyed by resolved local path, so concurrent posts
+// referencing the same image share one upload instead of racing to duplicate.
+const inFlightUploads = new Map<string, Promise<UploadedFileRecord | undefined>>();
+
 /**
  * Called by resolveMediaRef when a media attachment is actually needed.
  * Creates the file record + uploads to S3 (or local) on first reference.
  * Returns the Strapi file ID, or undefined on failure.
  */
 export async function uploadMediaOnDemand(attachmentId: number): Promise<number | undefined> {
-  // Already uploaded?
-  const existing = getMediaMapping(attachmentId);
-  if (existing) return existing;
+  const record = await uploadMediaRecordOnDemand(attachmentId);
+  return record?.id;
+}
 
+/**
+ * Same as uploadMediaOnDemand but returns the full file record
+ * (url/formats/dimensions), which content rewriting needs.
+ */
+export async function uploadMediaRecordOnDemand(
+  attachmentId: number
+): Promise<UploadedFileRecord | undefined> {
   const item = await getOrLoadMediaItem(attachmentId);
   if (!item || !item.localPath) return undefined;
 
+  const record = await uploadFileFromDisk({
+    localPath: item.localPath,
+    fileName: item.fileName,
+    mimeType: item.mimeType,
+    altText: item.altText,
+    caption: item.postTitle,
+  });
+  if (record) setMediaMapping(attachmentId, record.id);
+  return record;
+}
+
+/**
+ * Upload a file from disk through the optimize/S3 pipeline and insert its
+ * files row. Deduplicates by content hash and by in-flight path.
+ */
+export async function uploadFileFromDisk(
+  source: DiskUploadSource
+): Promise<UploadedFileRecord | undefined> {
+  const key = path.resolve(source.localPath);
+  const pending = inFlightUploads.get(key);
+  if (pending) return pending;
+
+  const task = doUploadFileFromDisk(source).finally(() => {
+    inFlightUploads.delete(key);
+  });
+  inFlightUploads.set(key, task);
+  return task;
+}
+
+async function doUploadFileFromDisk(
+  source: DiskUploadSource
+): Promise<UploadedFileRecord | undefined> {
   await loadHashCache();
 
   try {
-    const filePath = item.localPath;
-    const hash = hashFile(filePath);
+    const filePath = source.localPath;
+    // One read serves both the hash and the upload body.
+    const sourceBytes = fs.readFileSync(filePath);
+    const hash = hashBuffer(sourceBytes);
 
-    // Skip if hash already exists in DB
+    // The current files table is authoritative. A checkpoint's numeric file
+    // ID can be stale after a dev DB reset, while the immutable source hash
+    // still identifies the correct media record safely.
     if (existingHashes.has(hash)) {
       const existingId = existingHashes.get(hash)!;
-      setMediaMapping(attachmentId, existingId);
       uploadStats.skipped++;
-      return existingId;
+      return getFileRecordById(existingId);
     }
 
-    const fileStats = fs.statSync(filePath);
-    const sourceExt = getExtension(item.fileName);
-    const nameWithoutExt = path.basename(item.fileName, sourceExt);
+    const sourceExt = getExtension(source.fileName);
+    const nameWithoutExt = path.basename(source.fileName, sourceExt);
     const documentId = generateDocumentId();
 
     // Final file attributes — start with the source values, replaced by the
     // optimized output when optimization applies (S3 uploads only).
     let ext = sourceExt;
-    let mime = item.mimeType;
-    let { width, height } = await getImageDimensions(filePath, item.mimeType);
-    let sizeInBytes = fileStats.size;
+    let mime = source.mimeType;
+    let { width, height } = await getImageDimensions(filePath, source.mimeType);
+    let sizeInBytes = sourceBytes.length;
     let formatsJson: Record<string, any> | null = null;
 
     let fileUrl: string;
@@ -161,13 +260,13 @@ export async function uploadMediaOnDemand(attachmentId: number): Promise<number 
       const rootPath = config.s3.rootPath ? `${config.s3.rootPath}/` : "";
       // Pre-optimization source bytes — kept for AVIF twin generation, which
       // encodes from the highest-quality input available.
-      const sourceBuffer: Buffer = fs.readFileSync(filePath);
+      const sourceBuffer: Buffer = sourceBytes;
       let uploadBuffer: Buffer = sourceBuffer;
 
       // Optimize supported raster formats: bake orientation, cap at 1920px,
       // convert jpeg/png → webp, recompress webp/avif/tiff. gif/svg/other
       // return null and pass through untouched (formats stays NULL).
-      const optimized = OPTIMIZABLE_MIMES.has(item.mimeType)
+      const optimized = OPTIMIZABLE_MIMES.has(source.mimeType)
         ? await optimizeOriginal(uploadBuffer)
         : null;
       if (optimized) {
@@ -204,7 +303,7 @@ export async function uploadMediaOnDemand(attachmentId: number): Promise<number 
         contentType = "application/octet-stream";
         contentDisposition = `attachment; filename="${slug}${ext}"`;
         logger.warn(
-          `Media ${item.fileName} (${mime}) served as attachment to prevent inline script execution`
+          `Media ${source.fileName} (${mime}) served as attachment to prevent inline script execution`
         );
       }
 
@@ -261,7 +360,7 @@ export async function uploadMediaOnDemand(attachmentId: number): Promise<number 
       const hashedName = `${hash}_${nameWithoutExt}${ext}`;
       fileUrl = `/uploads/${hashedName}`;
       provider = "local";
-      providerMetadata = JSON.stringify({ sourcePath: item.localPath });
+      providerMetadata = JSON.stringify({ sourcePath: source.localPath });
     }
 
     const result = await pgQuery<{ id: number }>(
@@ -274,9 +373,9 @@ export async function uploadMediaOnDemand(attachmentId: number): Promise<number 
       ) RETURNING id`,
       [
         documentId,
-        item.fileName,
-        item.altText || null,
-        item.postTitle || null,
+        source.fileName,
+        source.altText || null,
+        source.caption || null,
         width,
         height,
         formatsJson ? JSON.stringify(formatsJson) : null,
@@ -292,17 +391,24 @@ export async function uploadMediaOnDemand(attachmentId: number): Promise<number 
     );
 
     const fileId = result[0].id;
-    setMediaMapping(attachmentId, fileId);
     existingHashes.set(hash, fileId);
+    const record: UploadedFileRecord = {
+      id: fileId,
+      url: fileUrl,
+      formats: formatsJson,
+      width,
+      height,
+    };
+    fileRecords.set(fileId, record);
     uploadStats.uploaded++;
 
     if (uploadStats.uploaded % 100 === 0) {
       logger.info(`  On-demand media: uploaded=${uploadStats.uploaded}, skipped=${uploadStats.skipped}`);
     }
 
-    return fileId;
+    return record;
   } catch (err: any) {
-    logger.error(`Failed to upload media ${item.fileName} (ID: ${attachmentId}): ${err.message}`);
+    logger.error(`Failed to upload media ${source.fileName}: ${err.message}`);
     uploadStats.failed++;
     return undefined;
   }

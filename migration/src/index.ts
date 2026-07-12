@@ -11,6 +11,7 @@ import { closePg, getPgPool } from "./db/pg-client.js";
 import { runPreflight } from "./phases/00-preflight.js";
 import { runMediaInventory } from "./phases/01-media-inventory.js";
 import { runMediaUpload, logMediaUploadStats, clearS3Bucket } from "./phases/02-media-upload.js";
+import { logContentMediaStats } from "./utils/content-media.js";
 import { runTaxonomies } from "./phases/03-taxonomies.js";
 import { runTags } from "./phases/04-tags.js";
 import { runPools } from "./phases/05-pools.js";
@@ -201,6 +202,7 @@ async function main(): Promise<void> {
     }
 
     logMediaUploadStats();
+    logContentMediaStats();
     const totalDuration = ((Date.now() - startTime) / 1000).toFixed(1);
     logger.info("========================================");
     logger.info(`Migration completed in ${totalDuration}s`);

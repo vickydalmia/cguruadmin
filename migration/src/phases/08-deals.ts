@@ -13,8 +13,10 @@ import {
   getEntityIdByDocumentId,
   insertLink,
   linkMedia,
+  linkContentMedia,
 } from "../utils/strapi-insert.js";
 import { computeMigrationStatus } from "../utils/content-status.js";
+import { rewriteContentMedia } from "../utils/content-media.js";
 import { clean, cleanCode, cleanHtml } from "../utils/sanitize.js";
 import {
   normalizeWpDate,
@@ -22,6 +24,7 @@ import {
   parseExpiryDate,
 } from "../utils/wp-dates.js";
 import { logger } from "../utils/logger.js";
+import { parseDecimal } from "../utils/price.js";
 
 export async function runDeals(): Promise<void> {
   logger.info("=== Phase 8: Deals Migration ===");
@@ -31,7 +34,6 @@ export async function runDeals(): Promise<void> {
     post_title: string;
     post_name: string;
     post_content: string;
-    post_excerpt: string;
     post_date: string | null;
     post_date_gmt: string | null;
     post_modified: string | null;
@@ -39,7 +41,7 @@ export async function runDeals(): Promise<void> {
     post_status: string;
     post_author: number;
   }>(`
-    SELECT p.ID, p.post_title, p.post_name, p.post_content, p.post_excerpt,
+    SELECT p.ID, p.post_title, p.post_name, p.post_content,
            CASE WHEN CAST(p.post_date AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_date AS CHAR) END AS post_date,
            CASE WHEN CAST(p.post_date_gmt AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_date_gmt AS CHAR) END AS post_date_gmt,
            CASE WHEN CAST(p.post_modified AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_modified AS CHAR) END AS post_modified,
@@ -54,6 +56,14 @@ export async function runDeals(): Promise<void> {
 
   logger.info(`Found ${posts.length} deal posts`);
   if (posts.length === 0) return;
+
+  // Saved migration maps can outlive a dev database reset. Never trust a
+  // mapped Strapi admin ID until it is confirmed in the active target DB;
+  // content authorship is optional, while a stale ID rejects the whole deal.
+  const adminUsers = await pgQuery<{ id: number }>(
+    `SELECT "id" FROM "admin_users"`,
+  );
+  const validAdminUserIds = new Set(adminUsers.map((user) => user.id));
 
   const postIds = posts.map((p) => p.ID);
   const placeholders = postIds.map(() => "?").join(",");
@@ -79,9 +89,14 @@ export async function runDeals(): Promise<void> {
 
       try {
         const documentId = generateDocumentId(`deal:${post.ID}`);
-        const content = post.post_content
-          ? cleanHtml(post.post_content.replace(/\[\/?\w+[^\]]*\]/g, ""))
-          : null;
+        // Upload + rewrite images embedded in the post body so no content
+        // image is left pointing at the old WordPress uploads URL.
+        const contentMedia = await rewriteContentMedia(
+          post.post_content
+            ? cleanHtml(post.post_content.replace(/\[\/?\w+[^\]]*\]/g, ""))
+            : null
+        );
+        const content = contentMedia.html;
         const createdAt =
           normalizeWpDate(post.post_date_gmt) ||
           normalizeWpLocalDate(post.post_date) ||
@@ -103,25 +118,41 @@ export async function runDeals(): Promise<void> {
           expiresAt,
         });
 
-        const authorId = getUserMapping(post.post_author) ?? null;
+        const mappedAuthorId = getUserMapping(post.post_author);
+        const authorId =
+          mappedAuthorId !== undefined && validAdminUserIds.has(mappedAuthorId)
+            ? mappedAuthorId
+            : null;
+        // WP records the last editor in _edit_last; fall back to the author
+        // when the editor was deleted from wp_users or never mapped.
+        const mappedEditorId = meta._edit_last
+          ? getUserMapping(parseInt(meta._edit_last, 10))
+          : undefined;
+        const editorId =
+          mappedEditorId !== undefined && validAdminUserIds.has(mappedEditorId)
+            ? mappedEditorId
+            : authorId;
 
         const result = await pgQuery<{ id: number }>(
           `INSERT INTO "deals" (
-            "document_id", "title", "content", "excerpt", "code",
+            "document_id", "title", "content", "code",
             "sale_price", "mrp", "discount",
             "is_popular", "affiliate_link", "expires_at", "scheduled_at", "content_status",
             "published_at", "created_at", "updated_at", "locale",
             "created_by_id", "updated_by_id"
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
           )
-          ON CONFLICT ("document_id") DO NOTHING
+          ON CONFLICT ("document_id") DO UPDATE SET
+            "sale_price" = EXCLUDED."sale_price",
+            "mrp" = EXCLUDED."mrp",
+            "discount" = EXCLUDED."discount",
+            "content" = EXCLUDED."content"
           RETURNING id`,
           [
             documentId,
             clean(post.post_title) || post.post_title,
             content,
-            clean(post.post_excerpt),
             cleanCode(meta.code),
             salePrice,
             mrp,
@@ -136,7 +167,7 @@ export async function runDeals(): Promise<void> {
             updatedAt,
             null,
             authorId,
-            authorId,
+            editorId,
           ]
         );
 
@@ -219,6 +250,13 @@ export async function runDeals(): Promise<void> {
           }
         }
 
+        await linkContentMedia(
+          contentMedia.fileIds,
+          entityId,
+          "api::deal.deal",
+          "content"
+        );
+
         inserted++;
         if (inserted % 200 === 0) {
           logger.info(`  Processed ${inserted}/${posts.length} deals`);
@@ -249,7 +287,8 @@ async function getMetaBulk(
     AND meta_key IN (
       'code', 'link', 'popular_coupon', 'image',
       'deal_mrp', 'deal_sale_price', 'deal_discount', 'deal_image', 'deal_store',
-      '_action_manager_date', '_expiration-date', '_expiration-date-status', 'expiration-date'
+      '_action_manager_date', '_expiration-date', '_expiration-date-status', 'expiration-date',
+      '_edit_last'
     )
   `, postIds);
 
@@ -340,10 +379,4 @@ function getDealLinkTable(
     banks: { table: "deals_banks_lnk", dealCol: "deal_id", termCol: "bank_id" },
   };
   return map[termTable] || null;
-}
-
-function parseDecimal(value: string | undefined): number | null {
-  if (!value) return null;
-  const parsed = parseFloat(value);
-  return isNaN(parsed) ? null : parsed;
 }

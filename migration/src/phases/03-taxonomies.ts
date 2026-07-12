@@ -10,8 +10,11 @@ import {
   getEntityIdByDocumentId,
   insertComponent,
   linkMedia,
+  linkContentMedia,
 } from "../utils/strapi-insert.js";
 import { clean, cleanHtml, cleanSlug } from "../utils/sanitize.js";
+import { parseDecimal, parseInteger } from "../utils/price.js";
+import { rewriteContentMedia } from "../utils/content-media.js";
 import { logger } from "../utils/logger.js";
 
 interface WpTerm {
@@ -229,6 +232,10 @@ async function insertTerm(
   // Build column list based on table type
   const isCategory = table === "categories";
 
+  // Upload + rewrite images embedded in the term description so none are
+  // left pointing at the old WordPress uploads URL.
+  const descriptionMedia = await rewriteContentMedia(cleanHtml(term.description));
+
   const columns = [
     "document_id",
     "name",
@@ -249,7 +256,7 @@ async function insertTerm(
     documentId,
     clean(term.name) || term.name,
     slug,
-    cleanHtml(term.description),
+    descriptionMedia.html,
     clean(term.short_desc),
     ...(isCategory ? [] : [clean(term.image_alt)]),
     ratingAverage,
@@ -267,7 +274,8 @@ async function insertTerm(
     const result = await pgQuery<{ id: number }>(
       `INSERT INTO "${table}" (${columns.map((c) => `"${c}"`).join(", ")})
        VALUES (${placeholders.join(", ")})
-       ON CONFLICT ("document_id") DO NOTHING
+       ON CONFLICT ("document_id") DO UPDATE SET
+         "description" = EXCLUDED."description"
        RETURNING id`,
       values
     );
@@ -293,6 +301,13 @@ async function insertTerm(
       const field = isCategory ? "icon" : "logo";
       await linkMedia(fileId, entityId, strapiType, field);
     }
+
+    await linkContentMedia(
+      descriptionMedia.fileIds,
+      entityId,
+      strapiType,
+      "description"
+    );
 
     // Insert FAQ components
     const termFaqMeta = faqMetaByTerm.get(term.term_id);
@@ -342,16 +357,4 @@ async function insertTerm(
       `Failed to insert term ${term.term_id} (${term.name}) into ${table}: ${err.message}`
     );
   }
-}
-
-function parseDecimal(value: string | null | undefined): number | null {
-  if (!value) return null;
-  const parsed = parseFloat(value);
-  return Number.isNaN(parsed) ? null : parsed;
-}
-
-function parseInteger(value: string | null | undefined): number | null {
-  if (!value) return null;
-  const parsed = parseInt(value, 10);
-  return Number.isNaN(parsed) ? null : parsed;
 }

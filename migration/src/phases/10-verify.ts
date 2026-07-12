@@ -195,7 +195,30 @@ export async function runVerification(): Promise<void> {
     logger.info(`  ${table}: ${withSeo.c}/${total.c} have SEO (${pct}%)`);
   }
 
-  // 5. Sample spot-checks
+  // 5. Content media: no rich-text field should still reference the old
+  // WordPress uploads URLs after content-image rewriting.
+  logger.info("\n--- Content Media (residual WP uploads URLs) ---");
+  const contentColumns: Array<[string, string]> = [
+    ["coupons", "content"],
+    ["deals", "content"],
+    ["stores", "description"],
+    ["brands", "description"],
+    ["categories", "description"],
+    ["banks", "description"],
+  ];
+  for (const [table, column] of contentColumns) {
+    const [residual] = await pgQuery<{ c: number }>(`
+      SELECT COUNT(*) AS c FROM "${table}"
+      WHERE "${column}" LIKE '%/wp-content/uploads/%'
+    `);
+    logger.info(
+      `  ${table}.${column}: ${residual.c} rows still reference WP uploads ${
+        residual.c > 0 ? "(⚠ images missed)" : "✓"
+      }`
+    );
+  }
+
+  // 6. Sample spot-checks
   logger.info("\n--- Sample Spot Checks ---");
 
   const sampleStores = await pgQuery<{ name: string; slug: string }>(`

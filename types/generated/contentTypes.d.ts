@@ -632,7 +632,6 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    excerpt: Schema.Attribute.Text;
     expiresAt: Schema.Attribute.DateTime;
     image: Schema.Attribute.Media<'images'>;
     isPopular: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
@@ -692,7 +691,6 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     dealImage: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
     discount: Schema.Attribute.String;
-    excerpt: Schema.Attribute.Text;
     expiresAt: Schema.Attribute.DateTime;
     isPopular: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
@@ -910,6 +908,7 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    websiteUrl: Schema.Attribute.String;
   };
 }
 

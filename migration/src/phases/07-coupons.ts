@@ -14,8 +14,10 @@ import {
   getEntityIdByDocumentId,
   insertLink,
   linkMedia,
+  linkContentMedia,
 } from "../utils/strapi-insert.js";
 import { computeMigrationStatus } from "../utils/content-status.js";
+import { rewriteContentMedia } from "../utils/content-media.js";
 import { clean, cleanCode, cleanHtml } from "../utils/sanitize.js";
 import {
   normalizeWpDate,
@@ -29,7 +31,6 @@ interface WpPost {
   post_title: string;
   post_name: string;
   post_content: string;
-  post_excerpt: string;
   post_date: string | null;
   post_date_gmt: string | null;
   post_modified: string | null;
@@ -46,7 +47,7 @@ export async function runCoupons(): Promise<void> {
   logger.info("=== Phase 7: Coupons Migration ===");
 
   const posts = await wpQuery<WpPost>(`
-    SELECT p.ID, p.post_title, p.post_name, p.post_content, p.post_excerpt,
+    SELECT p.ID, p.post_title, p.post_name, p.post_content,
            CASE WHEN CAST(p.post_date AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_date AS CHAR) END AS post_date,
            CASE WHEN CAST(p.post_date_gmt AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_date_gmt AS CHAR) END AS post_date_gmt,
            CASE WHEN CAST(p.post_modified AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_modified AS CHAR) END AS post_modified,
@@ -64,6 +65,14 @@ export async function runCoupons(): Promise<void> {
 
   logger.info(`Found ${posts.length} coupon posts`);
   if (posts.length === 0) return;
+
+  // Saved migration maps can outlive a dev database reset. Never trust a
+  // mapped Strapi admin ID until it is confirmed in the active target DB;
+  // content authorship is optional, while a stale ID rejects the whole coupon.
+  const adminUsers = await pgQuery<{ id: number }>(
+    `SELECT "id" FROM "admin_users"`,
+  );
+  const validAdminUserIds = new Set(adminUsers.map((user) => user.id));
 
   const postIds = posts.map((p) => p.ID);
 
@@ -90,7 +99,12 @@ export async function runCoupons(): Promise<void> {
         const documentId = generateDocumentId(`coupon:${post.ID}`);
         const isUnique = meta.unique_coupon === "1" || meta.unique_coupon === "true";
         const uniqueCouponPoolName = clean(meta.unique_coupon_name);
-        const content = cleanHtml(stripShortcodes(post.post_content));
+        // Upload + rewrite images embedded in the post body so no content
+        // image is left pointing at the old WordPress uploads URL.
+        const contentMedia = await rewriteContentMedia(
+          cleanHtml(stripShortcodes(post.post_content))
+        );
+        const content = contentMedia.html;
         const createdAt =
           normalizeWpDate(post.post_date_gmt) ||
           normalizeWpLocalDate(post.post_date) ||
@@ -109,25 +123,38 @@ export async function runCoupons(): Promise<void> {
           expiresAt,
         });
 
-        const authorId = getUserMapping(post.post_author) ?? null;
+        const mappedAuthorId = getUserMapping(post.post_author);
+        const authorId =
+          mappedAuthorId !== undefined && validAdminUserIds.has(mappedAuthorId)
+            ? mappedAuthorId
+            : null;
+        // WP records the last editor in _edit_last; fall back to the author
+        // when the editor was deleted from wp_users or never mapped.
+        const mappedEditorId = meta._edit_last
+          ? getUserMapping(parseInt(meta._edit_last, 10))
+          : undefined;
+        const editorId =
+          mappedEditorId !== undefined && validAdminUserIds.has(mappedEditorId)
+            ? mappedEditorId
+            : authorId;
 
         const result = await pgQuery<{ id: number }>(
           `INSERT INTO "coupons" (
-            "document_id", "title", "content", "excerpt",
+            "document_id", "title", "content",
             "code", "coupon_type", "is_popular",
             "affiliate_link", "expires_at", "scheduled_at", "content_status",
             "published_at", "created_at", "updated_at", "locale",
             "created_by_id", "updated_by_id"
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
           )
-          ON CONFLICT ("document_id") DO NOTHING
+          ON CONFLICT ("document_id") DO UPDATE SET
+            "content" = EXCLUDED."content"
           RETURNING id`,
           [
             documentId,
             clean(post.post_title) || post.post_title,
             content,
-            clean(post.post_excerpt),
             cleanCode(meta.code),
             isUnique ? "unique" : "static",
             meta.popular_coupon === "1",
@@ -140,7 +167,7 @@ export async function runCoupons(): Promise<void> {
             updatedAt,
             null,
             authorId,
-            authorId,
+            editorId,
           ]
         );
 
@@ -178,6 +205,13 @@ export async function runCoupons(): Promise<void> {
         if (imageId) {
           await linkMedia(imageId, entityId, "api::coupon.coupon", "image");
         }
+
+        await linkContentMedia(
+          contentMedia.fileIds,
+          entityId,
+          "api::coupon.coupon",
+          "content"
+        );
 
         // Link uniqueCouponPool if unique type
         if (isUnique && uniqueCouponPoolName) {
@@ -298,7 +332,8 @@ async function getPostMetaBulk(postIds: number[]): Promise<Map<number, PostMeta>
     AND meta_key IN (
       'code', 'link', 'popular_coupon', 'image',
       'is_deal', 'unique_coupon', 'unique_coupon_name',
-      '_action_manager_date', '_expiration-date', '_expiration-date-status', 'expiration-date'
+      '_action_manager_date', '_expiration-date', '_expiration-date-status', 'expiration-date',
+      '_edit_last'
     )
   `, postIds);
 

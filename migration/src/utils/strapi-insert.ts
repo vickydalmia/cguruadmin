@@ -179,3 +179,20 @@ export async function linkMedia(
   `;
   await pgQuery(sql, [fileId, relatedId, relatedType, field, order]);
 }
+
+/**
+ * Register images referenced inside rewritten rich-text HTML as "used" media.
+ * Phase 11 copies only files present in files_related_mph, so every
+ * rewriteContentMedia call site must link its fileIds through here or the
+ * files silently never reach public/uploads on the local provider.
+ */
+export async function linkContentMedia(
+  fileIds: number[],
+  relatedId: number,
+  relatedType: string,
+  field: string
+): Promise<void> {
+  for (let i = 0; i < fileIds.length; i++) {
+    await linkMedia(fileIds[i], relatedId, relatedType, field, i + 1);
+  }
+}

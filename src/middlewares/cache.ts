@@ -16,6 +16,12 @@ interface CacheEntry {
   body: unknown;
 }
 
+// Hard ceiling on live entries per store. Endpoints with user-controlled
+// query strings (/search?query=...) produce unbounded distinct keys, so
+// expired-only sweeping is not enough — a flood of unique queries inside one
+// TTL window would otherwise grow the map without limit.
+const MAX_ENTRIES = 500;
+
 // All middleware instances register their stores here so content changes can
 // purge cached responses immediately — otherwise an ISR revalidate could
 // re-render pages from a response cached BEFORE the edit (up to ttlMs stale).
@@ -50,10 +56,15 @@ export default (config: { ttlMs?: number }, { strapi: _strapi }: { strapi: Core.
     if (ctx.status === 200 && ctx.body != null) {
       store.set(key, { expiresAt: now + ttlMs, body: ctx.body });
       ctx.set('X-Cache', 'MISS');
-      // Opportunistic eviction of expired keys to bound memory.
-      if (store.size > 200) {
+      if (store.size > MAX_ENTRIES) {
+        // Drop expired entries first, then oldest-inserted live ones until
+        // back under the cap (Map preserves insertion order).
         for (const [k, v] of store) {
           if (now >= v.expiresAt) store.delete(k);
+        }
+        for (const k of store.keys()) {
+          if (store.size <= MAX_ENTRIES) break;
+          store.delete(k);
         }
       }
     }

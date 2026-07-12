@@ -36,6 +36,10 @@
     "logoAlt": {
       "type": "string"
     },
+    "websiteUrl": {
+      "type": "string",
+      "regex": "^https?://.+"
+    },
     "ratingAverage": {
       "type": "decimal",
       "min": 0,

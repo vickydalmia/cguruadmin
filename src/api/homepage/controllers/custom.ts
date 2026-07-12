@@ -12,7 +12,6 @@ const BRAND_FIELDS = ['name', 'slug', 'shortDescription', 'logoAlt'];
 // Never ship richtext `content` to the homepage payload.
 const COUPON_FIELDS = [
   'title',
-  'excerpt',
   'code',
   'couponType',
   'affiliateLink',
@@ -23,7 +22,6 @@ const COUPON_FIELDS = [
 ];
 const DEAL_FIELDS = [
   'title',
-  'excerpt',
   'code',
   'salePrice',
   'mrp',

@@ -70,6 +70,9 @@ fi
 TAG="${1:-${APP_IMAGE_TAG:-latest}}"
 APP_PORT="${APP_PORT:-$(read_env APP_PORT)}"
 APP_PORT="${APP_PORT:-1337}"
+# APP_BIND (the extra VPC-private-IP publish) is read straight from ${ENV_FILE}
+# by `docker compose --env-file` interpolation — the compose `:?` guard aborts
+# the deploy if it is missing — so deploy.sh does not need to handle it here.
 
 log "Image:  ${APP_IMAGE}"
 log "Tag:    ${TAG}"

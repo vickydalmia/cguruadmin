@@ -1338,7 +1338,7 @@ for (let i = 0; i < pairs.length; i += CHUNK) {
 **Source** (lines 48–63):
 
 ```sql
-SELECT p.ID, p.post_title, p.post_name, p.post_content, p.post_excerpt,
+SELECT p.ID, p.post_title, p.post_name, p.post_content,
        CASE WHEN CAST(p.post_date AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_date AS CHAR) END AS post_date,
        CASE WHEN CAST(p.post_date_gmt AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_date_gmt AS CHAR) END AS post_date_gmt,
        CASE WHEN CAST(p.post_modified AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_modified AS CHAR) END AS post_modified,
@@ -1439,7 +1439,7 @@ Silent null when the author wasn't in `wp_users` (or was skipped for missing ema
 
 ```sql
 INSERT INTO "coupons" (
-  "document_id", "title", "content", "excerpt",
+  "document_id", "title", "content",
   "code", "coupon_type", "is_popular",
   "affiliate_link", "expires_at", "scheduled_at", "content_status",
   "published_at", "created_at", "updated_at", "locale",
@@ -1456,7 +1456,6 @@ Field mapping:
 |---|---|---|
 | `title` | `post_title` | `clean() ?? raw` |
 | `content` | `post_content` | `stripShortcodes()` + `clean()` |
-| `excerpt` | `post_excerpt` | `clean()` |
 | `code` | `meta.code` | `cleanCode()` |
 | `coupon_type` | `meta.unique_coupon` | `'1'` or `'true'` → `"unique"`, else `"static"` |
 | `is_popular` | `meta.popular_coupon` | `=== '1'` |
@@ -1571,7 +1570,7 @@ Same shape as coupons but with deal-specific fields and the `deal_store` merge.
 
 **Source** (lines 42–53):
 ```sql
-SELECT p.ID, p.post_title, p.post_name, p.post_content, p.post_excerpt,
+SELECT p.ID, p.post_title, p.post_name, p.post_content,
        CASE WHEN CAST(p.post_date AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_date AS CHAR) END AS post_date,
        … (identical zero-date CASEs for the other 3 datetime columns) …
        p.post_status, p.post_author
@@ -1596,7 +1595,7 @@ AND meta_key IN (
 **Insert** (lines 108–141):
 ```sql
 INSERT INTO "deals" (
-  "document_id", "title", "content", "excerpt", "code",
+  "document_id", "title", "content", "code",
   "sale_price", "mrp", "discount",
   "is_popular", "affiliate_link", "expires_at", "scheduled_at", "content_status",
   "published_at", "created_at", "updated_at", "locale",

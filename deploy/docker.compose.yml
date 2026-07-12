@@ -11,7 +11,17 @@ services:
     environment:
       NODE_ENV: production
     ports:
+      # Always publish on loopback so host-local consumers (admin nginx, an
+      # SSH tunnel, the deploy health check) keep working.
       - "127.0.0.1:${APP_PORT:-1337}:1337"
+      # AND publish on the DO VPC private IP so the Astro origin (ISR warm /
+      # revalidate) can reach Strapi over the VPC. APP_BIND is REQUIRED and
+      # must be the private IP (e.g. 10.139.0.6) — the `:?` guard fails the
+      # deploy loudly if it is unset rather than letting an empty value expand
+      # to 0.0.0.0. NEVER use 0.0.0.0: Docker's published ports bypass ufw, so
+      # that exposes the Strapi admin/API publicly. Also restrict :1337 to the
+      # Astro droplet's private IP via the DO Cloud Firewall.
+      - "${APP_BIND:?APP_BIND must be set to the VPC private IP in ${ENV_FILE:-.env.production} (never 0.0.0.0)}:${APP_PORT:-1337}:1337"
     # Optional: mount CA for DB SSL (set DATABASE_SSL_CA_PATH=/opt/app/certs/ca.crt)
     # volumes:
     #   - ./certs/ca-certificate.crt:/opt/app/certs/ca.crt:ro

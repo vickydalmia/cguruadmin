@@ -1,5 +1,5 @@
-import { getMediaMapping } from "./id-maps.js";
 import { uploadMediaOnDemand } from "../phases/02-media-upload.js";
+import { resolveUploadsUrl } from "./content-media.js";
 import { logger } from "./logger.js";
 
 /**
@@ -18,11 +18,9 @@ export async function resolveMediaRef(
   // If it's a numeric attachment ID
   const numVal = Number(strVal);
   if (!isNaN(numVal) && numVal > 0) {
-    // Check if already mapped
-    const existing = getMediaMapping(numVal);
-    if (existing) return existing;
-
-    // Upload on demand
+    // Resolve against the active files table by source content hash. Saved
+    // numeric mappings may belong to a previous dev database whose file IDs
+    // were reused for unrelated assets after a reset.
     const fileId = await uploadMediaOnDemand(numVal);
     if (!fileId) {
       logger.debug(`Media ref ${numVal} could not be resolved or uploaded`);
@@ -30,8 +28,11 @@ export async function resolveMediaRef(
     return fileId;
   }
 
-  // If it's a URL, we can't resolve it to a file ID directly
-  logger.debug(`Media ref is a URL, cannot resolve: ${strVal.substring(0, 80)}`);
+  // URL reference — resolve via the uploads-path index (on-demand upload)
+  const record = await resolveUploadsUrl(strVal);
+  if (record) return record.id;
+
+  logger.debug(`Media ref URL could not be resolved: ${strVal.substring(0, 80)}`);
   return undefined;
 }
 

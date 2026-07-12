@@ -49,16 +49,10 @@ export async function runUsers(): Promise<void> {
            (SELECT meta_value FROM wp_usermeta WHERE user_id = u.ID AND meta_key = 'first_name' LIMIT 1) AS first_name,
            (SELECT meta_value FROM wp_usermeta WHERE user_id = u.ID AND meta_key = 'last_name' LIMIT 1) AS last_name
     FROM wp_users u
-    WHERE u.ID IN (
-      SELECT DISTINCT p.post_author
-      FROM wp_posts p
-      WHERE p.post_type = 'post'
-        AND p.post_status IN ('publish', 'future')
-    )
     ORDER BY u.ID
   `);
 
-  logger.info(`Found ${users.length} active WP users (post authors)`);
+  logger.info(`Found ${users.length} WP users`);
   if (users.length === 0) return;
 
   let inserted = 0;
@@ -191,26 +185,35 @@ async function backfillCreators(): Promise<void> {
     ID: number;
     post_author: number;
     is_deal: string | null;
+    edit_last: string | null;
   }>(`
     SELECT p.ID, p.post_author,
            (SELECT meta_value FROM wp_postmeta
-              WHERE post_id = p.ID AND meta_key = 'is_deal' LIMIT 1) AS is_deal
+              WHERE post_id = p.ID AND meta_key = 'is_deal' LIMIT 1) AS is_deal,
+           (SELECT meta_value FROM wp_postmeta
+              WHERE post_id = p.ID AND meta_key = '_edit_last' LIMIT 1) AS edit_last
     FROM wp_posts p
     WHERE p.post_type = 'post'
       AND p.post_status IN ('publish', 'future')
   `);
 
-  const dealPairs: Array<[string, number]> = [];
-  const couponPairs: Array<[string, number]> = [];
+  const dealPairs: Array<CreatorTriple> = [];
+  const couponPairs: Array<CreatorTriple> = [];
 
   for (const row of rows) {
-    const adminId = getUserMapping(row.post_author);
-    if (!adminId) continue;
+    const createdById = getUserMapping(row.post_author);
+    if (!createdById) continue;
+    // WP tracks the last editor separately from the author; fall back to the
+    // author when the editor was deleted from wp_users or never mapped.
+    const editorWpId = row.edit_last ? parseInt(row.edit_last, 10) : NaN;
+    const updatedById =
+      (Number.isNaN(editorWpId) ? undefined : getUserMapping(editorWpId)) ??
+      createdById;
     const isDeal = row.is_deal === "yes";
     const docId = generateDocumentId(
       isDeal ? `deal:${row.ID}` : `coupon:${row.ID}`
     );
-    (isDeal ? dealPairs : couponPairs).push([docId, adminId]);
+    (isDeal ? dealPairs : couponPairs).push([docId, createdById, updatedById]);
   }
 
   const dealsUpdated = await applyCreatorUpdates("deals", dealPairs);
@@ -273,7 +276,7 @@ async function backfillTaxonomyCreators(): Promise<number> {
              p.ID DESC
   `);
 
-  const pairsByTable = new Map<"stores" | "brands" | "categories" | "banks", Array<[string, number]>>();
+  const pairsByTable = new Map<"stores" | "brands" | "categories" | "banks", Array<CreatorTriple>>();
   const latestByTerm = new Map<number, { post_author: number; post_id: number }>();
 
   for (const row of rows) {
@@ -293,7 +296,8 @@ async function backfillTaxonomyCreators(): Promise<number> {
     if (!ref || !isTaxonomyTable(ref.table)) continue;
 
     const pairs = pairsByTable.get(ref.table) ?? [];
-    pairs.push([ref.documentId, adminId]);
+    // WP has no term-editor tracking, so author fills both columns.
+    pairs.push([ref.documentId, adminId, adminId]);
     pairsByTable.set(ref.table, pairs);
   }
 
@@ -323,7 +327,7 @@ async function backfillTagCreators(): Promise<number> {
              p.ID DESC
   `);
 
-  const pairs: Array<[string, number]> = [];
+  const pairs: Array<CreatorTriple> = [];
   const latestByTerm = new Map<number, { post_author: number; post_id: number }>();
 
   for (const row of rows) {
@@ -338,7 +342,11 @@ async function backfillTagCreators(): Promise<number> {
   for (const [termId, row] of latestByTerm) {
     const adminId = getUserMapping(row.post_author);
     if (adminId) {
-      pairs.push([getTagMapping(termId)?.documentId ?? generateDocumentId(`tag:${termId}`), adminId]);
+      pairs.push([
+        getTagMapping(termId)?.documentId ?? generateDocumentId(`tag:${termId}`),
+        adminId,
+        adminId,
+      ]);
     }
   }
 
@@ -351,9 +359,12 @@ function isTaxonomyTable(
   return ["stores", "brands", "categories", "banks"].includes(table);
 }
 
+/** [documentId, createdById, updatedById] */
+type CreatorTriple = [string, number, number];
+
 async function applyCreatorUpdates(
   table: "deals" | "coupons" | "stores" | "brands" | "categories" | "banks" | "tags",
-  pairs: Array<[string, number]>
+  pairs: Array<CreatorTriple>
 ): Promise<number> {
   if (pairs.length === 0) return 0;
 
@@ -366,18 +377,19 @@ async function applyCreatorUpdates(
     const values: any[] = [];
     const placeholders = chunk
       .map((pair, idx) => {
-        const p1 = idx * 2 + 1;
-        const p2 = idx * 2 + 2;
-        values.push(pair[0], pair[1]);
-        return `($${p1}::text, $${p2}::integer)`;
+        const p1 = idx * 3 + 1;
+        const p2 = idx * 3 + 2;
+        const p3 = idx * 3 + 3;
+        values.push(pair[0], pair[1], pair[2]);
+        return `($${p1}::text, $${p2}::integer, $${p3}::integer)`;
       })
       .join(", ");
 
     const sql = `
       UPDATE "${table}" AS t
-      SET created_by_id = v.admin_id,
-          updated_by_id = v.admin_id
-      FROM (VALUES ${placeholders}) AS v(document_id, admin_id)
+      SET created_by_id = v.created_id,
+          updated_by_id = v.updated_id
+      FROM (VALUES ${placeholders}) AS v(document_id, created_id, updated_id)
       WHERE t.document_id = v.document_id
     `;
     const result = await pool.query(sql, values);

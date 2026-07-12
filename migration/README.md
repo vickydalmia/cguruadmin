@@ -133,7 +133,7 @@ Uploads inventoried images to S3 with configurable concurrency. Deduplicates by 
 
 ### Phase 03 — Taxonomies
 
-Migrates WordPress category terms into **four** Strapi collections — `stores`, `brands`, `categories`, `banks` — based on the ACF `choose_type` termmeta field (defaults to "Store"). Also migrates FAQ items and SEO components for each entity, and links logo/icon media.
+Migrates WordPress category terms into **four** Strapi collections — `stores`, `brands`, `categories`, `banks` — based on the ACF `choose_type` termmeta field (defaults to "Store"). Also migrates FAQ items and SEO components for each entity, and links logo/icon media. Images embedded in term descriptions are rewritten through the content-media pipeline (see below).
 
 ### Phase 04 — Tags
 
@@ -155,6 +155,17 @@ Migrates published WordPress posts (where `is_deal` is not `'yes'`) into the `co
 - Resolves `coupon_type` ("static" or "unique") from ACF meta
 - Wires taxonomy relationships (store, brand, category, bank) via link tables, respecting Yoast primary term
 - Links tags, featured image, unique coupon pool, and SEO component
+- Rewrites content-embedded images (see **Content-embedded images** below)
+
+#### Content-embedded images
+
+Rich-text HTML (`coupons.content`, `deals.content`, taxonomy `description`) can reference images directly via `<img src>` / `srcset` / lightbox `<a href>` URLs pointing at `wp-content/uploads/`. `utils/content-media.ts` rewrites every such reference:
+
+1. The URL is normalized — query strings dropped, percent-encoding decoded, WP size suffixes (`-300x200`) and `-scaled` variants collapsed to the original file.
+2. The path is resolved to an attachment ID via a `_wp_attached_file` reverse index and uploaded on demand through the same optimize/S3 pipeline as Phase 02 (deduplicated by content hash and in-flight path).
+3. Files present in the uploads dir but missing a WP attachment row are uploaded straight from disk.
+4. `<img>` tags are rebuilt with the new optimized URL plus a responsive `srcset`/`sizes` built from the generated Strapi formats; other uploads URLs are swapped in place.
+5. Referenced files are linked in `files_related_mph` so Phase 11 treats them as used; unresolved URLs are left untouched and listed in the end-of-run stats. Phase 10 reports any rows still containing `wp-content/uploads` references.
 
 ### Phase 08 — Deals
 
@@ -253,7 +264,6 @@ All WordPress posts with `post_type='post'` and `post_status='publish'` are spli
 | `post_title` | `title` | |
 | `post_name` | `slug` | Deduplicated |
 | `post_content` | `content` | Shortcodes stripped |
-| `post_excerpt` | `excerpt` | |
 | `code` (postmeta) | `code` | Coupon code string |
 | `link` (postmeta) | `affiliate_link` | |
 | `popular_coupon` (postmeta) | `is_popular` | `'1'` → true |
@@ -375,6 +385,12 @@ Parsed into `components_shared_faq_items` rows and linked via `{table}_cmps` wit
 ## Idempotency & Resume
 
 The migration is designed to be safely re-run after interruption or failure.
+
+> **WordPress is the source of truth until cutover.** Re-running phases 03/07/08
+> intentionally refreshes `content` / `description` (and deal prices) on
+> existing rows via `ON CONFLICT DO UPDATE` — any edits made to those fields in
+> the Strapi admin are overwritten by the freshly migrated WordPress values.
+> Once editors start working in Strapi, stop re-running these phases.
 
 ### Checkpointing
 

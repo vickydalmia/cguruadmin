@@ -36,7 +36,7 @@ export function cleanHtml(val: string | null | undefined): string | null {
     ],
     allowedAttributes: {
       a: ["href", "title", "target", "rel"],
-      img: ["src", "srcset", "alt", "title", "width", "height", "loading"],
+      img: ["src", "srcset", "sizes", "alt", "title", "width", "height", "loading"],
       "*": ["class", "id", "colspan", "rowspan"],
     },
     // Only safe URL schemes; drops javascript:, vbscript:, and data: URIs.
