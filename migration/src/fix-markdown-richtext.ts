@@ -13,29 +13,44 @@
  * double-underscore), then re-runs the standard cleanHtml allowlist.
  * Everything else passes through byte-identical.
  *
- * Run (dry-run first, then apply):
- *   yarn fix:markdown-richtext
- *   yarn fix:markdown-richtext --apply
+ * Targets whatever PG_CONNECTION_STRING resolves to (migration/.env.migration
+ * by default — i.e. the DEPLOYED database). Dry-run prints the diff; applying
+ * requires an explicit confirmation flag matching that host (same guard as
+ * reset-homepage):
+ *
+ *   yarn fix:markdown-richtext                              # dry-run
+ *   yarn fix:markdown-richtext --apply --yes-i-mean-<host>  # write
  *
  * NOTE: writes via SQL, bypassing the documents middleware — static pages for
  * changed entries stay stale until the next rebuild/edit.
  */
 
-import 'dotenv/config';
-import { Client } from 'pg';
-import { cleanHtml, RICHTEXT_FIELDS } from '../src/utils/sanitize-richtext';
+import { createRequire } from "node:module";
+import { config } from "./config.js";
+import { pgQuery, closePg } from "./db/pg-client.js";
+import { logger } from "./utils/logger.js";
+// The main package owns the richtext allowlist and field registry; load it
+// from there so the two can never drift. createRequire (not import) because
+// the main package is CommonJS while this one is ESM — tsx compiles the TS
+// across the boundary but Node's named-export detection can't see through it.
+const require = createRequire(import.meta.url);
+const { cleanHtml, RICHTEXT_FIELDS } =
+  require("../../src/utils/sanitize-richtext") as {
+    cleanHtml: (html: string) => string;
+    RICHTEXT_FIELDS: Record<string, string[]>;
+  };
 
 // DB table per content-type uid (Strapi table names come from each schema's
 // collectionName, not mechanical pluralization — so map explicitly). Derived
 // from RICHTEXT_FIELDS so a richtext field added there cannot be silently
 // skipped here: an unmapped uid fails fast below instead.
 const TABLE_BY_UID: Record<string, string> = {
-  'api::deal.deal': 'deals',
-  'api::coupon.coupon': 'coupons',
-  'api::category.category': 'categories',
-  'api::bank.bank': 'banks',
-  'api::brand.brand': 'brands',
-  'api::store.store': 'stores',
+  "api::deal.deal": "deals",
+  "api::coupon.coupon": "coupons",
+  "api::category.category": "categories",
+  "api::bank.bank": "banks",
+  "api::brand.brand": "brands",
+  "api::store.store": "stores",
 };
 
 const TARGETS: Array<{ table: string; column: string }> = Object.entries(
@@ -58,8 +73,8 @@ function inlineMd(text: string, state: { converted: boolean }): string {
   // Bold pairs must hug their content (no space just inside the markers):
   // "**bold**" converts, but stray-asterisk noise like "2** get **1" does not.
   const replaced = text
-    .replace(/\*\*(\S(?:[^*\n]*\S)?)\*\*/g, '<strong>$1</strong>')
-    .replace(/__(\S(?:[^_\n]*\S)?)__/g, '<strong>$1</strong>');
+    .replace(/\*\*(\S(?:[^*\n]*\S)?)\*\*/g, "<strong>$1</strong>")
+    .replace(/__(\S(?:[^_\n]*\S)?)__/g, "<strong>$1</strong>");
   if (replaced !== text) state.converted = true;
   return replaced;
 }
@@ -74,7 +89,7 @@ function convertMarkdownArtifacts(html: string): string | null {
   const lines = html.split(/\r?\n/);
   const out: string[] = [];
   let list: {
-    type: 'ul' | 'ol';
+    type: "ul" | "ol";
     items: string[];
     rawLines: string[];
     firstNumber: number;
@@ -87,11 +102,11 @@ function convertMarkdownArtifacts(html: string): string | null {
     // sequence (2+ items) or a deliberate single-item list starting at 1.
     // Bullets ("- item") are unambiguous even alone.
     const isRealList =
-      list.type === 'ul' || list.items.length >= 2 || list.firstNumber === 1;
+      list.type === "ul" || list.items.length >= 2 || list.firstNumber === 1;
     if (isRealList) {
       out.push(
         `<${list.type}>` +
-          list.items.map((item) => `<li>${item}</li>`).join('') +
+          list.items.map((item) => `<li>${item}</li>`).join("") +
           `</${list.type}>`
       );
       state.converted = true;
@@ -107,7 +122,7 @@ function convertMarkdownArtifacts(html: string): string | null {
     const numbered = /^(\d+)[.)]\s+(.+)$/.exec(line);
 
     if (bullet || numbered) {
-      const type: 'ul' | 'ol' = bullet ? 'ul' : 'ol';
+      const type: "ul" | "ol" = bullet ? "ul" : "ol";
       if (!list || list.type !== type) {
         flush();
         list = {
@@ -126,24 +141,26 @@ function convertMarkdownArtifacts(html: string): string | null {
     out.push(inlineMd(raw, state));
   }
   flush();
-  return state.converted ? out.join('\n') : null;
+  return state.converted ? out.join("\n") : null;
 }
 
 async function main() {
-  const apply = process.argv.includes('--apply');
-  const client = new Client({
-    host: process.env.DATABASE_HOST,
-    port: Number(process.env.DATABASE_PORT ?? 5432),
-    user: process.env.DATABASE_USERNAME,
-    password: process.env.DATABASE_PASSWORD,
-    database: process.env.DATABASE_NAME,
-    ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
-  });
-  await client.connect();
+  const apply = process.argv.includes("--apply");
+  const host = new URL(config.pg.connectionString).hostname;
+
+  logger.info(`fix-markdown-richtext target host: ${host} (${apply ? "APPLY" : "dry-run"})`);
+  if (apply && !process.argv.includes(`--yes-i-mean-${host}`)) {
+    logger.error(
+      `Refusing to write: --apply updates richtext columns on ${host}. ` +
+        `Re-run with --yes-i-mean-${host} to confirm.`
+    );
+    process.exitCode = 1;
+    return;
+  }
 
   let totalChanged = 0;
   for (const { table, column } of TARGETS) {
-    const { rows } = await client.query(
+    const rows = await pgQuery<{ id: number; value: string }>(
       `SELECT id, ${column} AS value FROM ${table}
        WHERE ${column} ~ $1 OR ${column} LIKE '%**%'
        ORDER BY id`,
@@ -157,27 +174,28 @@ async function main() {
       if (converted === row.value) continue;
 
       totalChanged += 1;
-      console.log(`\n--- ${table}.${column} id=${row.id} ---`);
-      console.log('BEFORE:', JSON.stringify(row.value.slice(0, 300)));
-      console.log('AFTER :', JSON.stringify((converted ?? '').slice(0, 300)));
+      logger.info(`--- ${table}.${column} id=${row.id} ---`);
+      logger.info(`BEFORE: ${JSON.stringify(row.value.slice(0, 300))}`);
+      logger.info(`AFTER : ${JSON.stringify((converted ?? "").slice(0, 300))}`);
 
       if (apply) {
-        await client.query(`UPDATE ${table} SET ${column} = $1 WHERE id = $2`, [
+        await pgQuery(`UPDATE ${table} SET ${column} = $1 WHERE id = $2`, [
           converted,
           row.id,
         ]);
-        console.log('UPDATED');
+        logger.info("UPDATED");
       }
     }
   }
 
-  console.log(
-    `\n${totalChanged} row(s) ${apply ? 'updated' : 'would change (dry-run — pass --apply to write)'}`
+  logger.info(
+    `${totalChanged} row(s) ${apply ? "updated" : "would change (dry-run — pass --apply to write)"}`
   );
-  await client.end();
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main()
+  .catch((err) => {
+    logger.error(`fix-markdown-richtext failed: ${err?.message ?? err}`);
+    process.exitCode = 1;
+  })
+  .finally(() => closePg());
