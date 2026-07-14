@@ -16,6 +16,14 @@ import {
 } from '@strapi/design-system';
 import { Cross } from '@strapi/icons';
 
+import { useIntl } from 'react-intl';
+
+import {
+  HOMEPAGE_SECTION_LABELS,
+  HOMEPAGE_UID,
+} from '../constants/homepage-sections';
+import { HOMEPAGE_IMAGE_RULES } from '../constants/homepage-images';
+
 type RelationConfig = {
   field: string;
   target: string;
@@ -460,6 +468,144 @@ const RelationMultiSelectPanel: PanelComponent = ({ model, documentId }) => {
   };
 };
 
+// ---------------------------------------------------------------------------
+// Validation-problems panel (homepage). Both the client-side pre-save check
+// and the server-side image validator put their errors into the same nested
+// form-errors state ({ section: { items: [{ field: 'msg' }] } }); this panel
+// flattens that into a human list with the numbered section names, so editors
+// see exactly WHERE the save failed instead of hunting through every section.
+// ---------------------------------------------------------------------------
+const SECTION_LABEL_BY_ATTR: Record<string, string> = Object.fromEntries(
+  HOMEPAGE_SECTION_LABELS.map(({ attr, label }) => [attr, label])
+);
+
+// Client-side (pre-save) errors are stored as react-intl message descriptors
+// ({ id, defaultMessage, values? }), server-side ones as plain strings — the
+// flattener must treat descriptors as leaves, not nested error objects.
+type MessageDescriptorLike = {
+  id: string;
+  defaultMessage?: string;
+  values?: Record<string, unknown>;
+};
+
+const isMessageDescriptor = (node: unknown): node is MessageDescriptorLike =>
+  typeof node === 'object' &&
+  node !== null &&
+  !Array.isArray(node) &&
+  typeof (node as MessageDescriptorLike).id === 'string' &&
+  typeof (node as MessageDescriptorLike).defaultMessage === 'string';
+
+type FlatError = {
+  path: Array<string | number>;
+  message: string | MessageDescriptorLike;
+};
+
+const flattenFormErrors = (
+  node: unknown,
+  path: Array<string | number> = []
+): FlatError[] => {
+  if (node == null) return [];
+  if (typeof node === 'string' || isMessageDescriptor(node)) {
+    return path.length ? [{ path, message: node }] : [];
+  }
+  if (Array.isArray(node)) {
+    return node.flatMap((child, index) =>
+      child == null ? [] : flattenFormErrors(child, [...path, index])
+    );
+  }
+  if (typeof node === 'object') {
+    return Object.entries(node).flatMap(([key, value]) =>
+      flattenFormErrors(value, [...path, key])
+    );
+  }
+  return [];
+};
+
+// 'cardImage' -> 'card image'
+const humanizeFieldName = (segment: string): string =>
+  segment.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
+
+// ['newlyAdded','items',1,'cardImage'] -> "7 · Fresh Drops … › items #2 › card image"
+const describeErrorLocation = (path: Array<string | number>): string => {
+  const parts: string[] = [];
+  path.forEach((segment, index) => {
+    if (typeof segment === 'number') {
+      parts[parts.length - 1] = `${parts[parts.length - 1] ?? ''} #${segment + 1}`;
+      return;
+    }
+    parts.push(
+      index === 0
+        ? SECTION_LABEL_BY_ATTR[segment] ?? segment
+        : humanizeFieldName(segment)
+    );
+  });
+  return parts.join(' › ');
+};
+
+// "newlyAdded.items[].cardImage" rule paths, keyed without indices so an error
+// path like newlyAdded.items.1.cardImage can look up its size requirement.
+const IMAGE_RULE_BY_PATH = new Map(
+  HOMEPAGE_IMAGE_RULES.map((rule) => [rule.path.replace('[]', ''), rule])
+);
+
+const imageHintFor = (path: Array<string | number>): string | null => {
+  const key = path.filter((segment) => typeof segment === 'string').join('.');
+  const rule = IMAGE_RULE_BY_PATH.get(key);
+  return rule ? `Upload the ${rule.label} — exactly ${rule.width}×${rule.height} px.` : null;
+};
+
+function ValidationProblemsList({ problems }: { problems: FlatError[] }) {
+  const { formatMessage } = useIntl();
+
+  const messageText = (message: FlatError['message']): string =>
+    typeof message === 'string'
+      ? message
+      : formatMessage(
+          { id: message.id, defaultMessage: message.defaultMessage },
+          message.values as any
+        );
+
+  return (
+    <Flex direction="column" alignItems="stretch" gap={3} width="100%">
+      <Typography variant="pi" textColor="neutral600">
+        Fix these to save. Each problem field is also marked in red in the
+        form, and rows with problems open automatically.
+      </Typography>
+      {problems.map((problem) => {
+        // Server messages are already specific ("got 800×400 …") — only swap
+        // in the size hint for the generic client-side "This value is required."
+        const isGenericClientMessage = typeof problem.message !== 'string';
+        const hint = isGenericClientMessage ? imageHintFor(problem.path) : null;
+        return (
+          <Box key={problem.path.join('.')}>
+            <Typography variant="pi" fontWeight="bold" textColor="danger600" tag="p">
+              {describeErrorLocation(problem.path)}
+            </Typography>
+            <Typography variant="pi" textColor="danger600" tag="p">
+              {hint ?? messageText(problem.message)}
+            </Typography>
+          </Box>
+        );
+      })}
+    </Flex>
+  );
+}
+
+const ValidationProblemsPanel: PanelComponent = ({ model }) => {
+  // Hook order must not depend on the model — select first, bail after.
+  const formErrors = useForm('ValidationProblemsPanel', (state) => state.errors);
+
+  if (model !== HOMEPAGE_UID) return null;
+
+  const problems = flattenFormErrors(formErrors);
+  if (problems.length === 0) return null;
+
+  return {
+    title: `Validation problems (${problems.length})`,
+    content: <ValidationProblemsList problems={problems} />,
+  };
+};
+
 export default {
   config: {
     auth: { // Replace the Strapi logo in auth (login) views
@@ -472,13 +618,18 @@ export default {
     translations: {
       en: {
         'Auth.form.welcome.title': 'Welcome to CouponzGuru',
-        'Auth.form.welcome.subtitle': 'Log in to your account'
+        'Auth.form.welcome.subtitle': 'Log in to your account',
+        // Shown when the pre-save (client-side) check finds empty required
+        // fields — the request never reaches the server in that case, so the
+        // detailed server toast can't appear. Point editors at the panel.
+        'content-manager.validation.error':
+          'Some required fields are empty or invalid. See the "Validation problems" panel on the right — problem fields are marked in red and their rows open automatically.',
       },
     }
   },
   bootstrap(app: StrapiApp) {
     const apis = (app.getPlugin('content-manager') as any).apis;
-    apis.addEditViewSidePanel([RelationMultiSelectPanel]);
+    apis.addEditViewSidePanel([RelationMultiSelectPanel, ValidationProblemsPanel]);
 
     if (typeof document !== 'undefined') {
       const rewrite = () => {

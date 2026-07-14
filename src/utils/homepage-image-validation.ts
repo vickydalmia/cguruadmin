@@ -27,6 +27,16 @@ type Occurrence = {
   hasField: boolean;
   /** Admin-facing location, e.g. "hero › banners #2 › desktopImage". */
   where: string;
+  /** Admin form path for inline field errors, e.g. ['hero','banners',1,'desktopImage']. */
+  path: Array<string | number>;
+};
+
+// Shape consumed by the admin edit view: ValidationError details.errors[].path
+// becomes an inline error on that exact form field; `where` feeds the toast.
+type Problem = {
+  where: string;
+  path: Array<string | number>;
+  message: string;
 };
 
 // Resolve 'section.rows[].field' rule paths against a homepage-shaped object
@@ -49,6 +59,7 @@ function collectOccurrences(root: any, rules: HomepageImageRule[]): Occurrence[]
         hasField,
         fileId: hasField ? fileIdOf(row[rule.field]) : null,
         where: `${sectionKey} › ${listField} #${index + 1} › ${rule.field}`,
+        path: [sectionKey, listField, index, rule.field],
       });
     });
   }
@@ -91,14 +102,15 @@ export async function validateHomepageImages(
   const occurrences = collectOccurrences(data, HOMEPAGE_IMAGE_RULES);
   if (!occurrences.length) return;
 
-  const problems: string[] = [];
+  const problems: Problem[] = [];
 
   for (const o of occurrences) {
     if (o.rule.required && o.hasField && o.fileId == null) {
-      problems.push(
-        `${o.where}: ${o.rule.label} is required ` +
-          `(${o.rule.width}×${o.rule.height} px).`
-      );
+      problems.push({
+        where: o.where,
+        path: o.path,
+        message: `${o.rule.label} is required (${o.rule.width}×${o.rule.height} px).`,
+      });
     }
   }
 
@@ -127,20 +139,37 @@ export async function validateHomepageImages(
         // Deleted mid-flight — core relation validation reports it.
         if (!file) continue;
         if (file.width !== o.rule.width || file.height !== o.rule.height) {
-          problems.push(
-            `${o.where}: must be exactly ${o.rule.width}×${o.rule.height} px ` +
+          problems.push({
+            where: o.where,
+            path: o.path,
+            message:
+              `Must be exactly ${o.rule.width}×${o.rule.height} px ` +
               `(2x of ${o.rule.display[0]}×${o.rule.display[1]}), ` +
-              `got ${file.width ?? '?'}×${file.height ?? '?'} ("${file.name}").`
-          );
+              `got ${file.width ?? '?'}×${file.height ?? '?'} ("${file.name}").`,
+          });
         }
       }
     }
   }
 
   if (problems.length) {
+    const noun = problems.length === 1 ? 'problem' : 'problems';
     throw new errors.ValidationError(
-      `Homepage image check failed:\n• ${problems.join('\n• ')}`,
-      { problems }
+      `Homepage image check failed (${problems.length} ${noun} — the fields are ` +
+        `highlighted in the form):\n• ${problems
+          .map((p) => `${p.where}: ${p.message}`)
+          .join('\n• ')}`,
+      {
+        // The admin edit view turns details.errors[].path into an inline error
+        // on that exact field and auto-opens the errored repeatable row.
+        errors: problems.map((p) => ({
+          path: p.path,
+          message: p.message,
+          name: 'ValidationError',
+        })),
+        // Previous shape, kept for non-admin API consumers.
+        problems: problems.map((p) => `${p.where}: ${p.message}`),
+      }
     );
   }
 }

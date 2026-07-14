@@ -3,6 +3,19 @@ import crypto from 'crypto';
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
 
+  async relatedStores(ctx) {
+    const { slug } = ctx.params;
+    const result = await strapi
+      .service('api::store.custom' as any)
+      .relatedStores(slug, ctx.query);
+
+    if (!result) {
+      return ctx.notFound('Store not found');
+    }
+
+    return ctx.send(result);
+  },
+
   async submitRating(ctx) {
     const { slug } = ctx.params;
     const { value } = ctx.request.body ?? {};

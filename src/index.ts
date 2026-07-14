@@ -1,5 +1,6 @@
 import type { Core } from '@strapi/strapi';
 import { HOMEPAGE_IMAGE_RULES, imageRuleDescription } from './constants/homepage-images';
+import { HOMEPAGE_SECTION_LABELS, HOMEPAGE_UID } from './constants/homepage-sections';
 import { purgeResponseCaches } from './middlewares/cache';
 import { destroyRebuildQueue, enqueue, type ScopeRequest } from './static-deployment/queue';
 import { computeScope, preDeleteScope } from './static-deployment/scopes';
@@ -262,6 +263,62 @@ async function ensureSingleTypeEntryTitles(strapi: Core.Strapi): Promise<void> {
   }
 }
 
+// Homepage section labels/help text live in src/constants/homepage-sections.ts
+// (shared with the admin bundle). Pinned into the content-manager view config
+// on every boot — manual "Configure the view" edits to these attributes will
+// not stick; edit the shared constant instead.
+async function ensureHomepageSectionLabels(strapi: Core.Strapi): Promise<void> {
+  const service: any = strapi.plugin('content-manager').service('content-types');
+  if (!service) return;
+
+  try {
+    const contentType = strapi.contentType(HOMEPAGE_UID as any);
+    if (!contentType) return;
+
+    const config = await service.findConfiguration(contentType);
+
+    const metadatas = { ...(config.metadatas ?? {}) };
+    let metaChanged = false;
+    for (const { attr, label, description } of HOMEPAGE_SECTION_LABELS) {
+      if (!contentType.attributes?.[attr]) {
+        strapi.log.warn(`[content-manager] homepage has no attribute "${attr}" — label skipped`);
+        continue;
+      }
+      const prev = metadatas[attr] ?? {};
+      if (prev.edit?.label === label && prev.edit?.description === description) continue;
+      metadatas[attr] = { ...prev, edit: { ...(prev.edit ?? {}), label, description } };
+      metaChanged = true;
+    }
+
+    // Edit-form order = live page order: one row per attribute in the order
+    // above, keeping each cell's stored size; attributes added later (not in
+    // the list yet) are appended at the end rather than dropped.
+    const prevEdit: any[][] = config.layouts?.edit ?? [];
+    const cellsByName = new Map<string, any>();
+    for (const row of prevEdit) for (const cell of row) cellsByName.set(cell.name, cell);
+
+    const listed = new Set(HOMEPAGE_SECTION_LABELS.map(({ attr }) => attr));
+    const ordered = HOMEPAGE_SECTION_LABELS.map(({ attr }) => cellsByName.get(attr)).filter(Boolean);
+    const leftovers = [...cellsByName.values()].filter((cell) => !listed.has(cell.name));
+    const nextEdit = [...ordered, ...leftovers].map((cell) => [cell]);
+
+    const layoutChanged = JSON.stringify(nextEdit) !== JSON.stringify(prevEdit);
+    if (!metaChanged && !layoutChanged) return;
+
+    await service.updateConfiguration(contentType, {
+      settings: config.settings,
+      metadatas,
+      layouts: { ...config.layouts, edit: layoutChanged ? nextEdit : prevEdit },
+      options: config.options,
+    });
+    strapi.log.info('[content-manager] homepage section labels & form order pinned');
+  } catch (err: any) {
+    strapi.log.warn(
+      `[content-manager] homepage section labels failed: ${err?.message ?? err}`
+    );
+  }
+}
+
 // When an editor picks a coupon/deal/category/bank in a homepage component
 // and leaves the override text empty, snapshot the related record's title
 // into the override after save — so admin rows always carry a visible label.
@@ -388,6 +445,7 @@ export default {
     await ensureComponentEntryTitles(strapi);
     await ensureComponentFieldDescriptions(strapi);
     await ensureSingleTypeEntryTitles(strapi);
+    await ensureHomepageSectionLabels(strapi);
 
     strapi.log.info(
       `[rebuild] ${process.env.REBUILD_ENABLED === 'true' ? 'ENABLED' : 'disabled (log-only)'} — scopes computed on every content change`
