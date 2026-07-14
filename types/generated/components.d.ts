@@ -92,7 +92,7 @@ export interface HomeBankOffers extends Struct.ComponentSchema {
     items: Schema.Attribute.Component<'home.bank-offer-item', true> &
       Schema.Attribute.SetMinMax<
         {
-          max: 6;
+          max: 12;
         },
         number
       >;
@@ -112,7 +112,7 @@ export interface HomeCgExclusive extends Struct.ComponentSchema {
     items: Schema.Attribute.Component<'home.exclusive-item', true> &
       Schema.Attribute.SetMinMax<
         {
-          max: 4;
+          max: 8;
         },
         number
       >;
@@ -324,7 +324,7 @@ export interface HomeNewlyAdded extends Struct.ComponentSchema {
     items: Schema.Attribute.Component<'home.coupon-card-item', true> &
       Schema.Attribute.SetMinMax<
         {
-          max: 4;
+          max: 8;
         },
         number
       >;
@@ -415,7 +415,7 @@ export interface HomeTopOffers extends Struct.ComponentSchema {
     items: Schema.Attribute.Component<'home.top-offer-item', true> &
       Schema.Attribute.SetMinMax<
         {
-          max: 4;
+          max: 8;
         },
         number
       >;

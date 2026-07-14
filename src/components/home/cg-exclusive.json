@@ -21,7 +21,7 @@
       "type": "component",
       "repeatable": true,
       "component": "home.exclusive-item",
-      "max": 4
+      "max": 8
     }
   }
 }

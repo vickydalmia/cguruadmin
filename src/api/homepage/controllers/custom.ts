@@ -10,9 +10,19 @@ const BANK_FIELDS = ['name', 'slug', 'shortDescription', 'logoAlt'];
 const BRAND_FIELDS = ['name', 'slug', 'shortDescription', 'logoAlt'];
 
 // Relations in homepage components are curator-managed and therefore have no
-// database-level cardinality bound. Keep both the query and the returned
-// payload bounded; the post-fetch cap below remains as a defensive fallback.
+// database-level cardinality bound. Constrain visibility/order in the query
+// and cap the returned payload defensively below. Each section holds a +4
+// buffer over what the site renders, so a mid-cycle expiry/delete never
+// leaves a visible hole (the UI slices to its own display counts).
 const MAX_LIST_ITEMS = 16;
+const SECTION_LIST_CAPS = {
+  popularStores: 24, // site shows 24
+  topDeals: 10, // site shows 6
+  dealsByBrand: 10, // legacy fallback, mirrors topDeals
+  offersByBrand: 7, // site shows 3
+  exploreOffersPerTab: 10, // site shows 6 per tab
+  exploreDealsPerTab: 10, // legacy fallback, mirrors exploreOffers
+} as const;
 const PUBLISHED_OFFER_FILTER = { contentStatus: { $eq: 'published' } } as const;
 const NEWEST_FIRST = ['publishedAt:desc'] as const;
 
@@ -76,19 +86,17 @@ const publishedDealRef = {
   filters: PUBLISHED_OFFER_FILTER,
 };
 
-// Strapi's nested-populate query converter supports `limit` even though the
-// public Document Service nested-populate type currently omits pagination.
-// HOMEPAGE_POPULATE is passed through an explicit `any` boundary below.
+// Strapi's Document Service accepts nested filters and ordering here, but it
+// rejects nested `limit`/pagination keys. The response-level cap below remains
+// the compatibility-safe cardinality guard.
 const publishedCouponListRef = {
   ...publishedCouponRef,
   sort: NEWEST_FIRST,
-  limit: MAX_LIST_ITEMS,
 };
 
 const publishedDealListRef = {
   ...publishedDealRef,
   sort: NEWEST_FIRST,
-  limit: MAX_LIST_ITEMS,
 };
 
 const bannerSlides = {
@@ -186,45 +194,56 @@ const GLOBAL_POPULATE = {
   newsletter: true,
 } as const;
 
-const isPublished = (offer: any) => offer?.contentStatus === 'published';
+// Published AND not past its expiresAt: the populate filter only checks
+// contentStatus, which the 5-minute cron may not have flipped yet.
+const isLiveOffer = (offer: any, now: Date) =>
+  offer?.contentStatus === 'published' &&
+  (!offer.expiresAt || new Date(offer.expiresAt) > now);
 
 // Homepage components reference coupons/deals directly, which bypasses the
 // contentStatus visibility filter used by the list endpoints — strip anything
-// that isn't published before the payload leaves the API.
-function dropUnpublishedOffers(homepage: any) {
+// that isn't live before the payload leaves the API. Card-wrapper items
+// (hero/topOffers/cgExclusive/newlyAdded) carry their own copied image and
+// override text, so an item whose relation resolved to null (deleted, or
+// filtered out by the populate as expired/scheduled) must be dropped too —
+// otherwise the card renders with a dead offer behind it.
+function dropDeadOffers(homepage: any) {
   if (!homepage) return homepage;
+  const now = new Date();
+  const live = (offer: any) => isLiveOffer(offer, now);
 
   if (homepage.hero?.products) {
-    homepage.hero.products = homepage.hero.products.filter(
-      (p: any) => !p.deal || isPublished(p.deal),
-    );
+    homepage.hero.products = homepage.hero.products.filter((p: any) => live(p.deal));
   }
   for (const key of ['topOffers', 'cgExclusive', 'newlyAdded']) {
     const section = homepage[key];
     if (section?.items) {
-      section.items = section.items.filter((i: any) => !i.coupon || isPublished(i.coupon));
+      section.items = section.items.filter((i: any) => live(i.coupon));
     }
   }
+  if (homepage.bankOffers?.items) {
+    homepage.bankOffers.items = homepage.bankOffers.items.filter((i: any) => i.bank);
+  }
   if (homepage.offersByBrand?.offers) {
-    homepage.offersByBrand.offers = homepage.offersByBrand.offers.filter(isPublished);
+    homepage.offersByBrand.offers = homepage.offersByBrand.offers.filter(live);
   }
   if (homepage.exploreOffers?.tabs) {
     for (const tab of homepage.exploreOffers.tabs) {
       if (tab?.offers) {
-        tab.offers = tab.offers.filter(isPublished);
+        tab.offers = tab.offers.filter(live);
       }
     }
   }
   for (const key of ['topDeals', 'dealsByBrand']) {
     const section = homepage[key];
     if (section?.deals) {
-      section.deals = section.deals.filter(isPublished);
+      section.deals = section.deals.filter(live);
     }
   }
   if (homepage.exploreDeals?.tabs) {
     for (const tab of homepage.exploreDeals.tabs) {
       if (tab?.deals) {
-        tab.deals = tab.deals.filter(isPublished);
+        tab.deals = tab.deals.filter(live);
       }
     }
   }
@@ -232,37 +251,45 @@ function dropUnpublishedOffers(homepage: any) {
 }
 
 // The curated store/deal lists are unbounded oneToMany relations (schema
-// `max` only exists for repeatable components), so cap them here to keep the
-// payload and the per-store count queries bounded no matter what an admin
-// attaches in the CMS.
-const cap = (arr: any) => (Array.isArray(arr) ? arr.slice(0, MAX_LIST_ITEMS) : arr);
+// `max` only exists for repeatable components), so cap them here — per
+// section — to keep the payload and the per-store count queries bounded no
+// matter what an admin attaches in the CMS. Runs after dropDeadOffers, so
+// the caps count only live offers.
+const cap = (arr: any, limit: number = MAX_LIST_ITEMS) =>
+  Array.isArray(arr) ? arr.slice(0, limit) : arr;
 
 function capCuratedLists(homepage: any) {
   if (!homepage) return homepage;
 
   if (homepage.popularStores?.stores) {
-    homepage.popularStores.stores = cap(homepage.popularStores.stores);
+    homepage.popularStores.stores = cap(
+      homepage.popularStores.stores,
+      SECTION_LIST_CAPS.popularStores,
+    );
   }
-  for (const key of ['topDeals', 'dealsByBrand']) {
+  for (const key of ['topDeals', 'dealsByBrand'] as const) {
     const section = homepage[key];
     if (section?.deals) {
-      section.deals = cap(section.deals);
+      section.deals = cap(section.deals, SECTION_LIST_CAPS[key]);
     }
   }
   if (homepage.exploreDeals?.tabs) {
     for (const tab of homepage.exploreDeals.tabs) {
       if (tab?.deals) {
-        tab.deals = cap(tab.deals);
+        tab.deals = cap(tab.deals, SECTION_LIST_CAPS.exploreDealsPerTab);
       }
     }
   }
   if (homepage.offersByBrand?.offers) {
-    homepage.offersByBrand.offers = cap(homepage.offersByBrand.offers);
+    homepage.offersByBrand.offers = cap(
+      homepage.offersByBrand.offers,
+      SECTION_LIST_CAPS.offersByBrand,
+    );
   }
   if (homepage.exploreOffers?.tabs) {
     for (const tab of homepage.exploreOffers.tabs) {
       if (tab?.offers) {
-        tab.offers = cap(tab.offers);
+        tab.offers = cap(tab.offers, SECTION_LIST_CAPS.exploreOffersPerTab);
       }
     }
   }
@@ -316,7 +343,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     }
 
     const sanitized = await sanitizeOutput(strapi, ctx, 'api::homepage.homepage', homepage);
-    dropUnpublishedOffers(sanitized);
+    dropDeadOffers(sanitized);
     capCuratedLists(sanitized);
     await attachOfferCounts(strapi, sanitized);
 

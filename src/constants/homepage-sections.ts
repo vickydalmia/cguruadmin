@@ -27,43 +27,57 @@ export const HOMEPAGE_SECTION_LABELS: HomepageSectionLabel[] = [
   {
     attr: 'popularStores',
     label: '2 · Popular Stores',
-    description: 'Store row directly under the hero: one featured store plus the popular stores list.',
+    description:
+      'Store row directly under the hero: one featured store plus up to 24 popular stores.',
   },
   {
     attr: 'topOffers',
     label: '3 · Top Offers',
-    description: 'Coupon banner cards (584×356 images) shown after Popular Stores.',
+    description:
+      'Latest coupon banner cards (up to 8, 584×356 images) after Popular Stores. ' +
+      'The site shows 4; the extras backfill automatically when an offer expires.',
   },
   {
     attr: 'topDeals',
     label: '4 · Top Deals',
-    description: 'Product Deal cards from the dedicated Deal schema, shown after Top Offers.',
+    description:
+      'Product Deal cards (up to 10) from the "Deals Of The Day" category. ' +
+      'The site shows 6; the extras backfill automatically when a deal expires.',
   },
   {
     attr: 'cgExclusive',
     label: '5 · CG Exclusive',
-    description: 'Exclusive coupon banners (768×370 images) after Top Deals.',
+    description:
+      'Coupon banners (up to 8, 768×370 images) from the "Exclusive Coupons" category. ' +
+      'The site shows 4; the extras backfill automatically when an offer expires.',
   },
   {
     attr: 'exploreOffers',
     label: '6 · Explore Offers',
-    description: 'Tabbed Coupon-offer grid (up to 8 category tabs) in the middle of the page.',
+    description:
+      'Tabbed Coupon-offer grid (up to 8 category tabs, up to 10 offers each). ' +
+      'The site shows 6 per tab; the extras backfill automatically when offers expire.',
   },
   {
     attr: 'newlyAdded',
     label: '7 · Fresh Drops (newly added)',
-    description: 'Tall coupon cards (354×646 images) for newly added stores and offers.',
+    description:
+      'Tall cards (up to 8, 354×646 images) showing the latest coupons. ' +
+      'The site shows 4; the extras backfill automatically when an offer expires.',
   },
   {
     attr: 'offersByBrand',
     label: '8 · Offers by Brand',
     description:
-      'Coupon offers associated with brands, shown lower on the page after Fresh Drops.',
+      'Coupon offers associated with brands (up to 7). The site shows 3; ' +
+      'the extras backfill automatically when an offer expires.',
   },
   {
     attr: 'bankOffers',
     label: '9 · Bank Offers',
-    description: 'Bank & card offer tiles (up to 6) after Offers by Brand.',
+    description:
+      'Up to 12 bank tiles — banks with the most published coupons first, then ' +
+      'zero-coupon banks alphabetically. The site shows 8. Each tile links to that bank\'s page.',
   },
   {
     attr: 'latestInsightsEnabled',

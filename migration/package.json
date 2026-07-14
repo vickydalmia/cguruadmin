@@ -8,7 +8,8 @@
     "build": "tsc",
     "migrate": "tsx src/index.ts",
     "migrate:phase": "tsx src/index.ts --phase",
-    "migrate:fresh": "tsx src/index.ts --clean"
+    "migrate:fresh": "tsx src/index.ts --clean",
+    "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",

@@ -9,6 +9,26 @@ const MAX_PAGE = 20;
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
 const MAX_CANDIDATES = MAX_PAGE * MAX_PAGE_SIZE;
+const GENERIC_SLUG_TERMS = new Set([
+  "bank",
+  "banks",
+  "brand",
+  "brands",
+  "category",
+  "categories",
+  "code",
+  "codes",
+  "coupon",
+  "coupons",
+  "deal",
+  "deals",
+  "offer",
+  "offers",
+  "promo",
+  "promos",
+  "store",
+  "stores",
+]);
 
 const GROUPS = [
   "stores",
@@ -390,33 +410,79 @@ function toPublicOffer(hit: any) {
   return result;
 }
 
-function offerFilters(query: string) {
+function offerMatchClauses(
+  query: string,
+  options: {
+    includeCouponCode?: boolean;
+    includePrimaryStore?: boolean;
+  } = {},
+) {
   const clauses = filterNeedles(queryVariants(query)).flatMap((variant) => {
     const contains = { $containsi: variant };
+    const slugPrefix = slugPrefixFilter(variant);
+    const relationClauses = ["stores", "brands", "categories", "banks"].flatMap(
+      (relation) => [
+        { [relation]: { name: contains } },
+        ...(slugPrefix ? [{ [relation]: { slug: slugPrefix } }] : []),
+      ],
+    );
     return [
       { title: contains },
-      { stores: { name: contains } },
-      { brands: { name: contains } },
-      { categories: { name: contains } },
-      { banks: { name: contains } },
+      ...(options.includeCouponCode ? [{ code: contains }] : []),
+      ...relationClauses,
+      ...(options.includePrimaryStore
+        ? [
+            { primaryStore: { name: contains } },
+            ...(slugPrefix
+              ? [{ primaryStore: { slug: slugPrefix } }]
+              : []),
+          ]
+        : []),
     ];
   });
+  return clauses;
+}
+
+function slugPrefixFilter(value: string) {
+  const slugNeedle = value
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
+  if (!slugNeedle || GENERIC_SLUG_TERMS.has(slugNeedle)) return null;
+  return { $startsWithi: slugNeedle };
+}
+
+function couponFilters(query: string) {
   return {
-    $and: [publishedOnlyFilters(), { $or: clauses }],
+    $and: [
+      publishedOnlyFilters(),
+      { $or: offerMatchClauses(query, { includeCouponCode: true }) },
+    ],
   };
 }
 
-function nameContainsFilter(query: string) {
+function entityContainsFilter(query: string) {
   const needles = filterNeedles(queryVariants(query));
   return {
-    $or: needles.map((variant) => ({ name: { $containsi: variant } })),
+    $or: needles.flatMap((variant) => {
+      const contains = { $containsi: variant };
+      const slugPrefix = slugPrefixFilter(variant);
+      return [
+        { name: contains },
+        ...(slugPrefix ? [{ slug: slugPrefix }] : []),
+      ];
+    }),
   };
 }
 
 function productDealFilters(query: string) {
   return {
     $and: [
-      offerFilters(query),
+      publishedOnlyFilters(),
+      {
+        $or: offerMatchClauses(query, { includePrimaryStore: true }),
+      },
       { salePrice: { $notNull: true, $gt: 0 } },
     ],
   };
@@ -429,7 +495,7 @@ async function findEntities(
   limit: number,
 ) {
   return await strapi.documents(config.uid as any).findMany({
-    filters: nameContainsFilter(query),
+    filters: entityContainsFilter(query),
     fields: [
       "name",
       "slug",
@@ -449,7 +515,7 @@ async function countEntities(
   query: string,
 ) {
   return await strapi.documents(config.uid as any).count({
-    filters: nameContainsFilter(query),
+    filters: entityContainsFilter(query),
   } as any);
 }
 
@@ -457,7 +523,7 @@ async function findCoupons(strapi: Core.Strapi, query: string, limit: number) {
   return await strapi.documents("api::coupon.coupon").findMany({
     // Both code and no-code variants are Coupon-schema records. CTA wording
     // never changes the backing entity or removes it from Coupon search.
-    filters: offerFilters(query),
+    filters: couponFilters(query),
     fields: ["title", "code", "couponType", "affiliateLink", "isPopular"],
     populate: couponPopulate,
     sort: [
@@ -471,7 +537,7 @@ async function findCoupons(strapi: Core.Strapi, query: string, limit: number) {
 
 async function countCoupons(strapi: Core.Strapi, query: string) {
   return await strapi.documents("api::coupon.coupon").count({
-    filters: offerFilters(query),
+    filters: couponFilters(query),
   } as any);
 }
 
@@ -599,7 +665,11 @@ async function preview(strapi: Core.Strapi, request: SearchRequest) {
   response.hasMore.deals = response.totals.deals > PREVIEW_OFFER_LIMIT;
 
   const matchedName =
-    response.stores[0]?.name ?? response.brands[0]?.name ?? request.query;
+    response.stores[0]?.name ??
+    response.brands[0]?.name ??
+    response.categories[0]?.name ??
+    response.banks[0]?.name ??
+    request.query;
   const labels = [
     matchedName + " coupons",
     matchedName + " deals",

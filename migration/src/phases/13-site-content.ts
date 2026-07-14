@@ -1,6 +1,11 @@
 import { unserialize } from "php-serialize";
 import { wpQuery } from "../db/wp-client.js";
 import { pgQuery, pgTransaction } from "../db/pg-client.js";
+import {
+  limitHomepageBankOffers,
+  MAX_HOMEPAGE_BANK_OFFERS,
+} from "../utils/homepage-bank-offers.js";
+import { HOMEPAGE_SEED_LIMITS } from "../utils/homepage-limits.js";
 import { ensureTermMapping } from "../utils/id-maps.js";
 import { resolveMediaRef } from "../utils/media-resolver.js";
 import {
@@ -548,7 +553,7 @@ async function publishedCouponsForCategory(
      WHERE c.published_at IS NOT NULL
        AND c.content_status = 'published'
      ORDER BY c.id DESC
-     LIMIT 8`,
+     LIMIT ${HOMEPAGE_SEED_LIMITS.exploreOffersPerTab}`,
     [categoryId]
   );
   return rows.map((row) => row.id);
@@ -744,7 +749,7 @@ async function backfillOffersByBrand(homepageId: number): Promise<string> {
        AND c.content_status = 'published'
        AND l."${couponsBrandsLnk.targetCol}" = ANY($1::int[])
      ORDER BY c.id DESC
-     LIMIT 4`,
+     LIMIT ${HOMEPAGE_SEED_LIMITS.offersByBrand}`,
     [[...brandIds]]
   );
   if (couponRows.length === 0) return "offersByBrand(skipped: no matching coupons)";
@@ -949,6 +954,12 @@ interface CategoryRow {
   slug: string;
 }
 
+/** Coupon plus its image file — required-image item slots reuse the coupon's
+ *  own art so sections render and homepage saves are never blocked; editors
+ *  can replace with Figma-sized art later (existing files are grandfathered
+ *  by the size validator). */
+type CouponWithImage = { couponId: number; imageFileId: number };
+
 interface HomepageData {
   banners: Banner[];
   heroDealIds: number[];
@@ -957,19 +968,56 @@ interface HomepageData {
   popularStores: StoreRow[];
   popularFeaturedLnk: Lnk | null;
   popularStoresLnk: Lnk | null;
+  topOfferCoupons: CouponWithImage[];
+  topOfferCouponLnk: Lnk | null;
   topDealIds: number[];
   dealListDealsLnk: Lnk | null;
-  exclusiveCouponIds: number[];
+  exclusiveCoupons: CouponWithImage[];
   exclusiveCouponLnk: Lnk | null;
   exploreOfferTabs: Array<{ category: CategoryRow; couponIds: number[] }>;
   exploreOfferTabCategoryLnk: Lnk | null;
   exploreOfferTabOffersLnk: Lnk | null;
-  newlyAddedCouponIds: number[];
+  newlyAddedCoupons: CouponWithImage[];
   cardItemCouponLnk: Lnk | null;
   brandOfferIds: number[];
   offerListOffersLnk: Lnk | null;
   bankOffers: Array<{ bankId: number; subtitle: string | null }>;
   bankItemBankLnk: Lnk | null;
+}
+
+/** Newest published coupons that HAVE an image, with the image's file id.
+ *  extraJoin/extraWhere refine the pool (category membership, brand link). */
+async function newestCouponsWithImage(
+  limit: number,
+  extraJoin = "",
+  extraWhere = "",
+  params: unknown[] = []
+): Promise<CouponWithImage[]> {
+  const rows = await pgQuery<{ id: number; file_id: number }>(
+    `SELECT c.id, MIN(m.file_id) AS file_id
+     FROM "coupons" c
+     JOIN "files_related_mph" m
+       ON m.related_id = c.id
+      AND m.related_type = 'api::coupon.coupon'
+      AND m.field = 'image'
+     ${extraJoin}
+     WHERE c.published_at IS NOT NULL
+       AND c.content_status = 'published'
+       ${extraWhere}
+     GROUP BY c.id, c.published_at
+     ORDER BY c.published_at DESC
+     LIMIT ${Number(limit)}`,
+    params
+  );
+  return rows.map((r) => ({ couponId: r.id, imageFileId: r.file_id }));
+}
+
+async function categoryIdBySlug(slug: string): Promise<number | null> {
+  const rows = await pgQuery<{ id: number }>(
+    `SELECT id FROM "categories" WHERE slug = $1 AND published_at IS NOT NULL LIMIT 1`,
+    [slug]
+  );
+  return rows[0]?.id ?? null;
 }
 
 async function seedHomepage(
@@ -1026,44 +1074,89 @@ async function gatherHomepageData(
      WHERE published_at IS NOT NULL
        AND content_status = 'published'
      ORDER BY is_popular DESC, published_at DESC
-     LIMIT 4`
+     LIMIT ${HOMEPAGE_SEED_LIMITS.heroProducts}`
   );
 
-  // ── topDeals: 6 newest published popular deals ──
-  const topDeals = await pgQuery<{ id: number }>(
-    `SELECT id FROM "deals"
-     WHERE published_at IS NOT NULL
-       AND content_status = 'published'
-       AND is_popular = true
-     ORDER BY published_at DESC
-     LIMIT 6`
-  );
+  // ── topOffers: newest published coupons (image required by the schema,
+  //    so only coupons with art qualify — 97% of the catalog) ──
+  let topOfferCoupons: CouponWithImage[] = [];
+  if (hasTable("coupons") && hasTable("files_related_mph")) {
+    topOfferCoupons = await newestCouponsWithImage(HOMEPAGE_SEED_LIMITS.topOffers);
+  } else {
+    logger.warn("coupons/files tables not found — topOffers section will be empty");
+  }
 
-  // ── cgExclusive / newlyAdded: need coupons.offer_type ──
-  let exclusiveCouponIds: number[] = [];
-  let newlyAddedCouponIds: number[] = [];
-  if (hasTable("coupons") && (await hasColumn("coupons", "offer_type"))) {
-    const exclusive = await pgQuery<{ id: number }>(
-      `SELECT id FROM "coupons"
+  // ── topDeals: newest published deals from the Deals Of The Day
+  //    category; falls back to popular deals when the category or its link
+  //    table is unavailable ──
+  const dealsCategoriesLnk = await detectLnk("deals", "categories", "category");
+  const dealOfTheDayId = await categoryIdBySlug("deal-of-the-day");
+  let topDeals: Array<{ id: number }> = [];
+  if (dealsCategoriesLnk && dealOfTheDayId != null) {
+    topDeals = await pgQuery<{ id: number }>(
+      `SELECT d.id FROM "deals" d
+       JOIN "${dealsCategoriesLnk.table}" l
+         ON l."${dealsCategoriesLnk.sourceCol}" = d.id
+        AND l."${dealsCategoriesLnk.targetCol}" = $1
+       WHERE d.published_at IS NOT NULL
+         AND d.content_status = 'published'
+       ORDER BY d.published_at DESC
+       LIMIT ${HOMEPAGE_SEED_LIMITS.topDeals}`,
+      [dealOfTheDayId]
+    );
+  }
+  if (topDeals.length === 0) {
+    logger.warn(
+      "topDeals: 'deal-of-the-day' category empty or missing — falling back to newest popular deals"
+    );
+    topDeals = await pgQuery<{ id: number }>(
+      `SELECT id FROM "deals"
        WHERE published_at IS NOT NULL
          AND content_status = 'published'
-         AND offer_type = 'exclusive'
+         AND is_popular = true
        ORDER BY published_at DESC
-       LIMIT 4`
+       LIMIT ${HOMEPAGE_SEED_LIMITS.topDeals}`
     );
-    exclusiveCouponIds = exclusive.map((r) => r.id);
-    const newlyAdded = await pgQuery<{ id: number }>(
-      `SELECT id FROM "coupons"
-       WHERE published_at IS NOT NULL
-         AND content_status = 'published'
-         AND offer_type = 'newly_added'
-       ORDER BY published_at DESC
-       LIMIT 4`
+  }
+
+  // ── cgExclusive: newest coupons from the Exclusive Coupons category
+  //    (falls back to the offer_type flag); newlyAdded: newest coupons of
+  //    any kind. Counts come from HOMEPAGE_SEED_LIMITS. Both slots require
+  //    an image, reused from the coupon. ──
+  let exclusiveCoupons: CouponWithImage[] = [];
+  let newlyAddedCoupons: CouponWithImage[] = [];
+  if (hasTable("coupons") && hasTable("files_related_mph")) {
+    const couponsCategoriesLnkForExclusive = await detectLnk(
+      "coupons",
+      "categories",
+      "category"
     );
-    newlyAddedCouponIds = newlyAdded.map((r) => r.id);
+    const exclusiveCategoryId = await categoryIdBySlug("exclusive-coupons");
+    if (couponsCategoriesLnkForExclusive && exclusiveCategoryId != null) {
+      exclusiveCoupons = await newestCouponsWithImage(
+        HOMEPAGE_SEED_LIMITS.cgExclusive,
+        `JOIN "${couponsCategoriesLnkForExclusive.table}" cat
+           ON cat."${couponsCategoriesLnkForExclusive.sourceCol}" = c.id
+          AND cat."${couponsCategoriesLnkForExclusive.targetCol}" = $1`,
+        "",
+        [exclusiveCategoryId]
+      );
+    }
+    if (exclusiveCoupons.length === 0 && (await hasColumn("coupons", "offer_type"))) {
+      logger.warn(
+        "cgExclusive: 'exclusive-coupons' category empty or missing — falling back to offer_type='exclusive'"
+      );
+      exclusiveCoupons = await newestCouponsWithImage(
+        HOMEPAGE_SEED_LIMITS.cgExclusive,
+        "",
+        "AND c.offer_type = 'exclusive'"
+      );
+    }
+
+    newlyAddedCoupons = await newestCouponsWithImage(HOMEPAGE_SEED_LIMITS.newlyAdded);
   } else {
     logger.warn(
-      "coupons.offer_type column not found — cgExclusive/newlyAdded sections will be skipped (run Phase 12 schema first)"
+      "coupons/files tables not found — cgExclusive/newlyAdded sections will be skipped"
     );
   }
 
@@ -1084,7 +1177,7 @@ async function gatherHomepageData(
          WHERE c.published_at IS NOT NULL
            AND c.content_status = 'published'
          ORDER BY c.published_at DESC
-         LIMIT 8`,
+         LIMIT ${HOMEPAGE_SEED_LIMITS.exploreOffersPerTab}`,
         [category.id]
       );
       if (coupons.length === 0) {
@@ -1097,7 +1190,7 @@ async function gatherHomepageData(
     }
   }
 
-  // ── offersByBrand: 4 newest published Coupon entities with a brand relation ──
+  // ── offersByBrand: newest published Coupon entities with a brand relation ──
   let brandOfferIds: number[] = [];
   const couponsBrandsLnk = await detectLnk("coupons", "brands", "brand");
   if (couponsBrandsLnk) {
@@ -1110,34 +1203,42 @@ async function gatherHomepageData(
            WHERE b."${couponsBrandsLnk.sourceCol}" = c.id
          )
        ORDER BY c.published_at DESC
-       LIMIT 4`
+       LIMIT ${HOMEPAGE_SEED_LIMITS.offersByBrand}`
     );
     brandOfferIds = rows.map((r) => r.id);
   } else {
     logger.warn("coupons_brands_lnk not found — offersByBrand section skipped");
   }
 
-  // ── bankOffers: up to 6 banks by published-coupon count ──
+  // ── bankOffers: up to the component-schema maximum of 32 published
+  //    banks. Banks with the most published coupons come first; zero-coupon
+  //    banks trail alphabetically. ──
   let bankOffers: Array<{ bankId: number; subtitle: string | null }> = [];
-  const couponsBanksLnk = await detectLnk("coupons", "banks", "bank");
-  if (couponsBanksLnk && hasTable("banks")) {
+  if (hasTable("banks")) {
+    const couponsBanksLnk = await detectLnk("coupons", "banks", "bank");
+    const countJoin = couponsBanksLnk
+      ? `LEFT JOIN "${couponsBanksLnk.table}" l ON l."${couponsBanksLnk.targetCol}" = b.id
+         LEFT JOIN "coupons" c ON c.id = l."${couponsBanksLnk.sourceCol}"
+           AND c.published_at IS NOT NULL
+           AND c.content_status = 'published'`
+      : "";
+    const countExpr = couponsBanksLnk ? "COUNT(c.id)" : "0";
     const rows = await pgQuery<{ id: number; short_description: string | null }>(
       `SELECT b.id, b.short_description
        FROM "banks" b
-       JOIN "${couponsBanksLnk.table}" l ON l."${couponsBanksLnk.targetCol}" = b.id
-       JOIN "coupons" c ON c.id = l."${couponsBanksLnk.sourceCol}"
-         AND c.published_at IS NOT NULL
-         AND c.content_status = 'published'
-       GROUP BY b.id, b.short_description
-       ORDER BY COUNT(*) DESC
-       LIMIT 6`
+       ${countJoin}
+       WHERE b.published_at IS NOT NULL
+       GROUP BY b.id, b.short_description, b.name
+       ORDER BY ${countExpr} DESC, b.name ASC
+       LIMIT $1`,
+      [MAX_HOMEPAGE_BANK_OFFERS]
     );
-    bankOffers = rows.map((r) => ({
+    bankOffers = limitHomepageBankOffers(rows).map((r) => ({
       bankId: r.id,
       subtitle: truncate(clean(r.short_description), 80),
     }));
   } else {
-    logger.warn("coupons_banks_lnk not found — bankOffers section skipped");
+    logger.warn("banks table not found — bankOffers section skipped");
   }
 
   return {
@@ -1145,7 +1246,7 @@ async function gatherHomepageData(
     heroDealIds: heroDeals.map((r) => r.id),
     heroDealLnk: await detectLnk("components_home_hero_products", "deal", "deal"),
     popularFeatured: curatedStores[0] ?? null,
-    popularStores: curatedStores.slice(1, 13),
+    popularStores: curatedStores.slice(1, 1 + HOMEPAGE_SEED_LIMITS.popularStores),
     popularFeaturedLnk: await detectLnk(
       "components_home_popular_stores",
       "featured_store",
@@ -1156,9 +1257,15 @@ async function gatherHomepageData(
       "stores",
       "store"
     ),
+    topOfferCoupons,
+    topOfferCouponLnk: await detectLnk(
+      "components_home_top_offer_items",
+      "coupon",
+      "coupon"
+    ),
     topDealIds: topDeals.map((r) => r.id),
     dealListDealsLnk: await detectLnk("components_home_deal_lists", "deals", "deal"),
-    exclusiveCouponIds,
+    exclusiveCoupons,
     exclusiveCouponLnk: await detectLnk(
       "components_home_exclusive_items",
       "coupon",
@@ -1175,7 +1282,7 @@ async function gatherHomepageData(
       "offers",
       "coupon"
     ),
-    newlyAddedCouponIds,
+    newlyAddedCoupons,
     cardItemCouponLnk: await detectLnk(
       "components_home_coupon_card_items",
       "coupon",
@@ -1284,10 +1391,41 @@ async function buildHomepageTree(
     counts.push("hero(skipped)");
   }
 
-  // ── topOffers: enabled=false, no items (no WP source for banner art) ──
-  if (missingTables("components_home_top_offers").length === 0) {
+  // ── topOffers: newest coupons, each item reusing the coupon's image as the
+  //    banner (schema requires one; editors can swap in 584×356 art later) ──
+  if (
+    missingTables(
+      "components_home_top_offers",
+      "components_home_top_offer_items",
+      "components_home_top_offers_cmps"
+    ).length === 0 &&
+    data.topOfferCouponLnk &&
+    data.topOfferCoupons.length > 0
+  ) {
+    const id = await insertRow("components_home_top_offers", {
+      enabled: true,
+      heading: "Top Offers",
+    });
+    await addCmp("homepages_cmps", homepageId, id, "home.top-offers", "topOffers", 1);
+    for (let i = 0; i < data.topOfferCoupons.length; i++) {
+      const offer = data.topOfferCoupons[i];
+      const itemId = await insertRow("components_home_top_offer_items", {});
+      await addCmp(
+        "components_home_top_offers_cmps",
+        id,
+        itemId,
+        "home.top-offer-item",
+        "items",
+        i + 1
+      );
+      await linkRel(data.topOfferCouponLnk, itemId, offer.couponId);
+      await linkMedia(offer.imageFileId, itemId, "home.top-offer-item", "banner");
+    }
+    counts.push(`topOffers(${data.topOfferCoupons.length} items)`);
+  } else if (missingTables("components_home_top_offers").length === 0) {
     const id = await insertRow("components_home_top_offers", { enabled: false });
     await addCmp("homepages_cmps", homepageId, id, "home.top-offers", "topOffers", 1);
+    skip("topOffers: no coupons with images or item tables missing — section disabled");
     counts.push("topOffers(disabled)");
   } else {
     skip("components_home_top_offers missing — topOffers skipped");
@@ -1338,7 +1476,7 @@ async function buildHomepageTree(
   );
 
   // ── cgExclusive ──
-  if (data.exclusiveCouponIds.length === 0) {
+  if (data.exclusiveCoupons.length === 0) {
     if (logSkips) logger.info("cgExclusive: 0 exclusive coupons — section skipped");
     counts.push("cgExclusive(skipped: 0 coupons)");
   } else if (
@@ -1351,7 +1489,8 @@ async function buildHomepageTree(
   ) {
     const id = await insertRow("components_home_cg_exclusives", { enabled: true });
     await addCmp("homepages_cmps", homepageId, id, "home.cg-exclusive", "cgExclusive", 1);
-    for (let i = 0; i < data.exclusiveCouponIds.length; i++) {
+    for (let i = 0; i < data.exclusiveCoupons.length; i++) {
+      const offer = data.exclusiveCoupons[i];
       const itemId = await insertRow("components_home_exclusive_items", {});
       await addCmp(
         "components_home_cg_exclusives_cmps",
@@ -1361,9 +1500,11 @@ async function buildHomepageTree(
         "items",
         i + 1
       );
-      await linkRel(data.exclusiveCouponLnk, itemId, data.exclusiveCouponIds[i]);
+      await linkRel(data.exclusiveCouponLnk, itemId, offer.couponId);
+      // bannerOverride is validator-required (768×370) — reuse the coupon art.
+      await linkMedia(offer.imageFileId, itemId, "home.exclusive-item", "bannerOverride");
     }
-    counts.push(`cgExclusive(${data.exclusiveCouponIds.length} items)`);
+    counts.push(`cgExclusive(${data.exclusiveCoupons.length} items)`);
   } else {
     skip("cg-exclusive component tables/link missing — cgExclusive skipped");
     counts.push("cgExclusive(skipped)");
@@ -1409,9 +1550,9 @@ async function buildHomepageTree(
     counts.push("exploreOffers(skipped)");
   }
 
-  // ── newlyAdded ──
-  if (data.newlyAddedCouponIds.length === 0) {
-    if (logSkips) logger.info("newlyAdded: 0 newly_added coupons — section skipped");
+  // ── newlyAdded (Fresh Drops) ──
+  if (data.newlyAddedCoupons.length === 0) {
+    if (logSkips) logger.info("newlyAdded: 0 coupons with images — section skipped");
     counts.push("newlyAdded(skipped: 0 coupons)");
   } else if (
     missingTables(
@@ -1423,7 +1564,8 @@ async function buildHomepageTree(
   ) {
     const id = await insertRow("components_home_newly_addeds", { enabled: true });
     await addCmp("homepages_cmps", homepageId, id, "home.newly-added", "newlyAdded", 1);
-    for (let i = 0; i < data.newlyAddedCouponIds.length; i++) {
+    for (let i = 0; i < data.newlyAddedCoupons.length; i++) {
+      const offer = data.newlyAddedCoupons[i];
       const itemId = await insertRow("components_home_coupon_card_items", {});
       await addCmp(
         "components_home_newly_addeds_cmps",
@@ -1433,9 +1575,11 @@ async function buildHomepageTree(
         "items",
         i + 1
       );
-      await linkRel(data.cardItemCouponLnk, itemId, data.newlyAddedCouponIds[i]);
+      await linkRel(data.cardItemCouponLnk, itemId, offer.couponId);
+      // cardImage is schema-required (354×646) — reuse the coupon art.
+      await linkMedia(offer.imageFileId, itemId, "home.coupon-card-item", "cardImage");
     }
-    counts.push(`newlyAdded(${data.newlyAddedCouponIds.length} items)`);
+    counts.push(`newlyAdded(${data.newlyAddedCoupons.length} items)`);
   } else {
     skip("newly-added component tables/link missing — newlyAdded skipped");
     counts.push("newlyAdded(skipped)");
@@ -1455,7 +1599,7 @@ async function buildHomepageTree(
 
   // ── bankOffers ──
   if (data.bankOffers.length === 0) {
-    if (logSkips) logger.info("bankOffers: 0 banks with published coupons — section skipped");
+    if (logSkips) logger.info("bankOffers: 0 published banks — section skipped");
     counts.push("bankOffers(skipped: 0 banks)");
   } else if (
     missingTables(
@@ -1771,7 +1915,7 @@ async function getCuratedStores(): Promise<StoreRow[]> {
        AND c.content_status = 'published'
      GROUP BY s.id, s.name
      ORDER BY COUNT(*) DESC
-     LIMIT 16`
+     LIMIT ${1 + HOMEPAGE_SEED_LIMITS.popularStores}`
   );
   logger.info(
     `curated stores: options_featured_stores empty/unmapped — fallback to top ${fallback.length} stores by coupon count`

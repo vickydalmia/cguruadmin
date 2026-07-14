@@ -130,20 +130,31 @@ describe('store custom service relatedStores', () => {
       harness.service.relatedStores('current-store'),
     ).resolves.toMatchObject({ stores: [] });
 
+    // publishedOnlyFilters(): status check plus a $and-wrapped expiry window
+    // (wrapped so it never clobbers a caller's own top-level $or — the deal
+    // filter below is exactly that case).
+    const publishedShape = {
+      contentStatus: { $eq: 'published' },
+      $and: [
+        {
+          $or: [{ expiresAt: { $null: true } }, { expiresAt: { $gt: expect.any(String) } }],
+        },
+      ],
+    };
     expect(couponFindMany.mock.calls[0]?.[0].filters).toEqual({
       stores: { documentId: 'store-current' },
-      contentStatus: { $eq: 'published' },
+      ...publishedShape,
     });
     expect(dealFindMany.mock.calls[0]?.[0].filters).toEqual({
       $or: [
         { stores: { documentId: 'store-current' } },
         { primaryStore: { documentId: 'store-current' } },
       ],
-      contentStatus: { $eq: 'published' },
+      ...publishedShape,
     });
     expect(couponFindMany.mock.calls[1]?.[0].filters).toEqual({
       categories: { documentId: { $in: ['cat-a', 'cat-b'] } },
-      contentStatus: { $eq: 'published' },
+      ...publishedShape,
     });
   });
 

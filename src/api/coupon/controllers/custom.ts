@@ -257,16 +257,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     };
     const dealsQuery = await sanitizeDocumentQuery(strapi, ctx, 'api::deal.deal', {
       filters,
-      populate: {
-        dealImage: true,
-        tags: true,
-        stores: true,
-        banks: true,
-        categories: categoryRef,
-        brands: true,
-        cashbackItems: true,
-        primaryStore: true,
-      },
+      populate: DEAL_PUBLIC_POPULATE,
       sort: [{ isPopular: 'desc' }, { publishedAt: 'desc' }, { updatedAt: 'desc' }],
       start: (page - 1) * pageSize,
       limit: pageSize,

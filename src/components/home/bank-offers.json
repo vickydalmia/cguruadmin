@@ -21,7 +21,7 @@
       "type": "component",
       "repeatable": true,
       "component": "home.bank-offer-item",
-      "max": 6
+      "max": 12
     }
   }
 }

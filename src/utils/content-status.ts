@@ -27,6 +27,22 @@ export function computeContentStatus(input: {
   return "published";
 }
 
+// Public visibility filter for coupons/deals. Besides contentStatus, it
+// excludes offers whose expiresAt has already passed — the 5-minute cron
+// flips contentStatus eventually, but queries must not serve dead offers in
+// the window before it runs. The expiry clause is wrapped in $and because
+// several call sites spread this object into filters that already carry a
+// top-level $or (e.g. store service), which a bare $or key would clobber.
 export function publishedOnlyFilters() {
-  return { contentStatus: { $eq: "published" as const } };
+  return {
+    contentStatus: { $eq: "published" as const },
+    $and: [
+      {
+        $or: [
+          { expiresAt: { $null: true } },
+          { expiresAt: { $gt: new Date().toISOString() } },
+        ],
+      },
+    ],
+  };
 }
