@@ -803,6 +803,7 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
       Schema.Attribute.Private;
     dealsByBrand: Schema.Attribute.Component<'home.deal-list', false>;
     exploreDeals: Schema.Attribute.Component<'home.explore-deals', false>;
+    exploreOffers: Schema.Attribute.Component<'home.explore-offers', false>;
     faq: Schema.Attribute.Component<'home.faq-block', false>;
     hero: Schema.Attribute.Component<'home.hero-section', false>;
     howItWorks: Schema.Attribute.Component<'home.how-it-works', false>;
@@ -816,6 +817,7 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
     > &
       Schema.Attribute.Private;
     newlyAdded: Schema.Attribute.Component<'home.newly-added', false>;
+    offersByBrand: Schema.Attribute.Component<'home.offer-list', false>;
     popularSearches: Schema.Attribute.Component<'home.popular-searches', false>;
     popularStores: Schema.Attribute.Component<'home.popular-stores', false>;
     publishedAt: Schema.Attribute.DateTime;

@@ -117,7 +117,7 @@ Logs are written to:
 
 ## Migration Phases
 
-The migration runs sequential phases (00–14). Each phase checkpoints on completion so the process can resume after interruption.
+The migration runs sequential phases (00–14, including compatibility phase 13a). Each phase checkpoints on completion so the process can resume after interruption.
 
 ### Phase 00 — Preflight
 
@@ -197,11 +197,21 @@ Only posts present in the persisted ID maps (i.e., actually migrated) are touche
 Seeds the four Strapi single types the frontend needs:
 
 - `global` — header/footer codes, Amazon deal toggle, and the Amazon top banner (attachment resolved via the media map) from WP ACF option keys (`options_header_code`, `options_footer_code`, etc.).
-- `homepage` — created as a **single published row** (draftAndPublish is disabled on all four singles — homepage, menu, footer, global — they are publish-only), with the full component tree built once. Also seeds `title: "Homepage"` for the admin entry header. Curated sections: hero banners from the `options_slider_features` ACF repeater, hero products / topDeals / dealsByBrand from migrated deals, cgExclusive / newlyAdded from coupons by `offer_type`, popularStores from `options_featured_stores` (fallback: top stores by published-coupon count), exploreDeals tabs by fuzzy category slug match, bankOffers by published-coupon count, plus How It Works and FAQ copy mirrored from the frontend.
+- `homepage` — created as a **single published row** (draftAndPublish is disabled on all four singles — homepage, menu, footer, global — they are publish-only), with the full component tree built once. Also seeds `title: "Homepage"` for the admin entry header. Curated sections: hero banners from the `options_slider_features` ACF repeater; hero products and Top Deals from migrated Deal entities; CG Exclusive, Fresh Drops, Explore Offers, and Offers By Brand from Coupon entities; Popular Stores from `options_featured_stores` (fallback: top stores by published-coupon count); bank offers by published-coupon count; plus How It Works and FAQ copy mirrored from the frontend.
 - `menu` — topStores relation (same curated store list), one category section per explore category with its top stores, and the fixed extra nav items.
 - `footer` — link sections, social links, countries, and partner card mirrored from the frontend `footer-data.ts`; Popular Stores labels are resolved to real store relations where a matching store name exists.
 
 All component and relation link table names are verified against `information_schema` before writing; anything missing (schema not migrated yet) is skipped with a clear warning. Each single type is skipped entirely if its table already has a row, so re-runs are safe.
+
+### Phase 13a — Homepage Coupon Offer Sections
+
+Backfills existing homepages created before the Coupon-backed `exploreOffers` and `offersByBrand` components existed. It preserves the legacy section/category/brand criteria, selects real Coupons whose migration `contentStatus` is `published`, clones safe View All copy, and writes the new component trees transactionally. It never converts a Deal ID into a Coupon ID and is idempotent: populated new sections are skipped. Concurrent runs serialize on the homepage row. Missing Strapi component or relation infrastructure fails the phase so it is not checkpointed; apply the Strapi schemas first and rerun. The legacy Deal-backed fields remain available for one frontend compatibility release.
+
+Run only this compatibility phase after deploying the new Strapi component schemas:
+
+```bash
+npm run migrate -- --phase 13a-homepage-offer-sections
+```
 
 ### Phase 14 — Media Optimize (backfill)
 

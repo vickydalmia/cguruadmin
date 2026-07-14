@@ -20,7 +20,7 @@
     "p-limit": "^6.1.0",
     "pg": "^8.12.0",
     "php-serialize": "^5.0.1",
-    "sanitize-html": "^2.13.0",
+    "sanitize-html": "^2.17.6",
     "sharp": "^0.33.4",
     "ssh2": "^1.17.0",
     "winston": "^3.13.0"

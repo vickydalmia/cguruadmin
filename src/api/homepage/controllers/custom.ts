@@ -9,6 +9,13 @@ const CATEGORY_FIELDS = ['name', 'slug', 'shortDescription'];
 const BANK_FIELDS = ['name', 'slug', 'shortDescription', 'logoAlt'];
 const BRAND_FIELDS = ['name', 'slug', 'shortDescription', 'logoAlt'];
 
+// Relations in homepage components are curator-managed and therefore have no
+// database-level cardinality bound. Keep both the query and the returned
+// payload bounded; the post-fetch cap below remains as a defensive fallback.
+const MAX_LIST_ITEMS = 16;
+const PUBLISHED_OFFER_FILTER = { contentStatus: { $eq: 'published' } } as const;
+const NEWEST_FIRST = ['publishedAt:desc'] as const;
+
 // Never ship richtext `content` to the homepage payload.
 const COUPON_FIELDS = [
   'title',
@@ -59,6 +66,31 @@ const dealRef = {
   },
 };
 
+const publishedCouponRef = {
+  ...couponRef,
+  filters: PUBLISHED_OFFER_FILTER,
+};
+
+const publishedDealRef = {
+  ...dealRef,
+  filters: PUBLISHED_OFFER_FILTER,
+};
+
+// Strapi's nested-populate query converter supports `limit` even though the
+// public Document Service nested-populate type currently omits pagination.
+// HOMEPAGE_POPULATE is passed through an explicit `any` boundary below.
+const publishedCouponListRef = {
+  ...publishedCouponRef,
+  sort: NEWEST_FIRST,
+  limit: MAX_LIST_ITEMS,
+};
+
+const publishedDealListRef = {
+  ...publishedDealRef,
+  sort: NEWEST_FIRST,
+  limit: MAX_LIST_ITEMS,
+};
+
 const bannerSlides = {
   populate: { desktopImage: true, mobileImage: true },
 };
@@ -68,29 +100,57 @@ const HOMEPAGE_POPULATE = {
   hero: {
     populate: {
       banners: bannerSlides,
-      products: { populate: { deal: dealRef, imageOverride: true } },
+      products: { populate: { deal: publishedDealRef, imageOverride: true } },
     },
   },
   topOffers: {
-    populate: { viewAllCta: true, items: { populate: { coupon: couponRef, banner: true } } },
+    populate: {
+      viewAllCta: true,
+      items: { populate: { coupon: publishedCouponRef, banner: true } },
+    },
   },
   popularStores: {
     populate: { viewAllCta: true, featuredStore: storeRef, stores: storeRef },
   },
-  topDeals: { populate: { viewAllCta: true, deals: dealRef } },
+  topDeals: { populate: { viewAllCta: true, deals: publishedDealListRef } },
   cgExclusive: {
-    populate: { viewAllCta: true, items: { populate: { coupon: couponRef, bannerOverride: true } } },
+    populate: {
+      viewAllCta: true,
+      items: { populate: { coupon: publishedCouponRef, bannerOverride: true } },
+    },
   },
   exploreDeals: {
     populate: {
       viewAllCta: true,
-      tabs: { populate: { viewAllCta: true, category: categoryRef, deals: dealRef } },
+      tabs: {
+        populate: {
+          viewAllCta: true,
+          category: categoryRef,
+          deals: publishedDealListRef,
+        },
+      },
+    },
+  },
+  exploreOffers: {
+    populate: {
+      viewAllCta: true,
+      tabs: {
+        populate: {
+          viewAllCta: true,
+          category: categoryRef,
+          offers: publishedCouponListRef,
+        },
+      },
     },
   },
   newlyAdded: {
-    populate: { viewAllCta: true, items: { populate: { coupon: couponRef, cardImage: true } } },
+    populate: {
+      viewAllCta: true,
+      items: { populate: { coupon: publishedCouponRef, cardImage: true } },
+    },
   },
-  dealsByBrand: { populate: { viewAllCta: true, deals: dealRef } },
+  dealsByBrand: { populate: { viewAllCta: true, deals: publishedDealListRef } },
+  offersByBrand: { populate: { viewAllCta: true, offers: publishedCouponListRef } },
   bankOffers: { populate: { viewAllCta: true, items: { populate: { bank: bankRef } } } },
   howItWorks: { populate: { steps: true, features: true } },
   faq: { populate: { items: true } },
@@ -145,6 +205,16 @@ function dropUnpublishedOffers(homepage: any) {
       section.items = section.items.filter((i: any) => !i.coupon || isPublished(i.coupon));
     }
   }
+  if (homepage.offersByBrand?.offers) {
+    homepage.offersByBrand.offers = homepage.offersByBrand.offers.filter(isPublished);
+  }
+  if (homepage.exploreOffers?.tabs) {
+    for (const tab of homepage.exploreOffers.tabs) {
+      if (tab?.offers) {
+        tab.offers = tab.offers.filter(isPublished);
+      }
+    }
+  }
   for (const key of ['topDeals', 'dealsByBrand']) {
     const section = homepage[key];
     if (section?.deals) {
@@ -165,8 +235,6 @@ function dropUnpublishedOffers(homepage: any) {
 // `max` only exists for repeatable components), so cap them here to keep the
 // payload and the per-store count queries bounded no matter what an admin
 // attaches in the CMS.
-const MAX_LIST_ITEMS = 16;
-
 const cap = (arr: any) => (Array.isArray(arr) ? arr.slice(0, MAX_LIST_ITEMS) : arr);
 
 function capCuratedLists(homepage: any) {
@@ -185,6 +253,16 @@ function capCuratedLists(homepage: any) {
     for (const tab of homepage.exploreDeals.tabs) {
       if (tab?.deals) {
         tab.deals = cap(tab.deals);
+      }
+    }
+  }
+  if (homepage.offersByBrand?.offers) {
+    homepage.offersByBrand.offers = cap(homepage.offersByBrand.offers);
+  }
+  if (homepage.exploreOffers?.tabs) {
+    for (const tab of homepage.exploreOffers.tabs) {
+      if (tab?.offers) {
+        tab.offers = cap(tab.offers);
       }
     }
   }

@@ -1,0 +1,27 @@
+{
+  "collectionName": "components_home_explore_offers",
+  "info": {
+    "displayName": "Explore Offers Section",
+    "icon": "grid"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string"
+    },
+    "viewAllCta": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.cta"
+    },
+    "tabs": {
+      "type": "component",
+      "repeatable": true,
+      "component": "home.explore-offer-tab",
+      "max": 8
+    }
+  }
+}

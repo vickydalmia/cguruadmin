@@ -418,7 +418,7 @@ export async function runSiteContent(): Promise<void> {
   // Curated store list shared by homepage.popularStores and menu.topStores
   const curatedStores = await getCuratedStores();
 
-  // Explore categories shared by homepage.exploreDeals and menu.categorySections
+  // Explore categories shared by homepage.exploreOffers and menu.categorySections
   const exploreCategories = await getExploreCategories();
 
   // Each single type is atomic: a crash mid-tree rolls back the root row,
@@ -430,6 +430,423 @@ export async function runSiteContent(): Promise<void> {
 
   logger.info("Site content summary:");
   for (const line of summary) logger.info(`  ${line}`);
+}
+
+type ComponentLink = {
+  cmp_id: number;
+  order: number;
+};
+
+type LegacySectionRow = {
+  enabled: boolean | null;
+  heading: string | null;
+};
+
+type LegacyExploreTabRow = {
+  id: number;
+  label_override: string | null;
+  order: number;
+};
+
+function phase13aInfrastructureError(context: string, missing: string[]): Error {
+  return new Error(
+    `Phase 13a cannot safely backfill ${context}: missing required infrastructure ` +
+      `(${missing.join(", ")}). Apply the Strapi schemas before rerunning this phase.`
+  );
+}
+
+function requirePhase13aTables(context: string, ...tables: string[]): void {
+  const missing = missingTables(...tables);
+  if (missing.length > 0) throw phase13aInfrastructureError(context, missing);
+}
+
+async function componentLink(
+  table: string,
+  entityId: number,
+  field: string
+): Promise<ComponentLink | null> {
+  if (!hasTable(table)) return null;
+  const rows = await pgQuery<ComponentLink>(
+    `SELECT cmp_id, "order" FROM "${table}"
+     WHERE entity_id = $1 AND field = $2
+     ORDER BY "order" ASC LIMIT 1`,
+    [entityId, field]
+  );
+  return rows[0] ?? null;
+}
+
+function migratedOfferHeading(
+  heading: string | null,
+  fallback: string
+): string {
+  const value = clean(heading);
+  if (!value) return fallback;
+  return value.replace(/\bDeals\b/gi, "Offers").replace(/\bDeal\b/gi, "Offer");
+}
+
+async function cloneViewAllCta(
+  sourceCmpsTable: string,
+  sourceEntityId: number,
+  targetCmpsTable: string,
+  targetEntityId: number
+): Promise<void> {
+  requirePhase13aTables(
+    "View All CTA components",
+    sourceCmpsTable,
+    targetCmpsTable,
+    "components_shared_ctas"
+  );
+  const source = await componentLink(sourceCmpsTable, sourceEntityId, "viewAllCta");
+  if (!source) return;
+  const rows = await pgQuery<{ label: string | null; url: string | null }>(
+    `SELECT label, url FROM "components_shared_ctas" WHERE id = $1 LIMIT 1`,
+    [source.cmp_id]
+  );
+  const cta = rows[0];
+  if (!cta) return;
+  const label = migratedOfferHeading(cta.label, "View All Offers");
+  const url = cta.url === "/deals/" ? "/offers/" : cta.url;
+  const ctaId = await insertRow("components_shared_ctas", { label, url });
+  await addCmp(
+    targetCmpsTable,
+    targetEntityId,
+    ctaId,
+    "shared.cta",
+    "viewAllCta",
+    1
+  );
+}
+
+async function relationTargetId(
+  relation: Lnk,
+  sourceId: number
+): Promise<number | null> {
+  return (await relatedIds(relation, sourceId))[0] ?? null;
+}
+
+async function relatedIds(relation: Lnk, sourceId: number): Promise<number[]> {
+  const orderSql = relation.ordCols[0] ? `"${relation.ordCols[0]}" ASC, ` : "";
+  const rows = await pgQuery<{ target_id: number }>(
+    `SELECT "${relation.targetCol}" AS target_id
+     FROM "${relation.table}"
+     WHERE "${relation.sourceCol}" = $1
+     ORDER BY ${orderSql}"${relation.targetCol}" ASC`,
+    [sourceId]
+  );
+  return rows.map((row) => row.target_id);
+}
+
+async function publishedCouponsForCategory(
+  categoryId: number,
+  couponsCategoriesLnk: Lnk
+): Promise<number[]> {
+  const rows = await pgQuery<{ id: number }>(
+    `SELECT DISTINCT c.id FROM "coupons" c
+     JOIN "${couponsCategoriesLnk.table}" l
+       ON l."${couponsCategoriesLnk.sourceCol}" = c.id
+      AND l."${couponsCategoriesLnk.targetCol}" = $1
+     WHERE c.published_at IS NOT NULL
+       AND c.content_status = 'published'
+     ORDER BY c.id DESC
+     LIMIT 8`,
+    [categoryId]
+  );
+  return rows.map((row) => row.id);
+}
+
+async function backfillExploreOffers(homepageId: number): Promise<string> {
+  if (await componentLink("homepages_cmps", homepageId, "exploreOffers")) {
+    return "exploreOffers(skipped: already populated)";
+  }
+
+  const legacy = await componentLink("homepages_cmps", homepageId, "exploreDeals");
+  if (!legacy) return "exploreOffers(skipped: no legacy section)";
+
+  requirePhase13aTables(
+    "Explore Offers",
+    "components_home_explore_deals",
+    "components_home_explore_tabs",
+    "components_home_explore_deals_cmps",
+    "components_home_explore_tabs_cmps",
+    "components_home_explore_offers",
+    "components_home_explore_offer_tabs",
+    "components_home_explore_offers_cmps",
+    "components_home_explore_offer_tabs_cmps",
+    "components_shared_ctas",
+    "coupons"
+  );
+
+  const legacySection = (
+    await pgQuery<LegacySectionRow>(
+      `SELECT enabled, heading FROM "components_home_explore_deals" WHERE id = $1 LIMIT 1`,
+      [legacy.cmp_id]
+    )
+  )[0];
+  if (!legacySection) {
+    throw new Error(
+      `Phase 13a found a dangling Explore Deals component link for homepage ${homepageId}`
+    );
+  }
+
+  const legacyTabs = await pgQuery<LegacyExploreTabRow>(
+    `SELECT t.id, t.label_override, c."order"
+     FROM "components_home_explore_deals_cmps" c
+     JOIN "components_home_explore_tabs" t ON t.id = c.cmp_id
+     WHERE c.entity_id = $1 AND c.field = 'tabs'
+     ORDER BY c."order" ASC`,
+    [legacy.cmp_id]
+  );
+  const legacyCategoryLnk = await detectLnk(
+    "components_home_explore_tabs",
+    "category",
+    "category"
+  );
+  const newCategoryLnk = await detectLnk(
+    "components_home_explore_offer_tabs",
+    "category",
+    "category"
+  );
+  const newOffersLnk = await detectLnk(
+    "components_home_explore_offer_tabs",
+    "offers",
+    "coupon"
+  );
+  const couponsCategoriesLnk = await detectLnk("coupons", "categories", "category");
+  if (!legacyCategoryLnk || !newCategoryLnk || !newOffersLnk || !couponsCategoriesLnk) {
+    const missingRelations = [
+      !legacyCategoryLnk && "legacy Explore Deals category relation",
+      !newCategoryLnk && "Explore Offers category relation",
+      !newOffersLnk && "Explore Offers Coupon relation",
+      !couponsCategoriesLnk && "Coupon categories relation",
+    ].filter((value): value is string => Boolean(value));
+    throw phase13aInfrastructureError("Explore Offers relations", missingRelations);
+  }
+
+  const tabs: Array<{
+    source: LegacyExploreTabRow;
+    categoryId: number;
+    couponIds: number[];
+  }> = [];
+  for (const source of legacyTabs) {
+    const categoryId = await relationTargetId(legacyCategoryLnk, source.id);
+    if (!categoryId) continue;
+    const couponIds = await publishedCouponsForCategory(categoryId, couponsCategoriesLnk);
+    if (couponIds.length > 0) tabs.push({ source, categoryId, couponIds });
+  }
+  if (tabs.length === 0) return "exploreOffers(skipped: no matching coupons)";
+
+  const sectionId = await insertRow("components_home_explore_offers", {
+    enabled: legacySection.enabled ?? true,
+    heading: migratedOfferHeading(legacySection.heading, "Explore Offers"),
+  });
+  await addCmp(
+    "homepages_cmps",
+    homepageId,
+    sectionId,
+    "home.explore-offers",
+    "exploreOffers",
+    legacy.order
+  );
+  await cloneViewAllCta(
+    "components_home_explore_deals_cmps",
+    legacy.cmp_id,
+    "components_home_explore_offers_cmps",
+    sectionId
+  );
+
+  for (let index = 0; index < tabs.length; index++) {
+    const tab = tabs[index];
+    const tabId = await insertRow("components_home_explore_offer_tabs", {
+      label_override: tab.source.label_override,
+    });
+    await addCmp(
+      "components_home_explore_offers_cmps",
+      sectionId,
+      tabId,
+      "home.explore-offer-tab",
+      "tabs",
+      index + 1
+    );
+    await linkRel(newCategoryLnk, tabId, tab.categoryId);
+    for (let offerIndex = 0; offerIndex < tab.couponIds.length; offerIndex++) {
+      await linkRel(newOffersLnk, tabId, tab.couponIds[offerIndex], offerIndex + 1);
+    }
+    await cloneViewAllCta(
+      "components_home_explore_tabs_cmps",
+      tab.source.id,
+      "components_home_explore_offer_tabs_cmps",
+      tabId
+    );
+  }
+  return `exploreOffers(${tabs.length} tabs)`;
+}
+
+async function backfillOffersByBrand(homepageId: number): Promise<string> {
+  if (await componentLink("homepages_cmps", homepageId, "offersByBrand")) {
+    return "offersByBrand(skipped: already populated)";
+  }
+  const legacy = await componentLink("homepages_cmps", homepageId, "dealsByBrand");
+  if (!legacy) return "offersByBrand(skipped: no legacy section)";
+
+  requirePhase13aTables(
+    "Offers By Brand",
+    "components_home_deal_lists",
+    "components_home_deal_lists_cmps",
+    "components_home_offer_lists",
+    "components_home_offer_lists_cmps",
+    "components_shared_ctas",
+    "coupons",
+    "deals"
+  );
+
+  const legacySection = (
+    await pgQuery<LegacySectionRow>(
+      `SELECT enabled, heading FROM "components_home_deal_lists" WHERE id = $1 LIMIT 1`,
+      [legacy.cmp_id]
+    )
+  )[0];
+  const legacyDealsLnk = await detectLnk("components_home_deal_lists", "deals", "deal");
+  const dealsBrandsLnk = await detectLnk("deals", "brands", "brand");
+  const couponsBrandsLnk = await detectLnk("coupons", "brands", "brand");
+  const newOffersLnk = await detectLnk("components_home_offer_lists", "offers", "coupon");
+  if (!legacySection) {
+    throw new Error(
+      `Phase 13a found a dangling Deals By Brand component link for homepage ${homepageId}`
+    );
+  }
+  if (!legacyDealsLnk || !dealsBrandsLnk || !couponsBrandsLnk || !newOffersLnk) {
+    const missingRelations = [
+      !legacyDealsLnk && "legacy Deals By Brand Deal relation",
+      !dealsBrandsLnk && "Deal brands relation",
+      !couponsBrandsLnk && "Coupon brands relation",
+      !newOffersLnk && "Offers By Brand Coupon relation",
+    ].filter((value): value is string => Boolean(value));
+    throw phase13aInfrastructureError("Offers By Brand relations", missingRelations);
+  }
+
+  const dealIds = await relatedIds(legacyDealsLnk, legacy.cmp_id);
+  const brandRows = dealIds.length
+    ? await pgQuery<{ target_id: number }>(
+        `SELECT DISTINCT "${dealsBrandsLnk.targetCol}" AS target_id
+         FROM "${dealsBrandsLnk.table}"
+         WHERE "${dealsBrandsLnk.sourceCol}" = ANY($1::int[])`,
+        [dealIds]
+      )
+    : [];
+  const brandIds = new Set<number>(brandRows.map((row) => row.target_id));
+  if (brandIds.size === 0) return "offersByBrand(skipped: no legacy brands)";
+
+  const couponRows = await pgQuery<{ id: number }>(
+    `SELECT DISTINCT c.id FROM "coupons" c
+     JOIN "${couponsBrandsLnk.table}" l
+       ON l."${couponsBrandsLnk.sourceCol}" = c.id
+     WHERE c.published_at IS NOT NULL
+       AND c.content_status = 'published'
+       AND l."${couponsBrandsLnk.targetCol}" = ANY($1::int[])
+     ORDER BY c.id DESC
+     LIMIT 4`,
+    [[...brandIds]]
+  );
+  if (couponRows.length === 0) return "offersByBrand(skipped: no matching coupons)";
+
+  const sectionId = await insertRow("components_home_offer_lists", {
+    enabled: legacySection.enabled ?? true,
+    heading: migratedOfferHeading(legacySection.heading, "Offers By Brand"),
+  });
+  await addCmp(
+    "homepages_cmps",
+    homepageId,
+    sectionId,
+    "home.offer-list",
+    "offersByBrand",
+    legacy.order
+  );
+  for (let index = 0; index < couponRows.length; index++) {
+    await linkRel(newOffersLnk, sectionId, couponRows[index].id, index + 1);
+  }
+  await cloneViewAllCta(
+    "components_home_deal_lists_cmps",
+    legacy.cmp_id,
+    "components_home_offer_lists_cmps",
+    sectionId
+  );
+  return `offersByBrand(${couponRows.length} coupons)`;
+}
+
+async function assertPhase13aSchema(): Promise<void> {
+  requirePhase13aTables(
+    "homepage Coupon offer sections",
+    "homepages",
+    "homepages_cmps",
+    "components_home_explore_offers",
+    "components_home_explore_offer_tabs",
+    "components_home_explore_offers_cmps",
+    "components_home_explore_offer_tabs_cmps",
+    "components_home_offer_lists",
+    "components_home_offer_lists_cmps",
+    "components_shared_ctas",
+    "coupons"
+  );
+
+  const exploreCategoryLnk = await detectLnk(
+    "components_home_explore_offer_tabs",
+    "category",
+    "category"
+  );
+  const exploreOffersLnk = await detectLnk(
+    "components_home_explore_offer_tabs",
+    "offers",
+    "coupon"
+  );
+  const offersByBrandLnk = await detectLnk(
+    "components_home_offer_lists",
+    "offers",
+    "coupon"
+  );
+  const missingRelations = [
+    !exploreCategoryLnk && "Explore Offers category relation",
+    !exploreOffersLnk && "Explore Offers Coupon relation",
+    !offersByBrandLnk && "Offers By Brand Coupon relation",
+  ].filter((value): value is string => Boolean(value));
+  if (missingRelations.length > 0) {
+    throw phase13aInfrastructureError("homepage Coupon offer relations", missingRelations);
+  }
+}
+
+async function lockHomepageForOfferBackfill(homepageId: number): Promise<void> {
+  const rows = await pgQuery<{ id: number }>(
+    `SELECT id FROM "homepages" WHERE id = $1 FOR UPDATE`,
+    [homepageId]
+  );
+  if (rows.length === 0) {
+    throw new Error(`Homepage ${homepageId} disappeared before Phase 13a could lock it`);
+  }
+}
+
+// Compatibility backfill for databases whose homepage already contains the
+// legacy Deal-backed sections. It has its own checkpoint so existing installs
+// run it even if Phase 13 completed before these component schemas existed.
+export async function runHomepageOfferBackfill(): Promise<void> {
+  logger.info("=== Phase 13a: Homepage Coupon Offer Sections ===");
+  await loadExistingTables();
+  await assertPhase13aSchema();
+
+  const homepages = await pgQuery<{ id: number }>(
+    `SELECT id FROM "homepages" ORDER BY id ASC`
+  );
+  for (const homepage of homepages) {
+    const results = await pgTransaction(async () => {
+      // Serialize check-then-insert across concurrent deploy jobs. Without the
+      // row lock, two Phase 13a processes can both observe an absent component
+      // and attach duplicate sections before either transaction commits.
+      await lockHomepageForOfferBackfill(homepage.id);
+      return [
+        await backfillExploreOffers(homepage.id),
+        await backfillOffersByBrand(homepage.id),
+      ];
+    });
+    logger.info(`homepage ${homepage.id}: ${results.join(", ")}`);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -544,12 +961,13 @@ interface HomepageData {
   dealListDealsLnk: Lnk | null;
   exclusiveCouponIds: number[];
   exclusiveCouponLnk: Lnk | null;
-  exploreTabs: Array<{ category: CategoryRow; dealIds: number[] }>;
-  exploreTabCategoryLnk: Lnk | null;
-  exploreTabDealsLnk: Lnk | null;
+  exploreOfferTabs: Array<{ category: CategoryRow; couponIds: number[] }>;
+  exploreOfferTabCategoryLnk: Lnk | null;
+  exploreOfferTabOffersLnk: Lnk | null;
   newlyAddedCouponIds: number[];
   cardItemCouponLnk: Lnk | null;
-  brandDealIds: number[];
+  brandOfferIds: number[];
+  offerListOffersLnk: Lnk | null;
   bankOffers: Array<{ bankId: number; subtitle: string | null }>;
   bankItemBankLnk: Lnk | null;
 }
@@ -606,6 +1024,7 @@ async function gatherHomepageData(
   const heroDeals = await pgQuery<{ id: number }>(
     `SELECT id FROM "deals"
      WHERE published_at IS NOT NULL
+       AND content_status = 'published'
      ORDER BY is_popular DESC, published_at DESC
      LIMIT 4`
   );
@@ -613,7 +1032,9 @@ async function gatherHomepageData(
   // ── topDeals: 6 newest published popular deals ──
   const topDeals = await pgQuery<{ id: number }>(
     `SELECT id FROM "deals"
-     WHERE published_at IS NOT NULL AND is_popular = true
+     WHERE published_at IS NOT NULL
+       AND content_status = 'published'
+       AND is_popular = true
      ORDER BY published_at DESC
      LIMIT 6`
   );
@@ -624,14 +1045,18 @@ async function gatherHomepageData(
   if (hasTable("coupons") && (await hasColumn("coupons", "offer_type"))) {
     const exclusive = await pgQuery<{ id: number }>(
       `SELECT id FROM "coupons"
-       WHERE published_at IS NOT NULL AND offer_type = 'exclusive'
+       WHERE published_at IS NOT NULL
+         AND content_status = 'published'
+         AND offer_type = 'exclusive'
        ORDER BY published_at DESC
        LIMIT 4`
     );
     exclusiveCouponIds = exclusive.map((r) => r.id);
     const newlyAdded = await pgQuery<{ id: number }>(
       `SELECT id FROM "coupons"
-       WHERE published_at IS NOT NULL AND offer_type = 'newly_added'
+       WHERE published_at IS NOT NULL
+         AND content_status = 'published'
+         AND offer_type = 'newly_added'
        ORDER BY published_at DESC
        LIMIT 4`
     );
@@ -642,52 +1067,54 @@ async function gatherHomepageData(
     );
   }
 
-  // ── exploreDeals tabs: categories + their newest deals ──
-  const exploreTabs: Array<{ category: CategoryRow; dealIds: number[] }> = [];
-  const dealsCategoriesLnk = await detectLnk("deals", "categories", "category");
-  if (!dealsCategoriesLnk) {
+  // ── exploreOffers tabs: categories + their newest Coupon entities ──
+  const exploreOfferTabs: Array<{ category: CategoryRow; couponIds: number[] }> = [];
+  const couponsCategoriesLnk = await detectLnk("coupons", "categories", "category");
+  if (!couponsCategoriesLnk) {
     logger.warn(
-      "deals_categories_lnk not found — exploreDeals tabs will have no deals; section skipped"
+      "coupons_categories_lnk not found — exploreOffers tabs will have no offers; section skipped"
     );
   } else {
     for (const category of exploreCategories) {
-      const deals = await pgQuery<{ id: number }>(
-        `SELECT d.id FROM "deals" d
-         JOIN "${dealsCategoriesLnk.table}" l
-           ON l."${dealsCategoriesLnk.sourceCol}" = d.id
-          AND l."${dealsCategoriesLnk.targetCol}" = $1
-         WHERE d.published_at IS NOT NULL
-         ORDER BY d.published_at DESC
+      const coupons = await pgQuery<{ id: number }>(
+        `SELECT c.id FROM "coupons" c
+         JOIN "${couponsCategoriesLnk.table}" l
+           ON l."${couponsCategoriesLnk.sourceCol}" = c.id
+          AND l."${couponsCategoriesLnk.targetCol}" = $1
+         WHERE c.published_at IS NOT NULL
+           AND c.content_status = 'published'
+         ORDER BY c.published_at DESC
          LIMIT 8`,
         [category.id]
       );
-      if (deals.length === 0) {
+      if (coupons.length === 0) {
         logger.info(
-          `exploreDeals: category '${category.slug}' has 0 published deals — tab skipped`
+          `exploreOffers: category '${category.slug}' has 0 published coupons — tab skipped`
         );
         continue;
       }
-      exploreTabs.push({ category, dealIds: deals.map((r) => r.id) });
+      exploreOfferTabs.push({ category, couponIds: coupons.map((r) => r.id) });
     }
   }
 
-  // ── dealsByBrand: 4 newest published deals with a brand relation ──
-  let brandDealIds: number[] = [];
-  const dealsBrandsLnk = await detectLnk("deals", "brands", "brand");
-  if (dealsBrandsLnk) {
+  // ── offersByBrand: 4 newest published Coupon entities with a brand relation ──
+  let brandOfferIds: number[] = [];
+  const couponsBrandsLnk = await detectLnk("coupons", "brands", "brand");
+  if (couponsBrandsLnk) {
     const rows = await pgQuery<{ id: number }>(
-      `SELECT d.id FROM "deals" d
-       WHERE d.published_at IS NOT NULL
+      `SELECT c.id FROM "coupons" c
+       WHERE c.published_at IS NOT NULL
+         AND c.content_status = 'published'
          AND EXISTS (
-           SELECT 1 FROM "${dealsBrandsLnk.table}" b
-           WHERE b."${dealsBrandsLnk.sourceCol}" = d.id
+           SELECT 1 FROM "${couponsBrandsLnk.table}" b
+           WHERE b."${couponsBrandsLnk.sourceCol}" = c.id
          )
-       ORDER BY d.published_at DESC
+       ORDER BY c.published_at DESC
        LIMIT 4`
     );
-    brandDealIds = rows.map((r) => r.id);
+    brandOfferIds = rows.map((r) => r.id);
   } else {
-    logger.warn("deals_brands_lnk not found — dealsByBrand section skipped");
+    logger.warn("coupons_brands_lnk not found — offersByBrand section skipped");
   }
 
   // ── bankOffers: up to 6 banks by published-coupon count ──
@@ -700,6 +1127,7 @@ async function gatherHomepageData(
        JOIN "${couponsBanksLnk.table}" l ON l."${couponsBanksLnk.targetCol}" = b.id
        JOIN "coupons" c ON c.id = l."${couponsBanksLnk.sourceCol}"
          AND c.published_at IS NOT NULL
+         AND c.content_status = 'published'
        GROUP BY b.id, b.short_description
        ORDER BY COUNT(*) DESC
        LIMIT 6`
@@ -736,16 +1164,16 @@ async function gatherHomepageData(
       "coupon",
       "coupon"
     ),
-    exploreTabs,
-    exploreTabCategoryLnk: await detectLnk(
-      "components_home_explore_tabs",
+    exploreOfferTabs,
+    exploreOfferTabCategoryLnk: await detectLnk(
+      "components_home_explore_offer_tabs",
       "category",
       "category"
     ),
-    exploreTabDealsLnk: await detectLnk(
-      "components_home_explore_tabs",
-      "deals",
-      "deal"
+    exploreOfferTabOffersLnk: await detectLnk(
+      "components_home_explore_offer_tabs",
+      "offers",
+      "coupon"
     ),
     newlyAddedCouponIds,
     cardItemCouponLnk: await detectLnk(
@@ -753,7 +1181,12 @@ async function gatherHomepageData(
       "coupon",
       "coupon"
     ),
-    brandDealIds,
+    brandOfferIds,
+    offerListOffersLnk: await detectLnk(
+      "components_home_offer_lists",
+      "offers",
+      "coupon"
+    ),
     bankOffers,
     bankItemBankLnk: await detectLnk(
       "components_home_bank_offer_items",
@@ -936,41 +1369,44 @@ async function buildHomepageTree(
     counts.push("cgExclusive(skipped)");
   }
 
-  // ── exploreDeals ──
-  if (data.exploreTabs.length === 0) {
-    if (logSkips) logger.info("exploreDeals: no tabs with deals — section skipped");
-    counts.push("exploreDeals(skipped: 0 tabs)");
+  // ── exploreOffers (Coupon schema only) ──
+  if (data.exploreOfferTabs.length === 0) {
+    if (logSkips) logger.info("exploreOffers: no tabs with coupons — section skipped");
+    counts.push("exploreOffers(skipped: 0 tabs)");
   } else if (
     missingTables(
-      "components_home_explore_deals",
-      "components_home_explore_tabs",
-      "components_home_explore_deals_cmps"
+      "components_home_explore_offers",
+      "components_home_explore_offer_tabs",
+      "components_home_explore_offers_cmps"
     ).length === 0 &&
-    data.exploreTabCategoryLnk &&
-    data.exploreTabDealsLnk
+    data.exploreOfferTabCategoryLnk &&
+    data.exploreOfferTabOffersLnk
   ) {
-    const id = await insertRow("components_home_explore_deals", { enabled: true });
-    await addCmp("homepages_cmps", homepageId, id, "home.explore-deals", "exploreDeals", 1);
-    for (let i = 0; i < data.exploreTabs.length; i++) {
-      const tab = data.exploreTabs[i];
-      const tabId = await insertRow("components_home_explore_tabs", {});
+    const id = await insertRow("components_home_explore_offers", {
+      enabled: true,
+      heading: "Explore Offers",
+    });
+    await addCmp("homepages_cmps", homepageId, id, "home.explore-offers", "exploreOffers", 1);
+    for (let i = 0; i < data.exploreOfferTabs.length; i++) {
+      const tab = data.exploreOfferTabs[i];
+      const tabId = await insertRow("components_home_explore_offer_tabs", {});
       await addCmp(
-        "components_home_explore_deals_cmps",
+        "components_home_explore_offers_cmps",
         id,
         tabId,
-        "home.explore-tab",
+        "home.explore-offer-tab",
         "tabs",
         i + 1
       );
-      await linkRel(data.exploreTabCategoryLnk, tabId, tab.category.id);
-      for (let j = 0; j < tab.dealIds.length; j++) {
-        await linkRel(data.exploreTabDealsLnk, tabId, tab.dealIds[j], j + 1);
+      await linkRel(data.exploreOfferTabCategoryLnk, tabId, tab.category.id);
+      for (let j = 0; j < tab.couponIds.length; j++) {
+        await linkRel(data.exploreOfferTabOffersLnk, tabId, tab.couponIds[j], j + 1);
       }
     }
-    counts.push(`exploreDeals(${data.exploreTabs.length} tabs)`);
+    counts.push(`exploreOffers(${data.exploreOfferTabs.length} tabs)`);
   } else {
-    skip("explore-deals component tables/links missing — exploreDeals skipped");
-    counts.push("exploreDeals(skipped)");
+    skip("explore-offers component tables/links missing — exploreOffers skipped");
+    counts.push("exploreOffers(skipped)");
   }
 
   // ── newlyAdded ──
@@ -1005,14 +1441,14 @@ async function buildHomepageTree(
     counts.push("newlyAdded(skipped)");
   }
 
-  // ── dealsByBrand (home.deal-list) ──
+  // ── offersByBrand (Coupon schema only) ──
   counts.push(
-    await buildDealList(
+    await buildOfferList(
       homepageId,
-      "dealsByBrand",
-      null,
-      data.brandDealIds,
-      data.dealListDealsLnk,
+      "offersByBrand",
+      "Offers By Brand",
+      data.brandOfferIds,
+      data.offerListOffersLnk,
       skip
     )
   );
@@ -1137,6 +1573,39 @@ async function buildHomepageTree(
   return counts;
 }
 
+// Deal-list and offer-list sections share one structure; only the component
+// tables/uid and the item noun differ.
+const LIST_KINDS = {
+  deal: { table: "components_home_deal_lists", uid: "home.deal-list", noun: "deals" },
+  offer: { table: "components_home_offer_lists", uid: "home.offer-list", noun: "coupons" },
+} as const;
+
+async function buildList(
+  kind: keyof typeof LIST_KINDS,
+  homepageId: number,
+  field: string,
+  heading: string | null,
+  itemIds: number[],
+  itemsLnk: Lnk | null,
+  skip: (msg: string) => void
+): Promise<string> {
+  const { table, uid, noun } = LIST_KINDS[kind];
+  if (missingTables(table).length > 0) {
+    skip(`${table} missing — ${field} skipped`);
+    return `${field}(skipped)`;
+  }
+  const id = await insertRow(table, { enabled: true, heading });
+  await addCmp("homepages_cmps", homepageId, id, uid, field, 1);
+  if (itemsLnk) {
+    for (let i = 0; i < itemIds.length; i++) {
+      await linkRel(itemsLnk, id, itemIds[i], i + 1);
+    }
+  } else if (itemIds.length > 0) {
+    skip(`${uid} ${noun} link table not found — ${field} relation skipped`);
+  }
+  return `${field}(${itemIds.length} ${noun})`;
+}
+
 async function buildDealList(
   homepageId: number,
   field: string,
@@ -1145,23 +1614,18 @@ async function buildDealList(
   dealsLnk: Lnk | null,
   skip: (msg: string) => void
 ): Promise<string> {
-  if (missingTables("components_home_deal_lists").length > 0) {
-    skip(`components_home_deal_lists missing — ${field} skipped`);
-    return `${field}(skipped)`;
-  }
-  const id = await insertRow("components_home_deal_lists", {
-    enabled: true,
-    heading,
-  });
-  await addCmp("homepages_cmps", homepageId, id, "home.deal-list", field, 1);
-  if (dealsLnk) {
-    for (let i = 0; i < dealIds.length; i++) {
-      await linkRel(dealsLnk, id, dealIds[i], i + 1);
-    }
-  } else if (dealIds.length > 0) {
-    skip(`deal-list deals link table not found — ${field} deals relation skipped`);
-  }
-  return `${field}(${dealIds.length} deals)`;
+  return buildList("deal", homepageId, field, heading, dealIds, dealsLnk, skip);
+}
+
+async function buildOfferList(
+  homepageId: number,
+  field: string,
+  heading: string | null,
+  couponIds: number[],
+  offersLnk: Lnk | null,
+  skip: (msg: string) => void
+): Promise<string> {
+  return buildList("offer", homepageId, field, heading, couponIds, offersLnk, skip);
 }
 
 // ── hero banners from WP options_slider_features repeater ──
@@ -1304,6 +1768,7 @@ async function getCuratedStores(): Promise<StoreRow[]> {
      JOIN "${couponsStoresLnk.table}" l ON l."${couponsStoresLnk.targetCol}" = s.id
      JOIN "coupons" c ON c.id = l."${couponsStoresLnk.sourceCol}"
        AND c.published_at IS NOT NULL
+       AND c.content_status = 'published'
      GROUP BY s.id, s.name
      ORDER BY COUNT(*) DESC
      LIMIT 16`
@@ -1436,6 +1901,7 @@ async function seedMenu(
             AND cc."${couponsCategoriesLnk.targetCol}" = $1
            JOIN "coupons" c ON c.id = cs."${couponsStoresLnk.sourceCol}"
              AND c.published_at IS NOT NULL
+             AND c.content_status = 'published'
            GROUP BY s.id, s.name
            ORDER BY COUNT(*) DESC
            LIMIT 6`,

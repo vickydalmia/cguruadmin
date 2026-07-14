@@ -1,0 +1,26 @@
+{
+  "collectionName": "components_home_offer_lists",
+  "info": {
+    "displayName": "Coupon Offer List Section",
+    "icon": "priceTag"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string"
+    },
+    "viewAllCta": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.cta"
+    },
+    "offers": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::coupon.coupon"
+    }
+  }
+}

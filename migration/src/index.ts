@@ -24,6 +24,7 @@ import { runVerification } from "./phases/10-verify.js";
 import { runCopyUsedMedia } from "./phases/11-copy-used-media.js";
 import { runOfferBackfill } from "./phases/12-offer-backfill.js";
 import { runSiteContent } from "./phases/13-site-content.js";
+import { runHomepageOfferBackfill } from "./phases/13a-homepage-offer-sections.js";
 import { runMediaOptimize } from "./phases/14-media-optimize.js";
 
 interface Phase {
@@ -48,6 +49,7 @@ const phases: Phase[] = [
   { name: "11-copy-used-media", fn: runCopyUsedMedia },
   { name: "12-offer-backfill", fn: runOfferBackfill },
   { name: "13-site-content", fn: runSiteContent },
+  { name: "13a-homepage-offer-sections", fn: runHomepageOfferBackfill },
   { name: "14-media-optimize", fn: runMediaOptimize },
 ];
 
@@ -88,6 +90,8 @@ async function main(): Promise<void> {
       "components_home_popular_stores", "components_home_deal_lists",
       "components_home_cg_exclusives", "components_home_exclusive_items",
       "components_home_explore_deals", "components_home_explore_tabs",
+      "components_home_explore_offers", "components_home_explore_offer_tabs",
+      "components_home_offer_lists",
       "components_home_newly_addeds", "components_home_coupon_card_items",
       "components_home_bank_offers", "components_home_bank_offer_items",
       "components_home_how_it_works", "components_home_steps",

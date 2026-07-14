@@ -180,6 +180,40 @@ export interface HomeExploreDeals extends Struct.ComponentSchema {
   };
 }
 
+export interface HomeExploreOfferTab extends Struct.ComponentSchema {
+  collectionName: 'components_home_explore_offer_tabs';
+  info: {
+    displayName: 'Explore Offers Tab';
+    icon: 'grid';
+  };
+  attributes: {
+    category: Schema.Attribute.Relation<'oneToOne', 'api::category.category'>;
+    labelOverride: Schema.Attribute.String;
+    offers: Schema.Attribute.Relation<'oneToMany', 'api::coupon.coupon'>;
+    viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
+  };
+}
+
+export interface HomeExploreOffers extends Struct.ComponentSchema {
+  collectionName: 'components_home_explore_offers';
+  info: {
+    displayName: 'Explore Offers Section';
+    icon: 'grid';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String;
+    tabs: Schema.Attribute.Component<'home.explore-offer-tab', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 8;
+        },
+        number
+      >;
+    viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
+  };
+}
+
 export interface HomeExploreTab extends Struct.ComponentSchema {
   collectionName: 'components_home_explore_tabs';
   info: {
@@ -294,6 +328,20 @@ export interface HomeNewlyAdded extends Struct.ComponentSchema {
         },
         number
       >;
+    viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
+  };
+}
+
+export interface HomeOfferList extends Struct.ComponentSchema {
+  collectionName: 'components_home_offer_lists';
+  info: {
+    displayName: 'Coupon Offer List Section';
+    icon: 'priceTag';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String;
+    offers: Schema.Attribute.Relation<'oneToMany', 'api::coupon.coupon'>;
     viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
   };
 }
@@ -526,6 +574,8 @@ declare module '@strapi/strapi' {
       'home.deal-list': HomeDealList;
       'home.exclusive-item': HomeExclusiveItem;
       'home.explore-deals': HomeExploreDeals;
+      'home.explore-offer-tab': HomeExploreOfferTab;
+      'home.explore-offers': HomeExploreOffers;
       'home.explore-tab': HomeExploreTab;
       'home.faq-block': HomeFaqBlock;
       'home.hero-product': HomeHeroProduct;
@@ -533,6 +583,7 @@ declare module '@strapi/strapi' {
       'home.how-it-works': HomeHowItWorks;
       'home.latest-insights': HomeLatestInsights;
       'home.newly-added': HomeNewlyAdded;
+      'home.offer-list': HomeOfferList;
       'home.popular-searches': HomePopularSearches;
       'home.popular-stores': HomePopularStores;
       'home.step': HomeStep;

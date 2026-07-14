@@ -23,6 +23,8 @@ import {
   HOMEPAGE_UID,
 } from '../constants/homepage-sections';
 import { HOMEPAGE_IMAGE_RULES } from '../constants/homepage-images';
+import RichTextEditor from './components/RichTextEditor';
+import DateTimeInput from './components/DateTimeInput';
 
 type RelationConfig = {
   field: string;
@@ -607,6 +609,17 @@ const ValidationProblemsPanel: PanelComponent = ({ model }) => {
 };
 
 export default {
+  register(app: StrapiApp) {
+    // Replace the built-in markdown editor for ALL `richtext` fields with the
+    // TipTap WYSIWYG (the fields store HTML, rendered raw on the site). NOTE:
+    // in Strapi 5 the registry key must be the raw attribute type 'richtext'
+    // — the v4 'wysiwyg' key silently does nothing.
+    app.addFields({ type: 'richtext', Component: RichTextEditor } as any);
+    // Same picker as Strapi's built-in datetime input, but with 5-minute time
+    // steps (QC: coupon schedule needs finer granularity than 15 min).
+    app.addFields({ type: 'datetime', Component: DateTimeInput } as any);
+  },
+
   config: {
     auth: { // Replace the Strapi logo in auth (login) views
       logo: Logo,

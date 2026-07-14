@@ -5,6 +5,7 @@ import { purgeResponseCaches } from './middlewares/cache';
 import { destroyRebuildQueue, enqueue, type ScopeRequest } from './static-deployment/queue';
 import { computeScope, preDeleteScope } from './static-deployment/scopes';
 import { validateHomepageImages } from './utils/homepage-image-validation';
+import { sanitizeRichtextData } from './utils/sanitize-richtext';
 
 const HIDE_FROM_EDIT: Record<string, string[]> = {
   'api::deal.deal': ['stores', 'brands', 'categories', 'banks', 'tags'],
@@ -132,6 +133,7 @@ const COMPONENT_ENTRY_TITLES: Record<string, string> = {
   'home.coupon-card-item': 'titleOverride',
   'home.bank-offer-item': 'subtitle',
   'home.explore-tab': 'labelOverride',
+  'home.explore-offer-tab': 'labelOverride',
   'home.step': 'title',
   'home.why-feature': 'label',
   'home.top-offers': 'heading',
@@ -139,6 +141,8 @@ const COMPONENT_ENTRY_TITLES: Record<string, string> = {
   'home.deal-list': 'heading',
   'home.cg-exclusive': 'heading',
   'home.explore-deals': 'heading',
+  'home.explore-offers': 'heading',
+  'home.offer-list': 'heading',
   'home.newly-added': 'heading',
   'home.bank-offers': 'heading',
   'home.how-it-works': 'heading',
@@ -335,6 +339,7 @@ const OVERRIDE_FILLS: Array<{
   { componentUid: 'home.exclusive-item', overrideField: 'titleOverride', relationField: 'coupon', relationLabel: 'title' },
   { componentUid: 'home.coupon-card-item', overrideField: 'titleOverride', relationField: 'coupon', relationLabel: 'title' },
   { componentUid: 'home.explore-tab', overrideField: 'labelOverride', relationField: 'category', relationLabel: 'name' },
+  { componentUid: 'home.explore-offer-tab', overrideField: 'labelOverride', relationField: 'category', relationLabel: 'name' },
   { componentUid: 'home.bank-offer-item', overrideField: 'subtitle', relationField: 'bank', relationLabel: 'shortDescription' },
 ];
 
@@ -365,6 +370,12 @@ export default {
     // deploy.sh curl both hit the built-in.
 
     strapi.documents.use(async (context: any, next: any) => {
+      // Richtext fields hold HTML rendered raw on the public site — enforce
+      // the migration-era allowlist on every write, whatever the editor.
+      if (['create', 'update', 'clone'].includes(context.action)) {
+        sanitizeRichtextData(context.uid, context.params?.data);
+      }
+
       // Homepage section images must match their Figma sizes exactly — reject
       // the save before any side effect (ISR enqueue, cache purge, override
       // fill). Already-attached files are grandfathered inside the validator.

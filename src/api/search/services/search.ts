@@ -212,13 +212,73 @@ function offerOwner(document: any, source: "coupon" | "deal") {
   return relatedEntities(document)[0] ?? null;
 }
 
-function relevance(value: string, query: string): number {
-  const candidate = value.normalize("NFKC").toLocaleLowerCase();
-  const needle = query.toLocaleLowerCase();
+// Naive substring matching misses plural/singular variants — "Mobiles" must
+// find the "Mobile Phones" category. Singular candidates are derived with
+// conservative stemmer rules so real words never get mangled into short junk
+// needles ("boss" must NOT become "bos", "shoes" must NOT become "sho"):
+//   -ies → -y (categories → category)
+//   -es  →  ∅ only after ch/sh/x/z (watches → watch, boxes → box)
+//   -s   →  ∅ unless the word ends in ss/us/is (mobiles → mobile; boss stays)
+// and every derived stem must keep ≥3 characters.
+function queryVariants(query: string): string[] {
+  const q = query.trim();
+  const variants = new Set([q]);
+  const lower = q.toLocaleLowerCase();
+
+  if (lower.endsWith("ies") && lower.length - 3 >= 3) {
+    variants.add(q.slice(0, -3) + "y");
+  } else if (/(?:ch|sh|x|z)es$/u.test(lower) && lower.length - 2 >= 3) {
+    variants.add(q.slice(0, -2));
+  } else if (
+    lower.endsWith("s") &&
+    !/(?:ss|us|is)$/u.test(lower) &&
+    lower.length - 1 >= 3
+  ) {
+    variants.add(q.slice(0, -1));
+  }
+  return [...variants];
+}
+
+// SQL needles: a shorter variant substring-subsumes a longer one for
+// $containsi (rows matching "mobiles" all match "mobile"), so drop any
+// variant that contains another — fewer OR clauses, identical row set.
+function filterNeedles(variants: string[]): string[] {
+  const lowered = variants.map((variant) => variant.toLocaleLowerCase());
+  return variants.filter((_, index) =>
+    lowered.every(
+      (other, otherIndex) =>
+        otherIndex === index || !lowered[index].includes(other),
+    ),
+  );
+}
+
+function relevanceForNeedle(candidate: string, needle: string): number {
   if (candidate === needle) return 0;
   if (candidate.startsWith(needle)) return 1;
   if (candidate.includes(" " + needle)) return 2;
   return candidate.includes(needle) ? 3 : 4;
+}
+
+const NO_MATCH_RELEVANCE = 10;
+
+// Matches on the query AS TYPED rank in tiers 0-3; matches only via a
+// singular/plural variant rank in tiers 4-6 (variant tier + 3), so a variant
+// hit can never outrank a literal one; no match at all sinks to the bottom.
+function relevanceForVariants(value: string, variants: string[]): number {
+  const candidate = value.normalize("NFKC").toLocaleLowerCase();
+  const literal = relevanceForNeedle(candidate, variants[0].toLocaleLowerCase());
+  if (literal < 4) return literal;
+
+  let best = NO_MATCH_RELEVANCE;
+  for (const variant of variants.slice(1)) {
+    const tier = relevanceForNeedle(candidate, variant.toLocaleLowerCase());
+    if (tier < 4) best = Math.min(best, tier + 3);
+  }
+  return best;
+}
+
+function relevance(value: string, query: string): number {
+  return relevanceForVariants(value, queryVariants(query));
 }
 
 function time(value: unknown): number {
@@ -231,8 +291,14 @@ function rank<T extends Record<string, any>>(
   query: string,
   label: (item: T) => string,
 ): T[] {
+  // Variants are computed once and each item scored once (not per comparison)
+  // — the comparator runs O(n log n) times over up to 1000 candidates.
+  const variants = queryVariants(query);
+  const scores = new Map<T, number>(
+    items.map((item) => [item, relevanceForVariants(label(item), variants)]),
+  );
   return [...items].sort((a, b) => {
-    const byMatch = relevance(label(a), query) - relevance(label(b), query);
+    const byMatch = scores.get(a)! - scores.get(b)!;
     if (byMatch) return byMatch;
     const byPopularity =
       Number(Boolean(b?.isPopular)) - Number(Boolean(a?.isPopular));
@@ -300,6 +366,15 @@ function mapOffer(document: any, type: "coupon" | "deal") {
     originalPrice:
       type === "deal" && document?.mrp != null ? String(document.mrp) : null,
     discount: type === "deal" ? cleanText(document?.discount, 80) : null,
+    expiresAt:
+      type === "deal" ? cleanText(document?.expiresAt, 80) : null,
+    owner:
+      type === "deal" && ownerName
+        ? {
+            name: ownerName,
+            logo: mapMedia(ownerMedia, owner?.logoAlt ?? ownerName),
+          }
+        : null,
     rankText: [
       name,
       ...relatedEntities(document).map((item) => item?.name),
@@ -316,20 +391,25 @@ function toPublicOffer(hit: any) {
 }
 
 function offerFilters(query: string) {
-  const contains = { $containsi: query };
+  const clauses = filterNeedles(queryVariants(query)).flatMap((variant) => {
+    const contains = { $containsi: variant };
+    return [
+      { title: contains },
+      { stores: { name: contains } },
+      { brands: { name: contains } },
+      { categories: { name: contains } },
+      { banks: { name: contains } },
+    ];
+  });
   return {
-    $and: [
-      publishedOnlyFilters(),
-      {
-        $or: [
-          { title: contains },
-          { stores: { name: contains } },
-          { brands: { name: contains } },
-          { categories: { name: contains } },
-          { banks: { name: contains } },
-        ],
-      },
-    ],
+    $and: [publishedOnlyFilters(), { $or: clauses }],
+  };
+}
+
+function nameContainsFilter(query: string) {
+  const needles = filterNeedles(queryVariants(query));
+  return {
+    $or: needles.map((variant) => ({ name: { $containsi: variant } })),
   };
 }
 
@@ -338,20 +418,6 @@ function productDealFilters(query: string) {
     $and: [
       offerFilters(query),
       { salePrice: { $notNull: true, $gt: 0 } },
-      { mrp: { $notNull: true, $gt: 0 } },
-    ],
-  };
-}
-
-// Deals never come from the coupons table (they have their own content type),
-// so search only surfaces real coupons: unique-type or with a non-empty code.
-function couponOnlyFilter() {
-  return {
-    $or: [
-      { couponType: { $eq: "unique" } },
-      {
-        $and: [{ code: { $notNull: true } }, { code: { $ne: "" } }],
-      },
     ],
   };
 }
@@ -363,7 +429,7 @@ async function findEntities(
   limit: number,
 ) {
   return await strapi.documents(config.uid as any).findMany({
-    filters: { name: { $containsi: query } },
+    filters: nameContainsFilter(query),
     fields: [
       "name",
       "slug",
@@ -383,15 +449,15 @@ async function countEntities(
   query: string,
 ) {
   return await strapi.documents(config.uid as any).count({
-    filters: { name: { $containsi: query } },
+    filters: nameContainsFilter(query),
   } as any);
 }
 
 async function findCoupons(strapi: Core.Strapi, query: string, limit: number) {
   return await strapi.documents("api::coupon.coupon").findMany({
-    filters: {
-      $and: [offerFilters(query), couponOnlyFilter()],
-    },
+    // Both code and no-code variants are Coupon-schema records. CTA wording
+    // never changes the backing entity or removes it from Coupon search.
+    filters: offerFilters(query),
     fields: ["title", "code", "couponType", "affiliateLink", "isPopular"],
     populate: couponPopulate,
     sort: [
@@ -405,9 +471,7 @@ async function findCoupons(strapi: Core.Strapi, query: string, limit: number) {
 
 async function countCoupons(strapi: Core.Strapi, query: string) {
   return await strapi.documents("api::coupon.coupon").count({
-    filters: {
-      $and: [offerFilters(query), couponOnlyFilter()],
-    },
+    filters: offerFilters(query),
   } as any);
 }
 
@@ -422,6 +486,7 @@ async function findDeals(strapi: Core.Strapi, query: string, limit: number) {
       "salePrice",
       "mrp",
       "discount",
+      "expiresAt",
       "isPopular",
     ],
     populate: dealPopulate,

@@ -37,9 +37,7 @@ export const HOMEPAGE_SECTION_LABELS: HomepageSectionLabel[] = [
   {
     attr: 'topDeals',
     label: '4 · Top Deals',
-    description:
-      'Deal strip NEAR THE TOP of the page, right after Top Offers. Same layout as ' +
-      '"8 · Deals by Brand" — that one is the strip lower down the page.',
+    description: 'Product Deal cards from the dedicated Deal schema, shown after Top Offers.',
   },
   {
     attr: 'cgExclusive',
@@ -47,9 +45,9 @@ export const HOMEPAGE_SECTION_LABELS: HomepageSectionLabel[] = [
     description: 'Exclusive coupon banners (768×370 images) after Top Deals.',
   },
   {
-    attr: 'exploreDeals',
-    label: '6 · Explore Deals',
-    description: 'Tabbed deals grid (up to 8 category tabs) in the middle of the page.',
+    attr: 'exploreOffers',
+    label: '6 · Explore Offers',
+    description: 'Tabbed Coupon-offer grid (up to 8 category tabs) in the middle of the page.',
   },
   {
     attr: 'newlyAdded',
@@ -57,16 +55,15 @@ export const HOMEPAGE_SECTION_LABELS: HomepageSectionLabel[] = [
     description: 'Tall coupon cards (354×646 images) for newly added stores and offers.',
   },
   {
-    attr: 'dealsByBrand',
-    label: '8 · Deals by Brand',
+    attr: 'offersByBrand',
+    label: '8 · Offers by Brand',
     description:
-      'Deal strip LOWER ON THE PAGE, after Fresh Drops. Same layout as "4 · Top Deals" — ' +
-      'that one is the strip near the top.',
+      'Coupon offers associated with brands, shown lower on the page after Fresh Drops.',
   },
   {
     attr: 'bankOffers',
     label: '9 · Bank Offers',
-    description: 'Bank & card offer tiles (up to 6) after Deals by Brand.',
+    description: 'Bank & card offer tiles (up to 6) after Offers by Brand.',
   },
   {
     attr: 'latestInsightsEnabled',
@@ -97,6 +94,18 @@ export const HOMEPAGE_SECTION_LABELS: HomepageSectionLabel[] = [
     attr: 'popularSearches',
     label: '13 · Popular Searches',
     description: 'Link list at the very bottom of the page, below the newsletter block.',
+  },
+  {
+    attr: 'exploreDeals',
+    label: 'Legacy · Explore Deals (temporary fallback)',
+    description:
+      'Deprecated Deal-schema content retained for one compatibility release. Populate Explore Offers instead.',
+  },
+  {
+    attr: 'dealsByBrand',
+    label: 'Legacy · Deals by Brand (temporary fallback)',
+    description:
+      'Deprecated Deal-schema content retained for one compatibility release. Populate Offers by Brand instead.',
   },
   {
     attr: 'seo',

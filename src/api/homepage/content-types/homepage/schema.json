@@ -40,6 +40,11 @@
       "component": "home.cg-exclusive",
       "repeatable": false
     },
+    "exploreOffers": {
+      "type": "component",
+      "component": "home.explore-offers",
+      "repeatable": false
+    },
     "exploreDeals": {
       "type": "component",
       "component": "home.explore-deals",
@@ -48,6 +53,11 @@
     "newlyAdded": {
       "type": "component",
       "component": "home.newly-added",
+      "repeatable": false
+    },
+    "offersByBrand": {
+      "type": "component",
+      "component": "home.offer-list",
       "repeatable": false
     },
     "dealsByBrand": {
