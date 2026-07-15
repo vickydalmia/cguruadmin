@@ -41,6 +41,53 @@ import TableRow from '@tiptap/extension-table-row';
 import TableHeader from '@tiptap/extension-table-header';
 import TableCell from '@tiptap/extension-table-cell';
 
+/**
+ * WP-migrated content joins visual lines with <br> inside ONE block, so a
+ * heading/list (which are block-level formats) applies to every line in that
+ * block at once — the reported "H2 on the first line makes every line H2".
+ * Split each block on <br> into separate paragraphs/headings on load, so one
+ * visual line = one block and per-line formatting works as editors expect.
+ * (A stray Shift+Enter soft break likewise normalizes to a paragraph on load.)
+ */
+function normalizeBreaksToBlocks(html: string): string {
+  if (!html || !/<br/i.test(html)) return html;
+  if (typeof DOMParser === 'undefined') return html;
+
+  const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
+  const body = doc.body;
+
+  // Loose <br>-separated text with no block wrapper → wrap so the split applies.
+  const BLOCKS = 'p,h1,h2,h3,h4,h5,h6,ul,ol,blockquote,table,pre';
+  if (!body.querySelector(BLOCKS)) {
+    const p = doc.createElement('p');
+    while (body.firstChild) p.appendChild(body.firstChild);
+    body.appendChild(p);
+  }
+
+  body.querySelectorAll('p,h1,h2,h3,h4,h5,h6').forEach((block) => {
+    if (!block.querySelector('br')) return;
+    const tag = block.tagName.toLowerCase();
+
+    // Group the block's children into runs separated by <br>.
+    const groups: Node[][] = [[]];
+    block.childNodes.forEach((node) => {
+      if (node.nodeName === 'BR') groups.push([]);
+      else groups[groups.length - 1].push(node);
+    });
+
+    // One new same-tag block per run; drop empty runs (from consecutive <br>).
+    const out: HTMLElement[] = [];
+    for (const group of groups) {
+      const el = doc.createElement(tag);
+      group.forEach((n) => el.appendChild(n.cloneNode(true)));
+      if ((el.textContent ?? '').trim() !== '' || el.querySelector('img')) out.push(el);
+    }
+    if (out.length) block.replaceWith(...out);
+  });
+
+  return body.innerHTML;
+}
+
 const EXTENSIONS = [
   // Legacy WP content has h1/h4-h6 — accept all levels so loading + saving a
   // document never downgrades headings; the toolbar only offers H2/H3.
@@ -251,7 +298,7 @@ const RichTextEditor = ({
 
   const editor = useEditor({
     extensions: EXTENSIONS,
-    content: field.value ?? '',
+    content: normalizeBreaksToBlocks(field.value ?? ''),
     editable: !disabled,
     // Don't re-render the whole component (and its ~20 toolbar buttons) on
     // every keystroke — the useEditorState selector below re-renders only
@@ -291,7 +338,7 @@ const RichTextEditor = ({
   // document — but never while the editor is focused, or the cursor jumps.
   React.useEffect(() => {
     if (!editor || editor.isFocused) return;
-    const incoming = field.value ?? '';
+    const incoming = normalizeBreaksToBlocks(field.value ?? '');
     if (incoming !== (editor.isEmpty ? '' : editor.getHTML())) {
       editor.commands.setContent(incoming, false);
     }
