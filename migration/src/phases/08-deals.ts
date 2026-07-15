@@ -16,7 +16,8 @@ import {
 } from "../utils/strapi-insert.js";
 import { computeMigrationStatus } from "../utils/content-status.js";
 import { rewriteContentMedia } from "../utils/content-media.js";
-import { clean, cleanCode, cleanHtml } from "../utils/sanitize.js";
+import { clean, cleanCode } from "../utils/sanitize.js";
+import { cleanDealContent } from "../utils/deal-content.js";
 import { extractOfferText, extractCashbackFields } from "../utils/offer-extract.js";
 import {
   normalizeWpDate,
@@ -91,7 +92,7 @@ export async function runDeals(): Promise<void> {
         // image is left pointing at the old WordPress uploads URL.
         const contentMedia = await rewriteContentMedia(
           post.post_content
-            ? cleanHtml(post.post_content.replace(/\[\/?\w+[^\]]*\]/g, ""))
+            ? cleanDealContent(post.post_content.replace(/\[\/?\w+[^\]]*\]/g, ""))
             : null
         );
         const content = contentMedia.html;

@@ -20,7 +20,10 @@
  * Dry-run prints counts; applying requires the host confirmation flag:
  *
  *   yarn backfill:offer-fields                              # dry-run
- *   yarn backfill:offer-fields --apply --yes-i-mean-<host>  # write
+ *   yarn backfill:offer-fields --apply --yes-i-mean-<host>  # write (fill-only)
+ *   yarn backfill:offer-fields --apply --reextract --yes-i-mean-<host>
+ *       # re-derive offer/cashback/bank text for ALL rows (clears them first),
+ *       # e.g. after improving the extractor. `badge` is left untouched.
  *
  * NOTE: writes via SQL, bypassing the documents middleware — static pages for
  * changed entries stay stale until the next rebuild/edit.
@@ -64,12 +67,21 @@ async function backfillBadge(table: string, apply: boolean): Promise<void> {
 }
 
 // offer_text / cashback_text / bank_offer_text ← extracted per row.
-async function backfillTexts(table: string, apply: boolean): Promise<void> {
+// reextract=true re-derives ALL rows (clears the three columns first, so it also
+// removes now-invalid values) — use it to re-apply improved extraction logic.
+async function backfillTexts(table: string, apply: boolean, reextract: boolean): Promise<void> {
   for (const col of ["offer_text", "cashback_text", "bank_offer_text"]) {
     if (!(await columnExists(table, col))) {
       logger.warn(`${table}.${col} column not found — boot Strapi first. Skipping text backfill for ${table}.`);
       return;
     }
+  }
+
+  if (reextract && apply) {
+    await pgQuery(
+      `UPDATE "${table}" SET "offer_text" = NULL, "cashback_text" = NULL, "bank_offer_text" = NULL`,
+    );
+    logger.info(`${table}: cleared offer/cashback/bank text for re-extraction`);
   }
 
   const rows = await pgQuery<{
@@ -80,8 +92,10 @@ async function backfillTexts(table: string, apply: boolean): Promise<void> {
     cashback_text: string | null;
     bank_offer_text: string | null;
   }>(
-    `SELECT id, title, content, offer_text, cashback_text, bank_offer_text FROM "${table}"
-     WHERE offer_text IS NULL OR cashback_text IS NULL OR bank_offer_text IS NULL`,
+    reextract
+      ? `SELECT id, title, content, offer_text, cashback_text, bank_offer_text FROM "${table}"`
+      : `SELECT id, title, content, offer_text, cashback_text, bank_offer_text FROM "${table}"
+         WHERE offer_text IS NULL OR cashback_text IS NULL OR bank_offer_text IS NULL`,
   );
 
   logger.info(`${table}: scanning ${rows.length} row(s) with a null offer/cashback/bank field…`);
@@ -141,8 +155,13 @@ async function backfillTexts(table: string, apply: boolean): Promise<void> {
 
 async function main(): Promise<void> {
   const apply = process.argv.includes("--apply");
+  // --reextract: clear + re-derive offer/cashback/bank text for ALL rows (use
+  // after extraction-logic changes; discards prior auto-extracted values).
+  const reextract = process.argv.includes("--reextract");
   const host = new URL(config.pg.connectionString).hostname;
-  logger.info(`backfill-offer-fields target host: ${host} (${apply ? "APPLY" : "dry-run"})`);
+  logger.info(
+    `backfill-offer-fields target host: ${host} (${apply ? "APPLY" : "dry-run"}${reextract ? ", RE-EXTRACT" : ""})`,
+  );
   if (apply && !process.argv.includes(`--yes-i-mean-${host}`)) {
     logger.error(
       `Refusing to write: --apply updates coupons/deals on ${host}. ` +
@@ -154,7 +173,7 @@ async function main(): Promise<void> {
   try {
     for (const table of ["coupons", "deals"]) {
       await backfillBadge(table, apply);
-      await backfillTexts(table, apply);
+      await backfillTexts(table, apply, reextract);
     }
     if (!apply) {
       logger.info("Dry-run complete — pass --apply --yes-i-mean-<host> to write.");

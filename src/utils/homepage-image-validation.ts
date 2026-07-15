@@ -143,9 +143,10 @@ export async function validateHomepageImages(
             where: o.where,
             path: o.path,
             message:
-              `Must be exactly ${o.rule.width}×${o.rule.height} px ` +
-              `(2x of ${o.rule.display[0]}×${o.rule.display[1]}), ` +
-              `got ${file.width ?? '?'}×${file.height ?? '?'} ("${file.name}").`,
+              `${o.rule.label} must be exactly ${o.rule.width}×${o.rule.height} px ` +
+              `(2x of ${o.rule.display[0]}×${o.rule.display[1]}), but "${file.name}" is ` +
+              `${file.width ?? '?'}×${file.height ?? '?'} px. Resize/re-export it to the ` +
+              `exact size and upload again.`,
           });
         }
       }

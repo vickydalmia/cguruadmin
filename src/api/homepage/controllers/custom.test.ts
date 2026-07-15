@@ -2,18 +2,22 @@ import { describe, expect, it, vi } from 'vitest';
 
 import createHomepageController from './custom';
 
-function createHarness(homepage: any) {
+function createHarness(homepage: any, fallbackDeals: any[] = []) {
   const findFirst = vi.fn().mockResolvedValue(homepage);
+  const findManyDeals = vi.fn().mockResolvedValue(fallbackDeals);
   const count = vi.fn().mockResolvedValue(0);
-  const documents = vi.fn((uid: string) =>
-    uid === 'api::homepage.homepage' ? { findFirst } : { count },
-  );
+  const documents = vi.fn((uid: string) => {
+    if (uid === 'api::homepage.homepage') return { findFirst };
+    if (uid === 'api::deal.deal') return { count, findMany: findManyDeals };
+    return { count };
+  });
+  const sanitizeOutput = vi.fn(async (data: any) => data);
   const strapi = {
     documents,
     contentType: vi.fn(() => ({})),
     contentAPI: {
       sanitize: {
-        output: vi.fn(async (data: any) => data),
+        output: sanitizeOutput,
       },
     },
   } as any;
@@ -27,6 +31,8 @@ function createHarness(homepage: any) {
     controller: createHomepageController({ strapi }),
     ctx,
     findFirst,
+    findManyDeals,
+    sanitizeOutput,
   };
 }
 
@@ -37,7 +43,63 @@ function publishedOffer(index: number) {
   };
 }
 
+function actionableDeal(index: number, overrides: Record<string, any> = {}) {
+  return {
+    ...publishedOffer(index),
+    content: `<p>Product Deal ${index} description.</p>`,
+    dealImage: { url: `/deal-${index}.webp` },
+    salePrice: 999,
+    affiliateLink: `https://merchant.example/deal-${index}`,
+    ...overrides,
+  };
+}
+
 describe('homepage aggregate offer population', () => {
+  it('ships full card content without bloating compact entity and hero references', async () => {
+    const harness = createHarness({});
+
+    await harness.controller.homepageFull(harness.ctx as any);
+
+    const populate = harness.findFirst.mock.calls[0]?.[0].populate;
+    const couponRefs = [
+      populate.cgExclusive.populate.items.populate.coupon,
+      populate.newlyAdded.populate.items.populate.coupon,
+      populate.offersByBrand.populate.offers,
+      populate.exploreOffers.populate.tabs.populate.offers,
+    ];
+    const fullDealRefs = [
+      populate.topDeals.populate.deals,
+      populate.dealsByBrand.populate.deals,
+      populate.exploreDeals.populate.tabs.populate.deals,
+    ];
+
+    for (const ref of [...couponRefs, ...fullDealRefs]) {
+      expect(ref.fields).toContain('content');
+      expect(ref.fields).not.toContain('excerpt');
+    }
+
+    const heroDeal = populate.hero.populate.products.populate.deal;
+    expect(heroDeal.fields).not.toContain('content');
+    expect(heroDeal.fields).not.toContain('excerpt');
+
+    const topOfferCoupon = populate.topOffers.populate.items.populate.coupon;
+    expect(topOfferCoupon.fields).not.toContain('content');
+    expect(topOfferCoupon.fields).not.toContain('excerpt');
+
+    expect(populate.popularStores.populate.featuredStore.fields).not.toContain(
+      'shortDescription',
+    );
+    expect(
+      populate.topOffers.populate.items.populate.coupon.populate.brands.fields,
+    ).not.toContain('shortDescription');
+    expect(
+      populate.exploreOffers.populate.tabs.populate.category.fields,
+    ).not.toContain('shortDescription');
+    expect(populate.bankOffers.populate.items.populate.bank.fields).toContain(
+      'shortDescription',
+    );
+  });
+
   it('filters and sorts Coupon and Deal relations with Document Service-compatible keys', async () => {
     const harness = createHarness({});
 
@@ -137,5 +199,76 @@ describe('homepage aggregate offer population', () => {
       'future',
       'offer-1',
     ]);
+  });
+
+  it('fills Top Deals to its buffer with actionable Deal-schema records only', async () => {
+    const curated = [
+      actionableDeal(1),
+      actionableDeal(2, { dealImage: null }),
+      actionableDeal(3, { salePrice: 0 }),
+      actionableDeal(4, { affiliateLink: 'javascript:alert(1)' }),
+    ];
+    const fallback = [
+      actionableDeal(1),
+      ...Array.from({ length: 12 }, (_, index) => actionableDeal(index + 5)),
+    ];
+    const harness = createHarness(
+      { topDeals: { enabled: true, deals: curated } },
+      fallback,
+    );
+
+    const response = await harness.controller.homepageFull(harness.ctx as any);
+
+    expect(response.data.topDeals.deals).toHaveLength(10);
+    expect(
+      response.data.topDeals.deals.map((deal: any) => deal.documentId),
+    ).toEqual([
+      'offer-1',
+      'offer-5',
+      'offer-6',
+      'offer-7',
+      'offer-8',
+      'offer-9',
+      'offer-10',
+      'offer-11',
+      'offer-12',
+      'offer-13',
+    ]);
+    expect(harness.findManyDeals).toHaveBeenCalledTimes(1);
+    expect(harness.findManyDeals.mock.calls[0]?.[0]).toMatchObject({
+      filters: {
+        contentStatus: { $eq: 'published' },
+        salePrice: { $notNull: true, $gt: 0 },
+      },
+      sort: ['publishedAt:desc'],
+      limit: 40,
+    });
+    expect(harness.findManyDeals.mock.calls[0]?.[0].fields).toContain('content');
+    expect(harness.findManyDeals.mock.calls[0]?.[0].fields).not.toContain(
+      'excerpt',
+    );
+    expect(harness.findManyDeals.mock.calls[0]?.[0].populate).toHaveProperty(
+      'dealImage',
+      true,
+    );
+    expect(harness.sanitizeOutput).toHaveBeenCalledWith(
+      fallback,
+      {},
+      { auth: null },
+    );
+  });
+
+  it('does not query fallback Deals when six curated Top Deals are actionable', async () => {
+    const harness = createHarness({
+      topDeals: {
+        enabled: true,
+        deals: Array.from({ length: 6 }, (_, index) => actionableDeal(index)),
+      },
+    });
+
+    const response = await harness.controller.homepageFull(harness.ctx as any);
+
+    expect(response.data.topDeals.deals).toHaveLength(6);
+    expect(harness.findManyDeals).not.toHaveBeenCalled();
   });
 });

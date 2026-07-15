@@ -148,12 +148,36 @@ function ToolbarButton({
   );
 }
 
+// When the cursor sits inside a word with nothing selected, ProseMirror has no
+// range to attach the link mark to, so setLink is a no-op and the word never
+// becomes a (visible) link — the reported bug. Expand a collapsed selection to
+// the surrounding word so the link applies to the whole word.
+function selectWordIfCollapsed(editor: Editor): void {
+  const { state } = editor;
+  const { from, empty } = state.selection;
+  if (!empty) return;
+  const $pos = state.doc.resolve(from);
+  const text = $pos.parent.textContent;
+  const base = $pos.start();
+  let start = from - base;
+  let end = start;
+  while (start > 0 && !/\s/.test(text[start - 1])) start--;
+  while (end < text.length && !/\s/.test(text[end])) end++;
+  if (end > start) {
+    editor.commands.setTextSelection({ from: base + start, to: base + end });
+  }
+}
+
 function LinkControl({ editor, isActive }: { editor: Editor; isActive: boolean }) {
   const [open, setOpen] = React.useState(false);
   const [url, setUrl] = React.useState('');
 
   const apply = () => {
     const trimmed = url.trim();
+    // Expand a bare cursor to its word, then apply to the full link range so the
+    // whole word turns into a styled link and the toolbar reflects it (the
+    // selection stays on the range, so isActive('link') reads true afterwards).
+    selectWordIfCollapsed(editor);
     if (trimmed) {
       editor.chain().focus().extendMarkRange('link').setLink({ href: trimmed }).run();
     } else {

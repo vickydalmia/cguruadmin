@@ -1557,7 +1557,9 @@ RETURNING id
 Differences vs coupons:
 - `code` column is present (deal schema gained this field alongside coupons).
 - `sale_price`, `mrp`, `discount` replace `coupon_type`.
-- Content is stripped inline with the same regex: `post.post_content.replace(/\[\/?\w+[^\]]*\]/g, "")`.
+- Content is stripped inline with the same regex, then Deal-specific validation
+  rejects legacy scratch values (prices/codes) and empty rich-text wrappers.
+  Only description-like content is stored in `Deal.content`.
 
 **Taxonomy wiring diff** (lines 157–188): unlike coupons, deals use an inline closure with **per-table dedup**:
 

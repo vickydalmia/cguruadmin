@@ -21,10 +21,12 @@
       "required": true
     },
     "description": {
-      "type": "richtext"
+      "type": "richtext",
+      "searchable": false
     },
     "shortDescription": {
-      "type": "text"
+      "type": "text",
+      "searchable": false
     },
     "logo": {
       "type": "media",
@@ -34,11 +36,13 @@
       ]
     },
     "logoAlt": {
-      "type": "string"
+      "type": "string",
+      "searchable": false
     },
     "websiteUrl": {
       "type": "string",
-      "regex": "^https?://.+"
+      "regex": "^https?://.+",
+      "searchable": false
     },
     "ratingAverage": {
       "type": "decimal",

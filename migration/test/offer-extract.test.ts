@@ -36,8 +36,43 @@ test("offerText: rupee amount with off suffix", () => {
   assert.equal(extractOfferText("Save Rs.200 Off Your First Order"), "₹200 OFF");
 });
 
-test("offerText: bare FLAT when no amount", () => {
-  assert.equal(extractOfferText("Flat Discount Bonanza"), "FLAT OFF");
+test("offerText: bare 'flat' with no amount is NOT a badge", () => {
+  // "Flat" alone (or modifying a price / cashback) must not become "FLAT OFF".
+  assert.equal(extractOfferText("Flat Discount Bonanza"), null);
+  assert.equal(extractOfferText("Men T-Shirts Flat At Rs.599"), null);
+  assert.equal(extractOfferText("Plan Flat At $9.99/Month"), null);
+});
+
+test("offerText: bare rupee amount + off (no currency symbol)", () => {
+  assert.equal(extractOfferText("Sign Up Offer - Flat 250 Off On 1st Purchase"), "FLAT ₹250 OFF");
+  assert.equal(extractOfferText("Flat 1,000 Off On StartupHR Toolkit"), "FLAT ₹1000 OFF");
+});
+
+test("offerText: trailing-dollar amount + off", () => {
+  assert.equal(extractOfferText("PDF Fusion - Flat 30$ Off On PDF Creator"), "FLAT $30 OFF");
+  assert.equal(extractOfferText("Premium Sneakers - Flat 15$ Off On Adidas"), "FLAT $15 OFF");
+});
+
+test("offerText: scaled prize/credit sums are not discounts", () => {
+  assert.equal(extractOfferText("Instant Credit Line Of Upto Rs.5 Lakh"), null);
+  assert.equal(extractOfferText("IPL T20 Offer - Win Upto Rs.5 Crore Prizes"), null);
+  assert.equal(extractOfferText("Trade & Win Upto Rs.1.3 Lakhs At Bitbns"), null);
+});
+
+test("offerText: a bare price (currency, no off) is not a discount", () => {
+  assert.equal(extractOfferText("Enterprise Plan Flat At $99/Month"), null);
+  assert.equal(extractOfferText("Green Coffee Flat At Just Rs.299"), null);
+});
+
+test("offerText: 'flat X% cashback' is cashback, not a FLAT discount", () => {
+  assert.equal(extractOfferText("Flat 10% Cashback On Domestic Flights"), null);
+});
+
+test("cashback fields: 'Cashback Of X%' form is captured", () => {
+  assert.deepEqual(extractCashbackFields("Gift Cards - Flat Cashback Of 10% In Wallet"), {
+    cashbackText: "10% Cashback",
+    bankOfferText: null,
+  });
 });
 
 test("offerText: never exceeds 3 words", () => {
@@ -86,15 +121,24 @@ test("cashback fields: falls back to content and is case-insensitive", () => {
   );
 });
 
-test("cashback fields: bare bank offer only when no percentage bank", () => {
+test("cashback fields: a bank offer without a number is ignored (no bare 'Bank OFF')", () => {
   assert.deepEqual(extractCashbackFields("Exclusive Bank Offer inside"), {
     cashbackText: null,
-    bankOfferText: "Bank OFF",
+    bankOfferText: null,
   });
-  // With a % bank offer present, the bare fallback is suppressed.
+});
+
+test("cashback fields: percent bank with a bank name between", () => {
+  assert.deepEqual(extractCashbackFields("Min 50% Off + Extra 10% HDFC Bank OFF"), {
+    cashbackText: null,
+    bankOfferText: "10% Bank OFF",
+  });
+});
+
+test("cashback fields: rupee bank offer", () => {
   assert.deepEqual(
-    extractCashbackFields("12% Bank Discount plus a Bank Offer"),
-    { cashbackText: null, bankOfferText: "12% Bank OFF" }
+    extractCashbackFields("Up To 35% + Extra Up To Rs.2,000 Bank OFF"),
+    { cashbackText: null, bankOfferText: "₹2000 Bank OFF" }
   );
 });
 
@@ -103,6 +147,30 @@ test("cashback fields: both null when none present", () => {
     cashbackText: null,
     bankOfferText: null,
   });
+});
+
+test("offerText: MIN qualifier and ranges keep the first number", () => {
+  assert.equal(extractOfferText("Biba - Min 35% Off On Ethnics"), "MIN 35% OFF");
+  assert.equal(extractOfferText("Lavie - Min 30% To 80% Off"), "MIN 30% OFF");
+  assert.equal(extractOfferText("End Of Season Sale - Flat 40-60% Off"), "FLAT 40% OFF");
+  assert.equal(extractOfferText("Minimum 40% Off On Shoes"), "MIN 40% OFF");
+});
+
+test("offerText: Additional maps to EXTRA; Save is a discount", () => {
+  assert.equal(extractOfferText("New User - Additional 10% Off"), "EXTRA 10% OFF");
+  assert.equal(extractOfferText("Additional Rs.100 Off"), "EXTRA ₹100 OFF");
+  assert.equal(extractOfferText("Save 55% On PrivateVPN Plan"), "55% OFF");
+});
+
+test("offerText: dollar amounts", () => {
+  assert.equal(extractOfferText("Upto $20 Off On Flights"), "UPTO $20 OFF");
+  assert.equal(extractOfferText("$40 Instant Off On Bookings"), "$40 OFF");
+});
+
+test("offerText: a non-discount % is not a badge", () => {
+  assert.equal(extractOfferText("100% Whey Protein"), null);
+  assert.equal(extractOfferText("Welcome Bonus: 100% Match On Deposit"), null);
+  assert.equal(extractOfferText("Mock Tests - 100% Free Exams"), null);
 });
 
 test("regex state does not leak across repeated calls", () => {

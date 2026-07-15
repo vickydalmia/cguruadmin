@@ -25,6 +25,8 @@ import {
 import { HOMEPAGE_IMAGE_RULES } from '../constants/homepage-images';
 import RichTextEditor from './components/RichTextEditor';
 import DateTimeInput from './components/DateTimeInput';
+import BooleanConfirmInput from './components/BooleanConfirmInput';
+import SlugInput from './components/SlugInput';
 
 type RelationConfig = {
   field: string;
@@ -631,6 +633,12 @@ export default {
     // Same picker as Strapi's built-in datetime input, but with 5-minute time
     // steps (QC: coupon schedule needs finer granularity than 15 min).
     app.addFields({ type: 'datetime', Component: DateTimeInput } as any);
+    // Confirmation dialog before any boolean toggle flips (QC: avoid accidental
+    // ON/OFF from a stray click).
+    app.addFields({ type: 'boolean', Component: BooleanConfirmInput } as any);
+    // UID/slug input that starts empty instead of seeding the model name
+    // ("store"), auto-filling from `name` until hand-edited (QC bug).
+    app.addFields({ type: 'uid', Component: SlugInput } as any);
   },
 
   config: {
@@ -668,6 +676,29 @@ export default {
       if (titleEl) {
         new MutationObserver(rewrite).observe(titleEl, { childList: true });
       }
+
+      // QC bug: pressing Enter while typing a store/brand name submitted the
+      // edit form and created the entry. Swallow Enter on single-line text
+      // inputs inside the content-manager edit view so it never auto-submits.
+      // Textareas, the rich-text editor (contenteditable), and comboboxes
+      // (which use Enter to pick an option) are left untouched.
+      document.addEventListener(
+        'keydown',
+        (e: KeyboardEvent) => {
+          if (e.key !== 'Enter') return;
+          if (!window.location.pathname.includes('/content-manager/')) return;
+          const el = e.target as HTMLElement | null;
+          if (!el || el.tagName !== 'INPUT') return;
+          const input = el as HTMLInputElement;
+          if (input.getAttribute('role') === 'combobox') return;
+          if (input.getAttribute('aria-autocomplete')) return;
+          const type = (input.type || 'text').toLowerCase();
+          if (['text', 'search', 'url', 'email', 'tel', 'number', 'password'].includes(type)) {
+            e.preventDefault();
+          }
+        },
+        true
+      );
     }
   },
 };

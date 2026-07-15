@@ -5,10 +5,10 @@ import { arrayizeOfferText } from '../../../utils/offer-text';
 // fully-populated homepage (5 levels deep — far beyond what REST populate
 // query strings can sanely express) and one returns menu + footer + global.
 
-const STORE_FIELDS = ['name', 'slug', 'shortDescription', 'logoAlt'];
-const CATEGORY_FIELDS = ['name', 'slug', 'shortDescription'];
+const STORE_FIELDS = ['name', 'slug', 'logoAlt'];
+const CATEGORY_FIELDS = ['name', 'slug'];
 const BANK_FIELDS = ['name', 'slug', 'shortDescription', 'logoAlt'];
-const BRAND_FIELDS = ['name', 'slug', 'shortDescription', 'logoAlt'];
+const BRAND_FIELDS = ['name', 'slug', 'logoAlt'];
 
 // Relations in homepage components are curator-managed and therefore have no
 // database-level cardinality bound. Constrain visibility/order in the query
@@ -16,6 +16,8 @@ const BRAND_FIELDS = ['name', 'slug', 'shortDescription', 'logoAlt'];
 // buffer over what the site renders, so a mid-cycle expiry/delete never
 // leaves a visible hole (the UI slices to its own display counts).
 const MAX_LIST_ITEMS = 16;
+const TOP_DEALS_RENDER_COUNT = 6;
+const TOP_DEALS_FALLBACK_QUERY_LIMIT = 40;
 const SECTION_LIST_CAPS = {
   popularStores: 24, // site shows 24
   topDeals: 10, // site shows 6
@@ -27,9 +29,9 @@ const SECTION_LIST_CAPS = {
 const PUBLISHED_OFFER_FILTER = { contentStatus: { $eq: 'published' } } as const;
 const NEWEST_FIRST = ['publishedAt:desc'] as const;
 
-// Never ship richtext `content` to the homepage payload.
 const COUPON_FIELDS = [
   'title',
+  'content',
   'offerText',
   'cashbackText',
   'bankOfferText',
@@ -42,6 +44,7 @@ const COUPON_FIELDS = [
 ];
 const DEAL_FIELDS = [
   'title',
+  'content',
   'offerText',
   'cashbackText',
   'bankOfferText',
@@ -79,6 +82,20 @@ const dealRef = {
   },
 };
 
+// Hero products are compact linked merchandising tiles. They do not render
+// expandable details, so keep their Deal payload free of unused rich text.
+const heroDealRef = {
+  ...dealRef,
+  fields: DEAL_FIELDS.filter((field) => field !== 'content'),
+};
+
+// Top Offers are compact campaign tiles. Their Figma contract intentionally
+// excludes details and validity, so do not ship unused rich text for them.
+const topOfferCouponRef = {
+  ...couponRef,
+  fields: COUPON_FIELDS.filter((field) => field !== 'content'),
+};
+
 const publishedCouponRef = {
   ...couponRef,
   filters: PUBLISHED_OFFER_FILTER,
@@ -86,6 +103,16 @@ const publishedCouponRef = {
 
 const publishedDealRef = {
   ...dealRef,
+  filters: PUBLISHED_OFFER_FILTER,
+};
+
+const publishedHeroDealRef = {
+  ...heroDealRef,
+  filters: PUBLISHED_OFFER_FILTER,
+};
+
+const publishedTopOfferCouponRef = {
+  ...topOfferCouponRef,
   filters: PUBLISHED_OFFER_FILTER,
 };
 
@@ -111,13 +138,13 @@ const HOMEPAGE_POPULATE = {
   hero: {
     populate: {
       banners: bannerSlides,
-      products: { populate: { deal: publishedDealRef, imageOverride: true } },
+      products: { populate: { deal: publishedHeroDealRef, imageOverride: true } },
     },
   },
   topOffers: {
     populate: {
       viewAllCta: true,
-      items: { populate: { coupon: publishedCouponRef, banner: true } },
+      items: { populate: { coupon: publishedTopOfferCouponRef, banner: true } },
     },
   },
   popularStores: {
@@ -298,6 +325,86 @@ function capCuratedLists(homepage: any) {
   return homepage;
 }
 
+function hasSafeAffiliateLink(value: unknown) {
+  if (typeof value !== 'string') return false;
+  const href = value.trim();
+  if (!href) return false;
+  if (href.startsWith('/') && !href.startsWith('//')) return true;
+
+  try {
+    const parsed = new URL(href);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function isActionableProductDeal(deal: any, now: Date) {
+  const rawPrice =
+    typeof deal?.salePrice === 'string'
+      ? deal.salePrice.replaceAll(',', '').trim()
+      : deal?.salePrice;
+  const salePrice = Number(rawPrice);
+
+  return (
+    isLiveOffer(deal, now) &&
+    typeof deal?.dealImage?.url === 'string' &&
+    deal.dealImage.url.trim().length > 0 &&
+    Number.isFinite(salePrice) &&
+    salePrice > 0 &&
+    hasSafeAffiliateLink(deal?.affiliateLink)
+  );
+}
+
+// Legacy imports can violate today's required Deal fields. Keep every valid
+// curated Top Deal in editor order, then fill the remaining visible slots
+// from recent Deal-schema records. Coupon records never enter this section.
+async function fillTopDeals(
+  strapi: Core.Strapi,
+  ctx: any,
+  homepage: any,
+) {
+  const section = homepage?.topDeals;
+  if (!section?.enabled) return homepage;
+  const now = new Date();
+
+  const curatedDeals = Array.isArray(section.deals)
+    ? section.deals.filter((deal: any) => isActionableProductDeal(deal, now))
+    : [];
+  section.deals = curatedDeals;
+
+  if (curatedDeals.length >= TOP_DEALS_RENDER_COUNT) return homepage;
+
+  const recentDeals = await strapi.documents('api::deal.deal').findMany({
+    filters: {
+      ...PUBLISHED_OFFER_FILTER,
+      salePrice: { $notNull: true, $gt: 0 },
+    },
+    fields: DEAL_FIELDS,
+    populate: dealRef.populate,
+    sort: NEWEST_FIRST,
+    limit: TOP_DEALS_FALLBACK_QUERY_LIMIT,
+  } as any);
+  const sanitizedDeals = await sanitizeOutput(
+    strapi,
+    ctx,
+    'api::deal.deal',
+    recentDeals,
+  );
+  const seen = new Set(
+    curatedDeals.map((deal: any) => deal?.documentId).filter(Boolean),
+  );
+
+  for (const deal of Array.isArray(sanitizedDeals) ? sanitizedDeals : []) {
+    if (!isActionableProductDeal(deal, now) || seen.has(deal.documentId)) continue;
+    section.deals.push(deal);
+    if (deal.documentId) seen.add(deal.documentId);
+    if (section.deals.length >= SECTION_LIST_CAPS.topDeals) break;
+  }
+
+  return homepage;
+}
+
 async function countOffersForStore(strapi: Core.Strapi, documentId: string) {
   const filters = {
     stores: { documentId },
@@ -346,6 +453,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
 
     const sanitized = await sanitizeOutput(strapi, ctx, 'api::homepage.homepage', homepage);
     dropDeadOffers(sanitized);
+    await fillTopDeals(strapi, ctx, sanitized);
     capCuratedLists(sanitized);
     await attachOfferCounts(strapi, sanitized);
     // Nested coupon/deal cards: emit offerText as an array of words.

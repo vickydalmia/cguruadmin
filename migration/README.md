@@ -270,7 +270,7 @@ All WordPress posts with `post_type='post'` and `post_status='publish'` are spli
 |-----------|--------|-------|
 | `post_title` | `title` | |
 | `post_name` | `slug` | Deduplicated |
-| `post_content` | `content` | Shortcodes stripped |
+| `post_content` | `content` | Shortcodes stripped; Deal rows additionally reject price/code values and empty rich-text wrappers |
 | `code` (postmeta) | `code` | Coupon code string |
 | `link` (postmeta) | `affiliate_link` | |
 | `popular_coupon` (postmeta) | `is_popular` | `'1'` → true |

@@ -29,9 +29,8 @@ const DEFAULT_OFFER_SORT = [
 ];
 
 // Public-safe scalar whitelists. Richtext `content` is included since the
-// `excerpt` field was removed — the frontend derives card summaries from it.
-// The homepage whitelists (src/api/homepage/controllers/custom.ts) still
-// exclude content because nothing on the homepage consumes it.
+// `excerpt` field was removed. Homepage full-card sections also consume this
+// field; compact Hero and Top Offers references intentionally omit it.
 const COUPON_PUBLIC_FIELDS = [
   'title',
   'offerText',

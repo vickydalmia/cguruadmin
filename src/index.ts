@@ -4,6 +4,7 @@ import { HOMEPAGE_SECTION_LABELS, HOMEPAGE_UID } from './constants/homepage-sect
 import { purgeResponseCaches } from './middlewares/cache';
 import { destroyRebuildQueue, enqueue, type ScopeRequest } from './static-deployment/queue';
 import { computeScope, preDeleteScope } from './static-deployment/scopes';
+import { validateEntityFields } from './utils/entity-field-validation';
 import { validateHomepageImages } from './utils/homepage-image-validation';
 import { validateOfferFields } from './utils/offer-field-validation';
 import { sanitizeRichtextData } from './utils/sanitize-richtext';
@@ -363,6 +364,76 @@ async function fillHomepageOverrides(strapi: Core.Strapi): Promise<void> {
   }
 }
 
+// Single types only Super Admin may manage. Footer & Global Settings drive the
+// whole site's chrome, so a stray edit is high-blast-radius (QC: restrict to
+// Super Admin). Enforced as config-as-code: every boot strips the
+// content-manager (explorer) permissions for these subjects from every
+// non-super-admin admin role, so re-granting them in the Roles UI will not
+// stick — the same stance as ensurePublicReadPermissions above. Super Admin
+// bypasses permission checks entirely, so it always keeps access.
+const SUPER_ADMIN_ONLY_SUBJECTS = ['api::footer.footer', 'api::global.global'];
+
+async function restrictSingleTypesToSuperAdmin(strapi: Core.Strapi): Promise<void> {
+  try {
+    const roles = await strapi.db.query('admin::role').findMany({ select: ['id', 'code'] });
+    let removed = 0;
+    for (const role of roles) {
+      if (role.code === 'strapi-super-admin') continue;
+      const perms = await strapi.db.query('admin::permission').findMany({
+        where: { role: role.id, subject: { $in: SUPER_ADMIN_ONLY_SUBJECTS } },
+        select: ['id', 'action'],
+      });
+      const ids = perms
+        .filter((p: any) => String(p.action).startsWith('plugin::content-manager.explorer'))
+        .map((p: any) => p.id);
+      if (ids.length) {
+        await strapi.db.query('admin::permission').deleteMany({ where: { id: { $in: ids } } });
+        removed += ids.length;
+      }
+    }
+    if (removed > 0) {
+      strapi.log.info(
+        `[permissions] removed ${removed} Footer/Global permission(s) from non-super-admin roles`
+      );
+    }
+  } catch (err: any) {
+    strapi.log.warn(`[permissions] super-admin lock failed: ${err?.message ?? err}`);
+  }
+}
+
+// Surface the coupon/deal `contentStatus` (published/scheduled/expired) as a
+// column in the admin list view so editors can see and filter by it — expired
+// offers are already hidden from the public API, but the admin list mixed them
+// in with no signal (QC: separate expired). Idempotent: appends the column
+// once, after hideRelationsFromContentManager has trimmed the relation columns.
+async function ensureOfferListStatusColumn(strapi: Core.Strapi): Promise<void> {
+  const service: any = strapi.plugin('content-manager').service('content-types');
+  if (!service) return;
+
+  for (const uid of ['api::coupon.coupon', 'api::deal.deal']) {
+    try {
+      const contentType = strapi.contentType(uid as any);
+      if (!contentType?.attributes?.contentStatus) continue;
+
+      const config = await service.findConfiguration(contentType);
+      const list: string[] = config.layouts?.list ?? [];
+      if (list.includes('contentStatus')) continue;
+
+      await service.updateConfiguration(contentType, {
+        settings: config.settings,
+        metadatas: config.metadatas,
+        layouts: { ...config.layouts, list: [...list, 'contentStatus'] },
+        options: config.options,
+      });
+      strapi.log.info(`[content-manager] added contentStatus column to ${uid} list`);
+    } catch (err: any) {
+      strapi.log.warn(
+        `[content-manager] failed to add status column to ${uid}: ${err?.message ?? err}`
+      );
+    }
+  }
+}
+
 export default {
   register({ strapi }: { strapi: Core.Strapi }) {
     // NOTE: no custom /_health route — Strapi core already serves /_health
@@ -394,6 +465,12 @@ export default {
         ['create', 'update'].includes(context.action)
       ) {
         validateOfferFields(context.params?.data);
+      }
+
+      // Taxonomy cross-field checks (rating range, FAQ-enabled-but-empty, brand
+      // required SEO) — reject with an inline field error instead of a raw 500.
+      if (['create', 'update'].includes(context.action)) {
+        validateEntityFields(context.uid, context.action, context.params?.data);
       }
 
       // Offer changes: capture relations BEFORE the write. For deletes the
@@ -462,10 +539,12 @@ export default {
   async bootstrap({ strapi }: { strapi: Core.Strapi }) {
     await hideRelationsFromContentManager(strapi);
     await ensurePublicReadPermissions(strapi);
+    await restrictSingleTypesToSuperAdmin(strapi);
     await ensureUploadSettings(strapi);
     await ensureComponentEntryTitles(strapi);
     await ensureComponentFieldDescriptions(strapi);
     await ensureSingleTypeEntryTitles(strapi);
+    await ensureOfferListStatusColumn(strapi);
     await ensureHomepageSectionLabels(strapi);
 
     strapi.log.info(
