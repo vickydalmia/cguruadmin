@@ -4,7 +4,6 @@ import pLimit from "p-limit";
 import {
   setPostMapping,
   ensureTermMapping,
-  getTagMapping,
   getUserMapping,
 } from "../utils/id-maps.js";
 import { resolveMediaRef } from "../utils/media-resolver.js";
@@ -18,6 +17,7 @@ import {
 import { computeMigrationStatus } from "../utils/content-status.js";
 import { rewriteContentMedia } from "../utils/content-media.js";
 import { clean, cleanCode, cleanHtml } from "../utils/sanitize.js";
+import { extractOfferText, extractCashbackFields } from "../utils/offer-extract.js";
 import {
   normalizeWpDate,
   normalizeWpLocalDate,
@@ -69,11 +69,10 @@ export async function runDeals(): Promise<void> {
   const placeholders = postIds.map(() => "?").join(",");
 
   // Bulk-fetch all data upfront in parallel
-  const [metaByPost, termRelByPost, primaryTerms, tagRelByPost] = await Promise.all([
+  const [metaByPost, termRelByPost, primaryTerms] = await Promise.all([
     getMetaBulk(postIds, placeholders),
     getTermRelsBulk(postIds, placeholders),
     getPrimaryTerms(postIds, placeholders),
-    getTagRelsBulk(postIds, placeholders),
   ]);
 
   let inserted = 0;
@@ -85,7 +84,6 @@ export async function runDeals(): Promise<void> {
       const meta = metaByPost.get(post.ID) || {};
       const relations = termRelByPost.get(post.ID) || [];
       const primaryTermId = primaryTerms.get(post.ID);
-      const tagIds = tagRelByPost.get(post.ID) || [];
 
       try {
         const documentId = generateDocumentId(`deal:${post.ID}`);
@@ -97,6 +95,11 @@ export async function runDeals(): Promise<void> {
             : null
         );
         const content = contentMedia.html;
+        const title = clean(post.post_title) || post.post_title;
+        // Best-effort badge + cashback/bank texts parsed from the title
+        // (falling back to content); editors can correct these in the admin.
+        const offerText = extractOfferText(title, content);
+        const { cashbackText, bankOfferText } = extractCashbackFields(title, content);
         const createdAt =
           normalizeWpDate(post.post_date_gmt) ||
           normalizeWpLocalDate(post.post_date) ||
@@ -135,15 +138,18 @@ export async function runDeals(): Promise<void> {
 
         const result = await pgQuery<{ id: number }>(
           `INSERT INTO "deals" (
-            "document_id", "title", "content", "code",
+            "document_id", "title", "offer_text", "cashback_text", "bank_offer_text", "content", "code",
             "sale_price", "mrp", "discount",
-            "is_popular", "affiliate_link", "expires_at", "scheduled_at", "content_status",
+            "badge", "affiliate_link", "expires_at", "scheduled_at", "content_status",
             "published_at", "created_at", "updated_at", "locale",
             "created_by_id", "updated_by_id"
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
           )
           ON CONFLICT ("document_id") DO UPDATE SET
+            "offer_text" = EXCLUDED."offer_text",
+            "cashback_text" = EXCLUDED."cashback_text",
+            "bank_offer_text" = EXCLUDED."bank_offer_text",
             "sale_price" = EXCLUDED."sale_price",
             "mrp" = EXCLUDED."mrp",
             "discount" = EXCLUDED."discount",
@@ -151,13 +157,16 @@ export async function runDeals(): Promise<void> {
           RETURNING id`,
           [
             documentId,
-            clean(post.post_title) || post.post_title,
+            title,
+            offerText,
+            cashbackText,
+            bankOfferText,
             content,
             cleanCode(meta.code),
             salePrice,
             mrp,
             clean(meta.deal_discount),
-            meta.popular_coupon === "1",
+            meta.popular_coupon === "1" ? "Recommended" : null,
             clean(meta.link),
             expiresAt,
             contentStatus.scheduledAt,
@@ -223,19 +232,6 @@ export async function runDeals(): Promise<void> {
           const storeTermId = parseInt(meta.deal_store, 10);
           if (!isNaN(storeTermId)) {
             await linkTerm(storeTermId);
-          }
-        }
-
-        // Wire tag relations (pre-fetched)
-        for (const wpTagTermId of tagIds) {
-          const tagRef = getTagMapping(wpTagTermId);
-          if (tagRef) {
-            await insertLink("deals_tags_lnk", {
-              deal_id: entityId,
-              tag_id: tagRef.id,
-              tag_ord: 1,
-              deal_ord: 1,
-            });
           }
         }
 
@@ -334,25 +330,6 @@ async function getPrimaryTerms(
     logger.warn("wp_yoast_primary_term not available for deals");
     return new Map();
   }
-}
-
-async function getTagRelsBulk(
-  postIds: number[],
-  placeholders: string
-): Promise<Map<number, number[]>> {
-  const rows = await wpQuery<{ object_id: number; term_id: number }>(`
-    SELECT tr.object_id, tt.term_id
-    FROM wp_term_relationships tr
-    JOIN wp_term_taxonomy tt ON tr.term_taxonomy_id = tt.term_taxonomy_id AND tt.taxonomy = 'post_tag'
-    WHERE tr.object_id IN (${placeholders})
-  `, postIds);
-
-  const map = new Map<number, number[]>();
-  for (const row of rows) {
-    if (!map.has(row.object_id)) map.set(row.object_id, []);
-    map.get(row.object_id)!.push(row.term_id);
-  }
-  return map;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────

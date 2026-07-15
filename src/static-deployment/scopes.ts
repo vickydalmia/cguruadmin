@@ -118,5 +118,5 @@ export async function computeScope(
     return slug ? { slugs: [slug], homepage: true } : { full: true };
   }
 
-  return null; // unrelated content type (tags, pools, users…)
+  return null; // unrelated content type (pools, users…)
 }

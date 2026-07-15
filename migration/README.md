@@ -2,6 +2,8 @@
 
 Migrates the full CouponzGuru WordPress site (posts, taxonomies, media, SEO, unique coupon codes) into a Strapi 5 PostgreSQL backend with S3-hosted media.
 
+> **Running a migration into a new environment?** Follow the operator checklist in [FRESH-MIGRATION.md](./FRESH-MIGRATION.md) — this README is the reference for what each phase does internally.
+
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
@@ -22,7 +24,7 @@ Migrates the full CouponzGuru WordPress site (posts, taxonomies, media, SEO, uni
 |------------|---------|
 | **Node.js** | v18+ with `tsx` available (used to run TypeScript directly) |
 | **MySQL** | WordPress database dump loaded (tables: `wp_posts`, `wp_postmeta`, `wp_terms`, `wp_term_taxonomy`, `wp_term_relationships`, `wp_termmeta`) |
-| **PostgreSQL** | Strapi 5 database with tables already created by Strapi (stores, brands, categories, banks, tags, coupons, deals, unique_coupon_pools, unique_codes, files, component tables, link tables) |
+| **PostgreSQL** | Strapi 5 database with tables already created by Strapi (stores, brands, categories, banks, coupons, deals, unique_coupon_pools, unique_codes, files, component tables, link tables) |
 | **AWS S3** | Bucket + credentials for media uploads (optional — falls back to local provider records) |
 | **WordPress uploads** | Local copy of `wp-content/uploads/` for image file access |
 
@@ -135,10 +137,6 @@ Uploads inventoried images to S3 with configurable concurrency. Deduplicates by 
 
 Migrates WordPress category terms into **four** Strapi collections — `stores`, `brands`, `categories`, `banks` — based on the ACF `choose_type` termmeta field (defaults to "Store"). Also migrates FAQ items and SEO components for each entity, and links logo/icon media. Images embedded in term descriptions are rewritten through the content-media pipeline (see below).
 
-### Phase 04 — Tags
-
-Migrates WordPress post tags (`taxonomy='post_tag'`) into the Strapi `tags` table. Simple name + slug mapping.
-
 ### Phase 05 — Unique Coupon Pools
 
 Migrates `wp_uc_coupons` rows into `unique_coupon_pools`, including computed `total_codes` and `used_codes` counts. Skipped if the source table doesn't exist.
@@ -154,7 +152,7 @@ Migrates published WordPress posts (where `is_deal` is not `'yes'`) into the `co
 - Strips WordPress shortcodes from content
 - Resolves `coupon_type` ("static" or "unique") from ACF meta
 - Wires taxonomy relationships (store, brand, category, bank) via link tables, respecting Yoast primary term
-- Links tags, featured image, unique coupon pool, and SEO component
+- Links featured image, unique coupon pool, and SEO component
 - Rewrites content-embedded images (see **Content-embedded images** below)
 
 #### Content-embedded images
@@ -185,18 +183,17 @@ Copies only the media files actually referenced by entities (via `files_related_
 
 ### Phase 12 — Offer Backfill
 
-Backfills two newly-added Strapi fields from WordPress data:
+Backfills the `deal.primaryStore` manyToOne relation from WordPress data:
 
-- `offer_type` on `coupons` and `deals` from the `offer_type` postmeta key. Valid values: `exclusive`, `newly_added`, `electronics`, `fashion`, `travel`, `food` — anything else is skipped and the field stays null.
-- The `deal.primaryStore` manyToOne relation from the ACF `deal_store` postmeta key (a store term ID, plain or PHP-serialized). Links are written to the Strapi link table (detected at runtime via `information_schema`, expected name `deals_primary_store_lnk`) with delete-then-insert semantics so re-runs never leave stale rows.
+- The `deal.primaryStore` relation is resolved from the ACF `deal_store` postmeta key (a store term ID, plain or PHP-serialized). Links are written to the Strapi link table (detected at runtime via `information_schema`, expected name `deals_primary_store_lnk`) with delete-then-insert semantics so re-runs never leave stale rows.
 
-Only posts present in the persisted ID maps (i.e., actually migrated) are touched. If the `offer_type` columns or the link table don't exist yet (Strapi schema not migrated), the phase logs a warning and skips that part gracefully.
+Only posts present in the persisted ID maps (i.e., actually migrated) are touched. If the link table doesn't exist yet (Strapi schema not migrated), the phase logs a warning and skips gracefully.
 
 ### Phase 13 — Site Content
 
 Seeds the four Strapi single types the frontend needs:
 
-- `global` — header/footer codes, Amazon deal toggle, and the Amazon top banner (attachment resolved via the media map) from WP ACF option keys (`options_header_code`, `options_footer_code`, etc.).
+- `global` — header/footer codes from WP ACF option keys (`options_header_code`, `options_footer_code`).
 - `homepage` — created as a **single published row** (draftAndPublish is disabled on all four singles — homepage, menu, footer, global — they are publish-only), with the full component tree built once. Also seeds `title: "Homepage"` for the admin entry header. Curated sections: hero banners from the `options_slider_features` ACF repeater; hero products and Top Deals from migrated Deal entities; CG Exclusive, Fresh Drops, Explore Offers, and Offers By Brand from Coupon entities; Popular Stores from `options_featured_stores` (fallback: top stores by published-coupon count); bank offers ranked by published-coupon count; plus How It Works and FAQ copy mirrored from the frontend. Per-section item counts live in `src/utils/homepage-limits.ts` (each holds a +4 buffer over what the site renders; a parity test pins them to the component schema `max` values).
 - `menu` — topStores relation (same curated store list), one category section per explore category with its top stores, and the fixed extra nav items.
 - `footer` — link sections, social links, countries, and partner card mirrored from the frontend `footer-data.ts`; Popular Stores labels are resolved to real store relations where a matching store name exists.
@@ -277,7 +274,6 @@ All WordPress posts with `post_type='post'` and `post_status='publish'` are spli
 | `code` (postmeta) | `code` | Coupon code string |
 | `link` (postmeta) | `affiliate_link` | |
 | `popular_coupon` (postmeta) | `is_popular` | `'1'` → true |
-| `offer_type` (postmeta) | `offer_type` | Normalized to enum |
 | `unique_coupon` (postmeta) | `coupon_type` | `'1'`/`'true'` → `"unique"`, else `"static"` |
 | `unique_coupon_name` (postmeta) | `uniqueCouponPool` relation | Resolved by pool name for unique coupons |
 | Expiration meta* | `expires_at` | Unix timestamp or ISO date |
@@ -298,8 +294,6 @@ All WordPress posts with `post_type='post'` and `post_status='publish'` are spli
 ### Taxonomy Relationship Wiring
 
 Each coupon/deal can link to one store, one brand, one category, and one bank via link tables (`coupons_store_lnk`, `deals_brand_lnk`, etc.). The Yoast primary term is processed first. If multiple terms map to the same type, only the first is linked.
-
-Tags are linked via `coupons_tags_lnk` / `deals_tags_lnk` (many-to-many).
 
 ### Unique Coupon Pool / Code Mapping
 
@@ -419,7 +413,6 @@ Five maps are serialized to `.checkpoints/` as JSON:
 | `mediaIdMap` | WP attachment_id | Strapi file_id |
 | `poolIdMap` | WP pool_id | `{id, documentId, type, table}` |
 | `poolNameMap` | WP pool name | `{id, documentId, type, table}` |
-| `tagIdMap` | WP tag term_id | `{id, documentId, type, table}` |
 
 Maps are loaded at startup and saved after each phase, enabling later phases to reference IDs created by earlier ones.
 
@@ -428,7 +421,6 @@ Maps are loaded at startup and saved after each phase, enabling later phases to 
 - All main entity inserts use `ON CONFLICT (document_id) DO NOTHING`
 - `document_id` for migrated WordPress entities is deterministic and derived from stable source keys:
   - terms: `term:{table}:{wp_term_id}`
-  - tags: `tag:{wp_term_id}`
   - pools: `pool:{wp_pool_id}`
   - codes: `unique-code:{wp_uc_codes.id}`
   - coupons: `coupon:{wp_post_id}`
@@ -448,7 +440,7 @@ Per-table in-memory tracking prevents duplicate slugs. Collisions get a `-1`, `-
 
 Phase 10 runs a comprehensive validation suite (always runs, never checkpointed):
 
-1. **Record counts** — compares source (WordPress) vs destination (Strapi) counts for all entity types: stores, brands, categories, banks, tags, coupons, deals, pools, codes
+1. **Record counts** — compares source (WordPress) vs destination (Strapi) counts for all entity types: stores, brands, categories, banks, coupons, deals, pools, codes
 2. **Relationship integrity** — flags coupons/deals with no taxonomy links
 3. **Slug uniqueness** — warns on duplicate slugs within each table
 4. **SEO coverage** — reports the percentage of entities with SEO components per table

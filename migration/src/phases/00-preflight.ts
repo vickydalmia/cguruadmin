@@ -60,7 +60,6 @@ export async function runPreflight(): Promise<void> {
     "brands",
     "categories",
     "banks",
-    "tags",
     "coupons",
     "deals",
     "unique_coupon_pools",
@@ -84,7 +83,7 @@ export async function runPreflight(): Promise<void> {
 
   // Ensure unique indexes on document_id for idempotent inserts
   const tablesNeedingDocIdIndex = [
-    "stores", "brands", "categories", "banks", "tags",
+    "stores", "brands", "categories", "banks",
     "coupons", "deals", "unique_coupon_pools", "unique_codes", "files",
   ];
   logger.info("Ensuring document_id unique indexes...");
@@ -143,11 +142,6 @@ export async function runPreflight(): Promise<void> {
   `);
   logger.info(`    Deals: ${dealCount[0]?.c || 0}`);
   logger.info(`    Coupons: ${(postCount.c as number) - (dealCount[0]?.c || 0)}`);
-
-  const [tagCount] = await wpQuery<{ c: number }>(
-    "SELECT COUNT(*) AS c FROM wp_term_taxonomy WHERE taxonomy='post_tag'"
-  );
-  logger.info(`  Tags: ${tagCount.c}`);
 
   if (wpTableNames.has("wp_uc_coupons")) {
     const [poolCount] = await wpQuery<{ c: number }>(

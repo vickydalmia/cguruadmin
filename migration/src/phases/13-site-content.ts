@@ -875,12 +875,9 @@ async function seedGlobal(summary: string[]): Promise<void> {
   const opts = await fetchOptionsIn([
     "options_header_code",
     "options_footer_code",
-    "options_enable_amazon_deal",
-    "options_amazon_top_banner",
-    "options_amazon_top_banner_link",
   ]);
   logger.info(
-    `global: found ${opts.size}/5 WP option keys (${Array.from(opts.keys()).join(", ") || "none"})`
+    `global: found ${opts.size}/2 WP option keys (${Array.from(opts.keys()).join(", ") || "none"})`
   );
 
   const now = new Date().toISOString();
@@ -891,10 +888,6 @@ async function seedGlobal(summary: string[]): Promise<void> {
     title: "Global Settings",
     header_code: clean(opts.get("options_header_code") ?? null),
     footer_code: clean(opts.get("options_footer_code") ?? null),
-    enable_amazon_deal: opts.get("options_enable_amazon_deal") === "1",
-    amazon_top_banner_link: clean(
-      opts.get("options_amazon_top_banner_link") ?? null
-    ),
     published_at: now,
     created_at: now,
     updated_at: now,
@@ -910,27 +903,10 @@ async function seedGlobal(summary: string[]): Promise<void> {
     }
   }
 
-  const globalId = await insertRow("globals", row);
-
-  // amazonTopBanner media (attachment id → Strapi file id → morph link)
-  let bannerLinked = false;
-  const bannerRef = opts.get("options_amazon_top_banner");
-  if (bannerRef) {
-    const fileId = await resolveMediaRef(bannerRef);
-    if (fileId) {
-      await linkMedia(fileId, globalId, "api::global.global", "amazonTopBanner");
-      bannerLinked = true;
-    } else {
-      logger.warn(
-        `global: amazon_top_banner attachment ${bannerRef} could not be resolved — leaving null`
-      );
-    }
-  }
+  await insertRow("globals", row);
 
   logger.info("global seeded");
-  summary.push(
-    `global: seeded (amazonTopBanner ${bannerLinked ? "linked" : "null"})`
-  );
+  summary.push("global: seeded");
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1068,12 +1044,12 @@ async function gatherHomepageData(
   // ── hero banners from WP ACF options repeater ──
   const banners = await parseSliderBanners();
 
-  // ── hero products: top 4 published deals ──
+  // ── hero products: newest published deals ──
   const heroDeals = await pgQuery<{ id: number }>(
     `SELECT id FROM "deals"
      WHERE published_at IS NOT NULL
        AND content_status = 'published'
-     ORDER BY is_popular DESC, published_at DESC
+     ORDER BY published_at DESC
      LIMIT ${HOMEPAGE_SEED_LIMITS.heroProducts}`
   );
 
@@ -1087,7 +1063,7 @@ async function gatherHomepageData(
   }
 
   // ── topDeals: newest published deals from the Deals Of The Day
-  //    category; falls back to popular deals when the category or its link
+  //    category; falls back to newest deals when the category or its link
   //    table is unavailable ──
   const dealsCategoriesLnk = await detectLnk("deals", "categories", "category");
   const dealOfTheDayId = await categoryIdBySlug("deal-of-the-day");
@@ -1107,22 +1083,21 @@ async function gatherHomepageData(
   }
   if (topDeals.length === 0) {
     logger.warn(
-      "topDeals: 'deal-of-the-day' category empty or missing — falling back to newest popular deals"
+      "topDeals: 'deal-of-the-day' category empty or missing — falling back to newest deals"
     );
     topDeals = await pgQuery<{ id: number }>(
       `SELECT id FROM "deals"
        WHERE published_at IS NOT NULL
          AND content_status = 'published'
-         AND is_popular = true
        ORDER BY published_at DESC
        LIMIT ${HOMEPAGE_SEED_LIMITS.topDeals}`
     );
   }
 
-  // ── cgExclusive: newest coupons from the Exclusive Coupons category
-  //    (falls back to the offer_type flag); newlyAdded: newest coupons of
-  //    any kind. Counts come from HOMEPAGE_SEED_LIMITS. Both slots require
-  //    an image, reused from the coupon. ──
+  // ── cgExclusive: newest coupons from the Exclusive Coupons category;
+  //    newlyAdded: newest coupons of any kind. Counts come from
+  //    HOMEPAGE_SEED_LIMITS. Both slots require an image, reused from the
+  //    coupon. ──
   let exclusiveCoupons: CouponWithImage[] = [];
   let newlyAddedCoupons: CouponWithImage[] = [];
   if (hasTable("coupons") && hasTable("files_related_mph")) {
@@ -1142,14 +1117,9 @@ async function gatherHomepageData(
         [exclusiveCategoryId]
       );
     }
-    if (exclusiveCoupons.length === 0 && (await hasColumn("coupons", "offer_type"))) {
+    if (exclusiveCoupons.length === 0) {
       logger.warn(
-        "cgExclusive: 'exclusive-coupons' category empty or missing — falling back to offer_type='exclusive'"
-      );
-      exclusiveCoupons = await newestCouponsWithImage(
-        HOMEPAGE_SEED_LIMITS.cgExclusive,
-        "",
-        "AND c.offer_type = 'exclusive'"
+        "cgExclusive: 'exclusive-coupons' category empty or missing — section may be sparse"
       );
     }
 

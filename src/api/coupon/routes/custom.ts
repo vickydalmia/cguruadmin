@@ -25,12 +25,6 @@ export default {
         ],
       },
     },
-    {
-      method: 'GET',
-      path: '/deals/tag/:tagSlug',
-      handler: 'custom.getDealsByTag',
-      config: { auth: false },
-    },
     // Store coupons/deals
     {
       method: 'GET',

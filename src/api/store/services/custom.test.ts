@@ -37,6 +37,9 @@ function hydratedStore(candidate: ReturnType<typeof store>) {
 function createHarness() {
   const findManyByUid: Record<string, FindManyMock> = {
     'api::store.store': vi.fn(),
+    'api::brand.brand': vi.fn(),
+    'api::category.category': vi.fn(),
+    'api::bank.bank': vi.fn(),
     'api::coupon.coupon': vi.fn(),
     'api::deal.deal': vi.fn(),
   };
@@ -83,7 +86,7 @@ describe('store custom service relatedStores', () => {
     harness.findManyByUid['api::store.store'].mockResolvedValueOnce([]);
 
     await expect(
-      harness.service.relatedStores('missing', {
+      harness.service.relatedStores('store', 'missing', {
         categoryDocumentIds: 'cat-a',
       }),
     ).resolves.toBeNull();
@@ -92,12 +95,18 @@ describe('store custom service relatedStores', () => {
     expect(harness.findManyByUid['api::deal.deal']).not.toHaveBeenCalled();
   });
 
-  it('returns no recommendations without querying inventory when the caller confirms an empty category set', async () => {
+  it('uses the Store fallback without querying offer inventory when the caller confirms an empty category set', async () => {
     const harness = createHarness();
+    const fallback = store('store-2', 'Fallback Store', 'fallback-store');
     givenCurrentStore(harness);
+    givenHydratedStores(harness, [
+      hydratedStore(currentStore),
+      store('store-3', 'Missing Artwork', 'missing-artwork'),
+      hydratedStore(fallback),
+    ]);
 
     await expect(
-      harness.service.relatedStores('current-store', {
+      harness.service.relatedStores('store', 'current-store', {
         categorySource: 'storeOffers',
       }),
     ).resolves.toEqual({
@@ -106,10 +115,27 @@ describe('store custom service relatedStores', () => {
         offerCount: 0,
         sharedCategoryCount: 0,
       },
-      stores: [],
+      stores: [
+        expect.objectContaining({
+          slug: 'fallback-store',
+          offerCount: 0,
+          sharedCategoryCount: 0,
+        }),
+      ],
     });
 
-    expect(harness.findManyByUid['api::store.store']).toHaveBeenCalledTimes(1);
+    expect(harness.findManyByUid['api::store.store']).toHaveBeenCalledTimes(2);
+    expect(
+      harness.findManyByUid['api::store.store'].mock.calls[1]?.[0],
+    ).toMatchObject({
+      sort: [
+        { ratingAverage: 'desc' },
+        { ratingCount: 'desc' },
+        { updatedAt: 'desc' },
+        { name: 'asc' },
+      ],
+      limit: 24,
+    });
     expect(harness.findManyByUid['api::coupon.coupon']).not.toHaveBeenCalled();
     expect(harness.findManyByUid['api::deal.deal']).not.toHaveBeenCalled();
   });
@@ -127,7 +153,7 @@ describe('store custom service relatedStores', () => {
       .mockResolvedValueOnce([]);
 
     await expect(
-      harness.service.relatedStores('current-store'),
+      harness.service.relatedStores('store', 'current-store'),
     ).resolves.toMatchObject({ stores: [] });
 
     // publishedOnlyFilters(): status check plus a $and-wrapped expiry window
@@ -158,6 +184,80 @@ describe('store custom service relatedStores', () => {
     });
   });
 
+  it.each([
+    ['brand', 'api::brand.brand', 'brands'],
+    ['bank', 'api::bank.bank', 'banks'],
+  ] as const)(
+    'derives %s categories from active Coupons and Product Deals and returns Stores only',
+    async (entityType, uid, relationField) => {
+      const harness = createHarness();
+      const source = {
+        documentId: `${entityType}-1`,
+        name: `Current ${entityType}`,
+        slug: `current-${entityType}`,
+      };
+      const owner = store('store-2', 'Related Store', 'related-store');
+      harness.findManyByUid[uid].mockResolvedValueOnce([source]);
+      harness.findManyByUid['api::coupon.coupon']
+        .mockResolvedValueOnce([{ categories: [category('cat-a')] }])
+        .mockResolvedValueOnce([
+          { stores: [owner], categories: [category('cat-a')] },
+        ]);
+      harness.findManyByUid['api::deal.deal']
+        .mockResolvedValueOnce([{ categories: [category('cat-a')] }])
+        .mockResolvedValueOnce([]);
+      givenHydratedStores(harness, [hydratedStore(owner)]);
+
+      const result = await harness.service.relatedStores(
+        entityType,
+        source.slug,
+      );
+
+      expect(
+        harness.findManyByUid['api::coupon.coupon'].mock.calls[0]?.[0].filters,
+      ).toMatchObject({
+        [relationField]: { documentId: source.documentId },
+      });
+      expect(
+        harness.findManyByUid['api::deal.deal'].mock.calls[0]?.[0].filters,
+      ).toMatchObject({
+        [relationField]: { documentId: source.documentId },
+      });
+      expect(result).toEqual({
+        stores: [expect.objectContaining({ slug: 'related-store' })],
+      });
+    },
+  );
+
+  it('uses the selected Category directly and returns Stores attached to its active offers', async () => {
+    const harness = createHarness();
+    const selectedCategory = category('cat-a', 'mobiles');
+    const owner = store('store-2', 'Mobile Store', 'mobile-store');
+    harness.findManyByUid['api::category.category'].mockResolvedValueOnce([
+      selectedCategory,
+    ]);
+    givenRelatedOffers(harness, [
+      { stores: [owner], categories: [selectedCategory] },
+    ]);
+    givenHydratedStores(harness, [hydratedStore(owner)]);
+
+    const result = await harness.service.relatedStores(
+      'category',
+      'mobiles',
+    );
+
+    expect(harness.findManyByUid['api::coupon.coupon']).toHaveBeenCalledTimes(1);
+    expect(harness.findManyByUid['api::deal.deal']).toHaveBeenCalledTimes(1);
+    expect(
+      harness.findManyByUid['api::coupon.coupon'].mock.calls[0]?.[0].filters,
+    ).toMatchObject({
+      categories: { documentId: { $in: ['cat-a'] } },
+    });
+    expect(result).toEqual({
+      stores: [expect.objectContaining({ slug: 'mobile-store' })],
+    });
+  });
+
   it('ranks Coupon owners without classifying Coupons by the presence of a code', async () => {
     const harness = createHarness();
     const owner = store('store-2', 'Coupon Store', 'coupon-store');
@@ -165,20 +265,18 @@ describe('store custom service relatedStores', () => {
     givenRelatedOffers(harness, [
       {
         code: 'SAVE20',
-        isPopular: false,
         stores: [owner],
         categories: [category('cat-a')],
       },
       {
         code: null,
-        isPopular: true,
         stores: [owner],
         categories: [category('cat-a')],
       },
     ]);
     givenHydratedStores(harness, [hydratedStore(owner)]);
 
-    const result = await harness.service.relatedStores('current-store', {
+    const result = await harness.service.relatedStores('store', 'current-store', {
       categoryDocumentIds: 'cat-a',
     });
 
@@ -198,7 +296,6 @@ describe('store custom service relatedStores', () => {
     givenCurrentStore(harness);
     givenRelatedOffers(harness, [], [
       {
-        isPopular: true,
         stores: [storesOwner, primaryOwner],
         primaryStore: primaryOwner,
         categories: [category('cat-a')],
@@ -209,7 +306,7 @@ describe('store custom service relatedStores', () => {
       hydratedStore(storesOwner),
     ]);
 
-    const result = await harness.service.relatedStores('current-store', {
+    const result = await harness.service.relatedStores('store', 'current-store', {
       categorySlugs: 'cat-a',
     });
 
@@ -219,7 +316,7 @@ describe('store custom service relatedStores', () => {
     ]);
   });
 
-  it('preserves category, offer, popularity, name, and stable-key ranking after unordered hydration', async () => {
+  it('preserves category, offer, name, and stable-key ranking after unordered hydration', async () => {
     const harness = createHarness();
     const alpha = store('store-2', 'Alpha', 'alpha');
     const bravo = store('store-3', 'Bravo', 'bravo');
@@ -234,7 +331,7 @@ describe('store custom service relatedStores', () => {
       { stores: [bravo], categories: [category('cat-a')] },
       { stores: [bravo], categories: [category('cat-a')] },
       { stores: [bravo], categories: [category('cat-a')] },
-      { stores: [charlie], isPopular: true, categories: [category('cat-a')] },
+      { stores: [charlie], categories: [category('cat-a')] },
       { stores: [charlie], categories: [category('cat-a')] },
       { stores: [delta], categories: [category('cat-a')] },
       { stores: [delta], categories: [category('cat-a')] },
@@ -250,7 +347,7 @@ describe('store custom service relatedStores', () => {
       hydratedStore(echoOne),
     ]);
 
-    const result = await harness.service.relatedStores('current-store', {
+    const result = await harness.service.relatedStores('store', 'current-store', {
       categoryDocumentIds: 'cat-a,cat-b',
     });
 
@@ -267,7 +364,7 @@ describe('store custom service relatedStores', () => {
     ]);
   });
 
-  it('clamps the result limit and hydrates only the selected candidates', async () => {
+  it('clamps the result limit and hydrates a bounded pool before filtering artwork', async () => {
     const harness = createHarness();
     const candidates = Array.from({ length: 14 }, (_, index) =>
       store(`store-${index + 2}`, `Store ${String(index).padStart(2, '0')}`),
@@ -282,7 +379,7 @@ describe('store custom service relatedStores', () => {
     );
     givenHydratedStores(harness, candidates.slice(0, 12).map(hydratedStore));
 
-    const result = await harness.service.relatedStores('current-store', {
+    const result = await harness.service.relatedStores('store', 'current-store', {
       categorySlugs: 'cat-a',
       limit: '999',
     });
@@ -290,9 +387,9 @@ describe('store custom service relatedStores', () => {
     expect(result.stores).toHaveLength(12);
     const hydrationQuery =
       harness.findManyByUid['api::store.store'].mock.calls[1]?.[0];
-    expect(hydrationQuery.limit).toBe(12);
-    expect(hydrationQuery.filters.$or[0].documentId.$in).toHaveLength(12);
-    expect(hydrationQuery.filters.$or[1].slug.$in).toHaveLength(12);
+    expect(hydrationQuery.limit).toBe(14);
+    expect(hydrationQuery.filters.$or[0].documentId.$in).toHaveLength(14);
+    expect(hydrationQuery.filters.$or[1].slug.$in).toHaveLength(14);
   });
 
   it('uses the default limit for invalid input and caps category filters at twelve unique valid values', async () => {
@@ -316,7 +413,7 @@ describe('store custom service relatedStores', () => {
     );
     givenHydratedStores(harness, owners.slice(0, 6).map(hydratedStore));
 
-    await harness.service.relatedStores('current-store', {
+    await harness.service.relatedStores('store', 'current-store', {
       categoryDocumentIds: suppliedCategories,
       limit: 'not-a-number',
     });
@@ -328,7 +425,7 @@ describe('store custom service relatedStores', () => {
     );
     expect(
       harness.findManyByUid['api::store.store'].mock.calls[1]?.[0].limit,
-    ).toBe(6);
+    ).toBe(8);
   });
 
   it('hydrates logos once after ranking and omits selected stores that no longer exist', async () => {
@@ -343,7 +440,7 @@ describe('store custom service relatedStores', () => {
     const hydratedFirst = hydratedStore(first);
     givenHydratedStores(harness, [hydratedFirst]);
 
-    const result = await harness.service.relatedStores('current-store', {
+    const result = await harness.service.relatedStores('store', 'current-store', {
       categorySlugs: 'cat-a',
     });
 
@@ -396,7 +493,7 @@ describe('store custom service relatedStores', () => {
     );
     givenHydratedStores(harness, [hydratedStore(related)]);
 
-    const result = await harness.service.relatedStores('current-store', {
+    const result = await harness.service.relatedStores('store', 'current-store', {
       categorySlugs: 'cat-a',
     });
 

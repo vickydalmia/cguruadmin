@@ -4,7 +4,6 @@ import { pgQuery } from "../db/pg-client.js";
 import { getPgPool } from "../db/pg-client.js";
 import {
   ensureTermMapping,
-  getTagMapping,
   getUserMapping,
   setUserMapping,
 } from "../utils/id-maps.js";
@@ -219,10 +218,9 @@ async function backfillCreators(): Promise<void> {
   const dealsUpdated = await applyCreatorUpdates("deals", dealPairs);
   const couponsUpdated = await applyCreatorUpdates("coupons", couponPairs);
   const taxonomyUpdated = await backfillTaxonomyCreators();
-  const tagsUpdated = await backfillTagCreators();
 
   logger.info(
-    `Creator backfill: ${dealsUpdated} deals, ${couponsUpdated} coupons, ${taxonomyUpdated} taxonomies, ${tagsUpdated} tags updated`
+    `Creator backfill: ${dealsUpdated} deals, ${couponsUpdated} coupons, ${taxonomyUpdated} taxonomies updated`
   );
 }
 
@@ -309,50 +307,6 @@ async function backfillTaxonomyCreators(): Promise<number> {
   return total;
 }
 
-async function backfillTagCreators(): Promise<number> {
-  const rows = await wpQuery<{
-    term_id: number;
-    post_author: number;
-    post_id: number;
-  }>(`
-    SELECT tt.term_id, p.post_author, p.ID AS post_id
-    FROM wp_term_taxonomy tt
-    JOIN wp_term_relationships tr ON tr.term_taxonomy_id = tt.term_taxonomy_id
-    JOIN wp_posts p ON p.ID = tr.object_id
-    WHERE tt.taxonomy = 'post_tag'
-      AND p.post_type = 'post'
-      AND p.post_status IN ('publish', 'future')
-    ORDER BY tt.term_id,
-             COALESCE(p.post_modified_gmt, p.post_date_gmt, p.post_modified, p.post_date) DESC,
-             p.ID DESC
-  `);
-
-  const pairs: Array<CreatorTriple> = [];
-  const latestByTerm = new Map<number, { post_author: number; post_id: number }>();
-
-  for (const row of rows) {
-    if (!latestByTerm.has(row.term_id)) {
-      latestByTerm.set(row.term_id, {
-        post_author: row.post_author,
-        post_id: row.post_id,
-      });
-    }
-  }
-
-  for (const [termId, row] of latestByTerm) {
-    const adminId = getUserMapping(row.post_author);
-    if (adminId) {
-      pairs.push([
-        getTagMapping(termId)?.documentId ?? generateDocumentId(`tag:${termId}`),
-        adminId,
-        adminId,
-      ]);
-    }
-  }
-
-  return applyCreatorUpdates("tags", pairs);
-}
-
 function isTaxonomyTable(
   table: string
 ): table is "stores" | "brands" | "categories" | "banks" {
@@ -363,7 +317,7 @@ function isTaxonomyTable(
 type CreatorTriple = [string, number, number];
 
 async function applyCreatorUpdates(
-  table: "deals" | "coupons" | "stores" | "brands" | "categories" | "banks" | "tags",
+  table: "deals" | "coupons" | "stores" | "brands" | "categories" | "banks",
   pairs: Array<CreatorTriple>
 ): Promise<number> {
   if (pairs.length === 0) return 0;

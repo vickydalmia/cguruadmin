@@ -16,11 +16,14 @@
       "type": "string",
       "required": true
     },
+    "offerText": {
+      "type": "string"
+    },
     "content": {
       "type": "richtext"
     },
     "code": {
-      "type": "text"
+      "type": "string"
     },
     "couponType": {
       "type": "enumeration",
@@ -37,25 +40,22 @@
       "target": "api::unique-coupon-pool.unique-coupon-pool",
       "inversedBy": "coupons"
     },
-    "isPopular": {
-      "type": "boolean",
-      "default": false
-    },
-    "offerType": {
+    "badge": {
       "type": "enumeration",
       "enum": [
-        "exclusive",
-        "newly_added",
-        "electronics",
-        "fashion",
-        "travel",
-        "food"
+        "CG Exclusive",
+        "Recommended",
+        "Top Rated",
+        "Best Seller",
+        "Expiring Soon",
+        "LOOT Deal"
       ]
     },
-    "cashbackItems": {
-      "type": "component",
-      "repeatable": true,
-      "component": "shared.chip"
+    "cashbackText": {
+      "type": "string"
+    },
+    "bankOfferText": {
+      "type": "string"
     },
     "image": {
       "type": "media",
@@ -105,12 +105,6 @@
       "type": "relation",
       "relation": "manyToMany",
       "target": "api::brand.brand",
-      "inversedBy": "coupons"
-    },
-    "tags": {
-      "type": "relation",
-      "relation": "manyToMany",
-      "target": "api::tag.tag",
       "inversedBy": "coupons"
     }
   }

@@ -38,14 +38,12 @@ const RELATION_CONFIG: Record<string, RelationConfig[]> = {
     { field: 'brands', target: 'api::brand.brand', label: 'Brands' },
     { field: 'categories', target: 'api::category.category', label: 'Categories' },
     { field: 'banks', target: 'api::bank.bank', label: 'Banks' },
-    { field: 'tags', target: 'api::tag.tag', label: 'Tags' },
   ],
   'api::coupon.coupon': [
     { field: 'stores', target: 'api::store.store', label: 'Stores' },
     { field: 'brands', target: 'api::brand.brand', label: 'Brands' },
     { field: 'categories', target: 'api::category.category', label: 'Categories' },
     { field: 'banks', target: 'api::bank.bank', label: 'Banks' },
-    { field: 'tags', target: 'api::tag.tag', label: 'Tags' },
   ],
 };
 
@@ -537,7 +535,7 @@ const describeErrorLocation = (path: Array<string | number>): string => {
     }
     parts.push(
       index === 0
-        ? SECTION_LABEL_BY_ATTR[segment] ?? segment
+        ? SECTION_LABEL_BY_ATTR[segment] ?? humanizeFieldName(segment)
         : humanizeFieldName(segment)
     );
   });
@@ -571,7 +569,7 @@ function ValidationProblemsList({ problems }: { problems: FlatError[] }) {
     <Flex direction="column" alignItems="stretch" gap={3} width="100%">
       <Typography variant="pi" textColor="neutral600">
         Fix these to save. Each problem field is also marked in red in the
-        form, and rows with problems open automatically.
+        form, and any repeatable rows with problems open automatically.
       </Typography>
       {problems.map((problem) => {
         // Server messages are already specific ("got 800×400 …") — only swap
@@ -593,11 +591,26 @@ function ValidationProblemsList({ problems }: { problems: FlatError[] }) {
   );
 }
 
+// Content types that get the homepage-style "Validation problems" side panel.
+// Any create/update validation failure — client-side required-field checks or a
+// server ValidationError whose details.errors[].path map onto form fields (e.g.
+// the coupon/deal offer-text word caps) — is listed here with the offending
+// field highlighted inline.
+const VALIDATION_PANEL_UIDS = new Set<string>([
+  HOMEPAGE_UID,
+  'api::coupon.coupon',
+  'api::deal.deal',
+  'api::store.store',
+  'api::category.category',
+  'api::bank.bank',
+  'api::brand.brand',
+]);
+
 const ValidationProblemsPanel: PanelComponent = ({ model }) => {
   // Hook order must not depend on the model — select first, bail after.
   const formErrors = useForm('ValidationProblemsPanel', (state) => state.errors);
 
-  if (model !== HOMEPAGE_UID) return null;
+  if (!VALIDATION_PANEL_UIDS.has(model)) return null;
 
   const problems = flattenFormErrors(formErrors);
   if (problems.length === 0) return null;

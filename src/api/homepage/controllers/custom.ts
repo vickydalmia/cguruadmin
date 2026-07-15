@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { arrayizeOfferText } from '../../../utils/offer-text';
 
 // Aggregate endpoints for the static frontend build: one request returns the
 // fully-populated homepage (5 levels deep — far beyond what REST populate
@@ -29,25 +30,29 @@ const NEWEST_FIRST = ['publishedAt:desc'] as const;
 // Never ship richtext `content` to the homepage payload.
 const COUPON_FIELDS = [
   'title',
+  'offerText',
+  'cashbackText',
+  'bankOfferText',
+  'badge',
   'code',
   'couponType',
   'affiliateLink',
   'expiresAt',
-  'isPopular',
   'contentStatus',
-  'offerType',
 ];
 const DEAL_FIELDS = [
   'title',
+  'offerText',
+  'cashbackText',
+  'bankOfferText',
+  'badge',
   'code',
   'salePrice',
   'mrp',
   'discount',
   'affiliateLink',
   'expiresAt',
-  'isPopular',
   'contentStatus',
-  'offerType',
 ];
 
 const storeRef = { fields: STORE_FIELDS, populate: { logo: true } };
@@ -59,7 +64,6 @@ const couponRef = {
   fields: COUPON_FIELDS,
   populate: {
     image: true,
-    cashbackItems: true,
     stores: storeRef,
     brands: brandRef,
   },
@@ -69,7 +73,6 @@ const dealRef = {
   fields: DEAL_FIELDS,
   populate: {
     dealImage: true,
-    cashbackItems: true,
     primaryStore: storeRef,
     stores: storeRef,
     brands: brandRef,
@@ -189,7 +192,6 @@ const FOOTER_POPULATE = {
 } as const;
 
 const GLOBAL_POPULATE = {
-  amazonTopBanner: true,
   telegramCta: true,
   newsletter: true,
 } as const;
@@ -346,6 +348,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     dropDeadOffers(sanitized);
     capCuratedLists(sanitized);
     await attachOfferCounts(strapi, sanitized);
+    // Nested coupon/deal cards: emit offerText as an array of words.
+    arrayizeOfferText(sanitized);
 
     return ctx.send({ data: sanitized });
   },

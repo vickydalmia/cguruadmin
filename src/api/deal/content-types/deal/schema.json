@@ -16,6 +16,9 @@
       "type": "string",
       "required": true
     },
+    "offerText": {
+      "type": "string"
+    },
     "content": {
       "type": "richtext"
     },
@@ -39,25 +42,22 @@
     "discount": {
       "type": "string"
     },
-    "isPopular": {
-      "type": "boolean",
-      "default": false
-    },
-    "offerType": {
+    "badge": {
       "type": "enumeration",
       "enum": [
-        "exclusive",
-        "newly_added",
-        "electronics",
-        "fashion",
-        "travel",
-        "food"
+        "CG Exclusive",
+        "Recommended",
+        "Top Rated",
+        "Best Seller",
+        "Expiring Soon",
+        "LOOT Deal"
       ]
     },
-    "cashbackItems": {
-      "type": "component",
-      "repeatable": true,
-      "component": "shared.chip"
+    "cashbackText": {
+      "type": "string"
+    },
+    "bankOfferText": {
+      "type": "string"
     },
     "primaryStore": {
       "type": "relation",
@@ -105,12 +105,6 @@
       "type": "relation",
       "relation": "manyToMany",
       "target": "api::brand.brand",
-      "inversedBy": "deals"
-    },
-    "tags": {
-      "type": "relation",
-      "relation": "manyToMany",
-      "target": "api::tag.tag",
       "inversedBy": "deals"
     }
   }

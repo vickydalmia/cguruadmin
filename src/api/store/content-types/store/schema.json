@@ -50,6 +50,10 @@
       "default": 0,
       "min": 0
     },
+    "isVerified": {
+      "type": "boolean",
+      "default": false
+    },
     "isCjEnabled": {
       "type": "boolean",
       "default": false

@@ -320,9 +320,6 @@ function rank<T extends Record<string, any>>(
   return [...items].sort((a, b) => {
     const byMatch = scores.get(a)! - scores.get(b)!;
     if (byMatch) return byMatch;
-    const byPopularity =
-      Number(Boolean(b?.isPopular)) - Number(Boolean(a?.isPopular));
-    if (byPopularity) return byPopularity;
     const byDate =
       time(b?.publishedAt ?? b?.updatedAt) -
       time(a?.publishedAt ?? a?.updatedAt);
@@ -399,14 +396,13 @@ function mapOffer(document: any, type: "coupon" | "deal") {
       name,
       ...relatedEntities(document).map((item) => item?.name),
     ].join(" "),
-    isPopular: Boolean(document?.isPopular),
     sortDate: document?.publishedAt ?? document?.updatedAt ?? null,
   };
 }
 
 function toPublicOffer(hit: any) {
   if (!hit) return null;
-  const { rankText, isPopular, sortDate, ...result } = hit;
+  const { rankText, sortDate, ...result } = hit;
   return result;
 }
 
@@ -524,10 +520,9 @@ async function findCoupons(strapi: Core.Strapi, query: string, limit: number) {
     // Both code and no-code variants are Coupon-schema records. CTA wording
     // never changes the backing entity or removes it from Coupon search.
     filters: couponFilters(query),
-    fields: ["title", "code", "couponType", "affiliateLink", "isPopular"],
+    fields: ["title", "code", "couponType", "affiliateLink"],
     populate: couponPopulate,
     sort: [
-      { isPopular: "desc" },
       { publishedAt: "desc" },
       { updatedAt: "desc" },
     ],
@@ -553,11 +548,9 @@ async function findDeals(strapi: Core.Strapi, query: string, limit: number) {
       "mrp",
       "discount",
       "expiresAt",
-      "isPopular",
     ],
     populate: dealPopulate,
     sort: [
-      { isPopular: "desc" },
       { publishedAt: "desc" },
       { updatedAt: "desc" },
     ],

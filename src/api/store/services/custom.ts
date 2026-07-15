@@ -1,20 +1,29 @@
 import type { Core } from '@strapi/strapi';
 import { publishedOnlyFilters } from '../../../utils/content-status';
+import type { EntityPageType } from './entity-page';
 
 // Raw Knex ON PURPOSE: rating votes must NOT go through strapi.documents —
 // the global documents middleware in src/index.ts enqueues static rebuilds on
 // every documents-API write, and anonymous votes must never trigger a rebuild.
 
-const POSTGRES_CLIENTS = ['pg', 'postgres', 'postgresql'];
-const SQLITE_CLIENTS = ['sqlite', 'sqlite3', 'better-sqlite3'];
 const RELATED_STORE_LIMIT = 6;
 const MAX_RELATED_STORE_LIMIT = 12;
 const CATEGORY_FILTER_LIMIT = 12;
 const CATEGORY_SOURCE_OFFER_LIMIT = 120;
 const RELATED_OFFER_LIMIT = 320;
+const FALLBACK_STORE_MIN_POOL = 24;
+
+const ENTITY_CONFIG: Record<
+  EntityPageType,
+  { uid: string; relationField: 'stores' | 'brands' | 'categories' | 'banks' }
+> = {
+  store: { uid: 'api::store.store', relationField: 'stores' },
+  brand: { uid: 'api::brand.brand', relationField: 'brands' },
+  category: { uid: 'api::category.category', relationField: 'categories' },
+  bank: { uid: 'api::bank.bank', relationField: 'banks' },
+};
 
 const OFFER_SORT = [
-  { isPopular: 'desc' },
   { publishedAt: 'desc' },
   { updatedAt: 'desc' },
 ];
@@ -25,14 +34,6 @@ const hydratedStoreRef = {
   populate: { logo: true },
 };
 const categoryRef = { fields: ['name', 'slug'] };
-
-function isUniqueViolation(err: any): boolean {
-  return (
-    err?.code === '23505' || // Postgres
-    err?.errno === 1062 || // MySQL ER_DUP_ENTRY
-    /UNIQUE constraint failed/i.test(String(err?.message ?? '')) // SQLite
-  );
-}
 
 function oneString(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
@@ -128,18 +129,26 @@ function categoryFilter(
   return { $or: clauses };
 }
 
-function currentStoreCouponFilter(currentStore: any): Record<string, any> {
+function sourceCouponFilter(
+  entityType: EntityPageType,
+  source: any,
+): Record<string, any> {
   return {
-    stores: { documentId: currentStore.documentId },
+    [ENTITY_CONFIG[entityType].relationField]: { documentId: source.documentId },
     ...publishedOnlyFilters(),
   };
 }
 
-function currentStoreDealFilter(currentStore: any): Record<string, any> {
+function sourceDealFilter(
+  entityType: EntityPageType,
+  source: any,
+): Record<string, any> {
+  if (entityType !== 'store') return sourceCouponFilter(entityType, source);
+
   return {
     $or: [
-      { stores: { documentId: currentStore.documentId } },
-      { primaryStore: { documentId: currentStore.documentId } },
+      { stores: { documentId: source.documentId } },
+      { primaryStore: { documentId: source.documentId } },
     ],
     ...publishedOnlyFilters(),
   };
@@ -210,51 +219,110 @@ function publicStore(store: any, offerCount = 0, sharedCategoryCount = 0) {
   };
 }
 
+function relatedStoresResponse(
+  entityType: EntityPageType,
+  source: any,
+  stores: any[],
+) {
+  return entityType === 'store'
+    ? { store: publicStore(source), stores }
+    : { stores };
+}
+
+async function highRatedStoreFallback(
+  strapi: Core.Strapi,
+  entityType: EntityPageType,
+  source: any,
+  limit: number,
+) {
+  const documents = ((await strapi.documents('api::store.store').findMany({
+    ...hydratedStoreRef,
+    // Only genuinely rated Stores belong in a "high-rated" fallback. This also
+    // avoids PostgreSQL's NULLS-FIRST behaviour on `ratingAverage DESC`, which
+    // would otherwise let unrated Stores (null rating from the WP migration)
+    // fill the bounded pool and crowd out every rated Store.
+    filters: { ratingAverage: { $notNull: true } },
+    sort: [
+      { ratingAverage: 'desc' },
+      { ratingCount: 'desc' },
+      { updatedAt: 'desc' },
+      { name: 'asc' },
+    ],
+    limit: Math.max(limit * 3, FALLBACK_STORE_MIN_POOL),
+  } as any)) ?? []) as any[];
+  const seen = new Set<string>();
+  const stores: any[] = [];
+
+  for (const document of documents) {
+    if (
+      !document?.name ||
+      !document?.slug ||
+      !document?.logo ||
+      (entityType === 'store' && isSameStore(document, source))
+    ) {
+      continue;
+    }
+    const key = documentKey(document);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    stores.push(publicStore(document));
+    if (stores.length >= limit) break;
+  }
+
+  return stores;
+}
+
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
 
-  /**
-   * Return stores that share categories with the current store's visible
-   * coupon/deal inventory. The UI passes category ids/slugs it already fetched
-   * from /stores/:slug/coupons and /stores/:slug/deals; if absent, this falls
-   * back to sampling the current store's offer categories.
-   */
-  async relatedStores(slug: string, query: Record<string, unknown> = {}) {
+  /** Return Store-only suggestions for any public entity page. */
+  async relatedStores(
+    entityType: EntityPageType,
+    slug: string,
+    query: Record<string, unknown> = {},
+  ) {
     const limit = parsePositiveInteger(
       query.limit,
       RELATED_STORE_LIMIT,
       MAX_RELATED_STORE_LIMIT,
     );
-
-    const stores = await strapi.documents('api::store.store').findMany({
+    const config = ENTITY_CONFIG[entityType];
+    const sourceQuery: Record<string, any> = {
       filters: { slug },
-      fields: ['name', 'slug', 'logoAlt'],
-      populate: { logo: true },
+      fields: entityType === 'store' ? ['name', 'slug', 'logoAlt'] : ['name', 'slug'],
       limit: 1,
-    } as any);
+    };
+    if (entityType === 'store') sourceQuery.populate = { logo: true };
+    const sources = (await strapi
+      .documents(config.uid as any)
+      .findMany(sourceQuery as any)) as any[];
 
-    const currentStore = stores[0] as any;
-    if (!currentStore) return null;
+    const source = sources[0] as any;
+    if (!source) return null;
 
     let categoryDocumentIds = parseCsv(query.categoryDocumentIds);
     let categorySlugs = parseCsv(query.categorySlugs);
     const callerAlreadyKnowsCategories =
-      oneString(query.categorySource) === 'storeOffers';
+      ['storeOffers', 'entityOffers'].includes(oneString(query.categorySource) ?? '');
 
-    if (
+    if (entityType === 'category') {
+      const selectedCategory = uniqueCategoryFilters([source]);
+      categoryDocumentIds = selectedCategory.documentIds;
+      categorySlugs = selectedCategory.slugs;
+    } else if (
       categoryDocumentIds.length === 0 &&
       categorySlugs.length === 0 &&
       !callerAlreadyKnowsCategories
     ) {
       const [coupons, deals] = (await Promise.all([
         strapi.documents('api::coupon.coupon').findMany({
-          filters: currentStoreCouponFilter(currentStore),
+          filters: sourceCouponFilter(entityType, source),
           fields: ['title'],
           populate: { categories: categoryRef },
           sort: OFFER_SORT,
           limit: CATEGORY_SOURCE_OFFER_LIMIT,
         } as any),
         strapi.documents('api::deal.deal').findMany({
-          filters: currentStoreDealFilter(currentStore),
+          filters: sourceDealFilter(entityType, source),
           fields: ['title'],
           populate: { categories: categoryRef },
           sort: OFFER_SORT,
@@ -270,7 +338,13 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
 
     const byCategory = categoryFilter(categoryDocumentIds, categorySlugs);
     if (!byCategory) {
-      return { store: publicStore(currentStore), stores: [] };
+      const fallback = await highRatedStoreFallback(
+        strapi,
+        entityType,
+        source,
+        limit,
+      );
+      return relatedStoresResponse(entityType, source, fallback);
     }
 
     const filters = {
@@ -284,14 +358,14 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const [coupons, deals] = (await Promise.all([
       strapi.documents('api::coupon.coupon').findMany({
         filters,
-        fields: ['title', 'isPopular'],
+        fields: ['title'],
         populate: { stores: candidateStoreRef, categories: categoryRef },
         sort: OFFER_SORT,
         limit: RELATED_OFFER_LIMIT,
       } as any),
       strapi.documents('api::deal.deal').findMany({
         filters,
-        fields: ['title', 'isPopular'],
+        fields: ['title'],
         populate: {
           stores: candidateStoreRef,
           primaryStore: candidateStoreRef,
@@ -307,7 +381,6 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       {
         store: any;
         offerCount: number;
-        popularHits: number;
         categories: Set<string>;
       }
     >();
@@ -328,7 +401,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         .filter((key): key is string => Boolean(key));
 
       for (const owner of storeOwners(offer)) {
-        if (isSameStore(owner, currentStore)) continue;
+        if (entityType === 'store' && isSameStore(owner, source)) continue;
 
         const key = documentKey(owner);
         if (!key || !owner?.slug || !owner?.name) continue;
@@ -338,12 +411,10 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
           {
             store: owner,
             offerCount: 0,
-            popularHits: 0,
             categories: new Set<string>(),
           };
 
         entry.offerCount += 1;
-        if (offer?.isPopular) entry.popularHits += 1;
         for (const overlappingCategory of overlappingCategories) {
           entry.categories.add(overlappingCategory);
         }
@@ -359,9 +430,6 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         const byOfferCount = b.offerCount - a.offerCount;
         if (byOfferCount) return byOfferCount;
 
-        const byPopularity = b.popularHits - a.popularHits;
-        if (byPopularity) return byPopularity;
-
         const byName = String(a.store.name ?? '').localeCompare(
           String(b.store.name ?? ''),
         );
@@ -371,7 +439,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
           String(documentKey(b.store) ?? ''),
         );
       })
-      .slice(0, limit);
+      .slice(0, Math.max(limit * 3, FALLBACK_STORE_MIN_POOL));
 
     const selectedFilter = candidateStoreFilter(
       selectedEntries.map((entry) => entry.store),
@@ -401,7 +469,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         (documentId ? hydratedByDocumentId.get(documentId) : undefined) ??
         (itemSlug ? hydratedBySlug.get(itemSlug) : undefined);
 
-      if (!hydratedStore) return [];
+      if (!hydratedStore?.logo) return [];
       return [
         publicStore(
           hydratedStore,
@@ -409,86 +477,18 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
           entry.categories.size,
         ),
       ];
-    });
+    }).slice(0, limit);
+    const stores = relatedStores.length > 0
+      ? relatedStores
+      : await highRatedStoreFallback(strapi, entityType, source, limit);
 
-    return {
-      store: publicStore(currentStore),
-      stores: relatedStores,
-    };
+    return relatedStoresResponse(entityType, source, stores);
   },
 
-  /**
-   * Record one rating vote and return the fresh aggregate.
-   * Returns null when no store matches the slug, and the current aggregate
-   * with `alreadyVoted: true` when this client has voted on this store before
-   * (enforced by the store_rating_votes UNIQUE constraint, so it survives
-   * restarts and multi-node deploys).
-   */
+  /** @deprecated Use api::store.entity-page for all entity rating writes. */
   async submitRating(slug: string, value: number, ipHash: string) {
-    const knex = strapi.db.connection;
-    const client: string = (knex as any)?.client?.config?.client ?? '';
-
-    const store = await knex('stores')
-      .where({ slug })
-      .select(['id', 'rating_average', 'rating_count'])
-      .first();
-    if (!store) return null;
-
-    // The vote row is the dedupe gate: only apply the aggregate update when
-    // this insert actually lands. A concurrent duplicate loses on the unique
-    // constraint and reports alreadyVoted instead of double-counting.
-    try {
-      await knex('store_rating_votes').insert({
-        store_id: store.id,
-        ip_hash: ipHash,
-        value,
-      });
-    } catch (err: any) {
-      if (isUniqueViolation(err)) {
-        return {
-          ratingAverage: Number(store.rating_average ?? 0),
-          ratingCount: Number(store.rating_count ?? 0),
-          alreadyVoted: true,
-        };
-      }
-      throw err;
-    }
-
-    // rating_average is assigned BEFORE rating_count: MySQL applies SET left to
-    // right, Postgres reads old-row values — this order is correct on both.
-    const update = knex('stores')
-      .where({ id: store.id })
-      .update({
-        rating_average: knex.raw(
-          'ROUND(((COALESCE(rating_average, 0) * COALESCE(rating_count, 0)) + ?) / (COALESCE(rating_count, 0) + 1.0), 2)',
-          [value],
-        ),
-        rating_count: knex.raw('COALESCE(rating_count, 0) + 1'),
-      });
-
-    if (POSTGRES_CLIENTS.includes(client) || SQLITE_CLIENTS.includes(client)) {
-      const rows = await update.returning(['rating_average', 'rating_count']);
-      const row = rows?.[0];
-      if (!row) return null;
-      return {
-        ratingAverage: Number(row.rating_average),
-        ratingCount: Number(row.rating_count),
-        alreadyVoted: false,
-      };
-    }
-
-    // MySQL has no RETURNING: UPDATE yields the affected-row count, so read
-    // the fresh values back.
-    await update;
-    const row = await knex('stores')
-      .where({ id: store.id })
-      .select(['rating_average', 'rating_count'])
-      .first();
-    if (!row) return null;
-    return {
-      ratingAverage: Number(row.rating_average),
-      ratingCount: Number(row.rating_count),
-      alreadyVoted: false,
-    };
+    return await strapi
+      .service('api::store.entity-page' as any)
+      .submitRating('store', slug, value, ipHash);
   },
 });

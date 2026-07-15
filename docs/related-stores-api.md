@@ -1,67 +1,108 @@
-# Related Stores — how the recommendation works
+# Related Stores API
 
-*API:* `GET /api/stores/:slug/related-stores` · public, no login required · responses cached for 60 seconds
-*Used by:* the "Related Stores" block in the store-page sidebar
-*Code:* `src/api/store/services/custom.ts` (`relatedStores`), route in `src/api/store/routes/custom.ts`
+Public endpoints, cached for 60 seconds:
 
-## The one-line version
+- `GET /api/stores/:slug/related-stores`
+- `GET /api/brands/:slug/related-stores`
+- `GET /api/categories/:slug/related-stores`
+- `GET /api/banks/:slug/related-stores`
 
-> A store is "related" when its **live coupons and deals sit in the same categories** as the current store's offers — and the more categories it shares (and the more offers it has in them), the higher it ranks.
+The four routes share one Store-only implementation in
+`src/api/store/services/custom.ts`. Routes are registered in
+`src/api/store/routes/custom.ts`.
 
-We do not maintain a manual "related stores" list anywhere. The recommendations are computed automatically from the offer catalog, so they stay fresh as editors add or unpublish offers — no extra curation work.
+## Contract
 
-## How a request flows
+Every route returns Store records in `stores`. It never returns Brand, Category,
+or Bank records as suggestions.
 
-Using **Amazon** as the example:
+```json
+{
+  "stores": [
+    {
+      "documentId": "...",
+      "name": "Flipkart",
+      "slug": "shopping-coupon/flipkart",
+      "logo": {},
+      "logoAlt": "Flipkart logo",
+      "offerCount": 11,
+      "sharedCategoryCount": 7
+    }
+  ]
+}
+```
 
-1. **Find the store.** Look up the store by its slug (`amazon`). Unknown slug → 404.
+The Store route also keeps its legacy `store` field for compatibility. Unknown
+source slugs return 404. The default result limit is 6; `?limit=` is clamped to
+1-12.
 
-2. **Build Amazon's "interest profile" — the categories its offers live in.**
-   - Normally the website already knows these (it just fetched Amazon's coupons and deals to render the page) and passes them along, which keeps the request cheap.
-   - If not provided, the API works them out itself: it samples up to 120 of Amazon's most popular/recent published coupons and 120 deals, and collects their categories.
-   - Up to **12 categories** are used. If a store's offers have no categories at all, the API returns an empty list — there is nothing to match on.
+## Category Profile
 
-3. **Find candidate offers in those categories.** Fetch up to 320 published coupons + 320 published deals (most popular first, then newest) belonging to *any* of those categories — along with the stores that own them.
+The service first determines which categories should drive the result:
 
-4. **Score every store that owns one of those offers** (Amazon itself is excluded):
-   - **Shared categories** — how many of Amazon's categories this store's offers cover (breadth),
-   - **Offer count** — how many matching offers it has (depth),
-   - **Popular hits** — how many of those offers are flagged "popular".
+- **Store:** categories from the Store's active Coupon records and dedicated
+  Product Deal records. A Product Deal may relate through `stores` or
+  `primaryStore`.
+- **Brand:** categories from active Coupons and Product Deals related to the
+  Brand.
+- **Bank:** categories from active Coupons and Product Deals related to the
+  Bank.
+- **Category:** the selected Category itself. The service does not derive a
+  second category set from its offers.
 
-5. **Rank and pick the top 6** (the widget can ask for up to 12 via `?limit=`):
-   1. Most **shared categories** wins first,
-   2. then most **offers**,
-   3. then most **popular offers**,
-   4. alphabetical as the final tie-break (so results are stable, not random).
+Coupon code availability does not affect classification. Both code and no-code
+offers remain Coupon records; Product Deals are read only from the Deal content
+type.
 
-6. **Return the winners** with name, slug, logo, and their scores (`offerCount`, `sharedCategoryCount`) so the UI can show context like "11 offers".
+The website may pass category hints it already loaded through
+`categoryDocumentIds` or `categorySlugs` (comma-separated, up to 12 unique
+values). `categorySource=storeOffers` and `categorySource=entityOffers` indicate
+that the supplied category set is authoritative. Category routes always use the
+selected Category and ignore category hints.
 
-## Why "categories first, offers second"?
+## Store Selection
 
-Real result for Amazon today:
+For the chosen categories, the service samples up to 320 active Coupons and 320
+active Product Deals. It collects only their Store owners; a Product Deal's
+`primaryStore` also counts. The current Store is excluded on Store pages.
 
-| Rank | Store | Offers in shared categories | Shared categories |
-|---|---|---|---|
-| 1 | Flipkart | 11 | 7 |
-| 2 | Croma Retail | 6 | 6 |
-| 3 | Vijay Sales | 5 | 4 |
-| 4 | Lenovo | 41 | 3 |
-| 5 | Asus | 8 | 3 |
-| 6 | RealMe | 6 | 3 |
+Each Store is ranked by:
 
-Lenovo has by far the most offers (41) but ranks **below** Croma (6 offers), because Croma overlaps Amazon in 6 different categories while Lenovo only overlaps in 3. A store that is similar *across the board* (a marketplace rival like Flipkart) beats a narrow specialist with a deep catalog — which is the behavior we want for "stores like this one". A brand with many offers in one shared category still appears, just lower.
+1. Number of shared categories.
+2. Number of matching Coupon and Product Deal records.
+3. Number of matching records marked popular.
+4. Store name and stable document key for deterministic ties.
 
-## Product-relevant rules & guarantees
+The ranked candidates are hydrated once, and records without a usable logo are
+omitted. The result includes `offerCount` and `sharedCategoryCount` so the UI can
+explain the match.
 
-- **Only published content counts.** Draft or unpublished coupons/deals never influence the ranking and never appear.
-- **Self-updating.** Publish new offers or re-categorize a store's offers, and its related-store list adjusts on its own (within the 60-second cache window).
-- **Deterministic.** Same catalog → same order. No randomness between page loads.
-- **Bounded cost.** Hard caps (12 categories, 320 candidate offers per type) plus the 60-second cache keep the endpoint fast no matter how large the catalog grows.
-- **Levers editors already control:**
-  - *Categorizing offers well* is what drives quality — an offer with no categories contributes nothing to recommendations.
-  - The *"popular"* flag on an offer acts as a tie-breaker boost for its store.
-- **No manual override today.** If product ever wants to pin/exclude specific stores (e.g. never recommend a direct competitor), that would be a small follow-up feature — the ranking has a single, well-defined sort step where such rules would slot in.
+## Fallback
 
-## Known data caveat
+The sidebar should always have Store suggestions. When the source has no usable
+categories, or none of the related candidates has displayable Store artwork,
+the service falls back to Stores sorted by:
 
-Store slugs are inconsistent in shape (e.g. `shopping-coupon/flipkart` contains a `/`, while others are flat like `croma-coupons`). The API returns slugs as stored; the frontend link-building should be checked against nested slugs, or the slugs cleaned up in the CMS.
+1. Rating average.
+2. Rating count.
+3. Most recently updated.
+4. Name.
+
+Fallback results still require a name, slug, and logo. On a Store page, the
+current Store remains excluded. Fallback metrics are zero because those Stores
+were not selected through category overlap.
+
+## Operational Guarantees
+
+- Only `contentStatus=published`, unexpired Coupons and Product Deals influence
+  matching.
+- Results are deterministic for the same catalog state.
+- Work is bounded to 12 categories, 120 source records per content type, and
+  320 matching records per content type.
+- Results update automatically as editors publish, expire, or recategorize
+  offers, subject to the 60-second response cache.
+- Editors do not maintain a separate related-Store list.
+
+Store slugs may contain nested path segments, for example
+`shopping-coupon/flipkart`. Consumers must build links from the returned slug
+without assuming every slug is a single path segment.

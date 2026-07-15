@@ -1,0 +1,147 @@
+# Fresh Migration Runbook
+
+Step-by-step guide for migrating WordPress → Strapi into an **empty** target
+database (new environment, go-live, or a full re-do). For reference material —
+what each phase does internally, data mapping, troubleshooting — see
+[README.md](./README.md). For refreshing only the homepage on an already
+migrated database, skip to [Maintenance scripts](#maintenance-scripts).
+
+Everything here runs **from your local machine**. The scripts connect directly
+to the target Postgres (`PG_CONNECTION_STRING`) and to the WordPress MySQL
+(directly or through the built-in SSH tunnel). You never need shell access to
+the server or the Docker container.
+
+---
+
+## 1. Prerequisites
+
+- [ ] **Strapi deployed and booted once** against the target database. The
+      migration writes raw SQL into tables that only Strapi creates — coupons,
+      deals, all `components_home_*` tables, link tables. A brand-new database
+      that Strapi has never booted on will fail phase 00/13 with "missing
+      required infrastructure". Booting also runs the bootstrap routines
+      (public read permissions, homepage section labels, view configs).
+- [ ] **Target Postgres reachable from your machine** — for DigitalOcean
+      managed DBs, add your IP to the cluster's trusted sources.
+- [ ] **WordPress MySQL reachable** — a local dump loaded into MySQL, or the
+      live server via the SSH tunnel settings below.
+- [ ] **WordPress uploads** — local copy of `wp-content/uploads/` (media
+      files are read from disk, not over HTTP).
+- [ ] **S3 bucket + credentials** for media (optional — empty `S3_BUCKET`
+      records files with the local provider instead).
+- [ ] Node 18+ and dependencies installed: `cd migration && yarn install`.
+
+## 2. Configure the target
+
+```bash
+cp .env.migration.example .env.migration   # if starting from scratch
+```
+
+`PG_CONNECTION_STRING` in `.env.migration` **is the target selector** — every
+script in this package (migration, reset, markdown fix) writes to whatever it
+points at. Point it at the deployed database deliberately, and treat the file
+as secret (it is gitignored; never paste its contents into chats or logs).
+
+Key settings (full list in README § Setup & Configuration):
+
+| Variable | Purpose |
+|---|---|
+| `PG_CONNECTION_STRING` + `PG_CA_CERT_PATH` | Target Strapi Postgres (TLS verified for remote DBs) |
+| `WP_DB_*` | Source WordPress MySQL |
+| `SSH_HOST` / `SSH_PRIVATE_KEY_PATH` / `SSH_HOST_FINGERPRINT` | Optional tunnel to the WP DB (fingerprint is required when tunneling) |
+| `WP_UPLOADS_DIR` | Local path to `wp-content/uploads/` |
+| `S3_*` | Media destination |
+
+## 3. Run the migration
+
+```bash
+yarn migrate
+```
+
+One command runs every phase in order. Each phase checkpoints on completion,
+so if anything fails you fix the cause and re-run `yarn migrate` — it resumes
+where it stopped. (`yarn migrate:fresh` resets checkpoints but keeps the ID
+maps; `yarn migrate:phase <name>` runs a single phase.)
+
+Phase order:
+
+| Phase | What it does |
+|---|---|
+| `00-preflight` | Validates both DBs and required tables — fails fast, writes nothing |
+| `01-media-inventory` → `02-media-upload` | Catalogs WP media and uploads to S3 |
+| `03-taxonomies` | Stores, brands, categories, banks |
+| `05-pools` → `06-codes` → `06a-users` | Unique-coupon pools/codes, authors |
+| `07-coupons` → `08-deals` | The offers themselves (content sanitized through the shared `cleanHtml` allowlist on the way in) |
+| `09-seo-backfill` | Yoast SEO fields |
+| `10-verify` | Count/spot-check verification report |
+| `11-copy-used-media` → `12-offer-backfill` | Media wiring and offer relation backfill |
+| `13-site-content` | Global, **homepage**, menu, footer singles |
+| `13a-homepage-offer-sections` | Backfill for **pre-existing** homepages only — on a fresh run phase 13 already seeds everything and this is a no-op |
+| `14-media-optimize` | Image optimization backfill |
+
+Logs: console + `migration.log` (full) + `migration-errors.log`.
+
+### Homepage seed counts
+
+Phase 13 fills each homepage section to the counts in
+[`src/utils/homepage-limits.ts`](./src/utils/homepage-limits.ts) — the site
+renders 4 fewer per section (the +4 buffer absorbs offers that expire or get
+deleted mid-cycle; hero and popular stores carry no buffer). A parity test
+(`yarn test`) pins these to the component schema `max` values, since raw SQL
+bypasses Strapi validation.
+
+## 4. Verify
+
+- [ ] Phase `10-verify` output shows no missing counts.
+- [ ] `GET <strapi-url>/api/homepage-full` — sections filled to the seed
+      counts: topOffers 8, popularStores 1+24, topDeals 10, cgExclusive 8,
+      exploreOffers ≤10/tab, newlyAdded 8, offersByBrand 7, bankOffers 12.
+- [ ] `GET <strapi-url>/api/search?q=<known store>` returns grouped results.
+- [ ] Admin: log in, open Homepage, **save once** — proves component caps and
+      image validation pass on the seeded data.
+- [ ] Spot-check a store page and a coupon image URL (CDN base correct).
+
+## 5. After migration
+
+- Admin users/roles are not migrated — create editors in the admin and re-save
+  role permissions if needed.
+- The frontend (static build or ISR gateway) needs a full build/re-render once
+  content exists.
+
+---
+
+## Maintenance scripts
+
+Both live in this package, share `.env.migration` targeting, print the target
+host, and **refuse destructive actions without a `--yes-i-mean-<host>` flag**
+matching that host.
+
+### Reseed only the homepage
+
+Phase 13 skips the homepage when a row already exists. To rebuild it under
+current seeding rules (e.g. after changing section caps):
+
+```bash
+yarn tsx src/reset-homepage.ts --yes-i-mean-<pg-host>   # backs up all homepage tables to backups/, then deletes the row
+yarn migrate:phase 13-site-content                       # reseeds
+```
+
+### Repair markdown artifacts in richtext columns
+
+Only needed on databases whose content was edited with the old markdown admin
+editor — a fresh migration sanitizes everything on import and does not need it:
+
+```bash
+yarn fix:markdown-richtext                               # dry-run: prints would-be changes
+yarn fix:markdown-richtext --apply --yes-i-mean-<pg-host>
+```
+
+### Targeting a different database ad hoc
+
+Override the connection for a single command instead of editing
+`.env.migration` (empty `PG_CA_CERT_PATH` disables TLS for local):
+
+```bash
+PG_CONNECTION_STRING=postgresql://user:pass@127.0.0.1:5432/strapi PG_CA_CERT_PATH= \
+  yarn tsx src/reset-homepage.ts --yes-i-mean-127.0.0.1
+```

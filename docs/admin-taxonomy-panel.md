@@ -1,6 +1,6 @@
 # Admin Taxonomy Side Panel — Line-by-Line Reference
 
-A deep walkthrough of the custom Strapi v5 admin side panel we built for managing taxonomy relations (`stores`, `brands`, `categories`, `banks`, `tags`) on the `deal` and `coupon` content types.
+A deep walkthrough of the custom Strapi v5 admin side panel we built for managing taxonomy relations (`stores`, `brands`, `categories`, `banks`) on the `deal` and `coupon` content types.
 
 ---
 
@@ -17,8 +17,8 @@ Strapi v5's default relation widget fetches relation options one small batch at 
 
 ### Solution
 
-1. Build a **custom side panel** ("Taxonomies") that renders a compact checkbox + selected-chip UI for all five relations in one place, with search, pagination, and infinite scroll.
-2. **Hide the default relation widgets** for those five fields from the edit view, so nothing is duplicated and the main form stays clean.
+1. Build a **custom side panel** ("Taxonomies") that renders a compact checkbox + selected-chip UI for all four relations in one place, with search, pagination, and infinite scroll.
+2. **Hide the default relation widgets** for those four fields from the edit view, so nothing is duplicated and the main form stays clean.
 
 ### Files
 
@@ -87,10 +87,9 @@ const RELATION_CONFIG: Record<string, RelationConfig[]> = {
     { field: 'brands', target: 'api::brand.brand', label: 'Brands' },
     { field: 'categories', target: 'api::category.category', label: 'Categories' },
     { field: 'banks', target: 'api::bank.bank', label: 'Banks' },
-    { field: 'tags', target: 'api::tag.tag', label: 'Tags' },
   ],
   'api::coupon.coupon': [
-    /* same five */
+    /* same four */
   ],
 };
 ```
@@ -99,7 +98,7 @@ const RELATION_CONFIG: Record<string, RelationConfig[]> = {
 - **`target`** — the related content type's UID (used to build the candidate-list URL).
 - **`label`** — display name in the panel heading and search placeholder.
 - Keyed by content-type UID. Adding a new taxonomy to deals is a one-line change. Adding a third content type (e.g. a promotional banner) is just a new top-level key.
-- Both `deal` and `coupon` share the same five relations because they share the same taxonomy model.
+- Both `deal` and `coupon` share the same four relations because they share the same taxonomy model.
 
 ---
 
@@ -204,7 +203,7 @@ function useDeferredMount(): boolean {
 }
 ```
 
-- **Problem solved** — Side panels mount with the rest of the edit view. If all five sections kicked off network requests on first render, the first paint of the edit view would compete with 10+ XHRs (one for the current relation list plus one for candidates, per section).
+- **Problem solved** — Side panels mount with the rest of the edit view. If all four sections kicked off network requests on first render, the first paint of the edit view would compete with 8+ XHRs (one for the current relation list plus one for candidates, per section).
 - **Strategy** — Return `false` immediately, flip to `true` when the browser is idle (or after a 400 ms fallback timeout for browsers without `requestIdleCallback`, notably older Safari).
 - **`timeout: 1000`** — cap the idle wait at 1 second so slow devices don't get stuck showing an empty panel forever.
 - Every data-fetch `useEffect` in `RelationSection` guards on `if (!deferred) return`, so the whole network flurry is deferred until the main form is interactive.
@@ -235,7 +234,7 @@ function PanelBody({ model, documentId }: { model: string; documentId?: string }
 }
 ```
 
-- `useDeferredMount` is called **once** here (not inside each `RelationSection`). All five sections share the same `deferred` signal, so we spend only one idle slot instead of five.
+- `useDeferredMount` is called **once** here (not inside each `RelationSection`). All four sections share the same `deferred` signal, so we spend only one idle slot instead of four.
 - `<Divider />` between sections — not before the first.
 - `key={cfg.field}` is stable because `config.field` is a constant string per relation.
 - `documentId` is forwarded. When undefined (creating a new entry), the selected-fetch effect inside `RelationSection` silently skips; only the candidate-list fetch runs.
@@ -705,7 +704,7 @@ Four visual layers, top to bottom:
 Everything the panel does to stay fast:
 
 - **Deferred mount (§8).** Zero network work until the browser goes idle (capped at 1 s). First paint of the edit view is never blocked by the panel's fetches.
-- **Shared deferred signal (§9).** All five sections share a single `requestIdleCallback` slot instead of racing for five.
+- **Shared deferred signal (§9).** All four sections share a single `requestIdleCallback` slot instead of racing for four.
 - **Per-section isolation.** Each `RelationSection` owns its own state and effects. Typing in "Stores" search doesn't re-render or refetch "Brands".
 - **Selector-based `useForm` (§10a).** Each section subscribes only to its own form slot. Edits to `title`, `content`, unrelated relations, etc. do not trigger a re-render here.
 - **Debounced search (§10e).** 250 ms coalesces bursty typing into a single request.
@@ -720,14 +719,14 @@ Everything the panel does to stay fast:
 
 ## 12. Hiding the Default Relation Widgets — `src/index.ts`
 
-The panel would be redundant if the default relation widgets also rendered for those five fields. `src/index.ts` rewrites the content-manager's layout configuration on boot to hide them.
+The panel would be redundant if the default relation widgets also rendered for those four fields. `src/index.ts` rewrites the content-manager's layout configuration on boot to hide them.
 
 ```ts
 import type { Core } from '@strapi/strapi';
 
 const HIDE_FROM_EDIT: Record<string, string[]> = {
-  'api::deal.deal': ['stores', 'brands', 'categories', 'banks', 'tags'],
-  'api::coupon.coupon': ['stores', 'brands', 'categories', 'banks', 'tags'],
+  'api::deal.deal': ['stores', 'brands', 'categories', 'banks'],
+  'api::coupon.coupon': ['stores', 'brands', 'categories', 'banks'],
 };
 
 async function hideRelationsFromContentManager(strapi: Core.Strapi): Promise<void> {
@@ -802,10 +801,10 @@ Line by line:
 How to confirm everything works end-to-end:
 
 1. **Boot.** Run `yarn develop`. Server log should include `[content-manager] hid relations from api::deal.deal layout` (or the equivalent for coupons) on first boot. Subsequent boots will be quiet because the diff short-circuits.
-2. **Panel renders.** Open a deal or coupon edit view → look at the right rail. A "Taxonomies" panel should appear with five sections: Stores, Brands, Categories, Banks, Tags.
-3. **Default widgets are gone.** Scan the main edit form. The default relation inputs for those five fields should NOT be present (only `title`, `code`, rich text, media, etc.).
-4. **Select a tag.** Click a checkbox in any section. The chip appears immediately in the selected row. Save. Reload the page. The selection persists.
-5. **Deselect a tag.** Click the `X` on a chip (or uncheck). Save. Reload. The selection is gone server-side.
+2. **Panel renders.** Open a deal or coupon edit view → look at the right rail. A "Taxonomies" panel should appear with four sections: Stores, Brands, Categories, Banks.
+3. **Default widgets are gone.** Scan the main edit form. The default relation inputs for those four fields should NOT be present (only `title`, `code`, rich text, media, etc.).
+4. **Select a category.** Click a checkbox in any section. The chip appears immediately in the selected row. Save. Reload the page. The selection persists.
+5. **Deselect a category.** Click the `X` on a chip (or uncheck). Save. Reload. The selection is gone server-side.
 6. **Idempotency.** Select → deselect → save. The diff should be clean (nothing added or removed).
 7. **Debounce.** Open DevTools Network. Type rapidly in a search box. Confirm requests fire roughly every 250 ms, not per keystroke.
 8. **Pagination.** Find a relation with more than 30 options. Scroll to the bottom of its scroll box. Watch Network: a request with `?page=2` should fire. Keep scrolling — `?page=3`, etc.

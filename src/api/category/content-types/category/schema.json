@@ -33,6 +33,10 @@
         "images"
       ]
     },
+    "websiteUrl": {
+      "type": "string",
+      "regex": "^https?://.+"
+    },
     "ratingAverage": {
       "type": "decimal",
       "min": 0,
@@ -42,6 +46,10 @@
       "type": "integer",
       "default": 0,
       "min": 0
+    },
+    "isVerified": {
+      "type": "boolean",
+      "default": false
     },
     "coupons": {
       "type": "relation",

@@ -13,7 +13,6 @@ import { runMediaInventory } from "./phases/01-media-inventory.js";
 import { runMediaUpload, logMediaUploadStats, clearS3Bucket } from "./phases/02-media-upload.js";
 import { logContentMediaStats } from "./utils/content-media.js";
 import { runTaxonomies } from "./phases/03-taxonomies.js";
-import { runTags } from "./phases/04-tags.js";
 import { runPools } from "./phases/05-pools.js";
 import { runCodes } from "./phases/06-codes.js";
 import { runUsers } from "./phases/06a-users.js";
@@ -38,7 +37,6 @@ const phases: Phase[] = [
   { name: "01-media-inventory", fn: runMediaInventory },
   { name: "02-media-upload", fn: runMediaUpload },
   { name: "03-taxonomies", fn: runTaxonomies },
-  { name: "04-tags", fn: runTags },
   { name: "05-pools", fn: runPools },
   { name: "06-codes", fn: runCodes },
   { name: "06a-users", fn: runUsers },
@@ -71,9 +69,8 @@ async function main(): Promise<void> {
     const tablesToTruncate = [
       // Link/join tables first
       "coupons_stores_lnk", "coupons_brands_lnk", "coupons_categories_lnk", "coupons_banks_lnk",
-      "coupons_tags_lnk", "coupons_unique_coupon_pool_lnk",
+      "coupons_unique_coupon_pool_lnk",
       "deals_stores_lnk", "deals_brands_lnk", "deals_categories_lnk", "deals_banks_lnk",
-      "deals_tags_lnk",
       "unique_codes_pool_lnk",
       "files_related_mph",
       // Component join tables
@@ -83,7 +80,6 @@ async function main(): Promise<void> {
       "homepages_cmps", "menus_cmps", "footers_cmps", "globals_cmps",
       // Component data tables
       "components_shared_seos", "components_shared_faq_items",
-      "components_shared_chips",
       "components_homepage_slider_slides",
       "components_home_hero_sections", "components_home_hero_products",
       "components_home_top_offers", "components_home_top_offer_items",
@@ -102,7 +98,6 @@ async function main(): Promise<void> {
       // Entity tables
       "coupons", "deals",
       "unique_codes", "unique_coupon_pools",
-      "tags",
       "stores", "brands", "categories", "banks",
       // Single types (re-seeded by phase 13)
       "homepages", "menus", "footers", "globals",
@@ -122,7 +117,7 @@ async function main(): Promise<void> {
     const OWNED_PREFIXES = [
       "components_", "homepages_", "menus_", "footers_", "globals_",
       "coupons_", "deals_", "stores_", "brands_", "categories_", "banks_",
-      "tags_", "unique_codes_", "unique_coupon_pools_",
+      "unique_codes_", "unique_coupon_pools_",
     ];
     let existingTables = new Set<string>();
     try {

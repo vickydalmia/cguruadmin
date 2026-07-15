@@ -30,9 +30,6 @@ const poolIdMap = new Map<number, StrapiEntityRef>();
 // wp_uc_coupons.name -> Strapi pool info
 const poolNameMap = new Map<string, StrapiEntityRef>();
 
-// wp_tag term_id -> Strapi tag info
-const tagIdMap = new Map<number, StrapiEntityRef>();
-
 // wp_users.ID -> Strapi admin_users.id
 const userIdMap = new Map<number, number>();
 
@@ -123,14 +120,6 @@ export function getPoolMappingByName(poolName: string): StrapiEntityRef | undefi
   return normalizedKey ? poolNameMap.get(normalizedKey) : undefined;
 }
 
-export function setTagMapping(wpTermId: number, ref: StrapiEntityRef): void {
-  tagIdMap.set(wpTermId, ref);
-}
-
-export function getTagMapping(wpTermId: number): StrapiEntityRef | undefined {
-  return tagIdMap.get(wpTermId);
-}
-
 export function setUserMapping(wpUserId: number, adminUserId: number): void {
   userIdMap.set(wpUserId, adminUserId);
 }
@@ -164,7 +153,6 @@ export function saveMaps(): void {
   fs.writeFileSync(path.join(MAPS_DIR, "mediaIdMap.json"), mapToJson(mediaIdMap));
   fs.writeFileSync(path.join(MAPS_DIR, "poolIdMap.json"), mapToJson(poolIdMap));
   fs.writeFileSync(path.join(MAPS_DIR, "poolNameMap.json"), JSON.stringify(Array.from(poolNameMap.entries())));
-  fs.writeFileSync(path.join(MAPS_DIR, "tagIdMap.json"), mapToJson(tagIdMap));
   fs.writeFileSync(path.join(MAPS_DIR, "userIdMap.json"), mapToJson(userIdMap));
   logger.info("ID maps saved to disk");
 }
@@ -196,18 +184,13 @@ export function loadMaps(): void {
       const data = jsonToStringMap<StrapiEntityRef>(fs.readFileSync(poolNamePath, "utf-8"));
       data.forEach((v, k) => poolNameMap.set(k, v));
     }
-    const tagPath = path.join(MAPS_DIR, "tagIdMap.json");
-    if (fs.existsSync(tagPath)) {
-      const data = jsonToMap<StrapiEntityRef>(fs.readFileSync(tagPath, "utf-8"));
-      data.forEach((v, k) => tagIdMap.set(k, v));
-    }
     const userPath = path.join(MAPS_DIR, "userIdMap.json");
     if (fs.existsSync(userPath)) {
       const data = jsonToMap<number>(fs.readFileSync(userPath, "utf-8"));
       data.forEach((v, k) => userIdMap.set(k, v));
     }
     logger.info(
-      `ID maps loaded: terms=${termIdMap.size}, posts=${postIdMap.size}, media=${mediaIdMap.size}, pools=${poolIdMap.size}, poolNames=${poolNameMap.size}, tags=${tagIdMap.size}, users=${userIdMap.size}`
+      `ID maps loaded: terms=${termIdMap.size}, posts=${postIdMap.size}, media=${mediaIdMap.size}, pools=${poolIdMap.size}, poolNames=${poolNameMap.size}, users=${userIdMap.size}`
     );
   } catch (err) {
     logger.warn("Could not load ID maps from disk, starting fresh");
@@ -224,10 +207,9 @@ export function clearAllMaps(): void {
   mediaIdMap.clear();
   poolIdMap.clear();
   poolNameMap.clear();
-  tagIdMap.clear();
   userIdMap.clear();
   // Delete map files from disk
-  const mapFiles = ["termIdMap.json", "postIdMap.json", "mediaIdMap.json", "poolIdMap.json", "poolNameMap.json", "tagIdMap.json", "userIdMap.json"];
+  const mapFiles = ["termIdMap.json", "postIdMap.json", "mediaIdMap.json", "poolIdMap.json", "poolNameMap.json", "userIdMap.json"];
   for (const file of mapFiles) {
     const filePath = path.join(MAPS_DIR, file);
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -241,8 +223,4 @@ export function getMediaMapSize(): number {
 
 export function getAllTermMappings(): Map<number, StrapiEntityRef> {
   return termIdMap;
-}
-
-export function getAllTagMappings(): Map<number, StrapiEntityRef> {
-  return tagIdMap;
 }

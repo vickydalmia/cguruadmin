@@ -10,14 +10,14 @@ Scope: every TypeScript source file under `migration/src/`, every SQL query verb
 
 ### What it does
 
-The migration ingests a large WordPress 5.x site (coupons + deals plus supporting taxonomies, tags, media, SEO, and unique coupon codes) and writes the equivalent Strapi v5 content into a PostgreSQL database, with media living in S3 (or a local filesystem fallback).
+The migration ingests a large WordPress 5.x site (coupons + deals plus supporting taxonomies, media, SEO, and unique coupon codes) and writes the equivalent Strapi v5 content into a PostgreSQL database, with media living in S3 (or a local filesystem fallback).
 
 Sources:
 - **MySQL** — WordPress core tables (`wp_posts`, `wp_postmeta`, `wp_terms`, `wp_term_taxonomy`, `wp_term_relationships`, `wp_termmeta`, `wp_users`, `wp_usermeta`), plus optional `wp_uc_coupons`, `wp_uc_codes`, and `wp_yoast_indexable` / `wp_yoast_primary_term` when Yoast is installed.
 - **Filesystem** — `wp-content/uploads/` on disk for the actual image bytes.
 
 Targets:
-- **PostgreSQL** — Strapi v5's schema. Entity tables (`stores`, `brands`, `categories`, `banks`, `tags`, `coupons`, `deals`, `unique_coupon_pools`, `unique_codes`, `files`, `admin_users`), plus Strapi v5's conventional link tables (`{owner}_{field}_lnk`), component join tables (`{owner}_cmps`), component data (`components_shared_seos`, `components_shared_faq_items`), and the polymorphic media join (`files_related_mph`).
+- **PostgreSQL** — Strapi v5's schema. Entity tables (`stores`, `brands`, `categories`, `banks`, `coupons`, `deals`, `unique_coupon_pools`, `unique_codes`, `files`, `admin_users`), plus Strapi v5's conventional link tables (`{owner}_{field}_lnk`), component join tables (`{owner}_cmps`), component data (`components_shared_seos`, `components_shared_faq_items`), and the polymorphic media join (`files_related_mph`).
 - **S3 / local** — one record per unique image, deduped by SHA-256.
 
 ### Shape
@@ -28,7 +28,7 @@ config ─► connections ─► Phase loop ─► checkpoints ─► verificati
                              │
                              ├── Media inventoried (01)
                              ├── Media uploads happen on-demand (02)
-                             ├── Taxonomies, tags, pools, codes (03–06)
+                             ├── Taxonomies, pools, codes (03, 05–06)
                              ├── Users + creator backfill (06a)
                              ├── Coupons + deals + relations (07–08)
                              ├── SEO backfill (09)
@@ -67,7 +67,6 @@ Three mechanisms cooperate:
 | `migration/src/phases/01-media-inventory.ts` | WP attachment scan + plugin-dir blacklist |
 | `migration/src/phases/02-media-upload.ts` | On-demand S3/local upload + hash dedup |
 | `migration/src/phases/03-taxonomies.ts` | Stores / brands / categories / banks + FAQ + SEO |
-| `migration/src/phases/04-tags.ts` | `post_tag` → `tags` |
 | `migration/src/phases/05-pools.ts` | `wp_uc_coupons` → `unique_coupon_pools` |
 | `migration/src/phases/06-codes.ts` | `wp_uc_codes` → `unique_codes` + pool links |
 | `migration/src/phases/06a-users.ts` | WP authors → `admin_users` + creator backfill |
@@ -101,7 +100,6 @@ const phases: Phase[] = [
   { name: "01-media-inventory", fn: runMediaInventory },
   { name: "02-media-upload",    fn: runMediaUpload },
   { name: "03-taxonomies",      fn: runTaxonomies },
-  { name: "04-tags",            fn: runTags },
   { name: "05-pools",           fn: runPools },
   { name: "06-codes",           fn: runCodes },
   { name: "06a-users",          fn: runUsers },
@@ -113,7 +111,7 @@ const phases: Phase[] = [
 ];
 ```
 
-Order matters: 01 must run before 03–08 so inventoried attachments are resolvable; 03–06 must run before 07–08 so taxonomies/tags/pools are in the id maps; 06a must run before 07–08 so author ids are available for `created_by_id`.
+Order matters: 01 must run before 03–08 so inventoried attachments are resolvable; 03–06 must run before 07–08 so taxonomies/pools are in the id maps; 06a must run before 07–08 so author ids are available for `created_by_id`.
 
 Note that **Phase 02 is special** — its `runMediaUpload` only preloads the hash cache and logs counts. Actual S3 uploads happen *on demand* later via `uploadMediaOnDemand`, called from `resolveMediaRef` in `utils/media-resolver.ts`.
 
@@ -135,9 +133,8 @@ This is the destructive path — not called by default. When invoked:
    const tablesToTruncate = [
      // Link/join tables first
      "coupons_stores_lnk", "coupons_brands_lnk", "coupons_categories_lnk", "coupons_banks_lnk",
-     "coupons_tags_lnk", "coupons_unique_coupon_pool_lnk",
+     "coupons_unique_coupon_pool_lnk",
      "deals_stores_lnk", "deals_brands_lnk", "deals_categories_lnk", "deals_banks_lnk",
-     "deals_tags_lnk",
      "unique_codes_pool_lnk",
      "files_related_mph",
      // Component join tables
@@ -147,7 +144,6 @@ This is the destructive path — not called by default. When invoked:
      // Entity tables
      "coupons", "deals",
      "unique_codes", "unique_coupon_pools",
-     "tags",
      "stores", "brands", "categories", "banks",
      // Media (only migration-created records)
      "files",
@@ -381,7 +377,7 @@ Lazy singleton. Helpers (lines 33–48): `pgQuery<T>` returns rows directly, `pg
 
 ### 5a. `id-maps.ts` — the spine of the migration
 
-Seven `Map`s, each persisted as JSON under `migration/.checkpoints/`:
+Six `Map`s, each persisted as JSON under `migration/.checkpoints/`:
 
 ```ts
 // wp_term_id -> Strapi entity info (stores/brands/categories/banks)
@@ -398,9 +394,6 @@ const poolIdMap = new Map<number, StrapiEntityRef>();
 
 // pool name (raw or lowercased) -> Strapi pool info
 const poolNameMap = new Map<string, StrapiEntityRef>();
-
-// wp_tag term_id -> Strapi tag info
-const tagIdMap = new Map<number, StrapiEntityRef>();
 
 // wp_users.ID -> Strapi admin_users.id
 const userIdMap = new Map<number, number>();
@@ -473,7 +466,7 @@ Both raw-trimmed and lowercased variants are stored. Lookup prefers exact match,
 
 #### Persistence (lines 160–236)
 
-- `saveMaps()` — writes 7 JSON files.
+- `saveMaps()` — writes 6 JSON files.
 - `loadMaps()` — reads each if it exists; survives missing files silently (fresh run).
 - `clearAllMaps()` — clears in-memory **and** deletes the files. Only called by `--clean`.
 
@@ -500,7 +493,6 @@ Document-id conventions across phases:
 | Phase | Scheme | Example |
 |---|---|---|
 | 03 | `term:{table}:{wpTermId}` | `term:stores:42` |
-| 04 | `tag:{wpTermId}` | `tag:99` |
 | 05 | `pool:{wpPoolId}` | `pool:7` |
 | 06 | `unique-code:{wpCodeId}` | `unique-code:15023` |
 | 06a | `user:{wpUserId}` | `user:1` |
@@ -792,7 +784,7 @@ Read-only safety checks. Throws if anything is wrong. Skipped by checkpoint (`sk
    ```sql
    SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'
    ```
-   Asserts `stores`, `brands`, `categories`, `banks`, `tags`, `coupons`, `deals`, `unique_coupon_pools`, `unique_codes`, `files`, `files_related_mph`, `components_shared_seos`, `components_shared_faq_items`.
+   Asserts `stores`, `brands`, `categories`, `banks`, `coupons`, `deals`, `unique_coupon_pools`, `unique_codes`, `files`, `files_related_mph`, `components_shared_seos`, `components_shared_faq_items`.
 6. **Create unique indexes** (lines 91–103):
    ```sql
    CREATE UNIQUE INDEX IF NOT EXISTS "${table}_document_id_uq" ON "${table}" ("document_id");
@@ -802,7 +794,7 @@ Read-only safety checks. Throws if anything is wrong. Skipped by checkpoint (`sk
    ```
    These are what make `ON CONFLICT DO NOTHING` work — without a unique constraint on the conflict column, PG would raise an error on conflict.
 7. **Link-table discovery** — logs every table ending in `_lnk`, `_links`, or `_cmps` so you can eyeball the schema.
-8. **WP summary** — counts of terms (broken down by `choose_type`), published posts, deals, coupons (derived), tags, pools, codes, attachments, and posts with expiry metadata.
+8. **WP summary** — counts of terms (broken down by `choose_type`), published posts, deals, coupons (derived), pools, codes, attachments, and posts with expiry metadata.
 
 ### 6b. Phase 01 — Media Inventory (`01-media-inventory.ts`)
 
@@ -1055,26 +1047,6 @@ await insertComponent(
 );
 ```
 
-### 6e. Phase 04 — Tags (`04-tags.ts`)
-
-**Source**:
-```sql
-SELECT t.term_id, t.name, t.slug
-FROM wp_terms t
-JOIN wp_term_taxonomy tt ON t.term_id = tt.term_id AND tt.taxonomy = 'post_tag'
-ORDER BY t.term_id
-```
-
-**Target** (lines 31–37):
-```sql
-INSERT INTO "tags" ("document_id", "name", "slug", "created_at", "updated_at", "published_at", "locale")
-VALUES ($1, $2, $3, NOW(), NOW(), NOW(), $4)
-ON CONFLICT ("document_id") DO NOTHING
-RETURNING id
-```
-
-`documentId = generateDocumentId(\`tag:${tag.term_id}\`)`. Slug is `deduplicateSlug(cleanSlug(slug) || slug, "tags")`. Populates `tagIdMap`.
-
 ### 6f. Phase 05 — Coupon Pools (`05-pools.ts`)
 
 Existence probe:
@@ -1272,7 +1244,7 @@ A single skip for a missing email is tolerated. Total failure is a hard stop.
 
 #### Creator backfill (`backfillCreators`, lines 187–224)
 
-After user migration, patch `created_by_id` / `updated_by_id` on four entity types:
+After user migration, patch `created_by_id` / `updated_by_id` on these entity types:
 
 1. **Deals & coupons** (lines 190–217):
    ```sql
@@ -1300,9 +1272,7 @@ After user migration, patch `created_by_id` / `updated_by_id` on four entity typ
    ```
    "Latest post authoring the term" heuristic: we group by term and take the author of the most recently-modified post in that term. Then route via `ensureTermMapping` to determine which of the four taxonomy tables the term lives in, and accumulate pairs per-table.
 
-3. **Tags** (`backfillTagCreators`, lines 308–346): same shape but `taxonomy = 'post_tag'`, and the `ensureTermMapping` call is replaced by `getTagMapping(termId)?.documentId ?? generateDocumentId(\`tag:${termId}\`)`.
-
-**`applyCreatorUpdates`** (lines 354–388) — the single UPDATE helper used for all four:
+**`applyCreatorUpdates`** (lines 354–388) — the single UPDATE helper used for all of them:
 
 ```ts
 for (let i = 0; i < pairs.length; i += CHUNK) {
@@ -1358,11 +1328,10 @@ Coupons = posts that are NOT marked as deals. The zero-date `CASE`s run once per
 
 **Bulk prefetch** (lines 71–76) — all per-post data in parallel:
 ```ts
-const [allMeta, allRelations, primaryTerms, allTagRelations] = await Promise.all([
+const [allMeta, allRelations, primaryTerms] = await Promise.all([
   getPostMetaBulk(postIds),
   getTermRelationsBulk(postIds),
   getPrimaryTerms(postIds),
-  getTagRelationsBulk(postIds),
 ]);
 ```
 
@@ -1395,14 +1364,6 @@ WHERE post_id IN (?, …)
 AND taxonomy = 'category'
 ```
 Wrapped in try/catch — Yoast-less sites just get an empty map.
-
-##### Tag relations (`getTagRelationsBulk`):
-```sql
-SELECT tr.object_id, tt.term_id
-FROM wp_term_relationships tr
-JOIN wp_term_taxonomy tt ON tr.term_taxonomy_id = tt.term_taxonomy_id AND tt.taxonomy = 'post_tag'
-WHERE tr.object_id IN (?, …)
-```
 
 **Per-post processing** (lines 82–213) with `pLimit(20)`:
 
@@ -1523,20 +1484,6 @@ brands:     { table: "coupons_brands_lnk",     couponCol: "coupon_id", termCol: 
 categories: { table: "coupons_categories_lnk", couponCol: "coupon_id", termCol: "category_id" }
 banks:      { table: "coupons_banks_lnk",      couponCol: "coupon_id", termCol: "bank_id" }
 ```
-
-##### Tag wiring (lines 163–174):
-```ts
-for (const wpTagTermId of tagIds) {
-  const tagRef = getTagMapping(wpTagTermId);
-  if (tagRef) {
-    await insertLink("coupons_tags_lnk", {
-      coupon_id: entityId, tag_id: tagRef.id,
-      tag_ord: 1, coupon_ord: 1,
-    });
-  }
-}
-```
-Both `_ord`s are constant — tag ordering wasn't carried over.
 
 ##### Media wiring (lines 176–180):
 ```ts
@@ -1678,8 +1625,6 @@ if (dealImageId) {
 ```
 Try `deal_image` first, fall back to the generic `image` meta. The field is always `"dealImage"` regardless of source — that's the Strapi schema field name.
 
-**Tag wiring**: identical to coupons but with `"deals_tags_lnk"` and `deal_id`/`tag_id` columns.
-
 `getDealLinkTable` (lines 333–343):
 ```ts
 stores:     { table: "deals_stores_lnk",     dealCol: "deal_id", termCol: "store_id" }
@@ -1760,12 +1705,6 @@ SELECT COUNT(*) AS c FROM categories
 ```sql
 SELECT COUNT(*) AS c FROM wp_termmeta WHERE meta_key = 'choose_type' AND meta_value = 'Bank'
 SELECT COUNT(*) AS c FROM banks
-```
-
-**Tags**:
-```sql
-SELECT COUNT(*) AS c FROM wp_term_taxonomy WHERE taxonomy = 'post_tag'
-SELECT COUNT(*) AS c FROM tags
 ```
 
 **Coupons** (non-deals, include future/scheduled):
@@ -1858,7 +1797,7 @@ AND NOT EXISTS (SELECT 1 FROM deals_banks_lnk WHERE deal_id = d.id)
 
 #### Slug uniqueness (lines 175–184)
 
-For each taxonomy + tags:
+For each taxonomy:
 ```sql
 SELECT COUNT(*) AS c FROM (
   SELECT slug, COUNT(*) AS cnt FROM "${table}" GROUP BY slug HAVING COUNT(*) > 1
@@ -1925,19 +1864,16 @@ Naming: `{ownerTable}_{fieldName}_lnk`. Columns: `{owner_singular}_id`, `{target
 | `coupons_brands_lnk` | `coupon_id, brand_id, coupon_ord` |
 | `coupons_categories_lnk` | `coupon_id, category_id, coupon_ord` |
 | `coupons_banks_lnk` | `coupon_id, bank_id, coupon_ord` |
-| `coupons_tags_lnk` | `coupon_id, tag_id, tag_ord, coupon_ord` |
 | `coupons_unique_coupon_pool_lnk` | `coupon_id, unique_coupon_pool_id, coupon_ord` |
 | `deals_stores_lnk` | `deal_id, store_id, deal_ord` |
 | `deals_brands_lnk` | `deal_id, brand_id, deal_ord` |
 | `deals_categories_lnk` | `deal_id, category_id, deal_ord` |
 | `deals_banks_lnk` | `deal_id, bank_id, deal_ord` |
-| `deals_tags_lnk` | `deal_id, tag_id, tag_ord, deal_ord` |
 | `unique_codes_pool_lnk` | `unique_code_id, unique_coupon_pool_id, unique_code_ord` |
 
 Ordering rules:
 - `_ord` increments *per-owner* (so a coupon's stores are ordered 1, 2, 3 independent of its brands).
 - Primary taxonomy (from `wp_yoast_primary_term`) is inserted first, so it gets `ord = 1`.
-- Tags use constant `ord = 1` on both sides — tag ordering wasn't carried from WP.
 
 All link inserts go through `insertLink(table, columns)` which appends `ON CONFLICT DO NOTHING` — so re-running any content phase never creates duplicate rows.
 

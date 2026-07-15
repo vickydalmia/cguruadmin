@@ -461,6 +461,7 @@ export interface ApiBankBank extends Struct.CollectionTypeSchema {
     description: Schema.Attribute.RichText;
     faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     faqs: Schema.Attribute.Component<'shared.faq-item', true>;
+    isVerified: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::bank.bank'> &
       Schema.Attribute.Private;
@@ -490,6 +491,7 @@ export interface ApiBankBank extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    websiteUrl: Schema.Attribute.String;
   };
 }
 
@@ -513,6 +515,7 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
     description: Schema.Attribute.RichText;
     faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     faqs: Schema.Attribute.Component<'shared.faq-item', true>;
+    isVerified: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::brand.brand'> &
       Schema.Attribute.Private;
@@ -542,6 +545,7 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    websiteUrl: Schema.Attribute.String;
   };
 }
 
@@ -566,6 +570,7 @@ export interface ApiCategoryCategory extends Struct.CollectionTypeSchema {
     faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     faqs: Schema.Attribute.Component<'shared.faq-item', true>;
     icon: Schema.Attribute.Media<'images'>;
+    isVerified: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -596,6 +601,7 @@ export interface ApiCategoryCategory extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    websiteUrl: Schema.Attribute.String;
   };
 }
 
@@ -612,14 +618,25 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
   };
   attributes: {
     affiliateLink: Schema.Attribute.Text;
+    badge: Schema.Attribute.Enumeration<
+      [
+        'CG Exclusive',
+        'Recommended',
+        'Top Rated',
+        'Best Seller',
+        'Expiring Soon',
+        'LOOT Deal',
+      ]
+    >;
+    bankOfferText: Schema.Attribute.String;
     banks: Schema.Attribute.Relation<'manyToMany', 'api::bank.bank'>;
     brands: Schema.Attribute.Relation<'manyToMany', 'api::brand.brand'>;
-    cashbackItems: Schema.Attribute.Component<'shared.chip', true>;
+    cashbackText: Schema.Attribute.String;
     categories: Schema.Attribute.Relation<
       'manyToMany',
       'api::category.category'
     >;
-    code: Schema.Attribute.Text;
+    code: Schema.Attribute.String;
     content: Schema.Attribute.RichText;
     contentStatus: Schema.Attribute.Enumeration<
       ['published', 'scheduled', 'expired']
@@ -634,20 +651,16 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     expiresAt: Schema.Attribute.DateTime;
     image: Schema.Attribute.Media<'images'>;
-    isPopular: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
       'api::coupon.coupon'
     > &
       Schema.Attribute.Private;
-    offerType: Schema.Attribute.Enumeration<
-      ['exclusive', 'newly_added', 'electronics', 'fashion', 'travel', 'food']
-    >;
+    offerText: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
     scheduledAt: Schema.Attribute.DateTime;
     stores: Schema.Attribute.Relation<'manyToMany', 'api::store.store'>;
-    tags: Schema.Attribute.Relation<'manyToMany', 'api::tag.tag'>;
     title: Schema.Attribute.String & Schema.Attribute.Required;
     uniqueCouponPool: Schema.Attribute.Relation<
       'manyToOne',
@@ -672,9 +685,20 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
   };
   attributes: {
     affiliateLink: Schema.Attribute.Text;
+    badge: Schema.Attribute.Enumeration<
+      [
+        'CG Exclusive',
+        'Recommended',
+        'Top Rated',
+        'Best Seller',
+        'Expiring Soon',
+        'LOOT Deal',
+      ]
+    >;
+    bankOfferText: Schema.Attribute.String;
     banks: Schema.Attribute.Relation<'manyToMany', 'api::bank.bank'>;
     brands: Schema.Attribute.Relation<'manyToMany', 'api::brand.brand'>;
-    cashbackItems: Schema.Attribute.Component<'shared.chip', true>;
+    cashbackText: Schema.Attribute.String;
     categories: Schema.Attribute.Relation<
       'manyToMany',
       'api::category.category'
@@ -692,20 +716,16 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     dealImage: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
     discount: Schema.Attribute.String;
     expiresAt: Schema.Attribute.DateTime;
-    isPopular: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'> &
       Schema.Attribute.Private;
     mrp: Schema.Attribute.Decimal;
-    offerType: Schema.Attribute.Enumeration<
-      ['exclusive', 'newly_added', 'electronics', 'fashion', 'travel', 'food']
-    >;
+    offerText: Schema.Attribute.String;
     primaryStore: Schema.Attribute.Relation<'manyToOne', 'api::store.store'>;
     publishedAt: Schema.Attribute.DateTime;
     salePrice: Schema.Attribute.Decimal;
     scheduledAt: Schema.Attribute.DateTime;
     stores: Schema.Attribute.Relation<'manyToMany', 'api::store.store'>;
-    tags: Schema.Attribute.Relation<'manyToMany', 'api::tag.tag'>;
     title: Schema.Attribute.String & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -759,13 +779,9 @@ export interface ApiGlobalGlobal extends Struct.SingleTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
-    amazonTopBanner: Schema.Attribute.Media<'images'>;
-    amazonTopBannerLink: Schema.Attribute.String;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    enableAmazonDeal: Schema.Attribute.Boolean &
-      Schema.Attribute.DefaultTo<false>;
     footerCode: Schema.Attribute.Text;
     headerCode: Schema.Attribute.Text;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
@@ -885,6 +901,7 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
     faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     faqs: Schema.Attribute.Component<'shared.faq-item', true>;
     isCjEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    isVerified: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::store.store'> &
       Schema.Attribute.Private;
@@ -915,35 +932,6 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     websiteUrl: Schema.Attribute.String;
-  };
-}
-
-export interface ApiTagTag extends Struct.CollectionTypeSchema {
-  collectionName: 'tags';
-  info: {
-    description: 'Content tags for coupons and deals';
-    displayName: 'Tag';
-    pluralName: 'tags';
-    singularName: 'tag';
-  };
-  options: {
-    draftAndPublish: false;
-  };
-  attributes: {
-    coupons: Schema.Attribute.Relation<'manyToMany', 'api::coupon.coupon'>;
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    deals: Schema.Attribute.Relation<'manyToMany', 'api::deal.deal'>;
-    locale: Schema.Attribute.String & Schema.Attribute.Private;
-    localizations: Schema.Attribute.Relation<'oneToMany', 'api::tag.tag'> &
-      Schema.Attribute.Private;
-    name: Schema.Attribute.String & Schema.Attribute.Required;
-    publishedAt: Schema.Attribute.DateTime;
-    slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
-    updatedAt: Schema.Attribute.DateTime;
-    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
   };
 }
 
@@ -1556,7 +1544,6 @@ declare module '@strapi/strapi' {
       'api::homepage.homepage': ApiHomepageHomepage;
       'api::menu.menu': ApiMenuMenu;
       'api::store.store': ApiStoreStore;
-      'api::tag.tag': ApiTagTag;
       'api::unique-code.unique-code': ApiUniqueCodeUniqueCode;
       'api::unique-coupon-pool.unique-coupon-pool': ApiUniqueCouponPoolUniqueCouponPool;
       'plugin::content-releases.release': PluginContentReleasesRelease;

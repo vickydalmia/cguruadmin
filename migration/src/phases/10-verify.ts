@@ -45,13 +45,6 @@ export async function runVerification(): Promise<void> {
   const [pgBanks] = await pgQuery<{ c: number }>(`SELECT COUNT(*) AS c FROM banks`);
   checks.push({ entity: "Banks", wpCount: wpBanks.c, pgCount: pgBanks.c, match: wpBanks.c == pgBanks.c });
 
-  // Tags
-  const [wpTags] = await wpQuery<{ c: number }>(`
-    SELECT COUNT(*) AS c FROM wp_term_taxonomy WHERE taxonomy = 'post_tag'
-  `);
-  const [pgTags] = await pgQuery<{ c: number }>(`SELECT COUNT(*) AS c FROM tags`);
-  checks.push({ entity: "Tags", wpCount: wpTags.c, pgCount: pgTags.c, match: wpTags.c == pgTags.c });
-
   // Coupons (non-deals, include future/scheduled)
   const [wpCoupons] = await wpQuery<{ c: number }>(`
     SELECT COUNT(*) AS c FROM wp_posts p
@@ -172,7 +165,7 @@ export async function runVerification(): Promise<void> {
 
   // 3. Slug uniqueness (only for entities that have slugs)
   logger.info("\n--- Slug Uniqueness ---");
-  for (const table of ["stores", "brands", "categories", "banks", "tags"]) {
+  for (const table of ["stores", "brands", "categories", "banks"]) {
     const [dupes] = await pgQuery<{ c: number }>(`
       SELECT COUNT(*) AS c FROM (
         SELECT slug, COUNT(*) AS cnt FROM "${table}" GROUP BY slug HAVING COUNT(*) > 1

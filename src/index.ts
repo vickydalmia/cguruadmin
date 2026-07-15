@@ -5,11 +5,12 @@ import { purgeResponseCaches } from './middlewares/cache';
 import { destroyRebuildQueue, enqueue, type ScopeRequest } from './static-deployment/queue';
 import { computeScope, preDeleteScope } from './static-deployment/scopes';
 import { validateHomepageImages } from './utils/homepage-image-validation';
+import { validateOfferFields } from './utils/offer-field-validation';
 import { sanitizeRichtextData } from './utils/sanitize-richtext';
 
 const HIDE_FROM_EDIT: Record<string, string[]> = {
-  'api::deal.deal': ['stores', 'brands', 'categories', 'banks', 'tags'],
-  'api::coupon.coupon': ['stores', 'brands', 'categories', 'banks', 'tags'],
+  'api::deal.deal': ['stores', 'brands', 'categories', 'banks'],
+  'api::coupon.coupon': ['stores', 'brands', 'categories', 'banks'],
 };
 
 async function hideRelationsFromContentManager(strapi: Core.Strapi): Promise<void> {
@@ -62,7 +63,7 @@ async function hideRelationsFromContentManager(strapi: Core.Strapi): Promise<voi
 // the public frontend reads offers only through the custom controllers, which
 // control populate and never expose the unique-code pool.
 const PUBLIC_READ_ACTIONS = [
-  ...['store', 'brand', 'category', 'bank', 'tag'].flatMap(
+  ...['store', 'brand', 'category', 'bank'].flatMap(
     (name) => [`api::${name}.${name}.find`, `api::${name}.${name}.findOne`]
   ),
   ...['homepage', 'global', 'menu', 'footer'].map(
@@ -384,6 +385,15 @@ export default {
         ['create', 'update'].includes(context.action)
       ) {
         await validateHomepageImages(strapi, context.params?.data);
+      }
+
+      // Offer badge / cashback / bank texts are word-capped so they fit the
+      // fixed card slots — reject over-long values with an inline field error.
+      if (
+        ['api::coupon.coupon', 'api::deal.deal'].includes(context.uid) &&
+        ['create', 'update'].includes(context.action)
+      ) {
+        validateOfferFields(context.params?.data);
       }
 
       // Offer changes: capture relations BEFORE the write. For deletes the

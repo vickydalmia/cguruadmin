@@ -6,16 +6,6 @@ import { getPostMapping, ensureTermMapping } from "../utils/id-maps.js";
 import { insertLink } from "../utils/strapi-insert.js";
 import { logger } from "../utils/logger.js";
 
-/** Valid values for the Strapi `offerType` enum (stored as text in `offer_type`). */
-const OFFER_TYPES = new Set([
-  "exclusive",
-  "newly_added",
-  "electronics",
-  "fashion",
-  "travel",
-  "food",
-]);
-
 interface PrimaryStoreLinkTable {
   table: string;
   dealCol: string;
@@ -23,18 +13,14 @@ interface PrimaryStoreLinkTable {
 }
 
 /**
- * Phase 12 — Backfill two newly-added Strapi fields from WordPress data:
+ * Phase 12 — Backfill the deal.primaryStore manyToOne relation from WordPress
+ * data: the ACF `deal_store` postmeta key (a store term ID, possibly
+ * PHP-serialized).
  *
- * 1. `offer_type` on coupons and deals, from the `offer_type` postmeta key
- *    (unknown/missing values are left null).
- * 2. The deal.primaryStore manyToOne relation, from the ACF `deal_store`
- *    postmeta key (a store term ID, possibly PHP-serialized).
- *
- * Safe to re-run: offer_type uses plain UPDATEs, primaryStore links use
- * delete-then-insert per deal.
+ * Safe to re-run: primaryStore links use delete-then-insert per deal.
  */
 export async function runOfferBackfill(): Promise<void> {
-  logger.info("=== Phase 12: Offer Backfill (offerType + primaryStore) ===");
+  logger.info("=== Phase 12: Offer Backfill (primaryStore) ===");
 
   // Guard against stale ID maps: if the Strapi tables are empty, the persisted
   // maps belong to a different database (e.g. after switching
@@ -61,7 +47,7 @@ export async function runOfferBackfill(): Promise<void> {
     JOIN wp_posts p ON p.ID = pm.post_id
     WHERE p.post_type = 'post'
       AND p.post_status IN ('publish', 'future')
-      AND pm.meta_key IN ('offer_type', 'deal_store')
+      AND pm.meta_key IN ('deal_store')
     ORDER BY pm.post_id
   `);
 
@@ -71,69 +57,12 @@ export async function runOfferBackfill(): Promise<void> {
     metaByPost.get(row.post_id)![row.meta_key] = row.meta_value;
   }
 
-  logger.info(`Found ${metaByPost.size} posts with offer_type/deal_store meta`);
+  logger.info(`Found ${metaByPost.size} posts with deal_store meta`);
 
-  let couponsUpdated = 0;
-  let dealsUpdated = 0;
   let linksWritten = 0;
   let skipped = 0;
 
-  // ── 1. offer_type backfill ──────────────────────────────────────────
-
-  const hasCouponCol = await hasColumn("coupons", "offer_type");
-  const hasDealCol = await hasColumn("deals", "offer_type");
-  if (!hasCouponCol) {
-    logger.warn(
-      "coupons.offer_type column not found — run the Strapi schema migration first. Skipping coupon offerType backfill."
-    );
-  }
-  if (!hasDealCol) {
-    logger.warn(
-      "deals.offer_type column not found — run the Strapi schema migration first. Skipping deal offerType backfill."
-    );
-  }
-
-  // Group entity ids by target table + normalized offer type for bulk UPDATEs.
-  const offerTypeGroups = new Map<string, number[]>();
-
-  for (const [postId, meta] of metaByPost) {
-    if (!meta.offer_type) continue;
-
-    const ref = getPostMapping(postId);
-    if (!ref) {
-      skipped++;
-      continue; // post was never migrated
-    }
-
-    const offerType = normalizeOfferType(meta.offer_type);
-    if (!offerType) {
-      skipped++; // unknown value → leave null
-      continue;
-    }
-
-    if (ref.table === "coupons" && !hasCouponCol) continue;
-    if (ref.table === "deals" && !hasDealCol) continue;
-    if (ref.table !== "coupons" && ref.table !== "deals") {
-      skipped++;
-      continue;
-    }
-
-    const key = `${ref.table}|${offerType}`;
-    if (!offerTypeGroups.has(key)) offerTypeGroups.set(key, []);
-    offerTypeGroups.get(key)!.push(ref.id);
-  }
-
-  for (const [key, entityIds] of offerTypeGroups) {
-    const [table, offerType] = key.split("|");
-    const updated = await pgQuery<{ id: number }>(
-      `UPDATE "${table}" SET "offer_type" = $1 WHERE id = ANY($2::int[]) RETURNING id`,
-      [offerType, entityIds]
-    );
-    if (table === "coupons") couponsUpdated += updated.length;
-    else dealsUpdated += updated.length;
-  }
-
-  // ── 2. primaryStore backfill (deals only) ───────────────────────────
+  // ── primaryStore backfill (deals only) ──────────────────────────────
 
   const linkTable = await detectPrimaryStoreLinkTable();
   if (!linkTable) {
@@ -205,24 +134,11 @@ export async function runOfferBackfill(): Promise<void> {
   }
 
   logger.info(
-    `Offer backfill complete: ${couponsUpdated} coupons updated with offerType, ` +
-      `${dealsUpdated} deals updated, ${linksWritten} primaryStore links written, ${skipped} skipped`
+    `Offer backfill complete: ${linksWritten} primaryStore links written, ${skipped} skipped`
   );
 }
 
 // ── Schema detection ─────────────────────────────────────────────────
-
-async function hasColumn(table: string, column: string): Promise<boolean> {
-  const rows = await pgQuery(
-    `SELECT 1
-     FROM information_schema.columns
-     WHERE table_schema = current_schema()
-       AND table_name = $1
-       AND column_name = $2`,
-    [table, column]
-  );
-  return rows.length > 0;
-}
 
 /**
  * Finds the Strapi v5 link table for deal.primaryStore empirically. The
@@ -273,11 +189,6 @@ async function detectPrimaryStoreLinkTable(): Promise<PrimaryStoreLinkTable | nu
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
-
-function normalizeOfferType(raw: string): string | null {
-  const normalized = raw.trim().toLowerCase().replace(/[\s-]+/g, "_");
-  return OFFER_TYPES.has(normalized) ? normalized : null;
-}
 
 /**
  * Parses an ACF term-reference meta value into a WP term ID. Depending on the

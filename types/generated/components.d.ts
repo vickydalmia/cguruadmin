@@ -482,17 +482,6 @@ export interface NavLink extends Struct.ComponentSchema {
   };
 }
 
-export interface SharedChip extends Struct.ComponentSchema {
-  collectionName: 'components_shared_chips';
-  info: {
-    displayName: 'Chip';
-    icon: 'bulletList';
-  };
-  attributes: {
-    label: Schema.Attribute.String & Schema.Attribute.Required;
-  };
-}
-
 export interface SharedCta extends Struct.ComponentSchema {
   collectionName: 'components_shared_ctas';
   info: {
@@ -593,7 +582,6 @@ declare module '@strapi/strapi' {
       'homepage.slider-slide': HomepageSliderSlide;
       'nav.category-section': NavCategorySection;
       'nav.link': NavLink;
-      'shared.chip': SharedChip;
       'shared.cta': SharedCta;
       'shared.faq-item': SharedFaqItem;
       'shared.newsletter': SharedNewsletter;

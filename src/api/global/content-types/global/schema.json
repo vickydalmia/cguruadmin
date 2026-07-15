@@ -9,6 +9,7 @@
   "options": {
     "draftAndPublish": false
   },
+  "pluginOptions": {},
   "attributes": {
     "title": {
       "type": "string",
@@ -20,29 +21,15 @@
     "footerCode": {
       "type": "text"
     },
-    "amazonTopBanner": {
-      "type": "media",
-      "multiple": false,
-      "allowedTypes": [
-        "images"
-      ]
-    },
-    "amazonTopBannerLink": {
-      "type": "string"
-    },
-    "enableAmazonDeal": {
-      "type": "boolean",
-      "default": false
-    },
     "telegramCta": {
       "type": "component",
-      "repeatable": false,
-      "component": "shared.telegram-cta"
+      "component": "shared.telegram-cta",
+      "repeatable": false
     },
     "newsletter": {
       "type": "component",
-      "repeatable": false,
-      "component": "shared.newsletter"
+      "component": "shared.newsletter",
+      "repeatable": false
     }
   }
 }

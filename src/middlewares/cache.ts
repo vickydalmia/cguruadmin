@@ -9,7 +9,12 @@ import type { Core } from '@strapi/strapi';
  *
  * Per-instance only (not shared across horizontally-scaled nodes) — good
  * enough as a DoS dampener; a CDN in front should be the primary cache.
- * Configure with: { ttlMs?: number }.
+ *
+ * Configure with: { ttlMs?: number, keyByPath?: boolean }. Set `keyByPath` for
+ * endpoints that ignore the query string (e.g. /directories/:kind): the cache
+ * key is then the path alone, so `?nonce=1`, `?nonce=2`, … all share one entry
+ * instead of each forcing a fresh full-catalog miss. Leave it off where the
+ * query is semantically meaningful (e.g. /offers?page=2).
  */
 interface CacheEntry {
   expiresAt: number;
@@ -31,8 +36,12 @@ export function purgeResponseCaches(): void {
   for (const store of allStores) store.clear();
 }
 
-export default (config: { ttlMs?: number }, { strapi: _strapi }: { strapi: Core.Strapi }) => {
+export default (
+  config: { ttlMs?: number; keyByPath?: boolean },
+  { strapi: _strapi }: { strapi: Core.Strapi },
+) => {
   const ttlMs = config?.ttlMs ?? 60_000;
+  const keyByPath = config?.keyByPath ?? false;
   const store = new Map<string, CacheEntry>();
   allStores.add(store);
 
@@ -41,7 +50,9 @@ export default (config: { ttlMs?: number }, { strapi: _strapi }: { strapi: Core.
       return next();
     }
 
-    const key = ctx.originalUrl;
+    // Path-only key for query-agnostic endpoints, so arbitrary query strings
+    // can't multiply distinct keys and bypass the cache (full-scan DoS).
+    const key = keyByPath ? ctx.path : ctx.originalUrl;
     const now = Date.now();
     const hit = store.get(key);
     if (hit && now < hit.expiresAt) {
