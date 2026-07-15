@@ -692,6 +692,11 @@ export default {
           const input = el as HTMLInputElement;
           if (input.getAttribute('role') === 'combobox') return;
           if (input.getAttribute('aria-autocomplete')) return;
+          // The list-view search bar (and the relation-picker search) submit on
+          // Enter to apply the query — they live inside <form role="search">.
+          // Swallowing Enter there silently breaks search on EVERY content type
+          // (Strapi's SearchInput has no submit button; Enter is the only trigger).
+          if (input.closest('form[role="search"]')) return;
           const type = (input.type || 'text').toLowerCase();
           if (['text', 'search', 'url', 'email', 'tel', 'number', 'password'].includes(type)) {
             e.preventDefault();

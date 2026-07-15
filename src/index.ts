@@ -483,7 +483,8 @@ export default {
           preScope = await preDeleteScope(
             strapi,
             context.uid,
-            context.params?.documentId
+            context.params?.documentId,
+            context.action
           );
         } catch {
           preScope = null;

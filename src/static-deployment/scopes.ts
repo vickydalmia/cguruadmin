@@ -65,21 +65,30 @@ export async function offerRelationSlugs(
 }
 
 /**
- * Pre-fetch (BEFORE next()) for offer deletes — afterwards the doc is gone
- * and its relations are unknowable. Returns null when the doc can't be read;
- * the caller then escalates to full (safe default).
+ * Pre-fetch (BEFORE next()) for offer changes — for deletes the doc is gone
+ * afterwards and its relations are unknowable, so a failed pre-read must
+ * escalate to full. For updates the post-write computeScope still reads the
+ * after-relations, so a failed pre-read only loses REMOVED-relation coverage
+ * (reconciled by the nightly full) — escalating every transient read hiccup
+ * during routine edits to a 5k-page full sweep is how revalidate storms start.
  */
 export async function preDeleteScope(
   strapi: Core.Strapi,
   uid: string,
   documentId: string | undefined,
+  action: string,
 ): Promise<ScopeRequest | null> {
   if (!OFFER_UIDS.has(uid) || !documentId) return null;
+  const fallback = (): ScopeRequest | null =>
+    action === 'delete' ? { full: true } : null;
   try {
     const slugs = await offerRelationSlugs(strapi, uid as any, documentId);
-    return slugs ? { slugs, homepage: true } : { full: true };
-  } catch {
-    return { full: true };
+    return slugs ? { slugs, homepage: true } : fallback();
+  } catch (err: any) {
+    strapi.log.warn(
+      `[rebuild] pre-change relation read failed for ${uid} ${documentId} (${action}): ${err?.message ?? err}`
+    );
+    return fallback();
   }
 }
 

@@ -38,6 +38,19 @@ export function rebuildConfig() {
     // build at most this long after the batch's FIRST change.
     maxWaitMs: Number(process.env.REBUILD_MAX_WAIT_MS) || 300_000,
     fullThreshold: Number(process.env.REBUILD_FULL_THRESHOLD) || 150,
+    // TOTAL delivery attempts (first try + retries) for a failing streak,
+    // then the scope is DROPPED with a loud error — the nightly full build is
+    // the consistency net. Unbounded retries during a gateway outage would
+    // otherwise re-send the same (often full) scope every debounce window
+    // forever, amplifying the very overload that caused the failure. The
+    // streak counter is shared across the batch lineage: scopes merged into a
+    // failing batch inherit its remaining budget (documented trade-off — the
+    // alternative, resetting on every merge, would defeat the cap exactly
+    // when editors keep editing through an outage).
+    maxRetries: Number(process.env.REBUILD_MAX_RETRIES) || 5,
+    // Timeout for the POST to the gateway /revalidate. Generous on purpose:
+    // aborting an already-accepted request just queues a duplicate sweep.
+    postTimeoutMs: Math.max(1_000, Number(process.env.REBUILD_POST_TIMEOUT_MS) || 30_000),
   };
 }
 
@@ -45,6 +58,7 @@ let pending = emptyScope();
 let timer: NodeJS.Timeout | null = null;
 let building = false;
 let batchStartedAt: number | null = null;
+let deliveryFailures = 0;
 
 function describe(scope: PendingScope): string {
   if (scope.full) return 'FULL';
@@ -107,11 +121,26 @@ async function run(strapi: Core.Strapi): Promise<void> {
 
   try {
     await executeRebuild(strapi, job);
+    deliveryFailures = 0;
   } catch (err: any) {
     // Failed builds never deploy; merge the scope back and retry after the
-    // debounce window instead of hot-looping.
-    strapi.log.error(`[rebuild] build/deploy failed: ${err?.message ?? err} — will retry`);
-    enqueue(strapi, { full: job.full, homepage: job.homepage, slugs: job.slugs }, 'retry after failure');
+    // debounce window instead of hot-looping — but only maxRetries times.
+    // Beyond that the failure is systemic (gateway/infra down) and endless
+    // re-sends of the same scope would only pile more load onto whatever is
+    // failing; the nightly full build reconciles anything dropped here.
+    deliveryFailures += 1;
+    const { maxRetries } = rebuildConfig();
+    if (deliveryFailures >= maxRetries) {
+      deliveryFailures = 0;
+      strapi.log.error(
+        `[rebuild] build/deploy failed ${maxRetries}x in a row: ${err?.message ?? err} — GIVING UP on this scope (${job.reasons.slice(0, 5).join('; ')}); the nightly full build will reconcile`
+      );
+    } else {
+      strapi.log.error(
+        `[rebuild] build/deploy failed (attempt ${deliveryFailures}/${maxRetries}): ${err?.message ?? err} — will retry`
+      );
+      enqueue(strapi, { full: job.full, homepage: job.homepage, slugs: job.slugs }, 'retry after failure');
+    }
   } finally {
     building = false;
     if (pending.full || pending.homepage || pending.slugs.size > 0) {

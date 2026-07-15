@@ -172,6 +172,10 @@ async function executeRedisRevalidate(strapi: Core.Strapi, job: RebuildJob): Pro
         ],
       };
 
+  // Generous timeout: the gateway answers 202 after a Redis enqueue, but when
+  // it is busy (mid-sweep) a tight timeout aborts an ALREADY-ACCEPTED request
+  // and the retry then queues a duplicate full sweep. The gateway coalesces
+  // duplicates, but not timing out in the first place is cheaper.
   const response = await fetch(`${gatewayUrl.replace(/\/+$/, '')}/revalidate`, {
     method: 'POST',
     headers: {
@@ -179,7 +183,7 @@ async function executeRedisRevalidate(strapi: Core.Strapi, job: RebuildJob): Pro
       authorization: `Bearer ${secret}`,
     },
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(rebuildConfig().postTimeoutMs),
   });
 
   if (!response.ok) {
