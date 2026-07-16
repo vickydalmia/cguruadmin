@@ -1,10 +1,20 @@
 import type { Core } from '@strapi/strapi';
+import { DOTD_SECTION_LABELS, DOTD_UID } from './constants/deal-of-the-day-sections';
 import { HOMEPAGE_IMAGE_RULES, imageRuleDescription } from './constants/homepage-images';
-import { HOMEPAGE_SECTION_LABELS, HOMEPAGE_UID } from './constants/homepage-sections';
+import {
+  HOMEPAGE_SECTION_LABELS,
+  HOMEPAGE_UID,
+  type SectionLabel,
+} from './constants/homepage-sections';
 import { purgeResponseCaches } from './middlewares/cache';
 import { destroyRebuildQueue, enqueue, type ScopeRequest } from './static-deployment/queue';
 import { computeScope, preDeleteScope } from './static-deployment/scopes';
 import { validateEntityFields } from './utils/entity-field-validation';
+import {
+  isEntityTopPickUid,
+  validateEntityTopPickCoupons,
+} from './utils/entity-top-pick-validation';
+import { validateDealOfTheDaySectionLimits } from './utils/deal-of-the-day-validation';
 import { validateHomepageImages } from './utils/homepage-image-validation';
 import { validateOfferFields } from './utils/offer-field-validation';
 import { sanitizeRichtextData } from './utils/sanitize-richtext';
@@ -12,6 +22,10 @@ import { sanitizeRichtextData } from './utils/sanitize-richtext';
 const HIDE_FROM_EDIT: Record<string, string[]> = {
   'api::deal.deal': ['stores', 'brands', 'categories', 'banks'],
   'api::coupon.coupon': ['stores', 'brands', 'categories', 'banks'],
+  'api::store.store': ['topPickCoupons'],
+  'api::brand.brand': ['topPickCoupons'],
+  'api::bank.bank': ['topPickCoupons'],
+  'api::category.category': ['topPickCoupons'],
 };
 
 async function hideRelationsFromContentManager(strapi: Core.Strapi): Promise<void> {
@@ -151,6 +165,10 @@ const COMPONENT_ENTRY_TITLES: Record<string, string> = {
   'home.faq-block': 'heading',
   'home.popular-searches': 'heading',
   'home.latest-insights': 'heading',
+  'deal-day.deals-by-store': 'heading',
+  'deal-day.store-tab': 'labelOverride',
+  'deal-day.telegram-deals': 'heading',
+  'deal-day.section-heading': 'heading',
   'shared.cta': 'label',
   'shared.telegram-cta': 'heading',
   'shared.newsletter': 'heading',
@@ -241,6 +259,7 @@ async function ensureComponentFieldDescriptions(strapi: Core.Strapi): Promise<vo
 // `title` attribute ("Homepage"/"Menu"/"Footer") instead of wp_<hash> ids.
 const SINGLE_TYPE_ENTRY_TITLES = [
   'api::homepage.homepage',
+  'api::deal-of-the-day-page.deal-of-the-day-page',
   'api::menu.menu',
   'api::footer.footer',
   'api::global.global',
@@ -269,25 +288,29 @@ async function ensureSingleTypeEntryTitles(strapi: Core.Strapi): Promise<void> {
   }
 }
 
-// Homepage section labels/help text live in src/constants/homepage-sections.ts
-// (shared with the admin bundle). Pinned into the content-manager view config
-// on every boot — manual "Configure the view" edits to these attributes will
-// not stick; edit the shared constant instead.
-async function ensureHomepageSectionLabels(strapi: Core.Strapi): Promise<void> {
+// Single-type section labels/help text live in src/constants/*-sections.ts
+// (the homepage set is shared with the admin bundle). Pinned into the
+// content-manager view config on every boot — manual "Configure the view"
+// edits to these attributes will not stick; edit the shared constant instead.
+async function ensureSectionLabels(
+  strapi: Core.Strapi,
+  uid: string,
+  labels: SectionLabel[],
+): Promise<void> {
   const service: any = strapi.plugin('content-manager').service('content-types');
   if (!service) return;
 
   try {
-    const contentType = strapi.contentType(HOMEPAGE_UID as any);
+    const contentType = strapi.contentType(uid as any);
     if (!contentType) return;
 
     const config = await service.findConfiguration(contentType);
 
     const metadatas = { ...(config.metadatas ?? {}) };
     let metaChanged = false;
-    for (const { attr, label, description } of HOMEPAGE_SECTION_LABELS) {
+    for (const { attr, label, description } of labels) {
       if (!contentType.attributes?.[attr]) {
-        strapi.log.warn(`[content-manager] homepage has no attribute "${attr}" — label skipped`);
+        strapi.log.warn(`[content-manager] ${uid} has no attribute "${attr}" — label skipped`);
         continue;
       }
       const prev = metadatas[attr] ?? {};
@@ -303,8 +326,8 @@ async function ensureHomepageSectionLabels(strapi: Core.Strapi): Promise<void> {
     const cellsByName = new Map<string, any>();
     for (const row of prevEdit) for (const cell of row) cellsByName.set(cell.name, cell);
 
-    const listed = new Set(HOMEPAGE_SECTION_LABELS.map(({ attr }) => attr));
-    const ordered = HOMEPAGE_SECTION_LABELS.map(({ attr }) => cellsByName.get(attr)).filter(Boolean);
+    const listed = new Set(labels.map(({ attr }) => attr));
+    const ordered = labels.map(({ attr }) => cellsByName.get(attr)).filter(Boolean);
     const leftovers = [...cellsByName.values()].filter((cell) => !listed.has(cell.name));
     const nextEdit = [...ordered, ...leftovers].map((cell) => [cell]);
 
@@ -317,10 +340,10 @@ async function ensureHomepageSectionLabels(strapi: Core.Strapi): Promise<void> {
       layouts: { ...config.layouts, edit: layoutChanged ? nextEdit : prevEdit },
       options: config.options,
     });
-    strapi.log.info('[content-manager] homepage section labels & form order pinned');
+    strapi.log.info(`[content-manager] ${uid} section labels & form order pinned`);
   } catch (err: any) {
     strapi.log.warn(
-      `[content-manager] homepage section labels failed: ${err?.message ?? err}`
+      `[content-manager] ${uid} section labels failed: ${err?.message ?? err}`
     );
   }
 }
@@ -343,6 +366,7 @@ const OVERRIDE_FILLS: Array<{
   { componentUid: 'home.explore-tab', overrideField: 'labelOverride', relationField: 'category', relationLabel: 'name' },
   { componentUid: 'home.explore-offer-tab', overrideField: 'labelOverride', relationField: 'category', relationLabel: 'name' },
   { componentUid: 'home.bank-offer-item', overrideField: 'subtitle', relationField: 'bank', relationLabel: 'shortDescription' },
+  { componentUid: 'deal-day.store-tab', overrideField: 'labelOverride', relationField: 'store', relationLabel: 'name' },
 ];
 
 async function fillHomepageOverrides(strapi: Core.Strapi): Promise<void> {
@@ -458,6 +482,25 @@ export default {
         await validateHomepageImages(strapi, context.params?.data);
       }
 
+      if (
+        context.uid === 'api::deal-of-the-day-page.deal-of-the-day-page' &&
+        ['create', 'update'].includes(context.action)
+      ) {
+        await validateDealOfTheDaySectionLimits(strapi, context.params?.data);
+      }
+
+      if (
+        isEntityTopPickUid(context.uid) &&
+        ['create', 'update'].includes(context.action)
+      ) {
+        await validateEntityTopPickCoupons(
+          strapi,
+          context.uid,
+          context.params?.data,
+          context.params?.documentId,
+        );
+      }
+
       // Offer badge / cashback / bank texts are word-capped so they fit the
       // fixed card slots — reject over-long values with an inline field error.
       if (
@@ -494,7 +537,10 @@ export default {
       const result = await next();
 
       if (
-        context.uid === 'api::homepage.homepage' &&
+        [
+          'api::homepage.homepage',
+          'api::deal-of-the-day-page.deal-of-the-day-page',
+        ].includes(context.uid) &&
         ['create', 'update', 'publish'].includes(context.action)
       ) {
         try {
@@ -546,7 +592,8 @@ export default {
     await ensureComponentFieldDescriptions(strapi);
     await ensureSingleTypeEntryTitles(strapi);
     await ensureOfferListStatusColumn(strapi);
-    await ensureHomepageSectionLabels(strapi);
+    await ensureSectionLabels(strapi, HOMEPAGE_UID, HOMEPAGE_SECTION_LABELS);
+    await ensureSectionLabels(strapi, DOTD_UID, DOTD_SECTION_LABELS);
 
     strapi.log.info(
       `[rebuild] ${process.env.REBUILD_ENABLED === 'true' ? 'ENABLED' : 'disabled (log-only)'} — scopes computed on every content change`

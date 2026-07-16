@@ -6,6 +6,19 @@ import type { ScopeRequest } from './queue';
 
 const CHROME_UIDS = new Set(['api::menu.menu', 'api::footer.footer', 'api::global.global']);
 const OFFER_UIDS = new Set(['api::coupon.coupon', 'api::deal.deal']);
+
+// The deal-of-the-day category page renders curated Deal sections (its
+// single type may reference deals NOT tagged with the category), so every
+// Deal change rebuilds it — the same stance as `homepage: true` on offer
+// changes. One constant slug, deduped by the queue; coupons never render
+// there and do not carry it.
+const DEAL_OF_THE_DAY_SLUG = 'deal-of-the-day';
+const DOTD_PAGE_UID = 'api::deal-of-the-day-page.deal-of-the-day-page';
+
+function withDealLandingSlug(uid: string, slugs: string[]): string[] {
+  if (uid !== 'api::deal.deal') return slugs;
+  return [...new Set([...slugs, DEAL_OF_THE_DAY_SLUG])];
+}
 const ENTITY_UIDS: Record<string, string> = {
   'api::store.store': 'store',
   'api::brand.brand': 'brand',
@@ -83,7 +96,7 @@ export async function preDeleteScope(
     action === 'delete' ? { full: true } : null;
   try {
     const slugs = await offerRelationSlugs(strapi, uid as any, documentId);
-    return slugs ? { slugs, homepage: true } : fallback();
+    return slugs ? { slugs: withDealLandingSlug(uid, slugs), homepage: true } : fallback();
   } catch (err: any) {
     strapi.log.warn(
       `[rebuild] pre-change relation read failed for ${uid} ${documentId} (${action}): ${err?.message ?? err}`
@@ -102,6 +115,7 @@ export async function computeScope(
   if (!RELEVANT_ACTIONS.has(action)) return null;
 
   if (uid === 'api::homepage.homepage') return { homepage: true };
+  if (uid === DOTD_PAGE_UID) return { slugs: [DEAL_OF_THE_DAY_SLUG] };
   if (CHROME_UIDS.has(uid)) return { full: true };
 
   if (OFFER_UIDS.has(uid)) {
@@ -110,8 +124,8 @@ export async function computeScope(
     if (!documentId) return { full: true };
     const slugs = await offerRelationSlugs(strapi, uid as any, documentId);
     if (slugs === null) return { full: true };
-    if (slugs.length === 0) return { homepage: true }; // offer with no relations only shows via curation
-    return { slugs, homepage: true };
+    // An offer with no entity relations only shows via curation surfaces.
+    return { slugs: withDealLandingSlug(uid, slugs), homepage: true };
   }
 
   const kind = ENTITY_UIDS[uid];
@@ -124,7 +138,14 @@ export async function computeScope(
       fields: ['slug'] as any,
     });
     const slug = publicSlug(doc?.slug, kind);
-    return slug ? { slugs: [slug], homepage: true } : { full: true };
+    if (!slug) return { full: true };
+    // The deal landing page bakes store pill labels/logos and category tab
+    // names/icons into its HTML — same reason entity edits carry homepage.
+    const slugs =
+      kind === 'store' || kind === 'category'
+        ? [...new Set([slug, DEAL_OF_THE_DAY_SLUG])]
+        : [slug];
+    return { slugs, homepage: true };
   }
 
   return null; // unrelated content type (pools, users…)

@@ -1,0 +1,27 @@
+{
+  "collectionName": "components_deal_day_telegram_deals",
+  "info": {
+    "displayName": "Deal Day Telegram Deals",
+    "icon": "paperPlane"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string"
+    },
+    "description": {
+      "type": "text"
+    },
+    "ctaLabel": {
+      "type": "string"
+    },
+    "deals": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::deal.deal"
+    }
+  }
+}

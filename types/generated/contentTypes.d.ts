@@ -488,6 +488,10 @@ export interface ApiBankBank extends Struct.CollectionTypeSchema {
     seo: Schema.Attribute.Component<'shared.seo', false>;
     shortDescription: Schema.Attribute.Text;
     slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
+    topPickCoupons: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::coupon.coupon'
+    >;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -542,6 +546,10 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
     seo: Schema.Attribute.Component<'shared.seo', false>;
     shortDescription: Schema.Attribute.Text & Schema.Attribute.Required;
     slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
+    topPickCoupons: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::coupon.coupon'
+    >;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -598,6 +606,10 @@ export interface ApiCategoryCategory extends Struct.CollectionTypeSchema {
     seo: Schema.Attribute.Component<'shared.seo', false>;
     shortDescription: Schema.Attribute.Text;
     slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
+    topPickCoupons: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::coupon.coupon'
+    >;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -666,6 +678,49 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
       'manyToOne',
       'api::unique-coupon-pool.unique-coupon-pool'
     >;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiDealOfTheDayPageDealOfTheDayPage
+  extends Struct.SingleTypeSchema {
+  collectionName: 'deal_of_the_day_pages';
+  info: {
+    description: 'Curated sections for the deal-of-the-day category landing page';
+    displayName: 'Deal of the Day Page';
+    pluralName: 'deal-of-the-day-pages';
+    singularName: 'deal-of-the-day-page';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    allDeals: Schema.Attribute.Component<'deal-day.section-heading', false>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    dealsByCategory: Schema.Attribute.Component<'home.explore-deals', false>;
+    dealsByStore: Schema.Attribute.Component<'deal-day.deals-by-store', false>;
+    genZDrops: Schema.Attribute.Component<'home.deal-list', false>;
+    heroSubtitle: Schema.Attribute.String;
+    heroTitle: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::deal-of-the-day-page.deal-of-the-day-page'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    seo: Schema.Attribute.Component<'shared.seo', false>;
+    smartSavingStack: Schema.Attribute.Component<'home.deal-list', false>;
+    telegramDeals: Schema.Attribute.Component<'deal-day.telegram-deals', false>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Deal of the Day Page'>;
+    topDeals: Schema.Attribute.Component<'home.deal-list', false>;
+    topPicks: Schema.Attribute.Component<'home.deal-list', false>;
+    trendingNow: Schema.Attribute.Component<'home.deal-list', false>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -928,6 +983,10 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
     seo: Schema.Attribute.Component<'shared.seo', false>;
     shortDescription: Schema.Attribute.Text;
     slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
+    topPickCoupons: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::coupon.coupon'
+    >;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1538,6 +1597,7 @@ declare module '@strapi/strapi' {
       'api::brand.brand': ApiBrandBrand;
       'api::category.category': ApiCategoryCategory;
       'api::coupon.coupon': ApiCouponCoupon;
+      'api::deal-of-the-day-page.deal-of-the-day-page': ApiDealOfTheDayPageDealOfTheDayPage;
       'api::deal.deal': ApiDealDeal;
       'api::footer.footer': ApiFooterFooter;
       'api::global.global': ApiGlobalGlobal;

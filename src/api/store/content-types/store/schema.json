@@ -74,6 +74,11 @@
       "target": "api::deal.deal",
       "mappedBy": "stores"
     },
+    "topPickCoupons": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::coupon.coupon"
+    },
     "faqEnabled": {
       "type": "boolean",
       "default": false

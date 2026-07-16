@@ -143,6 +143,14 @@ const entityPopulate = (entityType: string) => ({
   [entityType === 'category' ? 'icon' : 'logo']: true,
   faqs: true,
   seo: { populate: { ogImage: true } },
+  // Each entity may curate up to four Coupon-schema Top Picks. The write-time
+  // validator enforces the cap; visibility filtering removes stale selections
+  // before the frontend decides whether the two-Coupon fallback is needed.
+  topPickCoupons: {
+    fields: COUPON_PUBLIC_FIELDS,
+    filters: visibilityFilters(),
+    populate: COUPON_PUBLIC_POPULATE,
+  },
 });
 
 function entityOfferFilters(

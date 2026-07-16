@@ -1,0 +1,21 @@
+{
+  "collectionName": "components_deal_day_section_headings",
+  "info": {
+    "displayName": "Deal Day Section Heading",
+    "icon": "layout"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string"
+    },
+    "viewAllCta": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.cta"
+    }
+  }
+}

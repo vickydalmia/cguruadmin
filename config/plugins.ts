@@ -21,7 +21,10 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
             config: {
               // Responsive format sizes generated on upload (originals are
               // capped at 1920 by src/extensions/upload — no 1920 breakpoint).
-              breakpoints: { large: 1000, medium: 750, small: 500 },
+              // xsmall serves ~150px card slots at DPR 2 — without it the
+              // smallest variant is 500px and thumbnails download 3x the
+              // pixels they render (Lighthouse "improve image delivery").
+              breakpoints: { large: 1000, medium: 750, small: 500, xsmall: 320 },
               provider: 'aws-s3',
               providerOptions: {
                 baseUrl: s3BaseUrl,
@@ -48,8 +51,14 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
                 },
               },
               actionOptions: {
-                upload: {},
-                uploadStream: {},
+                // Media filenames are content-hashed (and preventOverwrite is
+                // on), so a replaced image always gets a NEW URL — immutable
+                // year-long browser/CDN caching is safe and fixes the
+                // "Cache TTL: None" Lighthouse audit on media.couponzguru.com.
+                // Existing objects need a one-time metadata backfill (aws s3 cp
+                // --metadata-directive REPLACE --cache-control ...).
+                upload: { CacheControl: 'public, max-age=31536000, immutable' },
+                uploadStream: { CacheControl: 'public, max-age=31536000, immutable' },
                 delete: {},
               },
             },

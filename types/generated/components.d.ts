@@ -1,5 +1,67 @@
 import type { Schema, Struct } from '@strapi/strapi';
 
+export interface DealDayDealsByStore extends Struct.ComponentSchema {
+  collectionName: 'components_deal_day_deals_by_stores';
+  info: {
+    displayName: 'Deal Day Deals By Store';
+    icon: 'shoppingCart';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String;
+    tabs: Schema.Attribute.Component<'deal-day.store-tab', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 8;
+        },
+        number
+      >;
+    viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
+  };
+}
+
+export interface DealDaySectionHeading extends Struct.ComponentSchema {
+  collectionName: 'components_deal_day_section_headings';
+  info: {
+    displayName: 'Deal Day Section Heading';
+    icon: 'layout';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String;
+    viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
+  };
+}
+
+export interface DealDayStoreTab extends Struct.ComponentSchema {
+  collectionName: 'components_deal_day_store_tabs';
+  info: {
+    displayName: 'Deal Day Store Tab';
+    icon: 'shoppingCart';
+  };
+  attributes: {
+    deals: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'>;
+    labelOverride: Schema.Attribute.String;
+    store: Schema.Attribute.Relation<'oneToOne', 'api::store.store'>;
+    viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
+  };
+}
+
+export interface DealDayTelegramDeals extends Struct.ComponentSchema {
+  collectionName: 'components_deal_day_telegram_deals';
+  info: {
+    displayName: 'Deal Day Telegram Deals';
+    icon: 'paperPlane';
+  };
+  attributes: {
+    ctaLabel: Schema.Attribute.String;
+    deals: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'>;
+    description: Schema.Attribute.Text;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String;
+  };
+}
+
 export interface FooterCountry extends Struct.ComponentSchema {
   collectionName: 'components_footer_countries';
   info: {
@@ -552,6 +614,10 @@ export interface SharedTelegramCta extends Struct.ComponentSchema {
 declare module '@strapi/strapi' {
   export module Public {
     export interface ComponentSchemas {
+      'deal-day.deals-by-store': DealDayDealsByStore;
+      'deal-day.section-heading': DealDaySectionHeading;
+      'deal-day.store-tab': DealDayStoreTab;
+      'deal-day.telegram-deals': DealDayTelegramDeals;
       'footer.country': FooterCountry;
       'footer.link-section': FooterLinkSection;
       'footer.partner-card': FooterPartnerCard;

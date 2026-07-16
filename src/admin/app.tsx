@@ -9,8 +9,8 @@ import {
   Checkbox,
   Divider,
   Flex,
+  IconButton,
   Loader,
-  Tag,
   TextInput,
   Typography,
 } from '@strapi/design-system';
@@ -32,6 +32,10 @@ type RelationConfig = {
   field: string;
   target: string;
   label: string;
+  mainField?: 'name' | 'title';
+  scopeRelationField?: 'stores' | 'brands' | 'categories' | 'banks';
+  minSelections?: number;
+  maxSelections?: number;
 };
 
 const RELATION_CONFIG: Record<string, RelationConfig[]> = {
@@ -47,6 +51,45 @@ const RELATION_CONFIG: Record<string, RelationConfig[]> = {
     { field: 'categories', target: 'api::category.category', label: 'Categories' },
     { field: 'banks', target: 'api::bank.bank', label: 'Banks' },
   ],
+};
+
+const ENTITY_TOP_PICK_CONFIG: Record<string, RelationConfig> = {
+  'api::store.store': {
+    field: 'topPickCoupons',
+    target: 'api::coupon.coupon',
+    label: 'Top Pick Coupons',
+    mainField: 'title',
+    scopeRelationField: 'stores',
+    minSelections: 2,
+    maxSelections: 4,
+  },
+  'api::brand.brand': {
+    field: 'topPickCoupons',
+    target: 'api::coupon.coupon',
+    label: 'Top Pick Coupons',
+    mainField: 'title',
+    scopeRelationField: 'brands',
+    minSelections: 2,
+    maxSelections: 4,
+  },
+  'api::category.category': {
+    field: 'topPickCoupons',
+    target: 'api::coupon.coupon',
+    label: 'Top Pick Coupons',
+    mainField: 'title',
+    scopeRelationField: 'categories',
+    minSelections: 2,
+    maxSelections: 4,
+  },
+  'api::bank.bank': {
+    field: 'topPickCoupons',
+    target: 'api::coupon.coupon',
+    label: 'Top Pick Coupons',
+    mainField: 'title',
+    scopeRelationField: 'banks',
+    minSelections: 2,
+    maxSelections: 4,
+  },
 };
 
 type Candidate = { id: number; documentId: string; name: string };
@@ -258,19 +301,32 @@ function RelationSection({
     setPage(1);
     setPageCount(1);
     setInitialLoaded(false);
-  }, [debouncedSearch, config.target]);
+  }, [debouncedSearch, config.target, config.scopeRelationField, documentId]);
 
   React.useEffect(() => {
-    if (!deferred) return;
+    if (!deferred || (config.scopeRelationField && !documentId)) return;
     let cancelled = false;
     const run = async () => {
       setLoading(true);
       try {
-        const searchParam = debouncedSearch
-          ? `&filters[name][$containsi]=${encodeURIComponent(debouncedSearch)}`
-          : '';
+        const mainField = config.mainField ?? 'name';
+        const params = new URLSearchParams({
+          page: String(page),
+          pageSize: String(PAGE_SIZE),
+          sort: `${mainField}:ASC`,
+        });
+        if (debouncedSearch) {
+          params.set(`filters[${mainField}][$containsi]`, debouncedSearch);
+        }
+        if (config.scopeRelationField && documentId) {
+          params.set(
+            `filters[${config.scopeRelationField}][documentId][$eq]`,
+            documentId,
+          );
+          params.set('filters[contentStatus][$eq]', 'published');
+        }
         const res = await get(
-          `/content-manager/collection-types/${config.target}?page=${page}&pageSize=${PAGE_SIZE}&sort=name:ASC${searchParam}`
+          `/content-manager/collection-types/${config.target}?${params.toString()}`
         );
         const body = res?.data?.data ?? res?.data;
         const results: any[] = body?.results ?? [];
@@ -293,10 +349,27 @@ function RelationSection({
     return () => {
       cancelled = true;
     };
-  }, [deferred, page, debouncedSearch, config.target, config.field, get]);
+  }, [
+    deferred,
+    page,
+    debouncedSearch,
+    config.target,
+    config.field,
+    config.mainField,
+    config.scopeRelationField,
+    documentId,
+    get,
+  ]);
 
   const toggle = (c: Candidate) => {
     const exists = selectedList.some((s) => s.documentId === c.documentId);
+    if (
+      !exists &&
+      config.maxSelections != null &&
+      selectedList.length >= config.maxSelections
+    ) {
+      return;
+    }
     const next = exists
       ? selectedList.filter((s) => s.documentId !== c.documentId)
       : [...selectedList, c];
@@ -351,6 +424,20 @@ function RelationSection({
 
   const sentinelRef = React.useRef<HTMLDivElement>(null);
   const hasMore = page < pageCount;
+  const requiresSavedEntity = Boolean(
+    config.scopeRelationField && !documentId,
+  );
+  const atSelectionLimit =
+    config.maxSelections != null &&
+    selectedList.length >= config.maxSelections;
+  const scopeEntityLabel = config.scopeRelationField
+    ? {
+        stores: 'Store',
+        brands: 'Brand',
+        categories: 'Category',
+        banks: 'Bank',
+      }[config.scopeRelationField]
+    : null;
 
   React.useEffect(() => {
     const el = sentinelRef.current;
@@ -371,67 +458,125 @@ function RelationSection({
     <Box paddingTop={3} paddingBottom={3} width="100%">
       <Flex justifyContent="space-between" alignItems="center" paddingBottom={2}>
         <Typography variant="sigma" textColor="neutral600">
-          {config.label} ({selectedList.length})
+          {config.label} ({selectedList.length}
+          {config.maxSelections != null ? `/${config.maxSelections}` : ''})
         </Typography>
       </Flex>
 
+      {scopeEntityLabel && documentId ? (
+        <Box paddingBottom={3} width="100%">
+          <Typography variant="pi" textColor="neutral600">
+            Only published Coupons related to this {scopeEntityLabel} are
+            listed. Select {config.minSelections ?? 1}–{config.maxSelections}
+            {' '}Coupons. The first two live selections are shown; the next two
+            are expiry buffers. Clear all selections to use the latest two.
+          </Typography>
+        </Box>
+      ) : null}
+
       {selectedList.length > 0 ? (
         <Box paddingBottom={2} width="100%">
-          <Flex gap={1} wrap="wrap">
+          <Flex direction="column" alignItems="stretch" gap={2} width="100%">
             {selectedList.map((c) => (
-              <Tag key={c.documentId} icon={<Cross />} onClick={() => toggle(c)}>
-                {c.name}
-              </Tag>
+              <Box
+                key={c.documentId}
+                hasRadius
+                background="primary100"
+                padding={2}
+                width="100%"
+              >
+                <Flex alignItems="flex-start" gap={2} width="100%">
+                  <Box style={{ flex: 1, minWidth: 0 }}>
+                    <Typography
+                      variant="omega"
+                      textColor="neutral800"
+                      style={{
+                        display: 'block',
+                        lineHeight: 1.35,
+                        overflowWrap: 'anywhere',
+                      }}
+                    >
+                      {c.name}
+                    </Typography>
+                  </Box>
+                  <IconButton
+                    type="button"
+                    label={`Remove ${c.name}`}
+                    variant="ghost"
+                    size="S"
+                    onClick={() => toggle(c)}
+                    style={{ flexShrink: 0 }}
+                  >
+                    <Cross />
+                  </IconButton>
+                </Flex>
+              </Box>
             ))}
           </Flex>
         </Box>
       ) : null}
 
-      <Box paddingBottom={2} width="100%">
-        <TextInput
-          aria-label={`Search ${config.label}`}
-          placeholder={`Search ${config.label.toLowerCase()}...`}
-          value={search}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-            setSearch(e.target.value)
-          }
-          size="S"
-        />
-      </Box>
-
-      <Box
-        hasRadius
-        background="neutral0"
-        borderColor="neutral200"
-        padding={2}
-        width="100%"
-        style={{ maxHeight: 220, overflowY: 'auto', boxSizing: 'border-box' }}
-      >
-        {candidates.map((c) => (
-          <Box key={c.documentId} paddingBottom={1}>
-            <Checkbox
-              checked={selectedDocIds.has(c.documentId)}
-              onCheckedChange={() => toggle(c)}
-            >
-              {c.name}
-            </Checkbox>
-          </Box>
-        ))}
-
-        {initialLoaded && candidates.length === 0 ? (
-          <Typography variant="pi" textColor="neutral500">
-            {debouncedSearch ? 'No matches.' : `No ${config.label.toLowerCase()} available.`}
+      {requiresSavedEntity ? (
+        <Box paddingTop={1} paddingBottom={1} width="100%">
+          <Typography variant="pi" textColor="neutral600">
+            Save this entry first. Its related Coupons will then be available
+            here.
           </Typography>
-        ) : null}
+        </Box>
+      ) : (
+        <>
+          <Box paddingBottom={2} width="100%">
+            <TextInput
+              aria-label={`Search ${config.label}`}
+              placeholder={`Search ${config.label.toLowerCase()}...`}
+              value={search}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                setSearch(e.target.value)
+              }
+              size="S"
+            />
+          </Box>
 
-        {loading ? (
-          <Flex justifyContent="center" padding={2}>
-            <Loader small>Loading</Loader>
-          </Flex>
-        ) : null}
+          <Box
+            hasRadius
+            background="neutral0"
+            borderColor="neutral200"
+            padding={2}
+            width="100%"
+            style={{ maxHeight: 220, overflowY: 'auto', boxSizing: 'border-box' }}
+          >
+            {candidates.map((c) => (
+              <Box key={c.documentId} paddingBottom={1}>
+                <Checkbox
+                  checked={selectedDocIds.has(c.documentId)}
+                  disabled={
+                    !selectedDocIds.has(c.documentId) && atSelectionLimit
+                  }
+                  onCheckedChange={() => toggle(c)}
+                >
+                  {c.name}
+                </Checkbox>
+              </Box>
+            ))}
 
-        <div ref={sentinelRef} style={{ height: 1 }} />
-      </Box>
+            {initialLoaded && candidates.length === 0 ? (
+              <Typography variant="pi" textColor="neutral500">
+                {debouncedSearch
+                  ? 'No matches.'
+                  : `No ${config.label.toLowerCase()} available.`}
+              </Typography>
+            ) : null}
+
+            {loading ? (
+              <Flex justifyContent="center" padding={2}>
+                <Loader small>Loading</Loader>
+              </Flex>
+            ) : null}
+
+            <div ref={sentinelRef} style={{ height: 1 }} />
+          </Box>
+        </>
+      )}
     </Box>
   );
 }
@@ -467,6 +612,42 @@ const RelationMultiSelectPanel: PanelComponent = ({ model, documentId }) => {
   return {
     title: 'Taxonomies',
     content: <PanelBody model={model} documentId={documentId} />,
+  };
+};
+
+function EntityTopPickPanelBody({
+  config,
+  model,
+  documentId,
+}: {
+  config: RelationConfig;
+  model: string;
+  documentId?: string;
+}) {
+  const deferred = useDeferredMount();
+  return (
+    <RelationSection
+      config={config}
+      deferred={deferred}
+      model={model}
+      documentId={documentId}
+    />
+  );
+}
+
+const EntityTopPickCouponPanel: PanelComponent = ({ model, documentId }) => {
+  const config = ENTITY_TOP_PICK_CONFIG[model];
+  if (!config) return null;
+
+  return {
+    title: 'Top Pick Coupons',
+    content: (
+      <EntityTopPickPanelBody
+        config={config}
+        model={model}
+        documentId={documentId}
+      />
+    ),
   };
 };
 
@@ -653,6 +834,8 @@ export default {
       en: {
         'Auth.form.welcome.title': 'Welcome to CouponzGuru',
         'Auth.form.welcome.subtitle': 'Log in to your account',
+        // The media-library selection dialog uses this global action label.
+        'global.finish': 'Confirm',
         // Shown when the pre-save (client-side) check finds empty required
         // fields — the request never reaches the server in that case, so the
         // detailed server toast can't appear. Point editors at the panel.
@@ -663,7 +846,11 @@ export default {
   },
   bootstrap(app: StrapiApp) {
     const apis = (app.getPlugin('content-manager') as any).apis;
-    apis.addEditViewSidePanel([RelationMultiSelectPanel, ValidationProblemsPanel]);
+    apis.addEditViewSidePanel([
+      RelationMultiSelectPanel,
+      EntityTopPickCouponPanel,
+      ValidationProblemsPanel,
+    ]);
 
     if (typeof document !== 'undefined') {
       const rewrite = () => {

@@ -70,6 +70,11 @@
       "target": "api::deal.deal",
       "mappedBy": "banks"
     },
+    "topPickCoupons": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::coupon.coupon"
+    },
     "faqEnabled": {
       "type": "boolean",
       "default": false

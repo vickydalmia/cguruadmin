@@ -1,0 +1,27 @@
+{
+  "collectionName": "components_deal_day_deals_by_stores",
+  "info": {
+    "displayName": "Deal Day Deals By Store",
+    "icon": "shoppingCart"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string"
+    },
+    "viewAllCta": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.cta"
+    },
+    "tabs": {
+      "type": "component",
+      "repeatable": true,
+      "component": "deal-day.store-tab",
+      "max": 8
+    }
+  }
+}

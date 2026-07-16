@@ -80,6 +80,17 @@ describe('entity Coupon population', () => {
     expect(entityPopulate.faqs).toBe(true);
     expect(entityPopulate.seo).toEqual({ populate: { ogImage: true } });
     expect(entityPopulate.coupons.fields).toEqual(['documentId']);
+    expect(entityPopulate.topPickCoupons).toMatchObject({
+      fields: expect.arrayContaining(['title', 'couponType', 'affiliateLink']),
+      populate: {
+        image: true,
+        stores: expect.any(Object),
+        banks: expect.any(Object),
+        categories: expect.any(Object),
+        brands: expect.any(Object),
+        uniqueCouponPool: { fields: ['name'] },
+      },
+    });
   });
 
   it('returns coupons in the entity relation (drag) order, hydrated by id', async () => {
@@ -137,6 +148,12 @@ describe('entity product Deal population', () => {
     expect(options.filters.$or).toEqual([
       { stores: { documentId: 'store-amazon' } },
       { primaryStore: { documentId: 'store-amazon' } },
+    ]);
+    // With no curated entity.deals selection, related product Deals are the
+    // newest published records first before the UI builds its Deal rail.
+    expect(options.sort).toEqual([
+      { publishedAt: 'desc' },
+      { updatedAt: 'desc' },
     ]);
   });
 

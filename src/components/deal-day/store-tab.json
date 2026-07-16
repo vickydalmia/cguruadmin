@@ -1,0 +1,27 @@
+{
+  "collectionName": "components_deal_day_store_tabs",
+  "info": {
+    "displayName": "Deal Day Store Tab",
+    "icon": "shoppingCart"
+  },
+  "attributes": {
+    "store": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::store.store"
+    },
+    "labelOverride": {
+      "type": "string"
+    },
+    "viewAllCta": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.cta"
+    },
+    "deals": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::deal.deal"
+    }
+  }
+}

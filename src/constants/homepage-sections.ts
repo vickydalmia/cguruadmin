@@ -6,13 +6,16 @@
 // the labels in the validation-problems side panel) — keep it dependency-free.
 export const HOMEPAGE_UID = 'api::homepage.homepage';
 
-export type HomepageSectionLabel = {
+export type SectionLabel = {
   attr: string;
   label: string;
   description: string;
 };
 
-export const HOMEPAGE_SECTION_LABELS: HomepageSectionLabel[] = [
+// Back-compat alias (admin bundle imports the original name).
+export type HomepageSectionLabel = SectionLabel;
+
+export const HOMEPAGE_SECTION_LABELS: SectionLabel[] = [
   {
     attr: 'title',
     label: 'Admin title',
