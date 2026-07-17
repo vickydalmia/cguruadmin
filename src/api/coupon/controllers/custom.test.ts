@@ -1,8 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import createCouponController from './custom';
 
+const REDEEM_TEST_SECRET = 'redeem-test-secret';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 function createHarness() {
+  vi.stubEnv('ISR_REVALIDATE_SECRET', REDEEM_TEST_SECRET);
+
   const couponFindMany = vi.fn().mockResolvedValue([]);
   const couponFindOne = vi.fn().mockResolvedValue(null);
   const couponCount = vi.fn().mockResolvedValue(0);
@@ -43,7 +51,11 @@ function createHarness() {
     state: { auth: null, entityType: 'store' },
     notFound: vi.fn(),
     unauthorized: vi.fn(),
-    get: vi.fn(() => ''),
+    get: vi.fn((header: string) =>
+      header.toLowerCase() === 'authorization'
+        ? `Bearer ${REDEEM_TEST_SECRET}`
+        : '',
+    ),
     send: vi.fn((payload: any) => payload),
   };
 
