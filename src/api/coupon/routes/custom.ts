@@ -1,5 +1,13 @@
 export default {
   routes: [
+    // Private gateway-only resolver. Core Coupon/Deal findOne routes stay
+    // disabled so unique-code pools cannot be populated by public callers.
+    {
+      method: 'GET',
+      path: '/offer-redeem/:entityType/:documentId',
+      handler: 'custom.getRedeemOffer',
+      config: { auth: false },
+    },
     // Global listings of ALL published offers/deals (core find is disabled).
     {
       method: 'GET',

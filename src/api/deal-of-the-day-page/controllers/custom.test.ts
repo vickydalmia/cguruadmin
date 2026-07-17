@@ -91,6 +91,7 @@ describe('deal-of-the-day aggregate population', () => {
       populate.dealsByStore.populate.tabs.populate.deals,
       populate.smartSavingStack.populate.deals,
       populate.trendingNow.populate.deals,
+      populate.allDeals.populate.deals,
     ];
     for (const ref of fullDealRefs) {
       expect(ref.fields).toContain('content');
@@ -118,7 +119,7 @@ describe('deal-of-the-day aggregate population', () => {
     ]);
   });
 
-  it('filters and sorts every Deal relation with Document Service-compatible keys', async () => {
+  it('preserves exclusive-section curation order while filtering fallback-backed relations', async () => {
     const harness = createHarness({});
 
     await harness.controller.dealOfTheDayFull(harness.ctx as any);
@@ -130,10 +131,17 @@ describe('deal-of-the-day aggregate population', () => {
     };
 
     for (const ref of [
-      populate.topPicks.populate.deals,
-      populate.topDeals.populate.deals,
       populate.dealsByCategory.populate.tabs.populate.deals,
       populate.dealsByStore.populate.tabs.populate.deals,
+      populate.allDeals.populate.deals,
+    ]) {
+      expect(ref).not.toHaveProperty('filters');
+      expect(ref).not.toHaveProperty('sort');
+    }
+
+    for (const ref of [
+      populate.topPicks.populate.deals,
+      populate.topDeals.populate.deals,
       populate.smartSavingStack.populate.deals,
       populate.trendingNow.populate.deals,
       populate.genZDrops.populate.deals,
@@ -266,16 +274,12 @@ describe('deal-of-the-day aggregate population', () => {
     expect(harness.findManyDeals).not.toHaveBeenCalled();
   });
 
-  it('backfills category tabs by category membership and store tabs by store membership', async () => {
+  it('keeps selected category Deals exclusive and does not query category fallback', async () => {
     const harness = createHarness(
       {
         dealsByCategory: {
           enabled: true,
           tabs: [{ category: { documentId: 'cat-1' }, deals: [actionableDeal(1)] }],
-        },
-        dealsByStore: {
-          enabled: true,
-          tabs: [{ store: { documentId: 'store-1' }, deals: [] }],
         },
       },
       Array.from({ length: 12 }, (_, index) => actionableDeal(index + 20)),
@@ -283,19 +287,169 @@ describe('deal-of-the-day aggregate population', () => {
 
     const response = await harness.controller.dealOfTheDayFull(harness.ctx as any);
 
-    expect(harness.findManyDeals).toHaveBeenCalledTimes(2);
+    expect(response.data.dealsByCategory.tabs[0].deals).toHaveLength(1);
+    expect(response.data.dealsByCategory.tabs[0].deals[0].documentId).toBe('deal-1');
+    expect(harness.findManyDeals).not.toHaveBeenCalled();
+  });
+
+  it('queries category membership only when no category Deals are selected', async () => {
+    const fallback = Array.from({ length: 12 }, (_, index) => actionableDeal(index + 20));
+    const harness = createHarness({
+      dealsByCategory: {
+        enabled: true,
+        tabs: [{ category: { documentId: 'cat-1' }, deals: [] }],
+      },
+    }, fallback);
+
+    const response = await harness.controller.dealOfTheDayFull(harness.ctx as any);
+
+    expect(harness.findManyDeals).toHaveBeenCalledTimes(1);
     expect(harness.findManyDeals.mock.calls[0]?.[0].filters).toMatchObject({
       categories: { documentId: 'cat-1' },
     });
-    expect(harness.findManyDeals.mock.calls[1]?.[0].filters).toMatchObject({
+    expect(response.data.dealsByCategory.tabs[0].deals).toHaveLength(10);
+    expect(response.data.dealsByCategory.tabs[0].deals[0].documentId).toBe('deal-20');
+  });
+
+  it('does not activate category fallback when all selected Deals are unusable', async () => {
+    const harness = createHarness(
+      {
+        dealsByCategory: {
+          enabled: true,
+          tabs: [
+            {
+              category: { documentId: 'cat-1' },
+              deals: [actionableDeal(1, { dealImage: null })],
+            },
+          ],
+        },
+      },
+      [actionableDeal(20)],
+    );
+
+    const response = await harness.controller.dealOfTheDayFull(harness.ctx as any);
+
+    expect(response.data.dealsByCategory.tabs[0].deals).toEqual([]);
+    expect(harness.findManyDeals).not.toHaveBeenCalled();
+  });
+
+  it('keeps selected store Deals exclusive and preserves their order', async () => {
+    const harness = createHarness(
+      {
+        dealsByStore: {
+          enabled: true,
+          tabs: [
+            {
+              store: { documentId: 'store-1' },
+              deals: [actionableDeal(8), actionableDeal(2)],
+            },
+          ],
+        },
+      },
+      Array.from({ length: 12 }, (_, index) => actionableDeal(index + 20)),
+    );
+
+    const response = await harness.controller.dealOfTheDayFull(harness.ctx as any);
+
+    expect(
+      response.data.dealsByStore.tabs[0].deals.map((deal: any) => deal.documentId),
+    ).toEqual(['deal-8', 'deal-2']);
+    expect(harness.findManyDeals).not.toHaveBeenCalled();
+  });
+
+  it('queries store membership only when no store Deals are selected', async () => {
+    const fallback = Array.from({ length: 12 }, (_, index) => actionableDeal(index + 20));
+    const harness = createHarness(
+      {
+        dealsByStore: {
+          enabled: true,
+          tabs: [{ store: { documentId: 'store-1' }, deals: [] }],
+        },
+      },
+      fallback,
+    );
+
+    const response = await harness.controller.dealOfTheDayFull(harness.ctx as any);
+
+    expect(harness.findManyDeals).toHaveBeenCalledTimes(1);
+    expect(harness.findManyDeals.mock.calls[0]?.[0].filters).toMatchObject({
       $or: [
         { stores: { documentId: 'store-1' } },
         { primaryStore: { documentId: 'store-1' } },
       ],
     });
-    expect(response.data.dealsByCategory.tabs[0].deals).toHaveLength(10);
-    expect(response.data.dealsByCategory.tabs[0].deals[0].documentId).toBe('deal-1');
     expect(response.data.dealsByStore.tabs[0].deals).toHaveLength(10);
+  });
+
+  it('does not activate store fallback when all selected Deals are unusable', async () => {
+    const harness = createHarness(
+      {
+        dealsByStore: {
+          enabled: true,
+          tabs: [
+            {
+              store: { documentId: 'store-1' },
+              deals: [actionableDeal(1, { affiliateLink: 'javascript:alert(1)' })],
+            },
+          ],
+        },
+      },
+      [actionableDeal(20)],
+    );
+
+    const response = await harness.controller.dealOfTheDayFull(harness.ctx as any);
+
+    expect(response.data.dealsByStore.tabs[0].deals).toEqual([]);
+    expect(harness.findManyDeals).not.toHaveBeenCalled();
+  });
+
+  it('marks selected All Deals as curated and never merges a catalog fallback', async () => {
+    const harness = createHarness(
+      {
+        allDeals: {
+          enabled: true,
+          deals: [actionableDeal(7), actionableDeal(3)],
+        },
+      },
+      [actionableDeal(20)],
+    );
+
+    const response = await harness.controller.dealOfTheDayFull(harness.ctx as any);
+
+    expect(response.data.allDeals.source).toBe('curated');
+    expect(response.data.allDeals.deals.map((deal: any) => deal.documentId)).toEqual([
+      'deal-7',
+      'deal-3',
+    ]);
+    expect(harness.findManyDeals).not.toHaveBeenCalled();
+  });
+
+  it('marks an empty All Deals relation for catalog fallback', async () => {
+    const harness = createHarness({
+      allDeals: { enabled: true, deals: [] },
+    });
+
+    const response = await harness.controller.dealOfTheDayFull(harness.ctx as any);
+
+    expect(response.data.allDeals).toMatchObject({ source: 'catalog', deals: [] });
+    expect(harness.findManyDeals).not.toHaveBeenCalled();
+  });
+
+  it('keeps All Deals curated when every selected Deal becomes unusable', async () => {
+    const harness = createHarness(
+      {
+        allDeals: {
+          enabled: true,
+          deals: [actionableDeal(1, { dealImage: null })],
+        },
+      },
+      [actionableDeal(20)],
+    );
+
+    const response = await harness.controller.dealOfTheDayFull(harness.ctx as any);
+
+    expect(response.data.allDeals).toMatchObject({ source: 'curated', deals: [] });
+    expect(harness.findManyDeals).not.toHaveBeenCalled();
   });
 
   it('ships an empty Smart Stack when no curated or catalog deal carries both benefit texts', async () => {

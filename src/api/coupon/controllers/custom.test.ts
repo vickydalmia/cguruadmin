@@ -4,8 +4,10 @@ import createCouponController from './custom';
 
 function createHarness() {
   const couponFindMany = vi.fn().mockResolvedValue([]);
+  const couponFindOne = vi.fn().mockResolvedValue(null);
   const couponCount = vi.fn().mockResolvedValue(0);
   const dealFindMany = vi.fn().mockResolvedValue([]);
+  const dealFindOne = vi.fn().mockResolvedValue(null);
   const dealCount = vi.fn().mockResolvedValue(0);
   const entityFindMany = vi.fn().mockResolvedValue([
     {
@@ -16,10 +18,10 @@ function createHarness() {
   ]);
   const documents = vi.fn((uid: string) => {
     if (uid === 'api::coupon.coupon') {
-      return { findMany: couponFindMany, count: couponCount };
+      return { findMany: couponFindMany, findOne: couponFindOne, count: couponCount };
     }
     if (uid === 'api::deal.deal') {
-      return { findMany: dealFindMany, count: dealCount };
+      return { findMany: dealFindMany, findOne: dealFindOne, count: dealCount };
     }
     return { findMany: entityFindMany, count: vi.fn().mockResolvedValue(0) };
   });
@@ -40,6 +42,8 @@ function createHarness() {
     query: { page: '1', pageSize: '20' },
     state: { auth: null, entityType: 'store' },
     notFound: vi.fn(),
+    unauthorized: vi.fn(),
+    get: vi.fn(() => ''),
     send: vi.fn((payload: any) => payload),
   };
 
@@ -47,12 +51,58 @@ function createHarness() {
     controller: createCouponController({ strapi }),
     ctx,
     couponFindMany,
+    couponFindOne,
     couponCount,
     dealFindMany,
+    dealFindOne,
     dealCount,
     entityFindMany,
   };
 }
+
+describe('private offer redeem resolver', () => {
+  it('resolves a Coupon with only the required safe pool reference', async () => {
+    const harness = createHarness();
+    harness.ctx.params = {
+      entityType: 'coupon',
+      documentId: 'coupon-document-1',
+    } as any;
+    harness.couponFindOne.mockResolvedValue({
+      documentId: 'coupon-document-1',
+      title: 'Save 20%',
+      couponType: 'unique',
+      uniqueCouponPool: { documentId: 'pool-1' },
+    });
+
+    const payload = await harness.controller.getRedeemOffer(harness.ctx as any);
+
+    expect(harness.couponFindOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: 'coupon-document-1',
+        status: 'published',
+        fields: expect.arrayContaining(['title', 'code', 'couponType', 'affiliateLink']),
+        populate: expect.objectContaining({
+          uniqueCouponPool: { fields: ['name'] },
+        }),
+      }),
+    );
+    expect(payload.data.documentId).toBe('coupon-document-1');
+  });
+
+  it('never guesses the entity type from the document id', async () => {
+    const harness = createHarness();
+    harness.ctx.params = {
+      entityType: 'offer',
+      documentId: 'coupon-document-1',
+    } as any;
+
+    await harness.controller.getRedeemOffer(harness.ctx as any);
+
+    expect(harness.ctx.notFound).toHaveBeenCalled();
+    expect(harness.couponFindOne).not.toHaveBeenCalled();
+    expect(harness.dealFindOne).not.toHaveBeenCalled();
+  });
+});
 
 describe('entity Coupon population', () => {
   it('keeps Coupons category-scoped and populates the ordered Store logo reference', async () => {

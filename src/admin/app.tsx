@@ -22,6 +22,10 @@ import {
   HOMEPAGE_SECTION_LABELS,
   HOMEPAGE_UID,
 } from '../constants/homepage-sections';
+import {
+  DOTD_SECTION_LABELS,
+  DOTD_UID,
+} from '../constants/deal-of-the-day-sections';
 import { HOMEPAGE_IMAGE_RULES } from '../constants/homepage-images';
 import RichTextEditor from './components/RichTextEditor';
 import DateTimeInput from './components/DateTimeInput';
@@ -652,15 +656,20 @@ const EntityTopPickCouponPanel: PanelComponent = ({ model, documentId }) => {
 };
 
 // ---------------------------------------------------------------------------
-// Validation-problems panel (homepage). Both the client-side pre-save check
+// Validation-problems panel (homepage and Deal of the Day). Client-side checks
 // and the server-side image validator put their errors into the same nested
 // form-errors state ({ section: { items: [{ field: 'msg' }] } }); this panel
 // flattens that into a human list with the numbered section names, so editors
 // see exactly WHERE the save failed instead of hunting through every section.
 // ---------------------------------------------------------------------------
-const SECTION_LABEL_BY_ATTR: Record<string, string> = Object.fromEntries(
-  HOMEPAGE_SECTION_LABELS.map(({ attr, label }) => [attr, label])
-);
+const SECTION_LABEL_BY_MODEL: Record<string, Record<string, string>> = {
+  [HOMEPAGE_UID]: Object.fromEntries(
+    HOMEPAGE_SECTION_LABELS.map(({ attr, label }) => [attr, label])
+  ),
+  [DOTD_UID]: Object.fromEntries(
+    DOTD_SECTION_LABELS.map(({ attr, label }) => [attr, label])
+  ),
+};
 
 // Client-side (pre-save) errors are stored as react-intl message descriptors
 // ({ id, defaultMessage, values? }), server-side ones as plain strings — the
@@ -709,7 +718,10 @@ const humanizeFieldName = (segment: string): string =>
   segment.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
 
 // ['newlyAdded','items',1,'cardImage'] -> "7 · Fresh Drops … › items #2 › card image"
-const describeErrorLocation = (path: Array<string | number>): string => {
+const describeErrorLocation = (
+  path: Array<string | number>,
+  model: string
+): string => {
   const parts: string[] = [];
   path.forEach((segment, index) => {
     if (typeof segment === 'number') {
@@ -718,7 +730,7 @@ const describeErrorLocation = (path: Array<string | number>): string => {
     }
     parts.push(
       index === 0
-        ? SECTION_LABEL_BY_ATTR[segment] ?? humanizeFieldName(segment)
+        ? SECTION_LABEL_BY_MODEL[model]?.[segment] ?? humanizeFieldName(segment)
         : humanizeFieldName(segment)
     );
   });
@@ -737,7 +749,13 @@ const imageHintFor = (path: Array<string | number>): string | null => {
   return rule ? `Upload the ${rule.label} — exactly ${rule.width}×${rule.height} px.` : null;
 };
 
-function ValidationProblemsList({ problems }: { problems: FlatError[] }) {
+function ValidationProblemsList({
+  problems,
+  model,
+}: {
+  problems: FlatError[];
+  model: string;
+}) {
   const { formatMessage } = useIntl();
 
   const messageText = (message: FlatError['message']): string =>
@@ -762,7 +780,7 @@ function ValidationProblemsList({ problems }: { problems: FlatError[] }) {
         return (
           <Box key={problem.path.join('.')}>
             <Typography variant="pi" fontWeight="bold" textColor="danger600" tag="p">
-              {describeErrorLocation(problem.path)}
+              {describeErrorLocation(problem.path, model)}
             </Typography>
             <Typography variant="pi" textColor="danger600" tag="p">
               {hint ?? messageText(problem.message)}
@@ -781,6 +799,7 @@ function ValidationProblemsList({ problems }: { problems: FlatError[] }) {
 // field highlighted inline.
 const VALIDATION_PANEL_UIDS = new Set<string>([
   HOMEPAGE_UID,
+  DOTD_UID,
   'api::coupon.coupon',
   'api::deal.deal',
   'api::store.store',
@@ -800,7 +819,7 @@ const ValidationProblemsPanel: PanelComponent = ({ model }) => {
 
   return {
     title: `Validation problems (${problems.length})`,
-    content: <ValidationProblemsList problems={problems} />,
+    content: <ValidationProblemsList problems={problems} model={model} />,
   };
 };
 

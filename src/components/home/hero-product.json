@@ -17,9 +17,6 @@
       "type": "media",
       "multiple": false,
       "allowedTypes": ["images"]
-    },
-    "linkOverride": {
-      "type": "string"
     }
   }
 }

@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { publishedOnlyFilters } from '../../../utils/content-status';
 import { arrayizeOfferText } from '../../../utils/offer-text';
 
@@ -19,6 +20,23 @@ const visibilityFilters = () => publishedOnlyFilters();
 // Default page size for the global /offers and /deals listings (max 100 via
 // clampPageSize). Matches the "24 per page" grid the frontend renders.
 const DEFAULT_LIST_PAGE_SIZE = 24;
+const REDEEM_DOCUMENT_ID_PATTERN = /^[a-zA-Z0-9_-]{1,160}$/;
+const REDEEM_UIDS = {
+  coupon: 'api::coupon.coupon',
+  deal: 'api::deal.deal',
+} as const;
+
+function secureSecretMatch(actual: string, expected: string): boolean {
+  const digest = (value: string) => createHash('sha256').update(value).digest();
+  return timingSafeEqual(digest(actual), digest(expected));
+}
+
+function isRedeemResolverAuthorized(ctx: any): boolean {
+  const secret = process.env.ISR_REVALIDATE_SECRET?.trim();
+  if (!secret) return process.env.NODE_ENV !== 'production';
+  const authorization = String(ctx.get('authorization') || '');
+  return secureSecretMatch(authorization, `Bearer ${secret}`);
+}
 
 // Ordering for the global offer/deal listings: newest first. Per-entity
 // listings (store/category/brand/bank) instead follow the admin-curated
@@ -302,6 +320,57 @@ async function listEntityOffers(
 }
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
+
+  async getRedeemOffer(ctx) {
+    if (!isRedeemResolverAuthorized(ctx)) return ctx.unauthorized();
+
+    const entityType = String(ctx.params?.entityType ?? '');
+    const documentId = String(ctx.params?.documentId ?? '').trim();
+    if (
+      !(entityType in REDEEM_UIDS) ||
+      !REDEEM_DOCUMENT_ID_PATTERN.test(documentId)
+    ) {
+      return ctx.notFound('Offer not found');
+    }
+
+    const uid = REDEEM_UIDS[entityType as keyof typeof REDEEM_UIDS];
+    const commonFields = [
+      'title',
+      'code',
+      'affiliateLink',
+      'expiresAt',
+      'scheduledAt',
+      'contentStatus',
+      'updatedAt',
+    ];
+    const fields = entityType === 'coupon'
+      ? [...commonFields, 'couponType']
+      : commonFields;
+    const namedRelation = { fields: ['name'] };
+    const populate = entityType === 'coupon'
+      ? {
+          uniqueCouponPool: { fields: ['name'] },
+          stores: namedRelation,
+          brands: namedRelation,
+          banks: namedRelation,
+        }
+      : {
+          primaryStore: namedRelation,
+          stores: namedRelation,
+          brands: namedRelation,
+          banks: namedRelation,
+        };
+
+    const offer = await strapi.documents(uid as any).findOne({
+      documentId,
+      status: 'published',
+      fields,
+      populate,
+    } as any);
+    if (!offer) return ctx.notFound('Offer not found');
+
+    return ctx.send({ data: offer });
+  },
 
   async getCouponsByEntity(ctx) {
     const { slug } = ctx.params;

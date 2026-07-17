@@ -7,6 +7,7 @@ import {
   type SectionLabel,
 } from './constants/homepage-sections';
 import { purgeResponseCaches } from './middlewares/cache';
+import { invalidateOfferRedeemCache } from './offer-redeem/invalidate';
 import { destroyRebuildQueue, enqueue, type ScopeRequest } from './static-deployment/queue';
 import { computeScope, preDeleteScope } from './static-deployment/scopes';
 import { validateEntityFields } from './utils/entity-field-validation';
@@ -535,6 +536,31 @@ export default {
       }
 
       const result = await next();
+
+      if (
+        ['api::coupon.coupon', 'api::deal.deal'].includes(context.uid) &&
+        [
+          'create',
+          'clone',
+          'update',
+          'publish',
+          'unpublish',
+          'discardDraft',
+          'delete',
+        ].includes(context.action)
+      ) {
+        const offerDocumentId =
+          (result as any)?.documentId ?? context.params?.documentId;
+        void invalidateOfferRedeemCache(
+          strapi,
+          context.uid,
+          offerDocumentId,
+        ).catch((err: any) => {
+          strapi.log.warn(
+            `[offer-redeem] invalidation failed for ${context.uid}:${offerDocumentId}: ${err?.message ?? err}`
+          );
+        });
+      }
 
       if (
         [

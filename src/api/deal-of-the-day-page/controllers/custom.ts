@@ -6,6 +6,7 @@ import {
   cap,
   categoryRef,
   dealRef,
+  isActionableProductDeal,
   isLiveOffer,
   NEWEST_FIRST,
   PUBLISHED_OFFER_FILTER,
@@ -82,7 +83,10 @@ const DOTD_POPULATE = {
         populate: {
           viewAllCta: true,
           category: categoryRef,
-          deals: publishedDealListRef,
+          // Do not filter or sort here: relation presence selects curated-only
+          // mode, even when every selected Deal later proves unavailable, and
+          // the editor's chosen order must remain authoritative.
+          deals: dealRef,
         },
       },
     },
@@ -94,7 +98,9 @@ const DOTD_POPULATE = {
         populate: {
           viewAllCta: true,
           store: storeRef,
-          deals: publishedDealListRef,
+          // Relation presence selects curated-only mode. Preserve the editor's
+          // order and filter unavailable Deals after that choice is captured.
+          deals: dealRef,
         },
       },
     },
@@ -104,7 +110,7 @@ const DOTD_POPULATE = {
   genZDrops: compactDealListSection,
   // No viewAllCta populate: deal-day.telegram-deals has no such field.
   telegramDeals: { populate: { deals: publishedTelegramDealListRef } },
-  allDeals: { populate: { viewAllCta: true } },
+  allDeals: { populate: { viewAllCta: true, deals: dealRef } },
 } as const;
 
 const DEAL_LIST_SECTIONS = [
@@ -155,6 +161,9 @@ function dropDeadOffers(page: any) {
       if (tab?.deals) tab.deals = tab.deals.filter(live);
     }
   }
+  if (page.allDeals?.deals) {
+    page.allDeals.deals = page.allDeals.deals.filter(live);
+  }
   return page;
 }
 
@@ -177,11 +186,35 @@ function capCuratedLists(page: any) {
       if (tab?.deals) tab.deals = cap(tab.deals, SECTION_CAPS.perStoreTab);
     }
   }
+  if (page.allDeals?.deals) {
+    page.allDeals.deals = cap(page.allDeals.deals, SECTION_CAPS.allDeals);
+  }
   return page;
 }
 
-async function fillDerivedSections(strapi: Core.Strapi, ctx: any, page: any) {
+async function fillDerivedSections(
+  strapi: Core.Strapi,
+  ctx: any,
+  page: any,
+  curatedSelections: {
+    categoryTabs: ReadonlySet<any>;
+    storeTabs: ReadonlySet<any>;
+    allDeals: boolean;
+  },
+) {
   const now = new Date();
+
+  // All Deals has the same two exclusive modes as the tabs. The aggregate
+  // returns the selected Deals plus an explicit mode; the frontend already
+  // owns the full-catalog request and uses it only in catalog mode.
+  if (page?.allDeals) {
+    page.allDeals.source = curatedSelections.allDeals ? 'curated' : 'catalog';
+    page.allDeals.deals = curatedSelections.allDeals
+      ? (page.allDeals.deals ?? []).filter((deal: any) =>
+          isActionableProductDeal(deal, now),
+        )
+      : [];
+  }
 
   if (sectionActive(page?.topDeals)) {
     await backfillDeals(strapi, ctx, page.topDeals, {
@@ -198,14 +231,24 @@ async function fillDerivedSections(strapi: Core.Strapi, ctx: any, page: any) {
     await Promise.all(
       page.dealsByCategory.tabs
         .filter((tab: any) => tab?.category?.documentId)
-        .map((tab: any) =>
-          backfillDeals(strapi, ctx, tab, {
+        .map((tab: any) => {
+          // Category tabs have two exclusive modes. Any explicit CMS
+          // selection is authoritative and never mixes with category-query
+          // results. Only a genuinely empty relation activates fallback.
+          if (curatedSelections.categoryTabs.has(tab)) {
+            tab.deals = (tab.deals ?? []).filter((deal: any) =>
+              isActionableProductDeal(deal, now),
+            );
+            return Promise.resolve();
+          }
+
+          return backfillDeals(strapi, ctx, tab, {
             filters: { categories: { documentId: tab.category.documentId } },
             renderCount: TAB_RENDER_COUNT,
             capLimit: SECTION_CAPS.perCategoryTab,
             now,
-          }),
-        ),
+          });
+        }),
     );
   }
 
@@ -213,8 +256,15 @@ async function fillDerivedSections(strapi: Core.Strapi, ctx: any, page: any) {
     await Promise.all(
       page.dealsByStore.tabs
         .filter((tab: any) => tab?.store?.documentId)
-        .map((tab: any) =>
-          backfillDeals(strapi, ctx, tab, {
+        .map((tab: any) => {
+          if (curatedSelections.storeTabs.has(tab)) {
+            tab.deals = (tab.deals ?? []).filter((deal: any) =>
+              isActionableProductDeal(deal, now),
+            );
+            return Promise.resolve();
+          }
+
+          return backfillDeals(strapi, ctx, tab, {
             filters: {
               $or: [
                 { stores: { documentId: tab.store.documentId } },
@@ -224,8 +274,8 @@ async function fillDerivedSections(strapi: Core.Strapi, ctx: any, page: any) {
             renderCount: TAB_RENDER_COUNT,
             capLimit: SECTION_CAPS.perStoreTab,
             now,
-          }),
-        ),
+          });
+        }),
     );
   }
 
@@ -314,8 +364,26 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       'api::deal-of-the-day-page.deal-of-the-day-page',
       page,
     );
+    // Capture relation presence before dead/unusable Deals are removed. An
+    // explicit selection remains authoritative even if every selected Deal
+    // later expires; silently switching to fallback would violate CMS intent.
+    const curatedSelections = {
+      categoryTabs: new Set<any>(
+        (sanitized?.dealsByCategory?.tabs ?? []).filter(
+          (tab: any) => Array.isArray(tab?.deals) && tab.deals.length > 0,
+        ),
+      ),
+      storeTabs: new Set<any>(
+        (sanitized?.dealsByStore?.tabs ?? []).filter(
+          (tab: any) => Array.isArray(tab?.deals) && tab.deals.length > 0,
+        ),
+      ),
+      allDeals:
+        Array.isArray(sanitized?.allDeals?.deals) &&
+        sanitized.allDeals.deals.length > 0,
+    };
     dropDeadOffers(sanitized);
-    await fillDerivedSections(strapi, ctx, sanitized);
+    await fillDerivedSections(strapi, ctx, sanitized, curatedSelections);
     capCuratedLists(sanitized);
     await attachDealCounts(strapi, sanitized);
     // Nested deal cards: emit offerText as an array of words.

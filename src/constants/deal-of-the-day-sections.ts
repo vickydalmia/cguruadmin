@@ -18,6 +18,7 @@ export const DOTD_SECTION_CAPS = {
   trendingNow: 10, // UI renders up to 6
   genZDrops: 6, // UI renders 3
   telegramDeals: 6, // UI renders 3
+  allDeals: 24, // UI shows 9 initially, remainder behind load-more
 } as const;
 
 export const DOTD_SECTION_LABELS: SectionLabel[] = [
@@ -59,15 +60,19 @@ export const DOTD_SECTION_LABELS: SectionLabel[] = [
     attr: 'dealsByCategory',
     label: '3 · Deals by Category',
     description:
-      'Tabbed Deal grid (up to 8 category tabs). Each tab shows 6 (up to 10 buffered); ' +
-      'empty slots auto-fill with the newest deals from that category.',
+      'Tabbed Deal grid (up to 8 category tabs). If a tab has selected Deals, only ' +
+      'those Deals are used in the selected order. If no Deals are selected, the tab ' +
+      'auto-fills with the newest Deals from that category. The two modes never merge; ' +
+      'the site shows up to 6 selected or fallback Deals (maximum 10 configured).',
   },
   {
     attr: 'dealsByStore',
     label: '4 · Deals by Store',
     description:
-      'Tabbed Deal grid (up to 8 store tabs). Each tab shows 6 (up to 10 buffered); ' +
-      'empty slots auto-fill with the newest deals from that store.',
+      'Tabbed Deal grid (up to 8 store tabs). If a tab has selected Deals, only ' +
+      'those Deals are used in the selected order. If no Deals are selected, the tab ' +
+      'auto-fills with the newest Deals from that store. The two modes never merge; ' +
+      'the site shows up to 6 selected or fallback Deals (maximum 10 configured).',
   },
   {
     attr: 'smartSavingStack',
@@ -102,7 +107,11 @@ export const DOTD_SECTION_LABELS: SectionLabel[] = [
   {
     attr: 'allDeals',
     label: '9 · All Deals',
-    description: 'Heading and "view all" link above the all-deals grid at the bottom.',
+    description:
+      'If Deals are selected, the grid uses only those Deals in the selected order ' +
+      '(maximum 24; the site shows 9 first with the rest behind load-more). If none ' +
+      'are selected, it uses the newest Deals from the full catalog. The two modes ' +
+      'never merge. Also controls the heading and "view all" link.',
   },
   {
     attr: 'seo',

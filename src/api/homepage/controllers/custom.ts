@@ -57,6 +57,10 @@ const couponRef = {
     image: true,
     stores: storeRef,
     brands: brandRef,
+    // The pool documentId (always emitted alongside the selected fields) is
+    // what lets the frontend render the unique-code "Unlock Coupon" flow; the
+    // allocated codes themselves stay behind /unique-coupon/redeem.
+    uniqueCouponPool: { fields: ['name'] },
   },
 };
 

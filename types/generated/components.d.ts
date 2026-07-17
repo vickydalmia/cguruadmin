@@ -27,6 +27,7 @@ export interface DealDaySectionHeading extends Struct.ComponentSchema {
     icon: 'layout';
   };
   attributes: {
+    deals: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'>;
     enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     heading: Schema.Attribute.String;
     viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
@@ -312,7 +313,6 @@ export interface HomeHeroProduct extends Struct.ComponentSchema {
   attributes: {
     deal: Schema.Attribute.Relation<'oneToOne', 'api::deal.deal'>;
     imageOverride: Schema.Attribute.Media<'images'>;
-    linkOverride: Schema.Attribute.String;
     titleOverride: Schema.Attribute.String;
   };
 }
@@ -460,7 +460,6 @@ export interface HomeTopOfferItem extends Struct.ComponentSchema {
   attributes: {
     banner: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
     coupon: Schema.Attribute.Relation<'oneToOne', 'api::coupon.coupon'>;
-    linkOverride: Schema.Attribute.String;
     offerTextOverride: Schema.Attribute.String;
   };
 }

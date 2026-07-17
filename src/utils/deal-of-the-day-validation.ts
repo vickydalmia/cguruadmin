@@ -6,9 +6,30 @@ import {
 } from '../constants/deal-of-the-day-sections';
 
 const LIMITED_SECTIONS = [
-  ['topPicks', DOTD_SECTION_CAPS.topPicks, 'Top Picks'],
-  ['smartSavingStack', DOTD_SECTION_CAPS.smartSavingStack, 'Smart Saving Stack'],
-  ['genZDrops', DOTD_SECTION_CAPS.genZDrops, 'Gen-Z Drops'],
+  [
+    'topPicks',
+    DOTD_SECTION_CAPS.topPicks,
+    'Top Picks',
+    `${DOTD_SECTION_CAPS.topPicks / 2} shown + ${DOTD_SECTION_CAPS.topPicks / 2} buffered for expiry`,
+  ],
+  [
+    'smartSavingStack',
+    DOTD_SECTION_CAPS.smartSavingStack,
+    'Smart Saving Stack',
+    `${DOTD_SECTION_CAPS.smartSavingStack / 2} shown + ${DOTD_SECTION_CAPS.smartSavingStack / 2} buffered for expiry`,
+  ],
+  [
+    'genZDrops',
+    DOTD_SECTION_CAPS.genZDrops,
+    'Gen-Z Drops',
+    `${DOTD_SECTION_CAPS.genZDrops / 2} shown + ${DOTD_SECTION_CAPS.genZDrops / 2} buffered for expiry`,
+  ],
+  [
+    'allDeals',
+    DOTD_SECTION_CAPS.allDeals,
+    'All Deals',
+    '9 shown first, the rest behind load-more',
+  ],
 ] as const;
 
 export type RelationEntry = string | number | Record<string, unknown>;
@@ -95,7 +116,7 @@ export async function validateDealOfTheDaySectionLimits(
   });
   const problems: Problem[] = [];
 
-  for (const [section, max, label] of touched) {
+  for (const [section, max, label, detail] of touched) {
     const incomingDeals = data[section]?.deals;
     if (incomingDeals === undefined) continue;
     const count = resultingRelationCount(
@@ -106,9 +127,8 @@ export async function validateDealOfTheDaySectionLimits(
       problems.push({
         path: [section, 'deals'],
         message:
-          `${label} accepts at most ${max} Deals (${max / 2} shown + ` +
-          `${max / 2} buffered for expiry). Remove ${count - max} Deal` +
-          `${count - max === 1 ? '' : 's'}.`,
+          `${label} accepts at most ${max} Deals (${detail}). ` +
+          `Remove ${count - max} Deal${count - max === 1 ? '' : 's'}.`,
       });
     }
   }
