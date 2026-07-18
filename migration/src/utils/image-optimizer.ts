@@ -1,3 +1,4 @@
+import path from "path";
 import sharp from "sharp";
 import { logger } from "./logger.js";
 
@@ -213,6 +214,77 @@ export interface GenerateFormatsOptions {
   existingSizes?: Record<string, number>;
 }
 
+export interface FormatTarget {
+  key: string;
+  kind: "thumbnail" | "size" | "avif";
+  /** Bounding box the variant is resized to fit inside. */
+  width: number;
+  height: number;
+  /** Filename prefix ("" for original_avif — the .avif ext carries the format). */
+  filePrefix: string;
+}
+
+/**
+ * AVIF twin targets for a master: original_avif at the master's dimensions
+ * plus one `{key}_avif` per breakpoint smaller than either axis. Mime-agnostic
+ * on purpose — generateAvifTwins backfills jpeg/png rows too (phase 14 pass 2).
+ */
+function avifTargets(width: number, height: number): FormatTarget[] {
+  const targets: FormatTarget[] = [
+    { key: "original_avif", kind: "avif", width, height, filePrefix: "" },
+  ];
+  for (const [key, bp] of Object.entries(BREAKPOINTS)) {
+    if (bp < width || bp < height) {
+      targets.push({
+        key: `${key}_avif`,
+        kind: "avif",
+        width: bp,
+        height: bp,
+        filePrefix: `${key}_`,
+      });
+    }
+  }
+  return targets;
+}
+
+/** AVIF twin keys due for these dimensions, independent of source mime. */
+export function expectedAvifTwinKeys(width: number, height: number): string[] {
+  return avifTargets(width, height).map((target) => target.key);
+}
+
+/**
+ * The variant matrix a master with the given dimensions/mime is due to carry:
+ * thumbnail when the master exceeds the 245×156 box, one size per breakpoint
+ * smaller than either axis, plus the AVIF twin targets for webp masters.
+ * The ONLY derivation of the matrix — expectedFormatKeys, generateStrapiFormats
+ * and generateAvifTwins (via avifTargets) are all projections of it, so the
+ * gap selector, the generators and the helper can never disagree.
+ */
+export function formatTargets(
+  width: number,
+  height: number,
+  mime: string
+): FormatTarget[] {
+  const targets: FormatTarget[] = [];
+  if (width > THUMBNAIL.width || height > THUMBNAIL.height) {
+    targets.push({
+      key: "thumbnail",
+      kind: "thumbnail",
+      ...THUMBNAIL,
+      filePrefix: "thumbnail_",
+    });
+  }
+  for (const [key, bp] of Object.entries(BREAKPOINTS)) {
+    if (bp < width || bp < height) {
+      targets.push({ key, kind: "size", width: bp, height: bp, filePrefix: `${key}_` });
+    }
+  }
+  if (IMAGE_OPTIMIZATION.generateAvifTwins && mime === "image/webp") {
+    targets.push(...avifTargets(width, height));
+  }
+  return targets;
+}
+
 /**
  * Generate AVIF "twin" variants from the (ideally pre-optimization) source:
  *   - original_avif at the optimized original's dimensions
@@ -245,29 +317,24 @@ export async function generateAvifTwins(
 ): Promise<{
   formatsJson: Record<string, any>;
   uploads: FormatVariantUpload[];
+  /** Twin keys skipped because the webp counterpart was already smaller. */
+  droppedKeys: string[];
   /** Twins skipped because the webp counterpart was already smaller. */
   droppedLarger: number;
+  /** Twin keys whose encode threw — due again on the next run. */
+  failedKeys: string[];
 }> {
   const { width, height, hashBase, nameBase, urlPrefix, keyPrefix, compareTo, onlyKeys } = opts;
   const { quality, effort } = IMAGE_OPTIMIZATION.avif;
-  let droppedLarger = 0;
+  const droppedKeys: string[] = [];
+  const failedKeys: string[] = [];
 
   // JSON keys keep the `_avif` suffix (they must be distinct from the webp
   // entries), but FILENAMES drop it — the .avif extension already carries the
   // format, so the twin of `medium_slug.webp` is simply `medium_slug.avif`
   // and the original's twin is `slug.avif`. Same basename + different ext
   // never collides, on S3 or in Strapi's provider-key derivation.
-  const targets: Array<{
-    key: string;
-    filePrefix: string;
-    width: number;
-    height: number;
-  }> = [{ key: "original_avif", filePrefix: "", width, height }];
-  for (const [key, bp] of Object.entries(BREAKPOINTS)) {
-    if (bp < width || bp < height) {
-      targets.push({ key: `${key}_avif`, filePrefix: `${key}_`, width: bp, height: bp });
-    }
-  }
+  const targets = avifTargets(width, height);
   const dueTargets = onlyKeys
     ? targets.filter((target) => onlyKeys.has(target.key))
     : targets;
@@ -290,7 +357,7 @@ export async function generateAvifTwins(
 
       const counterpart = compareTo?.[target.key];
       if (counterpart && data.length >= counterpart) {
-        droppedLarger++;
+        droppedKeys.push(target.key);
         continue;
       }
 
@@ -311,13 +378,20 @@ export async function generateAvifTwins(
       };
       uploads.push({ key: s3Key, buffer: data, contentType: "image/avif" });
     } catch (err: any) {
+      failedKeys.push(target.key);
       logger.warn(
         `AVIF twin encode failed for ${target.key} (${hashBase}): ${err.message} — skipping target`
       );
     }
   }
 
-  return { formatsJson, uploads, droppedLarger };
+  return {
+    formatsJson,
+    uploads,
+    droppedKeys,
+    droppedLarger: droppedKeys.length,
+    failedKeys,
+  };
 }
 
 /**
@@ -334,6 +408,8 @@ export async function generateStrapiFormats(
 ): Promise<{
   formatsJson: Record<string, any>;
   uploads: FormatVariantUpload[];
+  /** Twin keys the AVIF size guard dropped ([] when twins do not run). */
+  droppedAvifKeys: string[];
 }> {
   const {
     width,
@@ -349,15 +425,9 @@ export async function generateStrapiFormats(
   } = opts;
   const format = extToFormat(ext);
 
-  const targets: Array<{ key: string; width: number; height: number }> = [];
-  if (width > THUMBNAIL.width || height > THUMBNAIL.height) {
-    targets.push({ key: "thumbnail", ...THUMBNAIL });
-  }
-  for (const [key, bp] of Object.entries(BREAKPOINTS)) {
-    if (bp < width || bp < height) {
-      targets.push({ key, width: bp, height: bp });
-    }
-  }
+  const targets = formatTargets(width, height, mime).filter(
+    (target) => target.kind !== "avif"
+  );
   const dueTargets = onlyKeys
     ? targets.filter((target) => onlyKeys.has(target.key))
     : targets;
@@ -366,8 +436,12 @@ export async function generateStrapiFormats(
   const uploads: FormatVariantUpload[] = [];
 
   for (const target of dueTargets) {
+    // .rotate() with no args bakes EXIF orientation: a no-op for the
+    // re-encoded buffers phases 02/14 pass in (optimizeOriginal strips
+    // metadata), but raw S3 masters (phase 15) must orient like every
+    // other pipeline or portrait jpegs come out landscape.
     const pipeline = encode(
-      sharp(optimizedBuffer).resize({
+      sharp(optimizedBuffer).rotate().resize({
         width: target.width,
         height: target.height,
         fit: "inside",
@@ -376,11 +450,11 @@ export async function generateStrapiFormats(
     );
     const { data, info } = await pipeline.toBuffer({ resolveWithObject: true });
 
-    const variantHash = `${target.key}_${hashBase}`;
+    const variantHash = `${target.filePrefix}${hashBase}`;
     const s3Key = `${keyPrefix}${variantHash}${ext}`;
 
     formatsJson[target.key] = {
-      name: `${target.key}_${nameBase}${ext}`,
+      name: `${target.filePrefix}${nameBase}${ext}`,
       hash: variantHash,
       ext,
       mime,
@@ -396,6 +470,7 @@ export async function generateStrapiFormats(
 
   // AVIF twins: only for webp originals (avif masters already produce avif
   // standard keys above; other mimes are left unchanged).
+  let droppedAvifKeys: string[] = [];
   if (IMAGE_OPTIMIZATION.generateAvifTwins && mime === "image/webp") {
     // Counterparts for tiers skipped via onlyKeys come from existingSizes
     // (bytes of the already-uploaded webp entries).
@@ -418,9 +493,10 @@ export async function generateStrapiFormats(
     });
     Object.assign(formatsJson, twins.formatsJson);
     uploads.push(...twins.uploads);
+    droppedAvifKeys = twins.droppedKeys;
   }
 
-  return { formatsJson, uploads };
+  return { formatsJson, uploads, droppedAvifKeys };
 }
 
 /**
@@ -436,18 +512,49 @@ export function expectedFormatKeys(
   height: number,
   mime: string
 ): string[] {
-  const keys: string[] = [];
-  if (width > THUMBNAIL.width || height > THUMBNAIL.height) {
-    keys.push("thumbnail");
+  return formatTargets(width, height, mime).map((target) => target.key);
+}
+
+/**
+ * Key/naming conventions of a row's existing S3 layout:
+ *   keyPrefix = everything up to and including the last '/' of the key
+ *               (rootPrefix for flat, root-relative keys)
+ *   hashBase  = key basename minus its extension
+ * Variants land beside the master for both folder-scheme and legacy flat keys.
+ */
+export function splitS3Key(
+  key: string,
+  rootPrefix: string
+): { keyPrefix: string; hashBase: string } {
+  const lastSlash = key.lastIndexOf("/");
+  const keyPrefix = lastSlash >= 0 ? key.slice(0, lastSlash + 1) : rootPrefix;
+  const basename = lastSlash >= 0 ? key.slice(lastSlash + 1) : key;
+  return { keyPrefix, hashBase: path.basename(basename, path.extname(basename)) };
+}
+
+/**
+ * True display dimensions of an image buffer (EXIF orientation 5-8 swaps
+ * width/height), falling back to the provided values when the bytes are
+ * undecodable or report a zero axis. `decoded` is true only when the dims
+ * came from the buffer itself — i.e. they are master-authoritative and safe
+ * to persist over stored row values.
+ */
+export async function decodeOrientedDims(
+  buffer: Buffer,
+  fallbackWidth: number | null,
+  fallbackHeight: number | null
+): Promise<{ width: number | null; height: number | null; decoded: boolean }> {
+  let width: number | null = null;
+  let height: number | null = null;
+  try {
+    const meta = await sharp(buffer).metadata();
+    const swapped = (meta.orientation ?? 1) >= 5;
+    width = (swapped ? meta.height : meta.width) ?? null;
+    height = (swapped ? meta.width : meta.height) ?? null;
+  } catch {
+    width = null;
+    height = null;
   }
-  for (const [key, bp] of Object.entries(BREAKPOINTS)) {
-    if (bp < width || bp < height) keys.push(key);
-  }
-  if (IMAGE_OPTIMIZATION.generateAvifTwins && mime === "image/webp") {
-    keys.push("original_avif");
-    for (const [key, bp] of Object.entries(BREAKPOINTS)) {
-      if (bp < width || bp < height) keys.push(`${key}_avif`);
-    }
-  }
-  return keys;
+  if (width && height) return { width, height, decoded: true };
+  return { width: fallbackWidth, height: fallbackHeight, decoded: false };
 }

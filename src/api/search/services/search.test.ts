@@ -85,6 +85,29 @@ function searchService() {
   };
 }
 
+function dealImageService(dealImage: Record<string, unknown>) {
+  const deal = {
+    documentId: "media-deal",
+    title: "Media deal",
+    affiliateLink: "https://track.example.com/media",
+    salePrice: 100,
+    dealImage,
+  };
+  const strapi = {
+    documents(uid: string) {
+      return {
+        async findMany() {
+          return uid === "api::deal.deal" ? [deal] : [];
+        },
+        async count() {
+          return uid === "api::deal.deal" ? 1 : 0;
+        },
+      };
+    },
+  };
+  return createSearchService({ strapi: strapi as any });
+}
+
 describe("public search entity boundaries", () => {
   it("keeps no-code Coupon records in the Coupon result group", async () => {
     const { calls, service } = searchService();
@@ -167,6 +190,65 @@ describe("public search entity boundaries", () => {
     // Media without formats (the owner logo) stays null on both fields.
     expect(response.deals[0].owner.logo.srcset).toBeNull();
     expect(response.deals[0].owner.logo.avifSrcset).toBeNull();
+  });
+
+  it("suppresses avifSrcset when the twin ladder stops short of the fallback max", async () => {
+    const service = dealImageService({
+      url: "https://cdn.example.com/bag.webp",
+      width: 960,
+      height: 720,
+      formats: {
+        xsmall: { url: "https://cdn.example.com/xsmall_bag.webp", width: 320 },
+        medium: { url: "https://cdn.example.com/medium_bag.webp", width: 750 },
+        // Size guard dropped the medium twin — a 320w avif must not shadow a
+        // 750w-capable fallback ladder for avif browsers.
+        xsmall_avif: {
+          url: "https://cdn.example.com/xsmall_bag.avif",
+          width: 320,
+        },
+      },
+    });
+    const response = await service.search({
+      query: "media",
+      mode: "group",
+      group: "deals",
+      page: 1,
+      pageSize: 20,
+    });
+
+    const media = response.deals[0].media;
+    expect(media.srcset).toBe(
+      "https://cdn.example.com/xsmall_bag.webp 320w, " +
+        "https://cdn.example.com/medium_bag.webp 750w",
+    );
+    expect(media.avifSrcset).toBeNull();
+  });
+
+  it("keeps avifSrcset for twins-only media with no standard formats", async () => {
+    const service = dealImageService({
+      url: "https://cdn.example.com/bag.webp",
+      width: 960,
+      height: 720,
+      formats: {
+        xsmall_avif: {
+          url: "https://cdn.example.com/xsmall_bag.avif",
+          width: 320,
+        },
+      },
+    });
+    const response = await service.search({
+      query: "media",
+      mode: "group",
+      group: "deals",
+      page: 1,
+      pageSize: 20,
+    });
+
+    const media = response.deals[0].media;
+    expect(media.srcset).toBeNull();
+    expect(media.avifSrcset).toBe(
+      "https://cdn.example.com/xsmall_bag.avif 320w",
+    );
   });
 
   it("matches entities by slug so acronym searches can find their full names", async () => {

@@ -78,6 +78,7 @@ Phase order:
 | `13-site-content` | Global, **homepage**, menu, footer singles |
 | `13a-homepage-offer-sections` | Backfill for **pre-existing** homepages only — on a fresh run phase 13 already seeds everything and this is a no-op |
 | `14-media-optimize` | Image optimization backfill |
+| `15-media-formats-backfill` | Variant-matrix gap backfill for **already-migrated** media only — on a fresh run phase 02 already generates every variant and this is a no-op (never checkpointed, safe to re-run) |
 
 Logs: console + `migration.log` (full) + `migration-errors.log`.
 
@@ -112,9 +113,10 @@ bypasses Strapi validation.
 
 ## Maintenance scripts
 
-Both live in this package, share `.env.migration` targeting, print the target
-host, and **refuse destructive actions without a `--yes-i-mean-<host>` flag**
-matching that host.
+All of these live in this package, share `.env.migration` targeting, print
+their target, and **refuse destructive actions without a `--yes-i-mean-<target>`
+flag** matching that target — the Postgres host, or the S3 bucket for
+`fix:cache-headers`. Every `fix:*` script defaults to a dry run.
 
 ### Reseed only the homepage
 
@@ -134,6 +136,35 @@ editor — a fresh migration sanitizes everything on import and does not need it
 ```bash
 yarn fix:markdown-richtext                               # dry-run: prints would-be changes
 yarn fix:markdown-richtext --apply --yes-i-mean-<pg-host>
+```
+
+### Backfill S3 Cache-Control headers
+
+Media uploaded before the immutable Cache-Control setting serves with no
+cache header at all. This stamps `public, max-age=31536000, immutable` on
+every object via an in-place `CopyObject` that carries the stored
+Content-Type, content headers, user metadata, storage class, and SSE settings
+through unchanged — only Cache-Control changes. Objects already carrying the
+value are skipped, so re-runs are cheap and idempotent:
+
+```bash
+yarn fix:cache-headers                                   # dry-run: lists objects that would change
+yarn fix:cache-headers --apply --yes-i-mean-<s3-bucket>  # confirmation flag names the BUCKET
+```
+
+### Rebuild rich-text image srcsets
+
+Content HTML is written once at migration time, so rich-text `<img>` srcsets
+are frozen at whatever variant matrix existed back then. This rebuilds
+`srcset`/`sizes` from the current `files.formats` — optionally run it after
+`yarn migrate:phase 15-media-formats-backfill`. Only tags whose `src` is an
+exact master URL from `files.url` are touched; everything else is logged and
+left as-is. Writes raw SQL, so changed entries stay stale on the frontend
+until the next rebuild:
+
+```bash
+yarn fix:content-srcsets                                 # dry-run: prints the diff
+yarn fix:content-srcsets --apply --yes-i-mean-<pg-host>
 ```
 
 ### Targeting a different database ad hoc

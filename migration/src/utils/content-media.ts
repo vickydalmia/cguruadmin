@@ -9,7 +9,11 @@ import {
   UploadedFileRecord,
 } from "../phases/02-media-upload.js";
 import { logger } from "./logger.js";
-import { IMAGE_BREAKPOINTS } from "./image-optimizer.js";
+import { getAttr, rebuildImgTag, replaceImgTags } from "./img-rewrite.js";
+
+// Re-exported so fix-content-srcsets shares the exact tag-rebuild pipeline the
+// migration used — the two cannot drift.
+export { getAttr, buildSrcset, rebuildImgTag, replaceImgTags } from "./img-rewrite.js";
 
 /**
  * Rewrites WordPress uploads URLs embedded in rich-text HTML (img src/srcset,
@@ -250,64 +254,6 @@ export interface ContentMediaResult {
   fileIds: number[];
 }
 
-function getAttr(tag: string, name: string): string | undefined {
-  const m = tag.match(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "i"));
-  return m ? (m[1] ?? m[2]) : undefined;
-}
-
-function escapeAttr(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-// buildSrcset sorts by width, so declaration order is irrelevant.
-const SRCSET_FORMAT_KEYS = ["thumbnail", ...Object.keys(IMAGE_BREAKPOINTS)];
-
-/** Width-sorted srcset from a file record's formats + original (exported for
- *  fix-content-srcsets, which rebuilds stored HTML after formats backfills). */
-export function buildSrcset(record: UploadedFileRecord): string | null {
-  const entries: Array<{ url: string; width: number }> = [];
-  const formats = record.formats || {};
-  for (const key of SRCSET_FORMAT_KEYS) {
-    const f = formats[key];
-    if (f?.url && f?.width) entries.push({ url: f.url, width: f.width });
-  }
-  if (record.url && record.width) {
-    entries.push({ url: record.url, width: record.width });
-  }
-  if (entries.length < 2) return null;
-  entries.sort((a, b) => a.width - b.width);
-  return entries.map((e) => `${e.url} ${e.width}w`).join(", ");
-}
-
-/** Rebuild an <img> tag around a file record: fresh src/srcset/sizes/dims,
- *  carrying over alt/title/class/id/loading from the old tag (exported for
- *  fix-content-srcsets alongside buildSrcset). */
-export function rebuildImgTag(tag: string, record: UploadedFileRecord): string {
-  const attrs: string[] = [`src="${escapeAttr(record.url)}"`];
-
-  const srcset = buildSrcset(record);
-  if (srcset && record.width) {
-    attrs.push(`srcset="${escapeAttr(srcset)}"`);
-    attrs.push(`sizes="(max-width: ${record.width}px) 100vw, ${record.width}px"`);
-  }
-
-  attrs.push(`alt="${escapeAttr(getAttr(tag, "alt") ?? "")}"`);
-  for (const name of ["title", "class", "id"]) {
-    const val = getAttr(tag, name);
-    if (val !== undefined) attrs.push(`${name}="${escapeAttr(val)}"`);
-  }
-  if (record.width && record.height) {
-    attrs.push(`width="${record.width}"`, `height="${record.height}"`);
-  }
-  attrs.push(`loading="${escapeAttr(getAttr(tag, "loading") ?? "lazy")}"`);
-
-  return `<img ${attrs.join(" ")} />`;
-}
-
 // Host part excludes '/' so an outer redirect/proxy URL that embeds an
 // uploads URL in its query string is never swallowed whole — only the inner
 // uploads URL itself matches.
@@ -328,28 +274,22 @@ export async function rewriteContentMedia(
   }
 
   const fileIds = new Set<number>();
-  let out = html;
 
   // Pass 1: rebuild <img> tags whose src points at WP uploads. This also
   // clears their stale srcset/sizes attributes in one shot.
-  const imgReplacements = new Map<string, string>();
-  for (const match of html.matchAll(/<img\b[^>]*\/?>/gi)) {
-    const tag = match[0];
-    if (imgReplacements.has(tag)) continue;
+  const pass1 = await replaceImgTags(html, async (tag) => {
     const src = getAttr(tag, "src");
-    if (!src || !src.includes("/wp-content/uploads/")) continue;
+    if (!src || !src.includes("/wp-content/uploads/")) return null;
     const record = await resolveUploadsUrl(src);
     if (!record) {
       reportMiss(src);
-      continue;
+      return null;
     }
     fileIds.add(record.id);
-    imgReplacements.set(tag, rebuildImgTag(tag, record));
     stats.imagesRewritten++;
-  }
-  for (const [oldTag, newTag] of imgReplacements) {
-    out = out.split(oldTag).join(newTag);
-  }
+    return rebuildImgTag(tag, record);
+  });
+  let out = pass1.html;
 
   // Pass 2: remaining uploads URLs (lightbox links, unresolved-img srcset
   // siblings, etc.). Longest first so a URL that prefixes another can't

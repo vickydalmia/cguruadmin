@@ -4,6 +4,12 @@ A deep technical walkthrough of the migration pipeline at `migration/`. Companio
 
 Scope: every TypeScript source file under `migration/src/`, every SQL query verbatim, every relationship wire, how media is filtered and resolved, connection lifecycle, and the `--clean` contract.
 
+> **Line-number drift warning.** The exact `(lines N–M)` pins in this document
+> predate the media-optimize work (the phase-02 optimize/variant pipeline,
+> phases 12–15, and the expanded `--clean` truncate list) — treat them as
+> approximate unless a section says otherwise. `migration/README.md` is the
+> maintained phase reference; phases 12–15 are covered compactly in §6n below.
+
 ---
 
 ## 1. Overview
@@ -24,7 +30,7 @@ Targets:
 
 ```
 config ─► connections ─► Phase loop ─► checkpoints ─► verification
-           (MySQL + PG)    (00 → 11)     (per phase)     (non-fatal)
+           (MySQL + PG)    (00 → 15)     (per phase)     (non-fatal)
                              │
                              ├── Media inventoried (01)
                              ├── Media uploads happen on-demand (02)
@@ -33,7 +39,9 @@ config ─► connections ─► Phase loop ─► checkpoints ─► verificati
                              ├── Coupons + deals + relations (07–08)
                              ├── SEO backfill (09)
                              ├── Verify (10)
-                             └── Copy used local media (11)
+                             ├── Copy used local media (11)
+                             ├── Offer + site-content backfills (12, 13, 13a)
+                             └── Media optimize + formats backfill (14, 15)
 ```
 
 ### Resumable by design
@@ -75,6 +83,13 @@ Three mechanisms cooperate:
 | `migration/src/phases/09-seo-backfill.ts` | Fill SEO components from `wp_yoast_indexable` |
 | `migration/src/phases/10-verify.ts` | Count + integrity + spot checks |
 | `migration/src/phases/11-copy-used-media.ts` | Copy locally-provisioned files to Strapi's `public/uploads` |
+| `migration/src/phases/12-offer-backfill.ts` | `deal.primaryStore` relation backfill from `deal_store` meta |
+| `migration/src/phases/13-site-content.ts` | Seed global / homepage / menu / footer single types |
+| `migration/src/phases/13a-homepage-offer-sections.ts` | Coupon-backed homepage section backfill (pre-existing homepages) |
+| `migration/src/phases/14-media-optimize.ts` | Optimize + AVIF-twin backfill for already-migrated media |
+| `migration/src/phases/15-media-formats-backfill.ts` | Variant-matrix gap backfill (xsmall / thumbnail / AVIF twins) |
+| `migration/src/utils/image-optimizer.ts` | Optimize originals + generate the variant matrix / AVIF twins (knobs re-exported from `src/constants/image.ts`) |
+| `migration/src/utils/content-media.ts` | Rewrite content-embedded `wp-content/uploads` images through the upload pipeline |
 
 ---
 
@@ -92,26 +107,31 @@ interface Phase {
 
 `skipCheckpoint` is set on phases we want to run every time (connection probes, verification) regardless of whether a prior run already completed them.
 
-### The phase array (lines 31–45)
+### The phase array
 
 ```ts
 const phases: Phase[] = [
-  { name: "00-preflight",       fn: runPreflight,      skipCheckpoint: true },
-  { name: "01-media-inventory", fn: runMediaInventory },
-  { name: "02-media-upload",    fn: runMediaUpload },
-  { name: "03-taxonomies",      fn: runTaxonomies },
-  { name: "05-pools",           fn: runPools },
-  { name: "06-codes",           fn: runCodes },
-  { name: "06a-users",          fn: runUsers },
-  { name: "07-coupons",         fn: runCoupons },
-  { name: "08-deals",           fn: runDeals },
-  { name: "09-seo-backfill",    fn: runSeoBackfill },
-  { name: "10-verify",          fn: runVerification,   skipCheckpoint: true },
-  { name: "11-copy-used-media", fn: runCopyUsedMedia },
+  { name: "00-preflight",              fn: runPreflight,             skipCheckpoint: true },
+  { name: "01-media-inventory",        fn: runMediaInventory },
+  { name: "02-media-upload",           fn: runMediaUpload },
+  { name: "03-taxonomies",             fn: runTaxonomies },
+  { name: "05-pools",                  fn: runPools },
+  { name: "06-codes",                  fn: runCodes },
+  { name: "06a-users",                 fn: runUsers },
+  { name: "07-coupons",                fn: runCoupons },
+  { name: "08-deals",                  fn: runDeals },
+  { name: "09-seo-backfill",           fn: runSeoBackfill },
+  { name: "10-verify",                 fn: runVerification,          skipCheckpoint: true },
+  { name: "11-copy-used-media",        fn: runCopyUsedMedia },
+  { name: "12-offer-backfill",         fn: runOfferBackfill },
+  { name: "13-site-content",           fn: runSiteContent },
+  { name: "13a-homepage-offer-sections", fn: runHomepageOfferBackfill },
+  { name: "14-media-optimize",         fn: runMediaOptimize },
+  { name: "15-media-formats-backfill", fn: runMediaFormatsBackfill,  skipCheckpoint: true },
 ];
 ```
 
-Order matters: 01 must run before 03–08 so inventoried attachments are resolvable; 03–06 must run before 07–08 so taxonomies/pools are in the id maps; 06a must run before 07–08 so author ids are available for `created_by_id`.
+Order matters: 01 must run before 03–08 so inventoried attachments are resolvable; 03–06 must run before 07–08 so taxonomies/pools are in the id maps; 06a must run before 07–08 so author ids are available for `created_by_id`. The trailing backfills (12–15) run against already-migrated rows, so they come after the entity phases. `15-media-formats-backfill` carries `skipCheckpoint: true` (its candidate SQL is the idempotency guard, so it stays re-runnable — a `--dry-run`/`--limit` pilot must never mark it complete). See §6n for phases 12–15.
 
 Note that **Phase 02 is special** — its `runMediaUpload` only preloads the hash cache and logs counts. Actual S3 uploads happen *on demand* later via `uploadMediaOnDemand`, called from `resolveMediaRef` in `utils/media-resolver.ts`.
 
@@ -859,64 +879,39 @@ for (const row of rows) existingHashes.set(row.hash, row.id);
 
 So re-running never re-uploads an image that's already in Strapi (whether inserted earlier in this run or from a previous run).
 
-**Upload logic** (lines 102–206):
+**Upload logic** (`uploadFileFromDisk` / `doUploadFileFromDisk`):
 
 1. `getMediaMapping(attachmentId)` — already uploaded in this process? Return.
 2. `getOrLoadMediaItem(attachmentId)` — inventory hit or fallback fetch. No local path → bail (`undefined`).
-3. `hashFile(filePath)` → SHA-256 truncated to 16 hex chars.
-4. `existingHashes.has(hash)` → record mapping and return the existing file id (dedup).
-5. Otherwise compute dimensions via `sharp`:
-   ```ts
-   const sharp = (await import("sharp")).default;
-   const meta = await sharp(filePath).metadata();
-   return { width: meta.width || null, height: meta.height || null };
-   ```
-   Wrapped in try/catch so a missing `sharp` (or a corrupt image) just sets width/height to null.
+3. `fs.readFileSync(filePath)` once → `hashBuffer` → SHA-256 truncated to 16 hex chars. The hash is always taken from the **pre-optimization source bytes**, so dedup/idempotency is unchanged by re-encoding.
+4. `existingHashes.has(hash)` → record mapping and return the existing file id (dedup). Uploads are also deduped by resolved local path via an in-flight map, so concurrent posts referencing the same image share one upload.
+5. **Optimize** (S3 path only) — supported raster MIMEs (jpeg/png/webp/avif/tiff) run through `optimizeOriginal`: EXIF orientation baked in, downscaled to fit 1920×1920, jpeg/png converted to webp, webp/avif/tiff re-encoded at quality 80. gif/svg/animated/undecodable inputs return `null` and pass through untouched (`formats` stays NULL). The optimized output replaces `ext`/`mime`/`width`/`height`/`size`; the pre-optimization bytes are kept as the AVIF encode source.
 6. Upload:
-   - **S3** (when `config.s3.bucket` and `config.s3.accessKeyId` are set):
+   - **S3** (when `config.s3.bucket` and `config.s3.accessKeyId` are set) — an SEO-friendly per-image folder key, then the responsive variants:
      ```ts
-     const s3Key = `${rootPath}${hash}_${nameWithoutExt}${ext}`;
-     await client.send(new PutObjectCommand({
-       Bucket: config.s3.bucket,
-       Key: s3Key,
-       Body: fileBuffer,
-       ContentType: item.mimeType,
-       CacheControl: "public, max-age=31536000, immutable",
-     }));
-     fileUrl = config.s3.baseUrl
-       ? `${config.s3.baseUrl.replace(/\/+$/, "")}/${s3Key}`
-       : `https://${config.s3.bucket}.s3.${config.s3.region}.amazonaws.com/${s3Key}`;
-     provider = "aws-s3";
-     providerMetadata = JSON.stringify({ key: s3Key });
+     const slug = slugifyFileName(nameWithoutExt);
+     const imageFolder = `${slug}-${hash.slice(0, 8)}`;
+     const s3Key = `${rootPath}${imageFolder}/${slug}${ext}`;
+     // uploads/myntra-coupon-codes-a1b2c3d4/myntra-coupon-codes.webp
      ```
-     The filename is hash-prefixed (`abc123_image.jpg`) so the same logical image with different on-disk names still dedups. 1-year immutable cache-control is aggressive but safe because the hash-prefixed key changes when the content changes.
-   - **Local fallback** (no S3 config):
-     ```ts
-     const hashedName = `${hash}_${nameWithoutExt}${ext}`;
-     fileUrl = `/uploads/${hashedName}`;
-     provider = "local";
-     providerMetadata = JSON.stringify({ sourcePath: item.localPath });
-     ```
-     Note we're not actually *copying* the file here — we're recording a `local` provider row so Strapi knows the file exists at `/uploads/hashedName`. Phase 11 does the actual copy.
-7. The Strapi `files` insert (lines 165–189):
+     The original is PUT with `Cache-Control: public, max-age=31536000, immutable`. SVG/markup-capable MIME types are forced to `application/octet-stream` + attachment disposition so they can never execute inline. When the file was optimized, `generateStrapiFormats` then renders the matrix (`thumbnail`/`xsmall`/`small`/`medium`/`large`, each key only when the master exceeds that size) plus AVIF twins for webp masters, uploads every variant under the same folder, and returns the `files.formats` JSON. Immutable cache-control is safe because the content hash sits in the folder segment, so the key changes when the content changes.
+   - **Local fallback** (no S3 config): no optimization, no variants. Records a `local` provider row at `/uploads/${hash}_${nameWithoutExt}${ext}` pointing at `sourcePath`; phase 11 does the actual copy.
+7. The Strapi `files` insert:
    ```sql
    INSERT INTO files (
      document_id, name, alternative_text, caption, width, height,
-     ext, mime, size, hash, url, provider, provider_metadata, folder_path,
-     created_at, updated_at, published_at
+     formats, ext, mime, size, hash, url, provider, provider_metadata,
+     folder_path, created_at, updated_at, published_at
    ) VALUES (
-     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW(), NOW()
+     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW(), NOW()
    ) RETURNING id
    ```
-   `size` is stored in KB (Strapi convention): `parseFloat((fileStats.size / 1024).toFixed(2))`. `folder_path` is always `"/"` — Strapi's root folder.
-8. Record the mapping and bump stats:
-   ```ts
-   setMediaMapping(attachmentId, fileId);
-   existingHashes.set(hash, fileId);
-   uploadStats.uploaded++;
-   ```
+   `formats` is the generated JSON (or NULL). `size` is stored in KB (Strapi convention). `folder_path` is always `"/"` — Strapi's root folder.
+8. Record the mapping and bump stats (`setMediaMapping`, `existingHashes.set`, `uploadStats.uploaded++`).
 
-**`clearS3Bucket()`** (lines 216–256) — paginated `ListObjectsV2` + `DeleteObjects` scoped to `config.s3.rootPath`. Invoked from `--clean`.
+All optimize/variant/twin knobs (breakpoints, thumbnail box, AVIF quality/effort) come from `cguruadmin/src/constants/image.ts`, re-exported through `utils/image-optimizer.ts` and shared with the admin upload extension.
+
+**`clearS3Bucket()`** — paginated `ListObjectsV2` + `DeleteObjects` scoped to `config.s3.rootPath` (refuses to run when the root path is empty). Invoked from `--clean`.
 
 ### 6d. Phase 03 — Taxonomies (`03-taxonomies.ts`)
 
@@ -1849,6 +1844,20 @@ Per file:
 - Otherwise `fs.copyFileSync(sourcePath, targetPath)`, count as `copied`.
 
 Logs `copied=N, skipped=N, failed=N`.
+
+### 6n. Phases 12–15 — Backfills (compact reference)
+
+These trailing phases run against already-migrated rows rather than reading fresh WordPress data. They post-date this document's line-by-line style, so they are summarized here; `migration/README.md` carries the authoritative per-phase prose.
+
+- **Phase 12 — Offer Backfill (`12-offer-backfill.ts`).** Fills the `deal.primaryStore` manyToOne from the ACF `deal_store` postmeta (a store term id, plain or PHP-serialized). Writes to the link table discovered at runtime via `information_schema` (expected `deals_primary_store_lnk`) with delete-then-insert semantics so re-runs never leave stale rows. Only posts present in the persisted id maps are touched; a missing link table (schema not migrated) logs a warning and skips.
+
+- **Phase 13 — Site Content (`13-site-content.ts`).** Seeds the four frontend single types — `global`, `homepage`, `menu`, `footer` (all publish-only; draftAndPublish disabled). Curated sections are built from migrated entities and ACF option keys; per-section item counts live in `src/utils/homepage-limits.ts` (each carries a +4 buffer over what the site renders, pinned to the component schema `max` by a parity test). Every component/relation link-table name is verified against `information_schema` first; each single type is skipped when its table already has a row, so re-runs are safe.
+
+- **Phase 13a — Homepage Coupon Offer Sections (`13a-homepage-offer-sections.ts`).** Backfills the Coupon-backed `exploreOffers`/`offersByBrand` component trees onto homepages created before those components existed, preserving the legacy section/category/brand criteria. Idempotent (populated sections are skipped), transactional, and serialized on the homepage row. Missing component/relation infrastructure fails the phase (not checkpointed) — apply the Strapi schemas first and rerun. Run standalone after deploying the new schemas: `npm run migrate -- --phase 13a-homepage-offer-sections`.
+
+- **Phase 14 — Media Optimize (`14-media-optimize.ts`).** Two passes over already-migrated S3 images. Pass 1 (candidates: `provider='aws-s3'`, `formats IS NULL`, optimizable MIME) optimizes the original + generates the full variant matrix incl. AVIF twins, writing `formats`/`ext`/`mime`/`url`/dims/`provider_metadata` in a single `UPDATE` as the last step; superseded objects are deleted on key change unless `--keep-originals`. Pass 2 (rows with `formats` but no `original_avif`) adds AVIF twins (`original_avif`/`xsmall_avif`/`small_avif`/`medium_avif`/`large_avif`) and merges them with `formats = formats || $new`. Source bytes resolve from a local `WP_UPLOADS_DIR` hash map, then the S3 object.
+
+- **Phase 15 — Media Formats Backfill (`15-media-formats-backfill.ts`).** Fills variant-matrix gaps for rows that **already have** `formats` (e.g. migrated before the `xsmall`/thumbnail rungs existed) — the gap Phase 14 cannot close. Per row it computes `expectedFormatKeys() − stored keys`, generates only the missing variants from the current S3 master (local WP original as the AVIF source when available), and jsonb-merges them last. `--dry-run` (DB-only report), `--limit N`, `--overwrite` (regenerate all, unconditional puts). Variant puts are conditional (`IfNoneMatch: "*"`; 412 = already present; `NotImplemented` flips to unconditional). S3 master key resolves `provider_metadata.key` → `{rootPath}/{hash}{ext}` → legacy `{rootPath}/{hash}_{name}{ext}`. Shared-hash rows serialize and reuse generated entries but each merges its own missing set. Never checkpointed (`skipCheckpoint: true`) so it stays re-runnable.
 
 ---
 

@@ -30,49 +30,18 @@
  * changed entries stay stale until the next rebuild/edit.
  */
 
-import { createRequire } from "node:module";
 import { config } from "./config.js";
 import { pgQuery, closePg } from "./db/pg-client.js";
 import { logger } from "./utils/logger.js";
-// rebuildImgTag composes the srcset via buildSrcset internally — both are
+// rebuildImgTag composes the srcset via buildSrcset internally, and
+// replaceImgTags is the same tag iterator the migration rewrite runs — all
 // exported from content-media so this script and the migration cannot drift.
-import { rebuildImgTag } from "./utils/content-media.js";
+import { getAttr, rebuildImgTag, replaceImgTags } from "./utils/content-media.js";
 import type { UploadedFileRecord } from "./phases/02-media-upload.js";
-// The main package owns the richtext allowlist and field registry; load it
-// from there so the two can never drift. createRequire (not import) because
-// the main package is CommonJS while this one is ESM — tsx compiles the TS
-// across the boundary but Node's named-export detection can't see through it.
-const require = createRequire(import.meta.url);
-const { cleanHtml, RICHTEXT_FIELDS } =
-  require("../../src/utils/sanitize-richtext") as {
-    cleanHtml: (html: string) => string;
-    RICHTEXT_FIELDS: Record<string, string[]>;
-  };
-
-// DB table per content-type uid (Strapi table names come from each schema's
-// collectionName, not mechanical pluralization — so map explicitly). Derived
-// from RICHTEXT_FIELDS so a richtext field added there cannot be silently
-// skipped here: an unmapped uid fails fast below instead.
-const TABLE_BY_UID: Record<string, string> = {
-  "api::deal.deal": "deals",
-  "api::coupon.coupon": "coupons",
-  "api::category.category": "categories",
-  "api::bank.bank": "banks",
-  "api::brand.brand": "brands",
-  "api::store.store": "stores",
-};
-
-const TARGETS: Array<{ table: string; column: string }> = Object.entries(
-  RICHTEXT_FIELDS
-).flatMap(([uid, fields]) => {
-  const table = TABLE_BY_UID[uid];
-  if (!table) {
-    throw new Error(
-      `RICHTEXT_FIELDS has "${uid}" but TABLE_BY_UID has no table for it — add the mapping`
-    );
-  }
-  return fields.map((column) => ({ table, column }));
-});
+// Sanitizer + table/column targets shared with fix-markdown-richtext; the
+// module throws at import on an unmapped uid, keeping this script's startup
+// fail-fast (before any DB connection or the confirmation-flag check).
+import { cleanHtml, RICHTEXT_TARGETS } from "./utils/richtext-targets.js";
 
 function parseFormats(value: unknown): Record<string, any> | null {
   if (!value) return null;
@@ -114,11 +83,6 @@ function lookupFileByUrl(url: string): Promise<UploadedFileRecord | undefined> {
   return task;
 }
 
-function getSrc(tag: string): string | undefined {
-  const m = tag.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
-  return m ? (m[1] ?? m[2]) : undefined;
-}
-
 const missedUrls = new Set<string>();
 
 /** Rebuild every media-host <img> in one HTML value; returns the count of
@@ -127,33 +91,23 @@ async function rewriteImgTags(
   html: string,
   mediaBase: string
 ): Promise<{ html: string; rewritten: number }> {
-  let out = html;
-  let rewritten = 0;
-
-  const replacements = new Map<string, string>();
-  for (const match of html.matchAll(/<img\b[^>]*\/?>/gi)) {
-    const tag = match[0];
-    if (replacements.has(tag)) continue;
-    const src = getSrc(tag);
-    if (!src || !src.startsWith(mediaBase)) continue;
+  const { html: out, replacements } = await replaceImgTags(html, async (tag) => {
+    const src = getAttr(tag, "src");
+    if (!src || !src.startsWith(mediaBase)) return null;
     const record = await lookupFileByUrl(src);
     if (!record) {
       if (!missedUrls.has(src)) {
         missedUrls.add(src);
         logger.warn(`No files row for img src, tag left as-is: ${src.substring(0, 140)}`);
       }
-      continue;
+      return null;
     }
     // A record without a rebuildable srcset (formats-less or dimension-less)
     // still gets its tag normalized — src/dims/alt survive, stale srcsets go.
     const rebuilt = rebuildImgTag(tag, record);
-    if (rebuilt !== tag) replacements.set(tag, rebuilt);
-  }
-  for (const [oldTag, newTag] of replacements) {
-    out = out.split(oldTag).join(newTag);
-    rewritten++;
-  }
-  return { html: out, rewritten };
+    return rebuilt !== tag ? rebuilt : null;
+  });
+  return { html: out, rewritten: replacements.size };
 }
 
 async function main() {
@@ -186,7 +140,7 @@ async function main() {
 
   let totalChanged = 0;
   let totalTags = 0;
-  for (const { table, column } of TARGETS) {
+  for (const { table, column } of RICHTEXT_TARGETS) {
     const rows = await pgQuery<{ id: number; value: string }>(
       `SELECT id, ${column} AS value FROM ${table}
        WHERE ${column} LIKE '%<img%' AND ${column} LIKE '%' || $1 || '%'

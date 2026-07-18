@@ -1,24 +1,30 @@
-import fs from "fs";
-import path from "path";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import pLimit from "p-limit";
-import sharp from "sharp";
 import { pgQuery } from "../db/pg-client.js";
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
 import {
-  IMAGE_BREAKPOINTS,
-  THUMBNAIL,
+  decodeOrientedDims,
   expectedFormatKeys,
   generateStrapiFormats,
+  splitS3Key,
   FormatVariantUpload,
 } from "../utils/image-optimizer.js";
+import {
+  AVIF_DROPPED_META_KEY,
+  buildGapWhere,
+  mergeAvifTombstones,
+  readAvifTombstones,
+} from "../utils/format-gaps.js";
+import { parseLimitFlag } from "../utils/cli.js";
+import { mediaSourceResolution } from "../utils/media-source-candidates.js";
 import { getS3Client } from "./02-media-upload.js";
 import {
   CACHE_CONTROL,
   buildLocalHashMap,
   fetchFromS3,
   parseProviderMetadata,
+  readLocalByHash,
 } from "./14-media-optimize.js";
 
 interface BackfillCandidateRow {
@@ -40,11 +46,12 @@ interface BackfillStats {
   variantsExisting: number;
   /** Rows whose true-dimension recheck found nothing missing. */
   alreadyComplete: number;
-  /** Rows that merged JSON generated for another row sharing the S3 key. */
+  /** Rows satisfied entirely by entries a groupmate generated this run. */
   reusedShared: number;
+  /** Rows whose NULL stored width/height were filled from the decoded master. */
+  dimsBackfilled: number;
   skippedNoSource: number;
-  /** Rows whose only missing keys were AVIF twins beaten by their webp
-   *  counterpart (or whose twin encodes failed — logged by the generator). */
+  /** Rows whose only persisted outcome was tombstoning guard-dropped twins. */
   skippedLarger: number;
   failed: number;
 }
@@ -56,10 +63,14 @@ interface BackfillContext {
   urlPrefix: string;
   overwrite: boolean;
   stats: BackfillStats;
-  /** Per-master-key serialization so shared-hash rows never encode concurrently. */
-  sharedKeyChains: Map<string, Promise<void>>;
-  /** Format entries generated this run, per master key, so shared-hash rows reuse them. */
-  sharedKeyEntries: Map<string, Record<string, any>>;
+}
+
+/** Rows sharing one complete source-candidate list — decoded and encoded once. */
+interface KeyGroup {
+  cacheKey: string;
+  keyCandidates: string[];
+  nameNoExt: string;
+  rows: BackfillCandidateRow[];
 }
 
 // Flipped once when the endpoint rejects IfNoneMatch (NotImplemented on
@@ -73,32 +84,52 @@ let conditionalPutSupported = true;
  * formats: Phase 14 pass 1 only handles `formats IS NULL` and pass 2 only
  * adds missing AVIF twins, so the WordPress-era catalog generated before the
  * xsmall(320) rung (or before the thumbnail rung) can never gain those keys
- * from existing tooling. Per row this phase recomputes
- * `expectedFormatKeys() − Object.keys(formats)`, generates ONLY the missing
- * variants from the current S3 master (local WP original as the AVIF source
- * when available), uploads them, and merges the new keys into formats as the
- * LAST step — crash-resumable and idempotent (a re-run finds nothing missing).
+ * from existing tooling. Candidates come from a WHERE clause GENERATED off
+ * the same constants expectedFormatKeys uses (buildGapWhere): one arm per
+ * thumbnail/breakpoint gap, tombstone-guarded arms per AVIF twin, and a
+ * `width IS NULL OR height IS NULL` arm — NULL dims silence every comparison
+ * arm, so those rows are selected and their true dims persisted from the
+ * decoded master (including when nothing else is missing). Per row this
+ * phase recomputes expected − stored − tombstoned keys, generates ONLY the
+ * missing variants from the current S3 master (local WP original as the AVIF
+ * source when available), uploads them, and merges the new keys in ONE
+ * per-row UPDATE as the LAST step — crash-resumable and idempotent.
+ *
+ * Convergence: AVIF twins the size guard drops are recorded in
+ * provider_metadata.avifDropped (same UPDATE) and excluded from selection,
+ * so a re-run after a successful pass selects ~0 rows and fetches ~0
+ * masters. Rows sharing one S3 master form a group: the master is fetched
+ * and dim-decoded once, generated entries and dropped keys are shared, and
+ * each row still merges its OWN missing set. provider_metadata is written
+ * wholesale from a JS merge — never run this phase concurrently with 14.
  *
  * Flags:
  *   --dry-run    per-row missing-keys report from DB values only; no S3
  *                access, no writes
- *   --limit N    process at most N candidate rows (pilot runs)
- *   --overwrite  regenerate ALL expected keys and replace the S3 objects
- *                (unconditional puts) instead of only filling gaps
+ *   --limit N    process at most N candidate rows (pilot runs); malformed
+ *                values abort before any DB/S3 access
+ *   --overwrite  regenerate ALL expected keys, replace the S3 objects
+ *                (unconditional puts), and REPLACE avifDropped with this
+ *                run's actual drops — the escape hatch when encoder tuning
+ *                makes previously-dropped twins viable
  *
  * Variant uploads use PutObject with IfNoneMatch: "*" so re-runs never
  * rewrite bytes already placed (412 counts as success). Masters ≤320 on both
- * axes correctly get nothing; rows whose AVIF twins keep losing the size
- * guard stay perpetual nominal candidates (cheap re-encode + re-drop).
+ * axes correctly get nothing.
  */
 export async function runMediaFormatsBackfill(): Promise<void> {
   logger.info("=== Phase 15: Media Formats Backfill (missing variants) ===");
 
   const dryRun = process.argv.includes("--dry-run");
   const overwrite = process.argv.includes("--overwrite");
-  const limitIdx = process.argv.indexOf("--limit");
-  const rawLimit = limitIdx !== -1 ? Number(process.argv[limitIdx + 1]) : NaN;
-  const rowLimit = Number.isInteger(rawLimit) && rawLimit > 0 ? rawLimit : null;
+  const limitFlag = parseLimitFlag(process.argv);
+  if (limitFlag.kind === "invalid") {
+    // Abort before any DB/S3 access: a lenient parse here once meant a typo
+    // ran the whole catalog instead of a pilot.
+    logger.error(limitFlag.reason);
+    process.exit(1);
+  }
+  const rowLimit = limitFlag.kind === "valid" ? limitFlag.value : null;
 
   if (dryRun) logger.info("--dry-run: no S3 or database writes will happen");
   if (overwrite) {
@@ -111,9 +142,9 @@ export async function runMediaFormatsBackfill(): Promise<void> {
     return;
   }
 
-  // Coarse SQL pre-filter only (stored width/height may be stale and twin
-  // gaps beyond xsmall_avif are not enumerated here) — every selected row is
-  // re-verified in JS against the master's true dimensions.
+  // Selection is authoritative-but-coarse (stored width/height may be stale):
+  // every selected row is re-verified in JS against the master's true
+  // dimensions before anything is generated.
   const params: number[] = [];
   let sql = `SELECT id, name, hash, ext, mime, width, height, provider_metadata, formats
      FROM files
@@ -121,14 +152,10 @@ export async function runMediaFormatsBackfill(): Promise<void> {
        AND formats IS NOT NULL
        AND mime IN ('image/jpeg','image/png','image/webp','image/avif','image/tiff')`;
   if (!overwrite) {
-    params.push(IMAGE_BREAKPOINTS.xsmall, THUMBNAIL.width, THUMBNAIL.height);
+    const gap = buildGapWhere(params.length + 1);
+    params.push(...gap.params);
     sql += `
-       AND (
-         (NOT (formats::jsonb ? 'xsmall') AND (width > $1 OR height > $1))
-         OR (NOT (formats::jsonb ? 'thumbnail') AND (width > $2 OR height > $3))
-         OR (mime = 'image/webp' AND NOT (formats::jsonb ? 'xsmall_avif')
-             AND (width > $1 OR height > $1))
-       )`;
+       AND (${gap.sql})`;
   }
   sql += `
      ORDER BY id`;
@@ -149,7 +176,16 @@ export async function runMediaFormatsBackfill(): Promise<void> {
     let keysMissing = 0;
     let unknownDims = 0;
     for (const row of candidates) {
-      const missing = computeMissingKeys(row, row.width, row.height, overwrite);
+      const tombstoned = readAvifTombstones(
+        parseProviderMetadata(row.provider_metadata)
+      );
+      const missing = computeMissingKeys(
+        row,
+        row.width,
+        row.height,
+        overwrite,
+        tombstoned
+      );
       if (!missing) {
         // The real run decodes the S3 master for dimensions; the DB-only
         // dry run cannot, so surface the row instead of dropping it.
@@ -192,6 +228,7 @@ export async function runMediaFormatsBackfill(): Promise<void> {
     variantsExisting: 0,
     alreadyComplete: 0,
     reusedShared: 0,
+    dimsBackfilled: 0,
     skippedNoSource: 0,
     skippedLarger: 0,
     failed: 0,
@@ -204,27 +241,27 @@ export async function runMediaFormatsBackfill(): Promise<void> {
     urlPrefix,
     overwrite,
     stats,
-    sharedKeyChains: new Map(),
-    sharedKeyEntries: new Map(),
   };
 
+  const groups = groupByPrimaryKey(candidates, rootPrefix);
   const limit = pLimit(5);
-  let processed = 0;
+  let processedRows = 0;
   await Promise.all(
-    candidates.map((row) =>
+    groups.map((group) =>
       limit(async () => {
         try {
-          await processFormatsRow(row, ctx);
+          await processKeyGroup(group, ctx);
         } catch (err: any) {
-          stats.failed++;
+          stats.failed += group.rows.length;
           logger.error(
-            `Failed to backfill formats for file ${row.id} (${row.name}): ${err.message}`
+            `Failed to backfill formats group ${group.cacheKey}: ${err.message}`
           );
         } finally {
-          processed++;
-          if (processed % 100 === 0) {
+          const before = processedRows;
+          processedRows += group.rows.length;
+          if (Math.floor(processedRows / 100) > Math.floor(before / 100)) {
             logger.info(
-              `  Formats backfill progress: ${processed}/${candidates.length} ` +
+              `  Formats backfill progress: ${processedRows}/${candidates.length} rows ` +
                 `(backfilled=${stats.backfilled}, complete=${stats.alreadyComplete}, ` +
                 `skipped=${stats.skippedNoSource}, failed=${stats.failed})`
             );
@@ -238,216 +275,260 @@ export async function runMediaFormatsBackfill(): Promise<void> {
     `Media formats backfill complete: backfilled=${stats.backfilled}, ` +
       `variants uploaded=${stats.variantsUploaded}, already on S3=${stats.variantsExisting}, ` +
       `already complete=${stats.alreadyComplete}, reused shared=${stats.reusedShared}, ` +
+      `dims backfilled=${stats.dimsBackfilled}, ` +
       `skipped (no source)=${stats.skippedNoSource}, ` +
       `skipped (avif larger)=${stats.skippedLarger}, failed=${stats.failed}`
   );
 }
 
 /**
- * Expected-minus-stored format keys for a row (null when dimensions are
- * unknown). --overwrite returns every expected key regardless of storage.
+ * Expected-minus-stored-minus-tombstoned format keys for a row (null when
+ * dimensions are unknown). --overwrite returns every expected key regardless
+ * of storage or tombstones.
  */
 function computeMissingKeys(
   row: BackfillCandidateRow,
   width: number | null,
   height: number | null,
-  overwrite: boolean
+  overwrite: boolean,
+  tombstoned: ReadonlySet<string>
 ): string[] | null {
   if (!width || !height) return null;
   const expected = expectedFormatKeys(width, height, row.mime);
   if (overwrite) return expected;
   const stored = new Set(Object.keys(row.formats ?? {}));
-  return expected.filter((key) => !stored.has(key));
-}
-
-async function processFormatsRow(
-  row: BackfillCandidateRow,
-  ctx: BackfillContext
-): Promise<void> {
-  const { stats, sharedKeyChains } = ctx;
-
-  const meta = parseProviderMetadata(row.provider_metadata);
-  const nameNoExt = path.basename(row.name, path.extname(row.name));
-  // Migration rows always carry provider_metadata.key (phase 02 writes it);
-  // rows the aws-s3 provider created carry none, and its convention is
-  // rootPath/{hash}{ext} — the upload extension's hash embeds the per-image
-  // folder. The migration-era flat {hash}_{name}{ext} form stays as a second
-  // fetch attempt for pre-folder-scheme rows.
-  const s3KeyCandidates: string[] = meta?.key
-    ? [meta.key]
-    : [
-        `${ctx.rootPrefix}${row.hash}${row.ext}`,
-        `${ctx.rootPrefix}${row.hash}_${nameNoExt}${row.ext}`,
-      ];
-  // Rows sharing a hash share the same candidate list, so the first candidate
-  // is a stable serialization/cache key even before the fetch resolves.
-  const s3Key = s3KeyCandidates[0];
-
-  // Rows sharing an S3 key (same content hash) serialize behind one another
-  // so variants encode/upload once (later rows reuse sharedKeyEntries), but
-  // every row computes and merges its OWN missing set: phase checkpointing
-  // means a row handed another row's subset would stay incomplete until an
-  // operator explicitly re-ran the phase.
-  const prevChain = sharedKeyChains.get(s3Key);
-  const task = (prevChain ?? Promise.resolve()).then(() =>
-    generateMissingForRow(row, s3KeyCandidates, nameNoExt, ctx)
-  );
-  // A failed row must not block waiting shared rows; this row's caller still
-  // sees the rejection through `await task` below.
-  sharedKeyChains.set(
-    s3Key,
-    task.then(
-      () => undefined,
-      () => undefined
-    )
-  );
-
-  const formatsJson = await task;
-  if (!formatsJson || Object.keys(formatsJson).length === 0) return;
-
-  // Single UPDATE merging the new keys — the LAST step, so a crash earlier
-  // leaves the row a candidate for re-runs.
-  await mergeFormats(row.id, formatsJson);
-  if (prevChain) stats.reusedShared++;
-  else stats.backfilled++;
+  return expected.filter((key) => !stored.has(key) && !tombstoned.has(key));
 }
 
 /**
- * Generate + upload the row's missing variants; returns the formats JSON to
- * merge (null when there is nothing to merge — stats already updated).
+ * Group candidate rows by their complete ordered source-candidate list
+ * (zero I/O — derivable from the row alone), preserving id order within and
+ * across groups.
  */
-async function generateMissingForRow(
-  row: BackfillCandidateRow,
-  keyCandidates: readonly string[],
-  nameNoExt: string,
+function groupByPrimaryKey(
+  rows: readonly BackfillCandidateRow[],
+  rootPrefix: string
+): KeyGroup[] {
+  const groups = new Map<string, KeyGroup>();
+  for (const row of rows) {
+    const meta = parseProviderMetadata(row.provider_metadata);
+    // Migration rows always carry provider_metadata.key (phase 02 writes it);
+    // rows the aws-s3 provider created carry none, and its convention is
+    // rootPath/{hash}{ext} — the upload extension's hash embeds the per-image
+    // folder. The migration-era flat {hash}_{name}{ext} form stays as a
+    // second fetch attempt for pre-folder-scheme rows. CANDIDATE ORDER IS
+    // INTENTIONAL: provider-shaped first, legacy flat second.
+    // Group by the COMPLETE ordered candidate list. The provider-shaped key
+    // can be shared by metadata-less rows whose legacy fallback differs by
+    // name; grouping those rows before resolution would discard every
+    // fallback except the first row's.
+    const { groupKey, keyCandidates, nameNoExt } = mediaSourceResolution(
+      row,
+      rootPrefix,
+      typeof meta?.key === "string" ? meta.key : null,
+    );
+    const cacheKey = keyCandidates[0];
+    let group = groups.get(groupKey);
+    if (!group) {
+      group = { cacheKey, keyCandidates, nameNoExt, rows: [] };
+      groups.set(groupKey, group);
+    }
+    group.rows.push(row);
+  }
+  return [...groups.values()];
+}
+
+/**
+ * Process every row of one shared-master group sequentially: the master is
+ * fetched and dim-decoded once, the local WP original is read at most once
+ * (lazily, only when a webp row has a twin to generate), and entries/dropped
+ * keys generated for one row satisfy groupmates without re-encoding. Every
+ * row still computes and persists its OWN missing set — a row handed another
+ * row's subset would stay incomplete until an operator re-ran the phase.
+ */
+async function processKeyGroup(
+  group: KeyGroup,
   ctx: BackfillContext
-): Promise<Record<string, any> | null> {
-  const { client, localByHash, stats } = ctx;
-  const cacheKey = keyCandidates[0];
+): Promise<void> {
+  const { client, stats } = ctx;
 
   // The stored formats derive from the S3 master, so it is both the resize
   // source and the authority on dimensions. Candidate keys are tried in
   // order; the one that hits defines where the new variants land.
   let master: Buffer | null = null;
-  let s3Key = cacheKey;
-  for (const key of keyCandidates) {
+  let resolvedKey = group.cacheKey;
+  for (const key of group.keyCandidates) {
     master = await fetchFromS3(client, key);
     if (master) {
-      s3Key = key;
+      resolvedKey = key;
       break;
     }
   }
   if (!master) {
-    stats.skippedNoSource++;
+    stats.skippedNoSource += group.rows.length;
     logger.warn(
-      `No S3 master for file ${row.id} (${row.name}, hash=${row.hash}, ` +
-        `tried: ${keyCandidates.join(", ")})`
+      `No S3 master for ${group.rows.length} row(s), first file ` +
+        `${group.rows[0].id} (${group.rows[0].name}, hash=${group.rows[0].hash}, ` +
+        `tried: ${group.keyCandidates.join(", ")})`
     );
-    return null;
+    return;
   }
 
-  // True master dimensions (EXIF orientation 5-8 swaps width/height); the
-  // stored row values are only a fallback for undecodable bytes.
-  let width: number | null = null;
-  let height: number | null = null;
-  try {
-    const srcMeta = await sharp(master).metadata();
-    const swapped = (srcMeta.orientation ?? 1) >= 5;
-    width = (swapped ? srcMeta.height : srcMeta.width) ?? null;
-    height = (swapped ? srcMeta.width : srcMeta.height) ?? null;
-  } catch {
-    width = null;
-    height = null;
-  }
-  if (!width || !height) {
-    width = row.width;
-    height = row.height;
-  }
-  if (!width || !height) {
-    stats.failed++;
-    logger.warn(
-      `Could not determine dimensions for file ${row.id} (${row.name}) — skipping`
-    );
-    return null;
-  }
-
-  const missing = computeMissingKeys(row, width, height, ctx.overwrite) ?? [];
-  if (missing.length === 0) {
-    // The SQL pre-filter matched on stale stored dimensions.
-    stats.alreadyComplete++;
-    return null;
-  }
-
-  // Entries an earlier shared-hash row already generated+uploaded this run
-  // satisfy this row without re-encoding; only the remainder is generated.
-  const cachedEntries = ctx.sharedKeyEntries.get(cacheKey) ?? {};
-  const toGenerate = missing.filter((key) => !(key in cachedEntries));
-  if (toGenerate.length === 0) {
-    return pickEntries(cachedEntries, missing);
-  }
-
-  // Key/naming conventions follow the row's existing S3 layout (same
-  // derivation as Phase 14 pass 2), so new variants land beside the old ones
-  // for both folder-scheme and legacy flat keys.
-  const lastSlash = s3Key.lastIndexOf("/");
-  const keyPrefix = lastSlash >= 0 ? s3Key.slice(0, lastSlash + 1) : ctx.rootPrefix;
-  const keyBasename = lastSlash >= 0 ? s3Key.slice(lastSlash + 1) : s3Key;
-  const hashBase = path.basename(keyBasename, path.extname(keyBasename));
+  const dims = await decodeOrientedDims(master, null, null);
+  const { keyPrefix, hashBase } = splitS3Key(resolvedKey, ctx.rootPrefix);
 
   // AVIF twins encode from the pre-optimization WP original when available
-  // (highest-quality input); webp tiers always resize the S3 master.
-  let avifSource: Buffer | undefined;
-  const localPath = localByHash.get(row.hash);
-  if (localPath) {
+  // (highest-quality input); read lazily, at most once per distinct hash —
+  // rows grouped by one S3 key normally share a hash, but nothing enforces
+  // it, and a groupmate must never encode from another row's original.
+  const localPromises = new Map<string, Promise<Buffer | null>>();
+  const getAvifSource = (hash: string): Promise<Buffer | null> => {
+    let promise = localPromises.get(hash);
+    if (!promise) {
+      promise = readLocalByHash(ctx.localByHash, hash);
+      localPromises.set(hash, promise);
+    }
+    return promise;
+  };
+
+  // Group-shared outcomes: entries generated for one row satisfy groupmates;
+  // dropped twin keys propagate so groupmates don't re-attempt them.
+  const entries: Record<string, any> = {};
+  const droppedSet = new Set<string>();
+
+  for (const row of group.rows) {
+    // A failed row must not block groupmates (the old per-key chain had the
+    // same guarantee).
     try {
-      avifSource = fs.readFileSync(localPath);
-    } catch {
-      avifSource = undefined;
+      const effWidth = dims.width ?? row.width;
+      const effHeight = dims.height ?? row.height;
+      if (!effWidth || !effHeight) {
+        stats.failed++;
+        logger.warn(
+          `Could not determine dimensions for file ${row.id} (${row.name}) — skipping`
+        );
+        continue;
+      }
+
+      const meta = parseProviderMetadata(row.provider_metadata);
+      const tombstoned = readAvifTombstones(meta);
+      const missing =
+        computeMissingKeys(row, effWidth, effHeight, ctx.overwrite, tombstoned) ?? [];
+      const needsDims =
+        dims.decoded && (row.width == null || row.height == null);
+
+      if (missing.length === 0) {
+        // The SQL arms matched on stale (or NULL) stored values.
+        stats.alreadyComplete++;
+        if (needsDims) {
+          // NULL-dims rows must exit the selector's NULL arm even when
+          // nothing is missing, or they get re-fetched forever.
+          await persistRow(row.id, { width: dims.width!, height: dims.height! });
+          stats.dimsBackfilled++;
+        }
+        continue;
+      }
+
+      const toGenerate = missing.filter(
+        (key) => !(key in entries) && !droppedSet.has(key)
+      );
+      let generatedOwn = false;
+      if (toGenerate.length > 0) {
+        // Byte sizes of the already-uploaded webp tiers for the AVIF size
+        // guard (tiers skipped via onlyKeys have no in-run counterpart).
+        // Entries carry sizeInBytes; `size` is KB via /1000, so *1000
+        // restores bytes.
+        const existingSizes: Record<string, number> = {};
+        for (const [key, entry] of Object.entries(row.formats ?? {})) {
+          const bytes =
+            entry?.sizeInBytes ??
+            (typeof entry?.size === "number"
+              ? Math.round(entry.size * 1000)
+              : undefined);
+          if (bytes) existingSizes[key] = bytes;
+        }
+
+        const wantsTwin =
+          row.mime === "image/webp" &&
+          toGenerate.some((key) => key.endsWith("_avif"));
+        const avifSource = wantsTwin
+          ? (await getAvifSource(row.hash)) ?? undefined
+          : undefined;
+
+        const { formatsJson, uploads, droppedAvifKeys } =
+          await generateStrapiFormats(master, {
+            width: effWidth,
+            height: effHeight,
+            ext: row.ext,
+            mime: row.mime,
+            hashBase,
+            nameBase: group.nameNoExt,
+            urlPrefix: ctx.urlPrefix,
+            keyPrefix,
+            avifSource,
+            onlyKeys: new Set(toGenerate),
+            existingSizes,
+          });
+
+        for (const variant of uploads) {
+          const outcome = await putVariant(ctx, variant);
+          if (outcome === "existing") stats.variantsExisting++;
+          else stats.variantsUploaded++;
+        }
+        Object.assign(entries, formatsJson);
+        for (const key of droppedAvifKeys) droppedSet.add(key);
+        generatedOwn = Object.keys(formatsJson).length > 0;
+      }
+
+      const merged = pickEntries(entries, missing);
+      const rowDropped = missing.filter((key) => droppedSet.has(key));
+
+      if (Object.keys(merged).length === 0 && rowDropped.length === 0) {
+        // Every due encode failed (already logged by the generator) — leave
+        // the row untouched so it stays eligible for re-runs.
+        stats.failed++;
+        continue;
+      }
+
+      const metaPatch = ctx.overwrite
+        ? replaceAvifTombstones(meta, rowDropped)
+        : mergeAvifTombstones(meta, rowDropped);
+
+      const patch: RowPatch = {};
+      if (Object.keys(merged).length > 0) patch.formats = merged;
+      if (metaPatch) patch.providerMetadata = metaPatch;
+      if (needsDims) {
+        patch.width = dims.width!;
+        patch.height = dims.height!;
+      }
+      await persistRow(row.id, patch);
+
+      if (needsDims) stats.dimsBackfilled++;
+      // Keys neither generated nor guard-dropped are encode failures: the
+      // row stays eligible for them, and the failure must not hide behind a
+      // success bucket even though the partial results were persisted.
+      const unresolved = missing.filter(
+        (key) => !(key in merged) && !rowDropped.includes(key)
+      );
+      if (unresolved.length > 0) {
+        stats.failed++;
+        logger.warn(
+          `File ${row.id} (${row.name}): ${unresolved.length} variant ` +
+            `encode(s) failed (${unresolved.join(", ")}) — row stays eligible`
+        );
+      } else if (Object.keys(merged).length > 0) {
+        if (generatedOwn) stats.backfilled++;
+        else stats.reusedShared++;
+      } else {
+        stats.skippedLarger++;
+      }
+    } catch (err: any) {
+      stats.failed++;
+      logger.error(
+        `Failed to backfill formats for file ${row.id} (${row.name}): ${err.message}`
+      );
     }
   }
-
-  // Byte sizes of the already-uploaded webp tiers for the AVIF size guard
-  // (tiers skipped via onlyKeys have no in-run counterpart). Entries carry
-  // sizeInBytes; `size` is KB via /1000, so *1000 restores bytes.
-  const existingSizes: Record<string, number> = {};
-  for (const [key, entry] of Object.entries(row.formats ?? {})) {
-    const bytes =
-      entry?.sizeInBytes ??
-      (typeof entry?.size === "number" ? Math.round(entry.size * 1000) : undefined);
-    if (bytes) existingSizes[key] = bytes;
-  }
-
-  const { formatsJson, uploads } = await generateStrapiFormats(master, {
-    width,
-    height,
-    ext: row.ext,
-    mime: row.mime,
-    hashBase,
-    nameBase: nameNoExt,
-    urlPrefix: ctx.urlPrefix,
-    keyPrefix,
-    avifSource,
-    onlyKeys: new Set(toGenerate),
-    existingSizes,
-  });
-
-  const merged = { ...pickEntries(cachedEntries, missing), ...formatsJson };
-  if (Object.keys(merged).length === 0) {
-    // Only AVIF twins were due and every one lost the size guard (or its
-    // encode failed — already logged): nothing to upload or merge. The row
-    // stays a nominal candidate, exactly like Phase 14 pass 2.
-    stats.skippedLarger++;
-    return null;
-  }
-
-  for (const variant of uploads) {
-    const outcome = await putVariant(ctx, variant);
-    if (outcome === "existing") stats.variantsExisting++;
-    else stats.variantsUploaded++;
-  }
-  ctx.sharedKeyEntries.set(cacheKey, { ...cachedEntries, ...formatsJson });
-
-  return merged;
 }
 
 /** Subset of `entries` limited to `keys` (missing entries are skipped). */
@@ -460,6 +541,66 @@ function pickEntries(
     if (key in entries) picked[key] = entries[key];
   }
   return picked;
+}
+
+/**
+ * --overwrite REPLACES the tombstone list with this run's actual drops (a
+ * regenerated twin must clear its stale tombstone); null when unchanged.
+ */
+function replaceAvifTombstones(
+  meta: Record<string, any> | null,
+  dropped: readonly string[]
+): Record<string, any> | null {
+  const next = [...new Set(dropped)].sort();
+  const prev = [...readAvifTombstones(meta)].sort();
+  if (next.length === prev.length && next.every((key, i) => key === prev[i])) {
+    return null;
+  }
+  const copy = { ...(meta ?? {}) };
+  if (next.length > 0) copy[AVIF_DROPPED_META_KEY] = next;
+  else delete copy[AVIF_DROPPED_META_KEY];
+  return copy;
+}
+
+interface RowPatch {
+  formats?: Record<string, any>;
+  providerMetadata?: Record<string, any>;
+  width?: number;
+  height?: number;
+}
+
+/**
+ * ONE dynamic UPDATE per row — always the LAST step, so a crash earlier
+ * leaves the row a candidate for re-runs. formats keys MERGE (`||` keeps
+ * keys the patch doesn't mention); provider_metadata is replaced wholesale
+ * from the JS merge (single-writer assumption — see the phase doc comment).
+ */
+async function persistRow(rowId: number, patch: RowPatch): Promise<void> {
+  const sets: string[] = [];
+  const values: any[] = [];
+  if (patch.formats) {
+    values.push(JSON.stringify(patch.formats));
+    sets.push(`formats = (formats::jsonb || $${values.length}::jsonb)`);
+  }
+  if (patch.providerMetadata) {
+    values.push(JSON.stringify(patch.providerMetadata));
+    sets.push(`provider_metadata = $${values.length}::jsonb`);
+  }
+  if (patch.width != null && patch.height != null) {
+    values.push(patch.width);
+    sets.push(`width = $${values.length}`);
+    values.push(patch.height);
+    sets.push(`height = $${values.length}`);
+  }
+  if (sets.length === 0) return;
+  values.push(rowId);
+  await pgQuery(
+    `UPDATE files
+     SET ${sets.join(",\n         ")},
+         updated_at = NOW()
+     WHERE id = $${values.length}`,
+    values
+  );
 }
 
 /**
@@ -503,17 +644,4 @@ async function putVariant(
     }
     throw err;
   }
-}
-
-async function mergeFormats(
-  fileId: number,
-  formatsJson: Record<string, any>
-): Promise<void> {
-  await pgQuery(
-    `UPDATE files
-     SET formats = (formats::jsonb || $1::jsonb),
-         updated_at = NOW()
-     WHERE id = $2`,
-    [JSON.stringify(formatsJson), fileId]
-  );
 }

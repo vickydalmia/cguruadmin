@@ -200,7 +200,9 @@ function mapMedia(media: any, fallbackAlt: string) {
   ) as Array<[string, any]>) {
     const url = safeHref(format?.url);
     const width = Number(format?.width);
-    if (!url || !Number.isFinite(width) || width <= 0) continue;
+    // Integer check matches cguru-ui's isRenderableCandidate so both ladders
+    // agree on which candidates count toward the coverage rule.
+    if (!url || !Number.isInteger(width) || width <= 0) continue;
     (formatName.endsWith("_avif") ? avifByWidth : byWidth).set(width, url);
   }
 
@@ -211,7 +213,20 @@ function mapMedia(media: any, fallbackAlt: string) {
       .join(", ");
 
   const srcset = toSrcset(byWidth);
-  const avifSrcset = toSrcset(avifByWidth);
+
+  // The avif <source> shadows the ENTIRE fallback srcset for avif-capable
+  // browsers, so a twin ladder whose top rung was dropped by the encoder's
+  // size guard would commit them to upscaling its widest candidate into
+  // large slots. Same coverage rule as cguru-ui's avifLadderCoversFallback
+  // (separate repo — cannot be imported): the avif ladder qualifies only
+  // when its max width reaches the fallback ladder's max width; an empty
+  // fallback ladder is covered vacuously (twins-only media keeps its avif).
+  const maxWidth = (candidates: Map<number, string>) =>
+    Math.max(0, ...candidates.keys());
+  const avifSrcset =
+    avifByWidth.size > 0 && maxWidth(avifByWidth) >= maxWidth(byWidth)
+      ? toSrcset(avifByWidth)
+      : "";
 
   return {
     src,

@@ -7,16 +7,24 @@ import {
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import pLimit from "p-limit";
-import sharp from "sharp";
 import { pgQuery } from "../db/pg-client.js";
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
 import {
+  BREAKPOINTS,
+  decodeOrientedDims,
   optimizeOriginal,
   generateStrapiFormats,
   generateAvifTwins,
   slugifyFileName,
+  splitS3Key,
 } from "../utils/image-optimizer.js";
+import {
+  buildAvifGapWhere,
+  mergeAvifTombstones,
+  missingAvifTwinKeys,
+  readAvifTombstones,
+} from "../utils/format-gaps.js";
 import { getS3Client, hashBuffer } from "./02-media-upload.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -66,13 +74,19 @@ interface HashCacheEntry {
  *   - deletes the superseded S3 object when the key changed (jpeg/png →
  *     webp) unless --keep-originals is passed
  *
- * Pass 2 — add-avif-only backfill for rows that already have formats but no
- * AVIF twins (NOT formats ? 'original_avif'): encodes the twins from the best
- * available source bytes, uploads them, and merges the new keys into formats
- * with `formats || $new` in a single UPDATE. --keep-originals is a no-op here.
+ * Pass 2 — add-avif-only backfill for rows that already have formats but are
+ * missing any due, non-tombstoned AVIF twin: encodes only those gaps from the
+ * best available source bytes, uploads them, and merges the new keys into
+ * formats with `formats || $new` in a single UPDATE. Twins the size guard drops are
+ * tombstoned in provider_metadata.avifDropped (same UPDATE, or a
+ * tombstone-only UPDATE when every twin dropped) and excluded from the
+ * candidate predicate, so guard-dropped rows converge instead of re-encoding
+ * every run. --keep-originals is a no-op here.
  *
- * Row-level idempotency comes from the candidate predicates
- * (pass 1: formats IS NULL; pass 2: missing original_avif key).
+ * Row-level idempotency comes from the candidate predicates (pass 1: formats
+ * IS NULL; pass 2: any due AVIF twin is missing and not tombstoned).
+ * provider_metadata is written wholesale from a JS merge — never run this
+ * phase concurrently with phase 15 against the same DB.
  */
 export async function runMediaOptimize(): Promise<void> {
   logger.info("=== Phase 14: Media Optimize (formats backfill + webp) ===");
@@ -171,17 +185,19 @@ export async function runMediaOptimize(): Promise<void> {
     );
   }
 
-  // ── Pass 2: add-avif-only backfill (formats without original_avif) ──
+  // ── Pass 2: add-avif-only backfill (any retryable twin gap) ─────────
   // Note: --keep-originals is a no-op here (pass 2 never deletes objects).
+  const avifGap = buildAvifGapWhere(1);
   const avifCandidates = await pgQuery<AvifCandidateRow>(
     `SELECT id, name, hash, ext, mime, width, height, provider_metadata,
             size, formats
      FROM files
      WHERE provider = 'aws-s3'
        AND formats IS NOT NULL
-       AND NOT (formats::jsonb ? 'original_avif')
+       AND (${avifGap.sql})
        AND mime IN ('image/webp','image/jpeg','image/png')
-     ORDER BY id`
+     ORDER BY id`,
+    avifGap.params,
   );
 
   if (avifCandidates.length === 0) {
@@ -258,15 +274,7 @@ async function processRow(row: CandidateRow, ctx: ProcessContext): Promise<void>
     meta?.key || `${rootPrefix}${row.hash}_${nameNoExt}${row.ext}`;
 
   // Source bytes: local WP uploads file first, S3 object as fallback.
-  let source: Buffer | null = null;
-  const localPath = localByHash.get(row.hash);
-  if (localPath) {
-    try {
-      source = fs.readFileSync(localPath);
-    } catch {
-      source = null;
-    }
-  }
+  let source: Buffer | null = await readLocalByHash(localByHash, row.hash);
   if (!source) {
     source = await fetchFromS3(client, oldKey);
   }
@@ -396,10 +404,12 @@ interface AvifCandidateRow {
 }
 
 /**
- * Pass 2 — add AVIF twins to a row that already has formats but no
- * original_avif key. Uploads the twins, then merges the new format entries
+ * Pass 2 — add missing AVIF twins to a row that already has formats. Uploads
+ * only retryable gaps, then merges the new format entries
  * into the existing formats JSON in a single UPDATE (last step, so a crash
- * leaves the row matching the pass-2 predicate for re-runs).
+ * leaves the row matching the pass-2 predicate for re-runs). Guard-dropped
+ * twins are tombstoned in provider_metadata.avifDropped so the row exits the
+ * candidate set instead of re-encoding (and re-dropping) forever.
  */
 async function processAvifRow(
   row: AvifCandidateRow,
@@ -413,15 +423,7 @@ async function processAvifRow(
     meta?.key || `${rootPrefix}${row.hash}_${nameNoExt}${row.ext}`;
 
   // Source bytes: local WP uploads file first, current S3 object as fallback.
-  let source: Buffer | null = null;
-  const localPath = localByHash.get(row.hash);
-  if (localPath) {
-    try {
-      source = fs.readFileSync(localPath);
-    } catch {
-      source = null;
-    }
-  }
+  let source: Buffer | null = await readLocalByHash(localByHash, row.hash);
   if (!source) {
     source = await fetchFromS3(client, s3Key);
   }
@@ -433,33 +435,15 @@ async function processAvifRow(
     return;
   }
 
-  // Key/naming conventions follow the row's existing S3 layout:
-  //   keyPrefix = everything up to and including the last '/' of the key
-  //   hashBase  = key basename minus its extension
-  //   nameBase  = row.name minus its extension
-  const lastSlash = s3Key.lastIndexOf("/");
-  const keyPrefix = lastSlash >= 0 ? s3Key.slice(0, lastSlash + 1) : rootPrefix;
-  const keyBasename = lastSlash >= 0 ? s3Key.slice(lastSlash + 1) : s3Key;
-  const hashBase = path.basename(keyBasename, path.extname(keyBasename));
+  // nameBase = row.name minus its extension; key/naming conventions follow
+  // the row's existing S3 layout (splitS3Key).
+  const { keyPrefix, hashBase } = splitS3Key(s3Key, rootPrefix);
 
   // True dimensions from the source bytes (row.width may not match the
   // source, e.g. a full-resolution local original); fall back to row values
   // when the source cannot be decoded, and skip when neither is available.
-  let width: number | null = null;
-  let height: number | null = null;
-  try {
-    const srcMeta = await sharp(source).metadata();
-    const swapped = (srcMeta.orientation ?? 1) >= 5;
-    width = (swapped ? srcMeta.height : srcMeta.width) ?? null;
-    height = (swapped ? srcMeta.width : srcMeta.height) ?? null;
-  } catch {
-    width = null;
-    height = null;
-  }
-  if (!width || !height) {
-    width = row.width;
-    height = row.height;
-  }
+  const dims = await decodeOrientedDims(source, row.width, row.height);
+  const { width, height } = dims;
   if (!width || !height) {
     stats.avifFailed++;
     logger.warn(
@@ -468,16 +452,24 @@ async function processAvifRow(
     return;
   }
 
+  const missingKeys = missingAvifTwinKeys(
+    row.formats,
+    readAvifTombstones(meta),
+    width,
+    height,
+  );
+  if (missingKeys.length === 0) return;
+
   // Size guard inputs: webp counterpart byte sizes from the existing formats
   // entries; the original's bytes from files.size (KB, /1024 convention).
   const compareTo: Record<string, number> = {};
   if (row.size) compareTo.original_avif = Math.round(row.size * 1024);
-  for (const key of ["small", "medium", "large"]) {
+  for (const key of Object.keys(BREAKPOINTS)) {
     const entry = row.formats?.[key];
     if (entry?.sizeInBytes) compareTo[`${key}_avif`] = entry.sizeInBytes;
   }
 
-  const { formatsJson, uploads, droppedLarger } = await generateAvifTwins(source, {
+  const { formatsJson, uploads, droppedKeys, failedKeys } = await generateAvifTwins(source, {
     width,
     height,
     hashBase,
@@ -485,15 +477,37 @@ async function processAvifRow(
     urlPrefix,
     keyPrefix,
     compareTo,
+    onlyKeys: new Set(missingKeys),
   });
 
   if (uploads.length === 0) {
-    if (droppedLarger > 0) {
+    if (droppedKeys.length > 0) {
       // WebP already beats AVIF for this image (tiny flat graphics) — not a
-      // failure. The row stays a nominal candidate on future runs (cheap
-      // re-encode) rather than poisoning formats with non-file marker keys,
-      // which would break Strapi's delete iteration.
-      stats.avifSkippedLarger = (stats.avifSkippedLarger ?? 0) + 1;
+      // failure. Tombstone the dropped twins (marker keys inside formats
+      // would break Strapi's delete iteration) so the row exits both this
+      // pass's predicate and phase 15's generated arms.
+      const newMeta = mergeAvifTombstones(meta, droppedKeys);
+      if (newMeta) {
+        await pgQuery(
+          `UPDATE files
+           SET provider_metadata = $1::jsonb,
+               updated_at = NOW()
+           WHERE id = $2`,
+          [JSON.stringify(newMeta), row.id]
+        );
+      }
+      if (failedKeys.length > 0) {
+        // Guard-dropped twins are tombstoned above, but encode failures keep
+        // the row eligible — surface them instead of hiding behind the
+        // skipped-larger bucket.
+        stats.avifFailed++;
+        logger.warn(
+          `AVIF twin encode(s) failed for file ${row.id} (${row.name}): ` +
+            `${failedKeys.join(", ")} — row stays eligible`
+        );
+      } else {
+        stats.avifSkippedLarger = (stats.avifSkippedLarger ?? 0) + 1;
+      }
       return;
     }
     // Every target's encode failed — leave the row eligible for re-runs.
@@ -516,16 +530,39 @@ async function processAvifRow(
     );
   }
 
-  // Single UPDATE — merge the new avif keys into the existing formats JSON.
-  await pgQuery(
-    `UPDATE files
-     SET formats = (formats::jsonb || $1::jsonb),
-         updated_at = NOW()
-     WHERE id = $2`,
-    [JSON.stringify(formatsJson), row.id]
-  );
+  // Single UPDATE — merge the new avif keys into the existing formats JSON
+  // and record any partially-dropped twins in the same write.
+  const newMeta = mergeAvifTombstones(meta, droppedKeys);
+  if (newMeta) {
+    await pgQuery(
+      `UPDATE files
+       SET formats = (formats::jsonb || $1::jsonb),
+           provider_metadata = $2::jsonb,
+           updated_at = NOW()
+       WHERE id = $3`,
+      [JSON.stringify(formatsJson), JSON.stringify(newMeta), row.id]
+    );
+  } else {
+    await pgQuery(
+      `UPDATE files
+       SET formats = (formats::jsonb || $1::jsonb),
+           updated_at = NOW()
+       WHERE id = $2`,
+      [JSON.stringify(formatsJson), row.id]
+    );
+  }
 
-  stats.avifBackfilled++;
+  if (failedKeys.length > 0) {
+    // Partial success persisted above; the failed twins keep the row
+    // eligible, so count it as failed rather than backfilled.
+    stats.avifFailed++;
+    logger.warn(
+      `AVIF twin encode(s) failed for file ${row.id} (${row.name}): ` +
+        `${failedKeys.join(", ")} — row stays eligible`
+    );
+  } else {
+    stats.avifBackfilled++;
+  }
   stats.avifVariantsUploaded += uploads.length;
 }
 
@@ -536,6 +573,23 @@ export function parseProviderMetadata(raw: any): Record<string, any> | null {
   if (typeof raw === "object") return raw;
   try {
     return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read the local WP uploads file for a content hash — null when the hash is
+ * unmapped or the file is unreadable (callers fall back to S3).
+ */
+export async function readLocalByHash(
+  localByHash: Map<string, string>,
+  hash: string
+): Promise<Buffer | null> {
+  const localPath = localByHash.get(hash);
+  if (!localPath) return null;
+  try {
+    return await fs.promises.readFile(localPath);
   } catch {
     return null;
   }

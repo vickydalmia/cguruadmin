@@ -25,45 +25,13 @@
  * changed entries stay stale until the next rebuild/edit.
  */
 
-import { createRequire } from "node:module";
 import { config } from "./config.js";
 import { pgQuery, closePg } from "./db/pg-client.js";
 import { logger } from "./utils/logger.js";
-// The main package owns the richtext allowlist and field registry; load it
-// from there so the two can never drift. createRequire (not import) because
-// the main package is CommonJS while this one is ESM — tsx compiles the TS
-// across the boundary but Node's named-export detection can't see through it.
-const require = createRequire(import.meta.url);
-const { cleanHtml, RICHTEXT_FIELDS } =
-  require("../../src/utils/sanitize-richtext") as {
-    cleanHtml: (html: string) => string;
-    RICHTEXT_FIELDS: Record<string, string[]>;
-  };
-
-// DB table per content-type uid (Strapi table names come from each schema's
-// collectionName, not mechanical pluralization — so map explicitly). Derived
-// from RICHTEXT_FIELDS so a richtext field added there cannot be silently
-// skipped here: an unmapped uid fails fast below instead.
-const TABLE_BY_UID: Record<string, string> = {
-  "api::deal.deal": "deals",
-  "api::coupon.coupon": "coupons",
-  "api::category.category": "categories",
-  "api::bank.bank": "banks",
-  "api::brand.brand": "brands",
-  "api::store.store": "stores",
-};
-
-const TARGETS: Array<{ table: string; column: string }> = Object.entries(
-  RICHTEXT_FIELDS
-).flatMap(([uid, fields]) => {
-  const table = TABLE_BY_UID[uid];
-  if (!table) {
-    throw new Error(
-      `RICHTEXT_FIELDS has "${uid}" but TABLE_BY_UID has no table for it — add the mapping`
-    );
-  }
-  return fields.map((column) => ({ table, column }));
-});
+// Sanitizer + table/column targets shared with fix-content-srcsets; the
+// module throws at import on an unmapped uid, keeping this script's startup
+// fail-fast (before any DB connection or the confirmation-flag check).
+import { cleanHtml, RICHTEXT_TARGETS } from "./utils/richtext-targets.js";
 
 // Rows worth looking at: a line starting with "- " / "* " / "+ " / "1. ",
 // or a **bold** marker pair.
@@ -159,7 +127,7 @@ async function main() {
   }
 
   let totalChanged = 0;
-  for (const { table, column } of TARGETS) {
+  for (const { table, column } of RICHTEXT_TARGETS) {
     const rows = await pgQuery<{ id: number; value: string }>(
       `SELECT id, ${column} AS value FROM ${table}
        WHERE ${column} ~ $1 OR ${column} LIKE '%**%'

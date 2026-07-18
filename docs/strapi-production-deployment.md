@@ -364,6 +364,10 @@ With a valid CA, keep `DATABASE_SSL_REJECT_UNAUTHORIZED=true`.
   are configured independently of the S3 gate, from `src/constants/image.ts`
   (shared with the migration pipeline) — the generated variant matrix is
   identical whether uploads land on S3 or local disk.
+- The same matrix also generates AVIF "twin" variants for webp masters
+  (`original`/`xsmall`/`small`/`medium`/`large` `_avif`), so `<picture>` markup
+  can serve AVIF with a webp fallback. A twin no smaller than its webp
+  counterpart is dropped.
 - New uploads get `Cache-Control: public, max-age=31536000, immutable`
   (filenames are content-hashed and overwrites are prevented, so immutable is
   safe). Objects uploaded before that setting need a one-time metadata
@@ -373,6 +377,11 @@ With a valid CA, keep `DATABASE_SSL_REJECT_UNAUTHORIZED=true`.
   prints the exact flag to use). The script preserves each object's stored
   Content-Type — do NOT use `aws s3 cp --metadata-directive REPLACE`, which
   re-guesses types from file extensions.
+- Its sibling `npm run fix:content-srcsets` rebuilds rich-text `<img>`
+  `srcset`/`sizes` from the current `files.formats` (same dry-run default and
+  `--apply --yes-i-mean-<pg-host>` gating) — useful after a variant backfill.
+  See [FRESH-MIGRATION.md § Maintenance scripts](../migration/FRESH-MIGRATION.md#maintenance-scripts)
+  for the full catalog.
 - An image CDN (on-the-fly resizing in front of the bucket) is a future-only
   option; nothing in the current pipeline depends on one. All variants are
   pre-generated at upload/migration/backfill time.

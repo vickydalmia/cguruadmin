@@ -119,7 +119,7 @@ Logs are written to:
 
 ## Migration Phases
 
-The migration runs sequential phases (00–14, including compatibility phase 13a). Each phase checkpoints on completion so the process can resume after interruption.
+The migration runs sequential phases (00–15, including compatibility phase 13a). Each phase checkpoints on completion so the process can resume after interruption.
 
 ### Phase 00 — Preflight
 
@@ -131,7 +131,7 @@ Queries all WordPress image attachments. Builds an in-memory catalog with file p
 
 ### Phase 02 — Media Upload to S3
 
-Uploads inventoried images to S3 with configurable concurrency. Deduplicates by SHA-256 hash. Before upload, supported raster images (jpeg/png/webp/avif/tiff) are optimized: EXIF orientation baked in, downscaled to fit 1920×1920, jpeg/png converted to webp, and webp/avif/tiff re-compressed at quality 80. Strapi-style responsive variants (`thumbnail`/`small`/`medium`/`large`) are generated and uploaded alongside the original, and recorded in the `files.formats` JSON column. For webp originals, AVIF "twin" variants (`original_avif`/`small_avif`/`medium_avif`/`large_avif`, quality 60, effort 3) are also encoded — from the pre-optimization source bytes for best quality — and merged into `formats`. gif/svg/other formats pass through untouched (`formats` stays NULL). Creates corresponding records in the Strapi `files` table with CloudFront URLs, dimensions, and provider metadata. See [Media / S3 Pipeline](#media--s3-pipeline) for details.
+Uploads inventoried images to S3 with configurable concurrency. Deduplicates by SHA-256 hash. Before upload, supported raster images (jpeg/png/webp/avif/tiff) are optimized: EXIF orientation baked in, downscaled to fit 1920×1920, jpeg/png converted to webp, and webp/avif/tiff re-compressed at quality 80. Strapi-style responsive variants (`thumbnail`/`xsmall`/`small`/`medium`/`large`) are generated and uploaded alongside the original, and recorded in the `files.formats` JSON column. For webp originals, AVIF "twin" variants (`original_avif`/`xsmall_avif`/`small_avif`/`medium_avif`/`large_avif`, quality 50, effort 4) are also encoded — from the pre-optimization source bytes for best quality — and merged into `formats`; a twin that comes out no smaller than its webp counterpart is dropped. All breakpoint/quality knobs live in [`src/constants/image.ts`](../src/constants/image.ts), the single source of truth shared with admin uploads. gif/svg/other formats pass through untouched (`formats` stays NULL). Creates corresponding records in the Strapi `files` table with CloudFront URLs, dimensions, and provider metadata. See [Media / S3 Pipeline](#media--s3-pipeline) for details.
 
 ### Phase 03 — Taxonomies
 
@@ -226,9 +226,33 @@ Runs two passes over already-migrated S3 images.
 npm run migrate -- --phase 14-media-optimize --keep-originals
 ```
 
-**Pass 2 — add-AVIF-only backfill.** Candidates are rows that already have `formats` but no `original_avif` key (`formats::jsonb ? 'original_avif'` is false) with MIME webp/jpeg/png. For each row, the source is resolved the same way (local hash map, then S3 object via `provider_metadata.key`), true dimensions are read via `sharp` metadata (falling back to the row's stored width/height), AVIF twins (`original_avif`/`small_avif`/`medium_avif`/`large_avif`) are encoded and uploaded next to the existing variants, and the new keys are merged into the existing JSON with a single `UPDATE files SET formats = formats || $new`. Idempotent via the missing-`original_avif` predicate; `--keep-originals` is a no-op for this pass.
+**Pass 2 — add-AVIF-only backfill.** Candidates are rows that already have `formats` but no `original_avif` key (`formats::jsonb ? 'original_avif'` is false) with MIME webp/jpeg/png. For each row, the source is resolved the same way (local hash map, then S3 object via `provider_metadata.key`), true dimensions are read via `sharp` metadata (falling back to the row's stored width/height), AVIF twins (`original_avif`/`xsmall_avif`/`small_avif`/`medium_avif`/`large_avif`) are encoded and uploaded next to the existing variants, and the new keys are merged into the existing JSON with a single `UPDATE files SET formats = formats || $new`. Idempotent via the missing-`original_avif` predicate; `--keep-originals` is a no-op for this pass.
 
 Fails fast with a clear error if the `files` table is empty (run a full migration first).
+
+### Phase 15 — Media Formats Backfill
+
+Fills gaps in the responsive variant matrix for rows that **already have** `formats`. Phase 14 pass 1 only handles `formats IS NULL` and pass 2 only adds missing AVIF twins, so rows migrated before the `xsmall` (320px) breakpoint or the thumbnail rung existed can never gain those keys from Phase 14. Per row, this phase computes the expected key set for the master's true dimensions and MIME (`expectedFormatKeys()`) minus the keys already stored, generates **only the missing variants** from the current S3 master (the local WordPress original is used as the AVIF encode source when available), uploads them, and merges the new keys into `formats` with a single jsonb-merge `UPDATE` as the **last** step — a crash leaves the row a candidate for the next run. Skipped with a warning when S3 isn't configured.
+
+```bash
+npm run migrate -- --phase 15-media-formats-backfill --dry-run    # DB-read-only report
+npm run migrate -- --phase 15-media-formats-backfill --limit 50   # pilot run
+npm run migrate -- --phase 15-media-formats-backfill --overwrite  # regenerate everything
+```
+
+- `--dry-run` — per-row missing-keys report from stored DB values only (no S3 access, no writes). Rows whose stored dimensions are unknown are warned and counted; the real run decides those from the S3 master.
+- `--limit N` — process at most N candidate rows.
+- `--overwrite` — regenerate **all** expected keys and replace the S3 objects (unconditional puts) instead of only filling gaps.
+
+Behavior notes:
+
+- **Never checkpointed** (`skipCheckpoint`) — re-runnable by design; the candidate SQL is the idempotency guard, and a checkpoint would let a `--dry-run`/`--limit` pilot mark the phase complete.
+- **S3 master resolution**: `provider_metadata.key` when present (migration rows always carry it); otherwise the aws-s3 provider convention `{rootPath}/{hash}{ext}` is tried first, then the legacy migration-era flat `{rootPath}/{hash}_{name}{ext}`. The candidate that hits defines where new variants land.
+- **Conditional PUT**: variant uploads use `IfNoneMatch: "*"` so re-runs never rewrite bytes already placed — a 412 response means a previous run uploaded the object and counts as success. Endpoints that answer `NotImplemented` (non-AWS S3 implementations) flip the rest of the run to unconditional puts.
+- **Shared hashes**: rows sharing an S3 key (same content hash) serialize behind one another and reuse the format entries generated by the first row, but each row computes and merges its **own** missing set.
+- **AVIF size guard**: rows whose only due keys are AVIF twins can legitimately end with nothing to merge — twins no smaller than their webp counterpart are dropped, and such rows stay nominal candidates (cheap re-encode + re-drop on re-runs), exactly like Phase 14 pass 2.
+
+Content HTML srcsets are frozen at migration time, so rich-text `<img>` tags don't automatically pick up backfilled variants — run `npm run fix:content-srcsets` afterwards if that parity matters (see [Maintenance scripts](#maintenance-scripts)).
 
 ---
 
@@ -320,22 +344,30 @@ Coupons with `coupon_type='unique'` are linked to their pool via `unique_coupon_
 
 ### Phase 02 — Upload & Register
 
-For each inventoried image:
+For each image (uploaded on demand the first time content references it):
 
-1. **Hash** — SHA-256 of file contents, truncated to 16 characters
-2. **S3 key** — `{S3_ROOT_PATH}/{hash}_{filename}{ext}`
-3. **Dedup check** — skip if hash already exists in Strapi `files` table
-4. **Upload** — PUT to S3 with `Cache-Control: public, max-age=31536000, immutable`
-5. **Metadata** — extract width/height via `sharp`, compute file size in KB
-6. **Register** — insert into Strapi `files` table:
+1. **Hash** — SHA-256 of the source file bytes, truncated to 16 characters. Computed before any optimization, so dedup/idempotency is unaffected by re-encoding.
+2. **Dedup check** — skip if the hash already exists in the Strapi `files` table (the existing record is reused)
+3. **Optimize** — supported raster formats (jpeg/png/webp/avif/tiff) go through `optimizeOriginal`: EXIF orientation baked, capped at 1920×1920, jpeg/png converted to webp, webp/avif/tiff re-encoded at quality 80. gif/svg/animated/undecodable images pass through untouched.
+4. **S3 key** — `{S3_ROOT_PATH}/{slug}-{hash[0:8]}/{slug}{ext}`: one folder per image (keyword-first slug + short content hash) so the original and all generated variants live together; only the extension changes on webp conversion
+5. **Upload** — PUT to S3 with `Cache-Control: public, max-age=31536000, immutable`. SVG/markup-capable MIME types are stored as `application/octet-stream` with an attachment disposition so they can never execute inline.
+6. **Variants** — `generateStrapiFormats` renders the responsive matrix (`thumbnail`/`xsmall`/`small`/`medium`/`large`, each key only when the master exceeds that size) plus AVIF twins for webp masters, uploads every variant next to the original, and returns the `files.formats` JSON
+7. **Register** — insert into Strapi `files` table:
    - `document_id`: CUID v2
    - `url`: `{S3_BASE_URL}/{s3Key}` (or AWS default URL)
    - `provider`: `"aws-s3"`
    - `provider_metadata`: JSON with S3 key
-   - `hash`, `name`, `alternative_text`, `caption`, `width`, `height`, `ext`, `mime`, `size`
-7. **ID map** — store `WP attachment_id → Strapi file_id` for later linking
+   - `formats`, `hash`, `name`, `alternative_text`, `caption`, `width`, `height`, `ext`, `mime`, `size`
+8. **ID map** — store `WP attachment_id → Strapi file_id` for later linking
 
-If `S3_BUCKET` is empty, files are registered as local provider records with `/uploads/{fileName}` URLs.
+If `S3_BUCKET` is empty, optimization is skipped entirely — files are registered as local provider records with `/uploads/{hash}_{name}{ext}` URLs and `formats` stays NULL.
+
+### Maintenance scripts
+
+Two operator scripts repair already-uploaded media / already-migrated content in place. Both default to **dry-run** and refuse to write without `--apply` plus an explicit confirmation flag naming the target; full runbook entries live in [FRESH-MIGRATION.md § Maintenance scripts](./FRESH-MIGRATION.md#maintenance-scripts).
+
+- `npm run fix:cache-headers` — stamps `Cache-Control: public, max-age=31536000, immutable` on every already-uploaded S3 object via an in-place `CopyObject` (`MetadataDirective: REPLACE`) that carries the stored Content-Type/Disposition/Encoding/Language, user metadata, storage class, and SSE settings through unchanged. Objects already carrying the value are skipped, so re-runs are cheap. Write flag: `--apply --yes-i-mean-<bucket>`.
+- `npm run fix:content-srcsets` — rebuilds `srcset`/`sizes` on migrated rich-text `<img>` tags from the current `files.formats` (e.g. after Phase 15 adds missing variants). Only tags whose `src` exactly matches a `files.url` master URL are touched; the rest are logged and left as-is. Write flag: `--apply --yes-i-mean-<pg-host>`.
 
 ### Media Linking
 
