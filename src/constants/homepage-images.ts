@@ -37,16 +37,6 @@ export const HOMEPAGE_IMAGE_RULES: HomepageImageRule[] = [
     required: true,
   },
   {
-    path: 'hero.banners[].mobileImage',
-    componentUid: 'homepage.slider-slide',
-    field: 'mobileImage',
-    label: 'Hero slide mobile image',
-    width: 686,
-    height: 412,
-    display: [343, 206],
-    required: false,
-  },
-  {
     path: 'hero.products[].imageOverride',
     componentUid: 'home.hero-product',
     field: 'imageOverride',

@@ -25,6 +25,7 @@ import { runOfferBackfill } from "./phases/12-offer-backfill.js";
 import { runSiteContent } from "./phases/13-site-content.js";
 import { runHomepageOfferBackfill } from "./phases/13a-homepage-offer-sections.js";
 import { runMediaOptimize } from "./phases/14-media-optimize.js";
+import { runMediaFormatsBackfill } from "./phases/15-media-formats-backfill.js";
 
 interface Phase {
   name: string;
@@ -49,6 +50,7 @@ const phases: Phase[] = [
   { name: "13-site-content", fn: runSiteContent },
   { name: "13a-homepage-offer-sections", fn: runHomepageOfferBackfill },
   { name: "14-media-optimize", fn: runMediaOptimize },
+  { name: "15-media-formats-backfill", fn: runMediaFormatsBackfill },
 ];
 
 async function main(): Promise<void> {

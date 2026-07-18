@@ -10,6 +10,8 @@
     "migrate:phase": "tsx src/index.ts --phase",
     "migrate:fresh": "tsx src/index.ts --clean",
     "fix:markdown-richtext": "tsx src/fix-markdown-richtext.ts",
+    "fix:cache-headers": "tsx src/fix-cache-headers.ts",
+    "fix:content-srcsets": "tsx src/fix-content-srcsets.ts",
     "backfill:offer-fields": "tsx src/backfill-offer-fields.ts",
     "cleanup:legacy-fields": "tsx src/drop-legacy-fields.ts",
     "test": "tsx --test test/*.test.ts"

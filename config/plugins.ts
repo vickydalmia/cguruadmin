@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { IMAGE_BREAKPOINTS } from '../src/constants/image';
 
 const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin => {
   const s3UploadEnabled = env.bool(
@@ -15,16 +16,14 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
       resolve: './src/plugins/unique-coupon',
     },
 
-    ...(s3UploadEnabled
-      ? {
-          upload: {
-            config: {
-              // Responsive format sizes generated on upload (originals are
-              // capped at 1920 by src/extensions/upload — no 1920 breakpoint).
-              // xsmall serves ~150px card slots at DPR 2 — without it the
-              // smallest variant is 500px and thumbnails download 3x the
-              // pixels they render (Lighthouse "improve image delivery").
-              breakpoints: { large: 1000, medium: 750, small: 500, xsmall: 320 },
+    upload: {
+      config: {
+        // Breakpoints live OUTSIDE the S3 gate: the variant matrix must be
+        // identical whether uploads land on S3 or local disk (values in
+        // src/constants/image.ts, shared with the migration pipeline).
+        breakpoints: { ...IMAGE_BREAKPOINTS },
+        ...(s3UploadEnabled
+          ? {
               provider: 'aws-s3',
               providerOptions: {
                 baseUrl: s3BaseUrl,
@@ -55,16 +54,17 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
                 // on), so a replaced image always gets a NEW URL — immutable
                 // year-long browser/CDN caching is safe and fixes the
                 // "Cache TTL: None" Lighthouse audit on media.couponzguru.com.
-                // Existing objects need a one-time metadata backfill (aws s3 cp
-                // --metadata-directive REPLACE --cache-control ...).
+                // Existing objects need a one-time metadata backfill:
+                // migration's `npm run fix:cache-headers` (NOT aws s3 cp,
+                // which re-guesses Content-Type from extensions).
                 upload: { CacheControl: 'public, max-age=31536000, immutable' },
                 uploadStream: { CacheControl: 'public, max-age=31536000, immutable' },
                 delete: {},
               },
-            },
-          },
-        }
-      : {}),
+            }
+          : {}),
+      },
+    },
   };
 };
 

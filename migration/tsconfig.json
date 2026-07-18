@@ -6,7 +6,9 @@
     "esModuleInterop": true,
     "strict": true,
     "outDir": "dist",
-    "rootDir": "src",
+    // ".." so imports of ../src/constants/* compile (TS6059). Everything runs
+    // via tsx; nothing consumes dist, so the emit-layout shift is harmless.
+    "rootDir": "..",
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,

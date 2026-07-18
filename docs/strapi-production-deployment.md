@@ -352,6 +352,29 @@ DigitalOcean managed PostgreSQL uses a CA certificate. For proper verification (
 
 With a valid CA, keep `DATABASE_SSL_REJECT_UNAUTHORIZED=true`.
 
+### Media uploads: S3 gate and image variants
+
+- `S3_UPLOAD_ENABLED` defaults to **off** when `NODE_ENV=production` (and on
+  everywhere else). A production boot without `S3_UPLOAD_ENABLED=true` logs a
+  loud startup error — `[upload] S3_UPLOAD_ENABLED is not "true" — uploads
+  will go to LOCAL DISK …` — because local disk is tmpfs in this deploy and
+  every redeploy wipes it. The boot still succeeds so a bad env can be fixed
+  through the running instance; treat the error as a deploy blocker.
+- Responsive breakpoints (`large`/`medium`/`small`/`xsmall` plus thumbnail)
+  are configured independently of the S3 gate, from `src/constants/image.ts`
+  (shared with the migration pipeline) — the generated variant matrix is
+  identical whether uploads land on S3 or local disk.
+- New uploads get `Cache-Control: public, max-age=31536000, immutable`
+  (filenames are content-hashed and overwrites are prevented, so immutable is
+  safe). Objects uploaded before that setting need a one-time metadata
+  backfill: `cd migration && npm run fix:cache-headers -- --dry-run`, review,
+  then re-run with `--apply`. The script preserves each object's stored
+  Content-Type — do NOT use `aws s3 cp --metadata-directive REPLACE`, which
+  re-guesses types from file extensions.
+- An image CDN (on-the-fly resizing in front of the bucket) is a future-only
+  option; nothing in the current pipeline depends on one. All variants are
+  pre-generated at upload/migration/backfill time.
+
 ## 6. Log the droplet into GHCR
 
 ### Create a personal access token (classic)

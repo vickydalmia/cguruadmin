@@ -1,5 +1,6 @@
-// Image optimization knobs for CMS uploads.
-// Twin copy lives in migration/src/utils/image-optimizer.ts — keep in sync.
+// Image optimization knobs + responsive variant matrix for CMS uploads.
+// Single source of truth: config/plugins.ts, src/extensions/upload and
+// migration/src/utils/image-optimizer.ts all import from here.
 export const IMAGE_OPTIMIZATION = {
   /** Longest side of the stored original after capping. */
   maxDimension: 1920,
@@ -17,3 +18,20 @@ export const IMAGE_OPTIMIZATION = {
    */
   avif: { quality: 50, effort: 4 },
 } as const;
+
+/**
+ * Responsive format sizes generated on upload (originals are capped at
+ * maxDimension by src/extensions/upload — no 1920 breakpoint). xsmall serves
+ * ~150px card slots at DPR 2 — without it the smallest variant is 500px and
+ * thumbnails download 3x the pixels they render (Lighthouse "improve image
+ * delivery").
+ */
+export const IMAGE_BREAKPOINTS = {
+  large: 1000,
+  medium: 750,
+  small: 500,
+  xsmall: 320,
+} as const;
+
+/** Strapi's internal thumbnail format size (upload plugin default). */
+export const THUMBNAIL = { width: 245, height: 156 } as const;

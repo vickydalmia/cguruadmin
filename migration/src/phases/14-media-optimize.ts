@@ -23,7 +23,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CHECKPOINT_DIR = path.resolve(__dirname, "../../.checkpoints");
 const HASH_MAP_CACHE = path.join(CHECKPOINT_DIR, "media-hash-map.json");
 
-const CACHE_CONTROL = "public, max-age=31536000, immutable";
+export const CACHE_CONTROL = "public, max-age=31536000, immutable";
 
 /** File extensions worth hashing when scanning the WP uploads tree. */
 const SOURCE_EXTENSIONS = new Set([
@@ -529,9 +529,9 @@ async function processAvifRow(
   stats.avifVariantsUploaded += uploads.length;
 }
 
-// ── Source resolution helpers ────────────────────────────────────────
+// ── Source resolution helpers (shared with Phase 15) ─────────────────
 
-function parseProviderMetadata(raw: any): Record<string, any> | null {
+export function parseProviderMetadata(raw: any): Record<string, any> | null {
   if (!raw) return null;
   if (typeof raw === "object") return raw;
   try {
@@ -541,7 +541,7 @@ function parseProviderMetadata(raw: any): Record<string, any> | null {
   }
 }
 
-async function fetchFromS3(
+export async function fetchFromS3(
   client: ReturnType<typeof getS3Client>,
   key: string
 ): Promise<Buffer | null> {
@@ -562,7 +562,7 @@ async function fetchFromS3(
  * Hashes are cached in .checkpoints/media-hash-map.json keyed by
  * mtime + size so re-runs don't rehash unchanged files.
  */
-function buildLocalHashMap(): Map<string, string> {
+export function buildLocalHashMap(): Map<string, string> {
   const map = new Map<string, string>();
 
   if (!fs.existsSync(config.wpUploadsDir)) {

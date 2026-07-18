@@ -218,9 +218,6 @@ for (const rule of HOMEPAGE_IMAGE_RULES) {
   (COMPONENT_FIELD_DESCRIPTIONS[rule.componentUid] ??= {})[rule.field] =
     imageRuleDescription(rule);
 }
-COMPONENT_FIELD_DESCRIPTIONS['homepage.slider-slide'].mobileImage +=
-  ' Optional — when empty, the desktop image is cropped on mobile.';
-
 async function ensureComponentFieldDescriptions(strapi: Core.Strapi): Promise<void> {
   const service: any = strapi.plugin('content-manager').service('components');
   if (!service) return;
@@ -620,6 +617,21 @@ export default {
     await ensureOfferListStatusColumn(strapi);
     await ensureSectionLabels(strapi, HOMEPAGE_UID, HOMEPAGE_SECTION_LABELS);
     await ensureSectionLabels(strapi, DOTD_UID, DOTD_SECTION_LABELS);
+
+    // S3_UPLOAD_ENABLED defaults OFF in production (config/plugins.ts), so a
+    // boot missing the flag silently writes uploads to the container's local
+    // disk — tmpfs in the hardened deploy, wiped on every redeploy. Loud
+    // error, never a throw: the instance must still boot so the env can be
+    // fixed and redeployed.
+    if (
+      process.env.NODE_ENV === 'production' &&
+      process.env.S3_UPLOAD_ENABLED !== 'true'
+    ) {
+      strapi.log.error(
+        '[upload] S3_UPLOAD_ENABLED is not "true" — uploads will go to LOCAL DISK ' +
+          '(ephemeral tmpfs, lost on redeploy). Set S3_UPLOAD_ENABLED=true in the production env.'
+      );
+    }
 
     strapi.log.info(
       `[rebuild] ${process.env.REBUILD_ENABLED === 'true' ? 'ENABLED' : 'disabled (log-only)'} — scopes computed on every content change`

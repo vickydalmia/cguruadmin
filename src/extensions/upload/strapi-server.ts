@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import sharp from 'sharp';
-import { IMAGE_OPTIMIZATION as OPT } from '../../constants/image';
+import { IMAGE_BREAKPOINTS, IMAGE_OPTIMIZATION as OPT } from '../../constants/image';
 
 const bytesToKbytes = (bytes: number) => Math.round((bytes / 1000) * 100) / 100;
 
@@ -137,7 +137,7 @@ export default (plugin: any) => {
 
       const breakpoints: Record<string, number> = strapi.config.get(
         'plugin::upload.breakpoints',
-        { large: 1000, medium: 750, small: 500 }
+        { ...IMAGE_BREAKPOINTS }
       );
       for (const prefix of ['thumbnail', ...Object.keys(breakpoints)]) {
         fs.mkdirSync(path.join(file.tmpWorkingDirectory, `${prefix}_${folder}`), {
@@ -198,7 +198,7 @@ export default (plugin: any) => {
     try {
       const breakpoints: Record<string, number> = strapi.config.get(
         'plugin::upload.breakpoints',
-        { large: 1000, medium: 750, small: 500 }
+        { ...IMAGE_BREAKPOINTS }
       );
       // JSON keys keep `_avif` (must differ from the webp entries); FILENAMES
       // drop it — the .avif extension already carries the format. Twin of

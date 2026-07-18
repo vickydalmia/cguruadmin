@@ -509,7 +509,6 @@ export interface HomepageSliderSlide extends Struct.ComponentSchema {
     altText: Schema.Attribute.String;
     desktopImage: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
     link: Schema.Attribute.String;
-    mobileImage: Schema.Attribute.Media<'images'>;
     order: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
   };
 }

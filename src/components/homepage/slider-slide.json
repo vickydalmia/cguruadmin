@@ -13,14 +13,6 @@
         "images"
       ]
     },
-    "mobileImage": {
-      "type": "media",
-      "multiple": false,
-      "required": false,
-      "allowedTypes": [
-        "images"
-      ]
-    },
     "link": {
       "type": "string"
     },

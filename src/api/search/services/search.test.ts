@@ -24,6 +24,23 @@ function searchService() {
       url: "https://cdn.example.com/shoes.webp",
       width: 600,
       height: 600,
+      formats: {
+        thumbnail: {
+          url: "https://cdn.example.com/thumbnail_shoes.webp",
+          width: 156,
+        },
+        xsmall: { url: "https://cdn.example.com/xsmall_shoes.webp", width: 320 },
+        small: { url: "https://cdn.example.com/small_shoes.webp", width: 500 },
+        original_avif: { url: "https://cdn.example.com/shoes.avif", width: 600 },
+        xsmall_avif: {
+          url: "https://cdn.example.com/xsmall_shoes.avif",
+          width: 320,
+        },
+        small_avif: {
+          url: "https://cdn.example.com/small_shoes.avif",
+          width: 500,
+        },
+      },
     },
     primaryStore: {
       name: "Shoe Store",
@@ -121,6 +138,35 @@ describe("public search entity boundaries", () => {
     );
     expect(JSON.stringify(dealFind?.options.filters)).not.toContain('"mrp"');
     expect(dealFind?.options.fields).toContain("expiresAt");
+  });
+
+  it("splits media formats into a WebP srcset and an additive AVIF srcset", async () => {
+    const { service } = searchService();
+    const response = await service.search({
+      query: "shoes",
+      mode: "group",
+      group: "deals",
+      page: 1,
+      pageSize: 20,
+    });
+
+    const media = response.deals[0].media;
+    // WebP/fallback candidates only, width-sorted, xsmall rung included.
+    expect(media.srcset).toBe(
+      "https://cdn.example.com/thumbnail_shoes.webp 156w, " +
+        "https://cdn.example.com/xsmall_shoes.webp 320w, " +
+        "https://cdn.example.com/small_shoes.webp 500w",
+    );
+    expect(media.srcset).not.toContain(".avif");
+    // AVIF twins land in their own srcset (same byWidth ordering).
+    expect(media.avifSrcset).toBe(
+      "https://cdn.example.com/xsmall_shoes.avif 320w, " +
+        "https://cdn.example.com/small_shoes.avif 500w, " +
+        "https://cdn.example.com/shoes.avif 600w",
+    );
+    // Media without formats (the owner logo) stays null on both fields.
+    expect(response.deals[0].owner.logo.srcset).toBeNull();
+    expect(response.deals[0].owner.logo.avifSrcset).toBeNull();
   });
 
   it("matches entities by slug so acronym searches can find their full names", async () => {

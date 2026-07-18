@@ -112,7 +112,7 @@ const publishedDealListRef = {
 };
 
 const bannerSlides = {
-  populate: { desktopImage: true, mobileImage: true },
+  populate: { desktopImage: true },
 };
 
 const HOMEPAGE_POPULATE = {

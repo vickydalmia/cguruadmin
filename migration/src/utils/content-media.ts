@@ -9,6 +9,7 @@ import {
   UploadedFileRecord,
 } from "../phases/02-media-upload.js";
 import { logger } from "./logger.js";
+import { IMAGE_BREAKPOINTS } from "./image-optimizer.js";
 
 /**
  * Rewrites WordPress uploads URLs embedded in rich-text HTML (img src/srcset,
@@ -262,9 +263,12 @@ function escapeAttr(value: string): string {
     .replace(/>/g, "&gt;");
 }
 
-const SRCSET_FORMAT_KEYS = ["thumbnail", "small", "medium", "large"];
+// buildSrcset sorts by width, so declaration order is irrelevant.
+const SRCSET_FORMAT_KEYS = ["thumbnail", ...Object.keys(IMAGE_BREAKPOINTS)];
 
-function buildSrcset(record: UploadedFileRecord): string | null {
+/** Width-sorted srcset from a file record's formats + original (exported for
+ *  fix-content-srcsets, which rebuilds stored HTML after formats backfills). */
+export function buildSrcset(record: UploadedFileRecord): string | null {
   const entries: Array<{ url: string; width: number }> = [];
   const formats = record.formats || {};
   for (const key of SRCSET_FORMAT_KEYS) {
@@ -279,7 +283,10 @@ function buildSrcset(record: UploadedFileRecord): string | null {
   return entries.map((e) => `${e.url} ${e.width}w`).join(", ");
 }
 
-function rebuildImgTag(tag: string, record: UploadedFileRecord): string {
+/** Rebuild an <img> tag around a file record: fresh src/srcset/sizes/dims,
+ *  carrying over alt/title/class/id/loading from the old tag (exported for
+ *  fix-content-srcsets alongside buildSrcset). */
+export function rebuildImgTag(tag: string, record: UploadedFileRecord): string {
   const attrs: string[] = [`src="${escapeAttr(record.url)}"`];
 
   const srcset = buildSrcset(record);

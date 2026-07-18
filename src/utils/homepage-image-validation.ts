@@ -73,7 +73,7 @@ function collectOccurrences(root: any, rules: HomepageImageRule[]): Occurrence[]
 const CURRENT_MEDIA_POPULATE = {
   hero: {
     populate: {
-      banners: { populate: ['desktopImage', 'mobileImage'] },
+      banners: { populate: ['desktopImage'] },
       products: { populate: ['imageOverride'] },
     },
   },

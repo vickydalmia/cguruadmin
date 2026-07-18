@@ -189,26 +189,34 @@ function mapMedia(media: any, fallbackAlt: string) {
   const src = safeHref(media?.url);
   if (!src) return null;
 
+  // A plain img srcset cannot advertise mixed AVIF and WebP candidates:
+  // srcset keeps the universally usable WebP/fallback variants, while the
+  // `_avif` twin formats feed the separate avifSrcset (consumed by a
+  // <source type="image/avif">, additive — null until twins exist).
   const byWidth = new Map<number, string>();
+  const avifByWidth = new Map<number, string>();
   for (const [formatName, format] of Object.entries(
     media?.formats ?? {},
   ) as Array<[string, any]>) {
-    // A plain img srcset cannot advertise mixed AVIF and WebP candidates.
-    // Keep the universally usable WebP/fallback variants here.
-    if (formatName.endsWith("_avif")) continue;
     const url = safeHref(format?.url);
     const width = Number(format?.width);
-    if (url && Number.isFinite(width) && width > 0) byWidth.set(width, url);
+    if (!url || !Number.isFinite(width) || width <= 0) continue;
+    (formatName.endsWith("_avif") ? avifByWidth : byWidth).set(width, url);
   }
 
-  const srcset = Array.from(byWidth.entries())
-    .sort((a, b) => a[0] - b[0])
-    .map(([width, url]) => url + " " + width + "w")
-    .join(", ");
+  const toSrcset = (candidates: Map<number, string>) =>
+    Array.from(candidates.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([width, url]) => url + " " + width + "w")
+      .join(", ");
+
+  const srcset = toSrcset(byWidth);
+  const avifSrcset = toSrcset(avifByWidth);
 
   return {
     src,
     srcset: srcset || null,
+    avifSrcset: avifSrcset || null,
     width: Number(media?.width) > 0 ? Number(media.width) : null,
     height: Number(media?.height) > 0 ? Number(media.height) : null,
     alt: cleanText(media?.alternativeText, 160) ?? fallbackAlt,

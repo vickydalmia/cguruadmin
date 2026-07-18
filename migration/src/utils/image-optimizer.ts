@@ -1,31 +1,19 @@
 import sharp from "sharp";
 import { logger } from "./logger.js";
 
-/**
- * Image optimization settings.
- *
- * Twin of cguruadmin/src/constants/image.ts — keep values in sync.
- */
-export const IMAGE_OPTIMIZATION = {
-  maxDimension: 1920,
-  quality: 80,
-  convertToWebp: ["jpeg", "png"],
-  recompress: ["webp", "avif", "tiff"],
-  // q50/effort 4 (sharp's own avif default quality): measured ~63% of webp
-  // q80 bytes across this catalog incl. small logos. q60/effort 3 was a trap —
-  // 91-105% of webp on small images. Full 4:4:4 chroma kept for banner text.
-  avif: { quality: 50, effort: 4 },
-  generateAvifTwins: true,
-} as const;
+// Single source of truth for optimization knobs + variant matrix lives in
+// cguruadmin/src/constants/image.ts; re-exported for migration callers.
+// Dynamic import is required: the constants file sits in a CJS package scope
+// (cguruadmin has no "type":"module"), and a STATIC named import of tsx's
+// CJS-transpiled output fails at runtime (Node's cjs-module-lexer cannot see
+// esbuild's getter exports) — only tsx's dynamic-import interop keeps names.
+const { IMAGE_BREAKPOINTS, IMAGE_OPTIMIZATION, THUMBNAIL } = await import(
+  "../../../src/constants/image.js"
+);
+export { IMAGE_BREAKPOINTS, IMAGE_OPTIMIZATION, THUMBNAIL };
 
-/** Strapi responsive breakpoints (matches Strapi upload plugin defaults). */
-const BREAKPOINTS: Record<string, number> = {
-  large: 1000,
-  medium: 750,
-  small: 500,
-};
-
-const THUMBNAIL = { width: 245, height: 156 };
+/** Strapi responsive breakpoints (spread keeps a mutable Record shape). */
+export const BREAKPOINTS: Record<string, number> = { ...IMAGE_BREAKPOINTS };
 
 const FORMAT_TO_EXT: Record<string, string> = {
   jpeg: ".jpg",
@@ -211,6 +199,18 @@ export interface GenerateFormatsOptions {
    * input available). Falls back to the optimized buffer when omitted.
    */
   avifSource?: Buffer;
+  /**
+   * Restrict generation to these format keys (incl. `_avif` twin keys) —
+   * backfills recompute only what a row is missing. Omitted = every due key.
+   */
+  onlyKeys?: Set<string>;
+  /**
+   * Byte sizes of ALREADY-UPLOADED variants keyed by format key ("small",
+   * "medium", ...) so the AVIF size guard can compare a twin against a webp
+   * tier skipped via onlyKeys. Values are bytes (entry.sizeInBytes — NOT
+   * entry.size, which is KB via /1000).
+   */
+  existingSizes?: Record<string, number>;
 }
 
 /**
@@ -239,6 +239,8 @@ export async function generateAvifTwins(
      * pages heavier.
      */
     compareTo?: Record<string, number>;
+    /** Restrict generation to these twin keys (backfills). Omitted = all due. */
+    onlyKeys?: Set<string>;
   }
 ): Promise<{
   formatsJson: Record<string, any>;
@@ -246,7 +248,7 @@ export async function generateAvifTwins(
   /** Twins skipped because the webp counterpart was already smaller. */
   droppedLarger: number;
 }> {
-  const { width, height, hashBase, nameBase, urlPrefix, keyPrefix, compareTo } = opts;
+  const { width, height, hashBase, nameBase, urlPrefix, keyPrefix, compareTo, onlyKeys } = opts;
   const { quality, effort } = IMAGE_OPTIMIZATION.avif;
   let droppedLarger = 0;
 
@@ -266,11 +268,14 @@ export async function generateAvifTwins(
       targets.push({ key: `${key}_avif`, filePrefix: `${key}_`, width: bp, height: bp });
     }
   }
+  const dueTargets = onlyKeys
+    ? targets.filter((target) => onlyKeys.has(target.key))
+    : targets;
 
   const formatsJson: Record<string, any> = {};
   const uploads: FormatVariantUpload[] = [];
 
-  for (const target of targets) {
+  for (const target of dueTargets) {
     try {
       const { data, info } = await sharp(sourceBuffer)
         .rotate()
@@ -330,8 +335,18 @@ export async function generateStrapiFormats(
   formatsJson: Record<string, any>;
   uploads: FormatVariantUpload[];
 }> {
-  const { width, height, ext, mime, hashBase, nameBase, urlPrefix, keyPrefix } =
-    opts;
+  const {
+    width,
+    height,
+    ext,
+    mime,
+    hashBase,
+    nameBase,
+    urlPrefix,
+    keyPrefix,
+    onlyKeys,
+    existingSizes,
+  } = opts;
   const format = extToFormat(ext);
 
   const targets: Array<{ key: string; width: number; height: number }> = [];
@@ -343,11 +358,14 @@ export async function generateStrapiFormats(
       targets.push({ key, width: bp, height: bp });
     }
   }
+  const dueTargets = onlyKeys
+    ? targets.filter((target) => onlyKeys.has(target.key))
+    : targets;
 
   const formatsJson: Record<string, any> = {};
   const uploads: FormatVariantUpload[] = [];
 
-  for (const target of targets) {
+  for (const target of dueTargets) {
     const pipeline = encode(
       sharp(optimizedBuffer).resize({
         width: target.width,
@@ -379,12 +397,14 @@ export async function generateStrapiFormats(
   // AVIF twins: only for webp originals (avif masters already produce avif
   // standard keys above; other mimes are left unchanged).
   if (IMAGE_OPTIMIZATION.generateAvifTwins && mime === "image/webp") {
+    // Counterparts for tiers skipped via onlyKeys come from existingSizes
+    // (bytes of the already-uploaded webp entries).
     const compareTo: Record<string, number> = {
       original_avif: optimizedBuffer.length,
     };
     for (const key of Object.keys(BREAKPOINTS)) {
-      const entry = formatsJson[key];
-      if (entry?.sizeInBytes) compareTo[`${key}_avif`] = entry.sizeInBytes;
+      const bytes = formatsJson[key]?.sizeInBytes ?? existingSizes?.[key];
+      if (bytes) compareTo[`${key}_avif`] = bytes;
     }
     const twins = await generateAvifTwins(opts.avifSource ?? optimizedBuffer, {
       width,
@@ -394,10 +414,40 @@ export async function generateStrapiFormats(
       urlPrefix,
       keyPrefix,
       compareTo,
+      onlyKeys,
     });
     Object.assign(formatsJson, twins.formatsJson);
     uploads.push(...twins.uploads);
   }
 
   return { formatsJson, uploads };
+}
+
+/**
+ * Format keys a master with the given dimensions/mime is due to carry:
+ * thumbnail when the master exceeds the 245×156 box, one key per breakpoint
+ * smaller than either master axis, plus the AVIF twin keys (original_avif/
+ * `{key}_avif`) for webp masters. Twin keys are nominal — the size guard in
+ * generateAvifTwins may drop any twin whose webp counterpart is already
+ * smaller, so rows can legitimately store fewer keys than reported here.
+ */
+export function expectedFormatKeys(
+  width: number,
+  height: number,
+  mime: string
+): string[] {
+  const keys: string[] = [];
+  if (width > THUMBNAIL.width || height > THUMBNAIL.height) {
+    keys.push("thumbnail");
+  }
+  for (const [key, bp] of Object.entries(BREAKPOINTS)) {
+    if (bp < width || bp < height) keys.push(key);
+  }
+  if (IMAGE_OPTIMIZATION.generateAvifTwins && mime === "image/webp") {
+    keys.push("original_avif");
+    for (const [key, bp] of Object.entries(BREAKPOINTS)) {
+      if (bp < width || bp < height) keys.push(`${key}_avif`);
+    }
+  }
+  return keys;
 }
