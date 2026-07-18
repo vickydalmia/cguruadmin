@@ -367,8 +367,10 @@ With a valid CA, keep `DATABASE_SSL_REJECT_UNAUTHORIZED=true`.
 - New uploads get `Cache-Control: public, max-age=31536000, immutable`
   (filenames are content-hashed and overwrites are prevented, so immutable is
   safe). Objects uploaded before that setting need a one-time metadata
-  backfill: `cd migration && npm run fix:cache-headers -- --dry-run`, review,
-  then re-run with `--apply`. The script preserves each object's stored
+  backfill: `cd migration && npm run fix:cache-headers` (dry-run is the
+  default), review, then re-run with `--apply --yes-i-mean-<bucket>` (the
+  script refuses `--apply` without the bucket-named confirmation flag and
+  prints the exact flag to use). The script preserves each object's stored
   Content-Type — do NOT use `aws s3 cp --metadata-directive REPLACE`, which
   re-guesses types from file extensions.
 - An image CDN (on-the-fly resizing in front of the bucket) is a future-only

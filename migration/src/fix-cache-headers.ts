@@ -80,6 +80,11 @@ async function processKey(
         ContentEncoding: head.ContentEncoding,
         ContentLanguage: head.ContentLanguage,
         Metadata: head.Metadata,
+        // An in-place copy also re-decides these: without them the object
+        // would fall back to STANDARD storage / bucket-default encryption.
+        StorageClass: head.StorageClass,
+        ServerSideEncryption: head.ServerSideEncryption,
+        SSEKMSKeyId: head.SSEKMSKeyId,
       })
     );
   } catch (err: any) {

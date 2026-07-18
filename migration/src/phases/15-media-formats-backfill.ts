@@ -147,9 +147,20 @@ export async function runMediaFormatsBackfill(): Promise<void> {
   if (dryRun) {
     let rowsMissing = 0;
     let keysMissing = 0;
+    let unknownDims = 0;
     for (const row of candidates) {
       const missing = computeMissingKeys(row, row.width, row.height, overwrite);
-      if (!missing || missing.length === 0) continue;
+      if (!missing) {
+        // The real run decodes the S3 master for dimensions; the DB-only
+        // dry run cannot, so surface the row instead of dropping it.
+        unknownDims++;
+        logger.warn(
+          `  [dry-run] file ${row.id} (${row.name}): stored dimensions ` +
+            `unknown — the real run decides from the S3 master`
+        );
+        continue;
+      }
+      if (missing.length === 0) continue;
       rowsMissing++;
       keysMissing += missing.length;
       logger.info(
@@ -159,7 +170,11 @@ export async function runMediaFormatsBackfill(): Promise<void> {
     }
     logger.info(
       `Dry run complete: ${rowsMissing}/${candidates.length} rows would be ` +
-        `backfilled (${keysMissing} format keys)`
+        `backfilled (${keysMissing} format keys` +
+        (unknownDims
+          ? `; ${unknownDims} rows with unknown stored dimensions decided at run time`
+          : "") +
+        `)`
     );
     return;
   }
@@ -253,9 +268,20 @@ async function processFormatsRow(
 
   const meta = parseProviderMetadata(row.provider_metadata);
   const nameNoExt = path.basename(row.name, path.extname(row.name));
-  // Legacy flat-key fallback matches Phase 14's derivation.
-  const s3Key: string =
-    meta?.key || `${ctx.rootPrefix}${row.hash}_${nameNoExt}${row.ext}`;
+  // Migration rows always carry provider_metadata.key (phase 02 writes it);
+  // rows the aws-s3 provider created carry none, and its convention is
+  // rootPath/{hash}{ext} — the upload extension's hash embeds the per-image
+  // folder. The migration-era flat {hash}_{name}{ext} form stays as a second
+  // fetch attempt for pre-folder-scheme rows.
+  const s3KeyCandidates: string[] = meta?.key
+    ? [meta.key]
+    : [
+        `${ctx.rootPrefix}${row.hash}${row.ext}`,
+        `${ctx.rootPrefix}${row.hash}_${nameNoExt}${row.ext}`,
+      ];
+  // Rows sharing a hash share the same candidate list, so the first candidate
+  // is a stable serialization/cache key even before the fetch resolves.
+  const s3Key = s3KeyCandidates[0];
 
   // Rows sharing an S3 key (same content hash) serialize behind one another
   // so variants encode/upload once (later rows reuse sharedKeyEntries), but
@@ -264,7 +290,7 @@ async function processFormatsRow(
   // operator explicitly re-ran the phase.
   const prevChain = sharedKeyChains.get(s3Key);
   const task = (prevChain ?? Promise.resolve()).then(() =>
-    generateMissingForRow(row, s3Key, nameNoExt, ctx)
+    generateMissingForRow(row, s3KeyCandidates, nameNoExt, ctx)
   );
   // A failed row must not block waiting shared rows; this row's caller still
   // sees the rejection through `await task` below.
@@ -292,19 +318,30 @@ async function processFormatsRow(
  */
 async function generateMissingForRow(
   row: BackfillCandidateRow,
-  s3Key: string,
+  keyCandidates: readonly string[],
   nameNoExt: string,
   ctx: BackfillContext
 ): Promise<Record<string, any> | null> {
   const { client, localByHash, stats } = ctx;
+  const cacheKey = keyCandidates[0];
 
   // The stored formats derive from the S3 master, so it is both the resize
-  // source and the authority on dimensions.
-  const master = await fetchFromS3(client, s3Key);
+  // source and the authority on dimensions. Candidate keys are tried in
+  // order; the one that hits defines where the new variants land.
+  let master: Buffer | null = null;
+  let s3Key = cacheKey;
+  for (const key of keyCandidates) {
+    master = await fetchFromS3(client, key);
+    if (master) {
+      s3Key = key;
+      break;
+    }
+  }
   if (!master) {
     stats.skippedNoSource++;
     logger.warn(
-      `No S3 master for file ${row.id} (${row.name}, hash=${row.hash}, key=${s3Key})`
+      `No S3 master for file ${row.id} (${row.name}, hash=${row.hash}, ` +
+        `tried: ${keyCandidates.join(", ")})`
     );
     return null;
   }
@@ -343,7 +380,7 @@ async function generateMissingForRow(
 
   // Entries an earlier shared-hash row already generated+uploaded this run
   // satisfy this row without re-encoding; only the remainder is generated.
-  const cachedEntries = ctx.sharedKeyEntries.get(s3Key) ?? {};
+  const cachedEntries = ctx.sharedKeyEntries.get(cacheKey) ?? {};
   const toGenerate = missing.filter((key) => !(key in cachedEntries));
   if (toGenerate.length === 0) {
     return pickEntries(cachedEntries, missing);
@@ -408,7 +445,7 @@ async function generateMissingForRow(
     if (outcome === "existing") stats.variantsExisting++;
     else stats.variantsUploaded++;
   }
-  ctx.sharedKeyEntries.set(s3Key, { ...cachedEntries, ...formatsJson });
+  ctx.sharedKeyEntries.set(cacheKey, { ...cachedEntries, ...formatsJson });
 
   return merged;
 }

@@ -50,7 +50,10 @@ const phases: Phase[] = [
   { name: "13-site-content", fn: runSiteContent },
   { name: "13a-homepage-offer-sections", fn: runHomepageOfferBackfill },
   { name: "14-media-optimize", fn: runMediaOptimize },
-  { name: "15-media-formats-backfill", fn: runMediaFormatsBackfill },
+  // Re-runnable by design (candidate SQL is the idempotency guard); a
+  // checkpoint would let a --dry-run/--limit pilot mark it complete and make
+  // resume-style runs skip the real backfill.
+  { name: "15-media-formats-backfill", fn: runMediaFormatsBackfill, skipCheckpoint: true },
 ];
 
 async function main(): Promise<void> {
