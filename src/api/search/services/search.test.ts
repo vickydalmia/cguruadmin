@@ -975,46 +975,51 @@ describe("ranked SQL path (Postgres)", () => {
   });
 
   it("keeps PostgreSQL SQL mode when pg_trgm is unavailable", async () => {
-    const { strapi, calls, raw, warn, service } = rankedStrapi({
-      client: "postgres",
-      pgTrgmAvailable: false,
-      presentIndexes: [...EXPECTED_SEARCH_INDEXES],
-    });
+    vi.stubEnv("NODE_ENV", "test");
+    try {
+      const { strapi, calls, raw, warn, service } = rankedStrapi({
+        client: "postgres",
+        pgTrgmAvailable: false,
+        presentIndexes: [...EXPECTED_SEARCH_INDEXES],
+      });
 
-    const status = await initializeSearchRuntime(strapi as any);
-    expect(status).toEqual({
-      mode: "postgres-sql",
-      pgTrgmAvailable: false,
-      missingExpectedIndexes: [],
-      invalidExpectedIndexes: EXPECTED_SEARCH_INDEXES.map((name) => ({
-        name,
-        reason:
-          "pg_trgm schema is unavailable; operator class is unverifiable",
-      })),
-    });
-    expect(service.status()).toEqual(status);
-    // Catalog inspection is diagnostic only and never changes mode.
-    expect(raw).toHaveBeenCalledTimes(3);
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0][0]).toContain("mode=postgres-sql");
-    expect(warn.mock.calls[0][0]).toContain("retry on the next boot");
+      const status = await initializeSearchRuntime(strapi as any);
+      expect(status).toEqual({
+        mode: "postgres-sql",
+        pgTrgmAvailable: false,
+        missingExpectedIndexes: [],
+        invalidExpectedIndexes: EXPECTED_SEARCH_INDEXES.map((name) => ({
+          name,
+          reason:
+            "pg_trgm schema is unavailable; operator class is unverifiable",
+        })),
+      });
+      expect(service.status()).toEqual(status);
+      // Catalog inspection is diagnostic only and never changes mode.
+      expect(raw).toHaveBeenCalledTimes(3);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toContain("mode=postgres-sql");
+      expect(warn.mock.calls[0][0]).toContain("retry on the next boot");
 
-    await service.search({
-      query: "boots",
-      mode: "group",
-      group: "stores",
-      page: 1,
-      pageSize: 20,
-    });
-    expect(raw.mock.calls.some(([sql]) => sql.includes("LIMIT ? OFFSET ?"))).toBe(
-      true,
-    );
-    expect(
-      calls.some(
-        (call) =>
-          call.uid === "api::store.store" && call.operation === "findMany",
-      ),
-    ).toBe(false);
+      await service.search({
+        query: "boots",
+        mode: "group",
+        group: "stores",
+        page: 1,
+        pageSize: 20,
+      });
+      expect(
+        raw.mock.calls.some(([sql]) => sql.includes("LIMIT ? OFFSET ?")),
+      ).toBe(true);
+      expect(
+        calls.some(
+          (call) =>
+            call.uid === "api::store.store" && call.operation === "findMany",
+        ),
+      ).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("initializes once and logs a healthy Postgres status as info", async () => {
@@ -1077,34 +1082,39 @@ describe("ranked SQL path (Postgres)", () => {
   });
 
   it("keeps Postgres SQL mode when index inspection fails", async () => {
-    const { strapi, calls, raw, warn, service } = rankedStrapi({
-      client: "postgres",
-      pgTrgmAvailable: true,
-      diagnosticsError: new Error("permission denied for catalog"),
-    });
-    const status = await initializeSearchRuntime(strapi as any);
-    // Indexes are performance aids only, so an uninspectable catalog never
-    // changes the dialect-selected mode.
-    expect(status).toEqual({
-      mode: "postgres-sql",
-      pgTrgmAvailable: true,
-      missingExpectedIndexes: [...EXPECTED_SEARCH_INDEXES],
-      invalidExpectedIndexes: [],
-    });
-    // One catalog failure plus the consolidated missing-performance warning.
-    expect(warn).toHaveBeenCalledTimes(2);
+    vi.stubEnv("NODE_ENV", "test");
+    try {
+      const { strapi, calls, raw, warn, service } = rankedStrapi({
+        client: "postgres",
+        pgTrgmAvailable: true,
+        diagnosticsError: new Error("permission denied for catalog"),
+      });
+      const status = await initializeSearchRuntime(strapi as any);
+      // Indexes are performance aids only, so an uninspectable catalog never
+      // changes the dialect-selected mode.
+      expect(status).toEqual({
+        mode: "postgres-sql",
+        pgTrgmAvailable: true,
+        missingExpectedIndexes: [...EXPECTED_SEARCH_INDEXES],
+        invalidExpectedIndexes: [],
+      });
+      // One catalog failure plus the consolidated missing-performance warning.
+      expect(warn).toHaveBeenCalledTimes(2);
 
-    await service.search({
-      query: "boots",
-      mode: "group",
-      group: "stores",
-      page: 1,
-      pageSize: 20,
-    });
-    expect(raw.mock.calls.some(([sql]) => sql.includes("LIMIT ? OFFSET ?"))).toBe(
-      true,
-    );
-    expect(calls).toHaveLength(0);
+      await service.search({
+        query: "boots",
+        mode: "group",
+        group: "stores",
+        page: 1,
+        pageSize: 20,
+      });
+      expect(
+        raw.mock.calls.some(([sql]) => sql.includes("LIMIT ? OFFSET ?")),
+      ).toBe(true);
+      expect(calls).toHaveLength(0);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("initializes non-Postgres status without catalog queries", async () => {
