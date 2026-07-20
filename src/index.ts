@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { join } from 'node:path';
 import { DOTD_SECTION_LABELS, DOTD_UID } from './constants/deal-of-the-day-sections';
 import { HOMEPAGE_IMAGE_RULES, imageRuleDescription } from './constants/homepage-images';
 import {
@@ -8,6 +9,7 @@ import {
 } from './constants/homepage-sections';
 import { purgeResponseCaches } from './middlewares/cache';
 import { invalidateOfferRedeemCache } from './offer-redeem/invalidate';
+import { initializeSearchRuntime } from './api/search/services/search';
 import { destroyRebuildQueue, enqueue, type ScopeRequest } from './static-deployment/queue';
 import { computeScope, preDeleteScope } from './static-deployment/scopes';
 import { validateEntityFields } from './utils/entity-field-validation';
@@ -607,6 +609,31 @@ export default {
   },
 
   async bootstrap({ strapi }: { strapi: Core.Strapi }) {
+    // User migrations run before Strapi's schema sync, so fresh databases do
+    // not have the search tables when those migrations first execute. Retry
+    // the same structural reconciliation here on every boot, after schema
+    // sync. Healthy indexes are inspection-only; optional DDL failures are
+    // logged and retried on the next boot without making Strapi unavailable.
+    // Resolve from the application root rather than this compiled module's
+    // directory: production runs dist/src/index.js while Strapi migrations
+    // remain under <app>/database.
+    const searchIndexMigrationPath = join(
+      (strapi as any).dirs.app.root,
+      'database',
+      'search-index-migration.js'
+    );
+    const { reconcileSearchIndexesAfterSchemaSync } = require(
+      searchIndexMigrationPath
+    );
+    await reconcileSearchIndexesAfterSchemaSync(
+      (strapi as any).db.connection,
+      strapi.log
+    );
+    // Fix the search implementation for this process before serving traffic:
+    // the database dialect alone selects Postgres full-set SQL or the
+    // non-Postgres full-set query-engine path. pg_trgm/index checks are
+    // diagnostics only and never change result semantics or runtime mode.
+    await initializeSearchRuntime(strapi);
     await hideRelationsFromContentManager(strapi);
     await ensurePublicReadPermissions(strapi);
     await restrictSingleTypesToSuperAdmin(strapi);

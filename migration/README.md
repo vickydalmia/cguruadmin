@@ -8,12 +8,19 @@ Migrates the full CouponzGuru WordPress site (posts, taxonomies, media, SEO, uni
 
 - [Prerequisites](#prerequisites)
 - [Setup & Configuration](#setup--configuration)
-- [How to Run](#how-to-run)
+- [How to Run](#how-to-run) — including what `--clean` destroys
 - [Migration Phases](#migration-phases)
+  - [00 Preflight](#phase-00--preflight) · [01 Media Inventory](#phase-01--media-inventory) · [02 Media Upload to S3](#phase-02--media-upload-to-s3) · [03 Taxonomies](#phase-03--taxonomies)
+  - [05 Unique Coupon Pools](#phase-05--unique-coupon-pools) · [06 Unique Codes](#phase-06--unique-codes) · [06a Users](#phase-06a--users) · [07 Coupons](#phase-07--coupons) · [08 Deals](#phase-08--deals)
+  - [09 SEO Backfill](#phase-09--seo-backfill) · [10 Verification](#phase-10--verification) · [11 Copy Used Media](#phase-11--copy-used-media) · [12 Offer Backfill](#phase-12--offer-backfill)
+  - [13 Site Content](#phase-13--site-content) · [13a Homepage Coupon Offer Sections](#phase-13a--homepage-coupon-offer-sections)
+  - [14 Media Optimize](#phase-14--media-optimize-backfill) · [15 Media Formats Backfill](#phase-15--media-formats-backfill)
 - [Data Mapping](#data-mapping)
 - [Media / S3 Pipeline](#media--s3-pipeline)
+  - [Maintenance scripts](#maintenance-scripts)
 - [SEO & FAQ Components](#seo--faq-components)
 - [Idempotency & Resume](#idempotency--resume)
+  - [ID Map Persistence](#id-map-persistence)
 - [Verification](#verification)
 
 ---
@@ -108,7 +115,20 @@ npm run migrate -- --phase 07-coupons
 npm run migrate -- --clean --phase 05-pools
 ```
 
-The `--clean` flag deletes checkpoint files but **preserves ID map files**, so relationship data from earlier phases is retained.
+> ⚠️ **`--clean` is destructive — it is a full reset, not a checkpoint reset.**
+> Before any phase runs it deletes the checkpoint files, deletes **all six ID
+> map files** (`clearAllMaps()` in [`src/utils/id-maps.ts`](./src/utils/id-maps.ts)
+> unlinks every `*Map.json`), `TRUNCATE ... RESTART IDENTITY CASCADE`s every
+> migrated table — entities, link tables, component tables, **and the
+> homepage/menu/footer/global singles** — deletes the `wp_`-prefixed
+> `admin_users` rows created by phase 06a, and empties the entire S3 prefix.
+> The exact destroy list is enumerated in
+> [FRESH-MIGRATION.md § What `--clean` destroys](./FRESH-MIGRATION.md#what---clean-destroys).
+>
+> `clearCheckpoints()` on its own does preserve `*Map.json` (and logs that it
+> did), but the `--clean` branch calls `clearAllMaps()` immediately afterwards,
+> so the net effect is that no relationship data survives. To re-run one phase
+> against existing data, use `--phase <name>` **without** `--clean`.
 
 Logs are written to:
 - **Console** — colorized, timestamped
@@ -119,7 +139,7 @@ Logs are written to:
 
 ## Migration Phases
 
-The migration runs sequential phases (00–15, including compatibility phase 13a). Each phase checkpoints on completion so the process can resume after interruption.
+The migration runs sequential phases (00–15, including the user phase 06a and the compatibility phase 13a) in the order declared in [`src/index.ts`](./src/index.ts). Each phase checkpoints on completion so the process can resume after interruption — except `00-preflight`, `10-verify` and `15-media-formats-backfill`, which are marked `skipCheckpoint` and therefore always run.
 
 ### Phase 00 — Preflight
 
@@ -144,6 +164,10 @@ Migrates `wp_uc_coupons` rows into `unique_coupon_pools`, including computed `to
 ### Phase 06 — Unique Codes
 
 Migrates `wp_uc_codes` into `unique_codes` in batches (default 5,000). Links each code to its pool via the `unique_codes_pool_lnk` table. Handles PostgreSQL parameter limits by sub-batching link inserts.
+
+### Phase 06a — Users
+
+Migrates `wp_users` into Strapi `admin_users`, giving every migrated author an account so the admin's "Created by" / "Updated by" columns are meaningful. Each account gets a deterministic `wp_`-prefixed `document_id` (which is also what `--clean` keys its admin-user cleanup on, so the real super admin survives), a random unusable password plus a reset token — nobody can log in until they use the password-reset flow — and the `strapi-editor` role. The phase **fails fast** if that role does not exist (boot Strapi once so its default roles are created). Users without an email are skipped. Every mapping is recorded in `userIdMap`; the phase then backfills `created_by_id`/`updated_by_id` on already-migrated rows, using the WP post author for coupons/deals and, for taxonomy rows (which WP does not track an editor for), the author of the term's most recently modified post.
 
 ### Phase 07 — Coupons
 
@@ -232,7 +256,9 @@ Fails fast with a clear error if the `files` table is empty (run a full migratio
 
 ### Phase 15 — Media Formats Backfill
 
-Fills gaps in the responsive variant matrix for rows that **already have** `formats`. Phase 14 pass 1 only handles `formats IS NULL` and pass 2 only adds missing AVIF twins, so rows migrated before the `xsmall` (320px) breakpoint or the thumbnail rung existed can never gain those keys from Phase 14. Per row, this phase computes the expected key set for the master's true dimensions and MIME (`expectedFormatKeys()`) minus the keys already stored, generates **only the missing variants** from the current S3 master (the local WordPress original is used as the AVIF encode source when available), uploads them, and merges the new keys into `formats` with a single jsonb-merge `UPDATE` as the **last** step — a crash leaves the row a candidate for the next run. Skipped with a warning when S3 isn't configured.
+Fills gaps in the responsive variant matrix for rows that **already have** `formats`. Phase 14 pass 1 only handles `formats IS NULL` and pass 2 only adds missing AVIF twins, so rows migrated before the `xsmall` (320px) breakpoint or the thumbnail rung existed can never gain those keys from Phase 14. Per row, this phase computes expected − stored − tombstoned keys (`expectedFormatKeys()`), generates **only the missing variants** from the current S3 master (the local WordPress original is used as the AVIF encode source when available), uploads them, and merges the new keys into `formats` with a single jsonb-merge `UPDATE` as the **last** step — a crash leaves the row a candidate for the next run. Skipped with a warning when S3 isn't configured.
+
+**Candidate selection.** The `WHERE` clause is generated by `buildGapWhere()` in [`src/utils/format-gaps.ts`](./src/utils/format-gaps.ts) from the same constants `expectedFormatKeys()` reads, so SQL and JS can never disagree about what "complete" means. Its arms are: one per thumbnail/breakpoint rung (key absent **and** the master exceeds that size), one per AVIF twin for `mime = 'image/webp'` (key absent, due, **and not tombstoned**), and a `width IS NULL OR height IS NULL` arm — three-valued logic silences every comparison arm for a dimensionless row, so those rows need their own arm. NULL-dims rows are selected even when nothing else is missing; their true dimensions are decoded from the master and persisted (counted as `dims backfilled` in the end-of-phase summary), which is what lets them leave the NULL arm instead of being re-fetched on every run.
 
 ```bash
 npm run migrate -- --phase 15-media-formats-backfill --dry-run    # DB-read-only report
@@ -242,15 +268,16 @@ npm run migrate -- --phase 15-media-formats-backfill --overwrite  # regenerate e
 
 - `--dry-run` — per-row missing-keys report from stored DB values only (no S3 access, no writes). Rows whose stored dimensions are unknown are warned and counted; the real run decides those from the S3 master.
 - `--limit N` — process at most N candidate rows.
-- `--overwrite` — regenerate **all** expected keys and replace the S3 objects (unconditional puts) instead of only filling gaps.
+- `--overwrite` — regenerate **all** expected keys and replace the S3 objects (unconditional puts) instead of only filling gaps. It also **REPLACES** `provider_metadata.avifDropped` with this run's actual drops rather than merging into it — the escape hatch when encoder tuning makes previously-dropped twins viable. Without it, a stale tombstone is permanent.
 
 Behavior notes:
 
 - **Never checkpointed** (`skipCheckpoint`) — re-runnable by design; the candidate SQL is the idempotency guard, and a checkpoint would let a `--dry-run`/`--limit` pilot mark the phase complete.
+- **AVIF size guard and its tombstone**: an AVIF twin that comes out no smaller than its webp counterpart is dropped, and the dropped key is recorded in `provider_metadata.avifDropped` **in the same `UPDATE`** that merges the generated keys. Because the candidate SQL excludes tombstoned twins, a re-run after a successful pass selects ~0 rows and fetches ~0 masters — the phase converges. (This is the one behaviour that differs from Phase 14 pass 2, which still re-encodes and re-drops.) The tombstone lives in `provider_metadata` rather than `formats` on purpose: Strapi treats every `formats` entry as a real file when deleting media, so a marker there would break its delete iteration. Rows whose only persisted outcome was a tombstone are reported as `skipped (avif larger)`.
+- **Shared masters**: rows resolving to the same S3 master form a group — the master is fetched and dimension-decoded **once**, and generated entries plus dropped keys are shared across the group — but each row still computes and merges its **own** missing set (reported as `reused shared` when a row is satisfied entirely by a groupmate's work). `provider_metadata` is written wholesale from a JS-side merge, so **never run this phase concurrently with Phase 14**.
 - **S3 master resolution**: `provider_metadata.key` when present (migration rows always carry it); otherwise the aws-s3 provider convention `{rootPath}/{hash}{ext}` is tried first, then the legacy migration-era flat `{rootPath}/{hash}_{name}{ext}`. The candidate that hits defines where new variants land.
 - **Conditional PUT**: variant uploads use `IfNoneMatch: "*"` so re-runs never rewrite bytes already placed — a 412 response means a previous run uploaded the object and counts as success. Endpoints that answer `NotImplemented` (non-AWS S3 implementations) flip the rest of the run to unconditional puts.
-- **Shared hashes**: rows sharing an S3 key (same content hash) serialize behind one another and reuse the format entries generated by the first row, but each row computes and merges its **own** missing set.
-- **AVIF size guard**: rows whose only due keys are AVIF twins can legitimately end with nothing to merge — twins no smaller than their webp counterpart are dropped, and such rows stay nominal candidates (cheap re-encode + re-drop on re-runs), exactly like Phase 14 pass 2.
+- **Partial failure is visible**: due keys that were neither generated nor guard-dropped are encode failures. Whatever succeeded is still persisted, the row stays eligible for the rest, and the run counts it as `failed` rather than hiding it in a success bucket.
 
 Content HTML srcsets are frozen at migration time, so rich-text `<img>` tags don't automatically pick up backfilled variants — run `npm run fix:content-srcsets` afterwards if that parity matters (see [Maintenance scripts](#maintenance-scripts)).
 
@@ -277,7 +304,7 @@ WordPress stores all taxonomy terms in `wp_terms` with `taxonomy='category'`. Th
 | `slug` | `slug` | Deduplicated per table (appends `-1`, `-2`, etc.) |
 | `description` | `description` | |
 | `store_short_description` (termmeta) | `short_description` | |
-| `store_cat_image` (termmeta) | `logo` / `icon` | Media link via `files_related_morphs` |
+| `store_cat_image` (termmeta) | `logo` / `icon` | Media link via `files_related_mph` |
 | `store_image_alt` (termmeta) | `logo_alt` | Stores, brands, banks only |
 | `enable_faq_schema` (termmeta) | `faq_enabled` | Boolean (`'1'` → true) |
 
@@ -364,17 +391,19 @@ If `S3_BUCKET` is empty, optimization is skipped entirely — files are register
 
 ### Maintenance scripts
 
-Two operator scripts repair already-uploaded media / already-migrated content in place. Both default to **dry-run** and refuse to write without `--apply` plus an explicit confirmation flag naming the target; full runbook entries live in [FRESH-MIGRATION.md § Maintenance scripts](./FRESH-MIGRATION.md#maintenance-scripts).
+Five non-phase scripts ship in this package's `package.json` and repair already-uploaded media / already-migrated content in place. All of them default to **dry-run** and refuse to write without `--apply` plus an explicit confirmation flag naming the target (`--yes-i-mean-<pg-host>`, or `--yes-i-mean-<bucket>` for `fix:cache-headers`); full runbook entries live in [FRESH-MIGRATION.md § Maintenance scripts](./FRESH-MIGRATION.md#maintenance-scripts). The two media-related ones are described here because they are part of this pipeline:
 
 - `npm run fix:cache-headers` — stamps `Cache-Control: public, max-age=31536000, immutable` on every already-uploaded S3 object via an in-place `CopyObject` (`MetadataDirective: REPLACE`) that carries the stored Content-Type/Disposition/Encoding/Language, user metadata, storage class, and SSE settings through unchanged. Objects already carrying the value are skipped, so re-runs are cheap. Write flag: `--apply --yes-i-mean-<bucket>`.
 - `npm run fix:content-srcsets` — rebuilds `srcset`/`sizes` on migrated rich-text `<img>` tags from the current `files.formats` (e.g. after Phase 15 adds missing variants). Only tags whose `src` exactly matches a `files.url` master URL are touched; the rest are logged and left as-is. Write flag: `--apply --yes-i-mean-<pg-host>`.
+
+The other three — `fix:markdown-richtext`, `backfill:offer-fields` and `cleanup:legacy-fields` (plus `src/reset-homepage.ts`, run through `tsx`) — are content/schema repairs rather than media work; see [FRESH-MIGRATION.md § Maintenance scripts](./FRESH-MIGRATION.md#maintenance-scripts).
 
 ### Media Linking
 
 When a phase needs to attach media to an entity (e.g., store logo, coupon image), it:
 
 1. Resolves the WP attachment ID or URL via `resolveMediaRef()` → Strapi `file_id`
-2. Inserts a row into `files_related_morphs` with the entity type, entity ID, and field name
+2. Inserts a row into `files_related_mph` with the entity type, entity ID, and field name
 
 ---
 
@@ -432,21 +461,22 @@ The migration is designed to be safely re-run after interruption or failure.
 
 - Each phase writes a checkpoint file to `.checkpoints/{phase}.json` on completion
 - On restart, completed phases are skipped automatically
-- `--clean` deletes checkpoint files but **preserves ID map files**
+- `--clean` deletes the checkpoint files **and every ID map file**, then wipes the target — see the warning under [How to Run](#how-to-run). It is not a resume aid.
 
 ### ID Map Persistence
 
-Five maps are serialized to `.checkpoints/` as JSON:
+Six maps are serialized to `.checkpoints/` as JSON by `saveMaps()` in [`src/utils/id-maps.ts`](./src/utils/id-maps.ts):
 
-| Map | Key | Value |
-|-----|-----|-------|
-| `termIdMap` | WP term_id | `{id, documentId, type, table}` |
-| `postIdMap` | WP post_id | `{id, documentId, type, table}` |
-| `mediaIdMap` | WP attachment_id | Strapi file_id |
-| `poolIdMap` | WP pool_id | `{id, documentId, type, table}` |
-| `poolNameMap` | WP pool name | `{id, documentId, type, table}` |
+| Map | File | Key → Value | What it unlocks |
+|-----|------|-------------|-----------------|
+| `termIdMap` | `termIdMap.json` | WP term_id → `{id, documentId, type, table}` | Phases 07/08/12 wire coupons/deals to the store/brand/category/bank rows phase 03 created |
+| `postIdMap` | `postIdMap.json` | WP post_id → `{id, documentId, type, table}` | Phase 12 backfills relations for exactly the posts that were migrated |
+| `mediaIdMap` | `mediaIdMap.json` | WP attachment_id → Strapi file_id | Every media link (`files_related_mph`) resolves without re-uploading |
+| `poolIdMap` | `poolIdMap.json` | WP pool_id → `{id, documentId, type, table}` | Phase 06 links `unique_codes` to their pool |
+| `poolNameMap` | `poolNameMap.json` | WP pool name (raw **and** lowercased) → `{id, documentId, type, table}` | Phase 07 resolves `unique_coupon_name` to a pool, which is how the WP theme addressed pools |
+| `userIdMap` | `userIdMap.json` | WP `user_id` → `admin_users.id` | Phases 07/08 stamp `created_by_id`/`updated_by_id` from the WP author and `_edit_last` without re-running phase 06a |
 
-Maps are loaded at startup and saved after each phase, enabling later phases to reference IDs created by earlier ones.
+Maps are loaded at startup (`loadMaps()`, each file independently optional) and saved after each phase, so a later phase run standalone via `--phase` can still reference IDs created by earlier ones. `termIdMap` additionally has a DB-backed fallback (`ensureTermMapping()` resolves by the deterministic `term:{table}:{wp_term_id}` document_id), so taxonomy lookups survive a lost map file; the other five do not.
 
 ### Database-Level Idempotency
 

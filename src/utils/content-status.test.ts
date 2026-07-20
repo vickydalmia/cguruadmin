@@ -45,4 +45,13 @@ describe('publishedOnlyFilters', () => {
   it('reserves only contentStatus and $and keys so call sites with $or can spread it safely', () => {
     expect(Object.keys(publishedOnlyFilters()).sort()).toEqual(['$and', 'contentStatus']);
   });
+
+  it('uses an explicit request cutoff without reading the clock again', () => {
+    const cutoff = '2026-07-20T12:34:56.789Z';
+    const filters = publishedOnlyFilters(cutoff);
+
+    expect(filters.$and[0].$or[1]).toEqual({
+      expiresAt: { $gt: cutoff },
+    });
+  });
 });

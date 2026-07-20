@@ -1,14 +1,51 @@
 import type { Core } from "@strapi/strapi";
 import { publishedOnlyFilters } from "../../../utils/content-status";
+import {
+  asciiFold,
+  entityCountQuery,
+  entityRankedQuery,
+  isPostgresClient,
+  NO_MATCH_TIER,
+  offerCountQuery,
+  offerRankedQuery,
+  RELATION_TIER_SHIFT,
+  VARIANT_TIER_SHIFT,
+  type OfferKind,
+  type SearchNeedles,
+  type SqlQuery,
+} from "./search-sql";
 
 const MIN_QUERY_LENGTH = 2;
 const MAX_QUERY_LENGTH = 80;
 const PREVIEW_ENTITY_LIMIT = 7;
 const PREVIEW_OFFER_LIMIT = 3;
+// Preview-only null-backfill margin: a ranked row can hydrate but map to
+// null (missing name/slug) or get dropped by the hydrate visibility
+// re-check, which would shrink the preview list below its display limit.
+// Preview windows over-fetch this many extra ranked ids so dropped rows
+// backfill from the next candidates. Paged group requests never over-fetch —
+// their LIMIT/OFFSET must stay exact or page boundaries would shift.
+const PREVIEW_BACKFILL = 2;
+const FALLBACK_READ_BATCH_SIZE = 500;
 const MAX_PAGE = 20;
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
-const MAX_CANDIDATES = MAX_PAGE * MAX_PAGE_SIZE;
+const EXPECTED_SEARCH_INDEX_DEFINITIONS = [
+  { name: "stores_name_search_trgm_idx", table: "stores", column: "name" },
+  { name: "brands_name_search_trgm_idx", table: "brands", column: "name" },
+  { name: "categories_name_search_trgm_idx", table: "categories", column: "name" },
+  { name: "banks_name_search_trgm_idx", table: "banks", column: "name" },
+  { name: "coupons_title_search_trgm_idx", table: "coupons", column: "title" },
+  { name: "deals_title_search_trgm_idx", table: "deals", column: "title" },
+  { name: "stores_slug_search_trgm_idx", table: "stores", column: "slug" },
+  { name: "brands_slug_search_trgm_idx", table: "brands", column: "slug" },
+  { name: "categories_slug_search_trgm_idx", table: "categories", column: "slug" },
+  { name: "banks_slug_search_trgm_idx", table: "banks", column: "slug" },
+  { name: "coupons_code_search_trgm_idx", table: "coupons", column: "code" },
+] as const;
+export const EXPECTED_SEARCH_INDEXES = EXPECTED_SEARCH_INDEX_DEFINITIONS.map(
+  ({ name }) => name,
+);
 const GENERIC_SLUG_TERMS = new Set([
   "bank",
   "banks",
@@ -79,6 +116,23 @@ const dealPopulate = {
   primaryStore: relationRef("logo"),
   dealImage: true,
 };
+
+// Field/populate sets are shared between the query-engine finders and the
+// ranked-ID hydration step so both paths emit byte-identical responses.
+const entityFields = (config: EntityConfig) => [
+  "name",
+  "slug",
+  ...(config.mediaField === "logo" ? ["logoAlt"] : []),
+];
+const COUPON_FIELDS = ["title", "code", "couponType", "affiliateLink"];
+const DEAL_FIELDS = [
+  "title",
+  "affiliateLink",
+  "salePrice",
+  "mrp",
+  "discount",
+  "expiresAt",
+];
 
 function oneString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
@@ -266,16 +320,16 @@ function offerOwner(document: any, source: "coupon" | "deal") {
 function queryVariants(query: string): string[] {
   const q = query.trim();
   const variants = new Set([q]);
-  const lower = q.toLocaleLowerCase();
+  const folded = asciiFold(q);
 
-  if (lower.endsWith("ies") && lower.length - 3 >= 3) {
+  if (folded.endsWith("ies") && folded.length - 3 >= 3) {
     variants.add(q.slice(0, -3) + "y");
-  } else if (/(?:ch|sh|x|z)es$/u.test(lower) && lower.length - 2 >= 3) {
+  } else if (/(?:ch|sh|x|z)es$/u.test(folded) && folded.length - 2 >= 3) {
     variants.add(q.slice(0, -2));
   } else if (
-    lower.endsWith("s") &&
-    !/(?:ss|us|is)$/u.test(lower) &&
-    lower.length - 1 >= 3
+    folded.endsWith("s") &&
+    !/(?:ss|us|is)$/u.test(folded) &&
+    folded.length - 1 >= 3
   ) {
     variants.add(q.slice(0, -1));
   }
@@ -283,14 +337,14 @@ function queryVariants(query: string): string[] {
 }
 
 // SQL needles: a shorter variant substring-subsumes a longer one for
-// $containsi (rows matching "mobiles" all match "mobile"), so drop any
+// literal containment (rows matching "mobiles" all match "mobile"), so drop any
 // variant that contains another — fewer OR clauses, identical row set.
 function filterNeedles(variants: string[]): string[] {
-  const lowered = variants.map((variant) => variant.toLocaleLowerCase());
+  const folded = variants.map(asciiFold);
   return variants.filter((_, index) =>
-    lowered.every(
+    folded.every(
       (other, otherIndex) =>
-        otherIndex === index || !lowered[index].includes(other),
+        otherIndex === index || !folded[index].includes(other),
     ),
   );
 }
@@ -302,52 +356,76 @@ function relevanceForNeedle(candidate: string, needle: string): number {
   return candidate.includes(needle) ? 3 : 4;
 }
 
-const NO_MATCH_RELEVANCE = 10;
+// Locale-independent on purpose: host ICU/locale differences must never
+// reorder results between instances behind the load balancer.
+function normalizeLabel(value: string): string {
+  return asciiFold(value);
+}
+
+// PostgreSQL's C collation compares the UTF-8 representation bytewise. Using
+// Buffer.compare instead of JS's UTF-16 `<` keeps the fallback's label and
+// document-id tails identical for supplementary Unicode code points too.
+function compareUtf8(a: string, b: string): number {
+  return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+}
 
 // Matches on the query AS TYPED rank in tiers 0-3; matches only via a
-// singular/plural variant rank in tiers 4-6 (variant tier + 3), so a variant
-// hit can never outrank a literal one; no match at all sinks to the bottom.
+// singular/plural variant rank in tiers 4-7 (variant tier + 4), so a variant
+// hit can never outrank a literal one; no match at all sinks to NO_MATCH_TIER
+// (shared with the SQL scorer, so shifted relation tiers still rank above
+// unscored rows in both modes).
 function relevanceForVariants(value: string, variants: string[]): number {
-  const candidate = value.normalize("NFKC").toLocaleLowerCase();
-  const literal = relevanceForNeedle(candidate, variants[0].toLocaleLowerCase());
+  const candidate = normalizeLabel(value);
+  const literal = relevanceForNeedle(candidate, asciiFold(variants[0]));
   if (literal < 4) return literal;
 
-  let best = NO_MATCH_RELEVANCE;
+  let best = NO_MATCH_TIER;
   for (const variant of variants.slice(1)) {
-    const tier = relevanceForNeedle(candidate, variant.toLocaleLowerCase());
-    if (tier < 4) best = Math.min(best, tier + 3);
+    const tier = relevanceForNeedle(candidate, asciiFold(variant));
+    if (tier < 4) best = Math.min(best, tier + VARIANT_TIER_SHIFT);
   }
   return best;
 }
 
-function relevance(value: string, query: string): number {
-  return relevanceForVariants(value, queryVariants(query));
-}
+// One scoreable field of a fallback item: direct fields (name/title, coupon
+// code) score at their tier as-is; relation names carry the SQL scorer's
+// RELATION_TIER_SHIFT so a relation hit ranks strictly below every
+// direct/variant tier.
+type ScoreField = { value: string; shift: number };
 
-function time(value: unknown): number {
-  const parsed = typeof value === "string" ? Date.parse(value) : Number.NaN;
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
+// Fallback twin of the ranked SQL ORDER BY tuple: best (lowest) shifted tier
+// across the item's fields — the JS mirror of LEAST() over per-column CASE
+// tiers — then normalized label ASC, then documentId ASC.
 function rank<T extends Record<string, any>>(
   items: T[],
   query: string,
+  fields: (item: T) => ScoreField[],
   label: (item: T) => string,
 ): T[] {
-  // Variants are computed once and each item scored once (not per comparison)
-  // — the comparator runs O(n log n) times over up to 1000 candidates.
+  // Variants are computed once and each item scored once (not per
+  // comparison) — the comparator runs O(n log n) times over the fallback
+  // matching set.
   const variants = queryVariants(query);
   const scores = new Map<T, number>(
-    items.map((item) => [item, relevanceForVariants(label(item), variants)]),
+    items.map((item) => [
+      item,
+      Math.min(
+        ...fields(item).map(
+          (field) => relevanceForVariants(field.value, variants) + field.shift,
+        ),
+      ),
+    ]),
+  );
+  const labels = new Map<T, string>(
+    items.map((item) => [item, normalizeLabel(label(item))]),
   );
   return [...items].sort((a, b) => {
     const byMatch = scores.get(a)! - scores.get(b)!;
     if (byMatch) return byMatch;
-    const byDate =
-      time(b?.publishedAt ?? b?.updatedAt) -
-      time(a?.publishedAt ?? a?.updatedAt);
-    if (byDate) return byDate;
-    return String(a?.documentId ?? a?.id ?? "").localeCompare(
+    const byLabel = compareUtf8(labels.get(a)!, labels.get(b)!);
+    if (byLabel) return byLabel;
+    return compareUtf8(
+      String(a?.documentId ?? a?.id ?? ""),
       String(b?.documentId ?? b?.id ?? ""),
     );
   });
@@ -415,183 +493,790 @@ function mapOffer(document: any, type: "coupon" | "deal") {
             logo: mapMedia(ownerMedia, owner?.logoAlt ?? ownerName),
           }
         : null,
-    rankText: [
-      name,
-      ...relatedEntities(document).map((item) => item?.name),
-    ].join(" "),
-    sortDate: document?.publishedAt ?? document?.updatedAt ?? null,
   };
 }
 
 function toPublicOffer(hit: any) {
-  if (!hit) return null;
-  const { rankText, sortDate, ...result } = hit;
-  return result;
+  return hit ?? null;
 }
 
-function offerMatchClauses(
-  query: string,
-  options: {
-    includeCouponCode?: boolean;
-    includePrimaryStore?: boolean;
-  } = {},
-) {
-  const clauses = filterNeedles(queryVariants(query)).flatMap((variant) => {
-    const contains = { $containsi: variant };
-    const slugPrefix = slugPrefixFilter(variant);
-    const relationClauses = ["stores", "brands", "categories", "banks"].flatMap(
-      (relation) => [
-        { [relation]: { name: contains } },
-        ...(slugPrefix ? [{ [relation]: { slug: slugPrefix } }] : []),
-      ],
-    );
-    return [
-      { title: contains },
-      ...(options.includeCouponCode ? [{ code: contains }] : []),
-      ...relationClauses,
-      ...(options.includePrimaryStore
-        ? [
-            { primaryStore: { name: contains } },
-            ...(slugPrefix
-              ? [{ primaryStore: { slug: slugPrefix } }]
-              : []),
-          ]
-        : []),
-    ];
-  });
-  return clauses;
-}
-
-function slugPrefixFilter(value: string) {
-  const slugNeedle = value
-    .normalize("NFKC")
-    .toLocaleLowerCase()
+function slugNeedle(value: string): string | null {
+  const normalized = value.normalize("NFKC");
+  if (!/^[\x00-\x7F]*$/u.test(normalized)) return null;
+  const needle = asciiFold(normalized)
     .replace(/[^a-z0-9]+/gu, "-")
     .replace(/^-+|-+$/gu, "");
-  if (!slugNeedle || GENERIC_SLUG_TERMS.has(slugNeedle)) return null;
-  return { $startsWithi: slugNeedle };
+  if (!needle || GENERIC_SLUG_TERMS.has(needle)) return null;
+  return needle;
 }
 
-function couponFilters(query: string) {
-  return {
-    $and: [
-      publishedOnlyFilters(),
-      { $or: offerMatchClauses(query, { includeCouponCode: true }) },
-    ],
-  };
+function searchNeedles(query: string): SearchNeedles {
+  const variants = queryVariants(query);
+  const whereNeedles = filterNeedles(variants);
+  const slugNeedles = Array.from(
+    new Set(whereNeedles.map(slugNeedle).filter(Boolean)),
+  ) as string[];
+  return { variants, whereNeedles, slugNeedles };
 }
 
-function entityContainsFilter(query: string) {
-  const needles = filterNeedles(queryVariants(query));
-  return {
-    $or: needles.flatMap((variant) => {
-      const contains = { $containsi: variant };
-      const slugPrefix = slugPrefixFilter(variant);
-      return [
-        { name: contains },
-        ...(slugPrefix ? [{ slug: slugPrefix }] : []),
-      ];
-    }),
-  };
+// Product-deal visibility rule: only deals carrying a positive sale price
+// are product cards (mirrored by offerWhere in search-sql.ts). Shared by the
+// fallback reads and the ranked-path hydrate re-check.
+const DEAL_SALE_PRICE_FILTER = { salePrice: { $notNull: true, $gt: 0 } };
+
+type FallbackRequestCache = Map<string, Promise<any[]>>;
+
+function literalContains(value: unknown, needles: string[]): boolean {
+  if (typeof value !== "string") return false;
+  const candidate = normalizeLabel(value);
+  return needles.some((needle) => candidate.includes(normalizeLabel(needle)));
 }
 
-function productDealFilters(query: string) {
-  return {
-    $and: [
-      publishedOnlyFilters(),
-      {
-        $or: offerMatchClauses(query, { includePrimaryStore: true }),
-      },
-      { salePrice: { $notNull: true, $gt: 0 } },
-    ],
-  };
+function literalSlugPrefix(value: unknown, needles: string[]): boolean {
+  if (typeof value !== "string") return false;
+  const candidate = normalizeLabel(value);
+  return needles.some((needle) => candidate.startsWith(needle));
 }
 
-async function findEntities(
+function entityMatches(document: any, needles: SearchNeedles): boolean {
+  return (
+    literalContains(document?.name, needles.whereNeedles) ||
+    literalSlugPrefix(document?.slug, needles.slugNeedles)
+  );
+}
+
+function offerMatches(
+  document: any,
+  kind: OfferKind,
+  needles: SearchNeedles,
+): boolean {
+  if (literalContains(document?.title, needles.whereNeedles)) return true;
+  if (
+    kind === "coupon" &&
+    literalContains(document?.code, needles.whereNeedles)
+  ) {
+    return true;
+  }
+  return relatedEntities(document).some(
+    (relation) =>
+      literalContains(relation?.name, needles.whereNeedles) ||
+      literalSlugPrefix(relation?.slug, needles.slugNeedles),
+  );
+}
+
+// Non-Postgres is a correctness fallback, not a candidate-window heuristic.
+// Read every visible row in deterministic 500-row batches, then perform
+// literal membership, ranking, counting, and pagination over the full set in
+// JS. In particular %, _, and backslash have no wildcard meaning here.
+async function readAllDocuments(
+  strapi: Core.Strapi,
+  uid: string,
+  options: {
+    status: "published";
+    filters: Record<string, any>;
+    fields: string[];
+    populate: Record<string, any>;
+  },
+): Promise<any[]> {
+  const documents: any[] = [];
+  let start = 0;
+  let previousFullBatch = "";
+  for (;;) {
+    const batch = await strapi.documents(uid as any).findMany({
+      ...options,
+      sort: [{ documentId: "asc" }],
+      start,
+      limit: FALLBACK_READ_BATCH_SIZE,
+    } as any);
+    if (!Array.isArray(batch)) {
+      throw new Error(`Search fallback ${uid} read did not return an array`);
+    }
+    documents.push(...batch);
+    if (batch.length < FALLBACK_READ_BATCH_SIZE) break;
+
+    // Guard against an adapter silently ignoring `start`, which would
+    // otherwise spin forever and repeatedly append the same page.
+    const signature = [
+      batch.length,
+      String(batch[0]?.documentId ?? batch[0]?.id ?? ""),
+      String(batch.at(-1)?.documentId ?? batch.at(-1)?.id ?? ""),
+    ].join(":");
+    if (signature === previousFullBatch) {
+      throw new Error(`Search fallback ${uid} pagination did not advance`);
+    }
+    previousFullBatch = signature;
+    start += FALLBACK_READ_BATCH_SIZE;
+  }
+  return documents;
+}
+
+function cachedFallbackRead(
+  cache: FallbackRequestCache,
+  key: string,
+  load: () => Promise<any[]>,
+): Promise<any[]> {
+  const existing = cache.get(key);
+  if (existing) return existing;
+  const pending = load();
+  cache.set(key, pending);
+  return pending;
+}
+
+function fallbackEntities(
   strapi: Core.Strapi,
   config: EntityConfig,
   query: string,
-  limit: number,
-) {
-  return await strapi.documents(config.uid as any).findMany({
-    filters: entityContainsFilter(query),
-    fields: [
-      "name",
-      "slug",
-      ...(config.mediaField === "logo" ? ["logoAlt"] : []),
-    ],
-    populate: { [config.mediaField]: true },
-    // Deterministic order: without it Postgres returns heap order, so the
-    // candidate window (and thus pages) could differ between requests.
-    sort: [{ name: "asc" }],
-    limit,
-  } as any);
+  cache: FallbackRequestCache,
+): Promise<any[]> {
+  return cachedFallbackRead(cache, `entity:${config.key}`, async () => {
+    const needles = searchNeedles(query);
+    const documents = await readAllDocuments(strapi, config.uid, {
+      status: "published",
+      filters: {},
+      fields: entityFields(config),
+      populate: { [config.mediaField]: true },
+    });
+    return documents.filter((document) => entityMatches(document, needles));
+  });
 }
 
-async function countEntities(
+function fallbackOffers(
   strapi: Core.Strapi,
-  config: EntityConfig,
+  kind: OfferKind,
+  query: string,
+  cache: FallbackRequestCache,
+  nowIso: string,
+): Promise<any[]> {
+  return cachedFallbackRead(cache, `offer:${kind}`, async () => {
+    const needles = searchNeedles(query);
+    const documents = await readAllDocuments(
+      strapi,
+      kind === "coupon" ? "api::coupon.coupon" : "api::deal.deal",
+      kind === "coupon"
+        ? {
+            status: "published",
+            filters: publishedOnlyFilters(nowIso),
+            fields: COUPON_FIELDS,
+            populate: couponPopulate,
+          }
+        : {
+            status: "published",
+            filters: {
+              $and: [publishedOnlyFilters(nowIso), DEAL_SALE_PRICE_FILTER],
+            },
+            fields: DEAL_FIELDS,
+            populate: dealPopulate,
+          },
+    );
+    return documents.filter((document) =>
+      offerMatches(document, kind, needles),
+    );
+  });
+}
+
+function rankOfferDocuments(
+  items: any[],
+  kind: OfferKind,
   query: string,
 ) {
-  return await strapi.documents(config.uid as any).count({
-    filters: entityContainsFilter(query),
-  } as any);
-}
-
-async function findCoupons(strapi: Core.Strapi, query: string, limit: number) {
-  return await strapi.documents("api::coupon.coupon").findMany({
-    // Both code and no-code variants are Coupon-schema records. CTA wording
-    // never changes the backing entity or removes it from Coupon search.
-    filters: couponFilters(query),
-    fields: ["title", "code", "couponType", "affiliateLink"],
-    populate: couponPopulate,
-    sort: [
-      { publishedAt: "desc" },
-      { updatedAt: "desc" },
-    ],
-    limit,
-  } as any);
-}
-
-async function countCoupons(strapi: Core.Strapi, query: string) {
-  return await strapi.documents("api::coupon.coupon").count({
-    filters: couponFilters(query),
-  } as any);
-}
-
-async function findDeals(strapi: Core.Strapi, query: string, limit: number) {
-  return await strapi.documents("api::deal.deal").findMany({
-    // Search deal cards are the product-card surface from Figma. Collection
-    // promos without product pricing belong to offer surfaces, not this list.
-    filters: productDealFilters(query),
-    fields: [
-      "title",
-      "affiliateLink",
-      "salePrice",
-      "mrp",
-      "discount",
-      "expiresAt",
-    ],
-    populate: dealPopulate,
-    sort: [
-      { publishedAt: "desc" },
-      { updatedAt: "desc" },
-    ],
-    limit,
-  } as any);
-}
-
-async function countDeals(strapi: Core.Strapi, query: string) {
-  return await strapi.documents("api::deal.deal").count({
-    filters: productDealFilters(query),
-  } as any);
-}
-
-function rankOffers(items: any[], query: string) {
   return rank(
-    items.filter(Boolean),
+    items,
     query,
-    (item) => item?.rankText ?? item?.name ?? "",
+    (item) => [
+      { value: String(item?.title ?? ""), shift: 0 },
+      ...(kind === "coupon" && typeof item?.code === "string"
+        ? [{ value: item.code, shift: 0 }]
+        : []),
+      ...relatedEntities(item).map((relation) => ({
+        value: String(relation?.name ?? ""),
+        shift: RELATION_TIER_SHIFT,
+      })),
+    ],
+    (item) => String(item?.title ?? ""),
+  );
+}
+
+// ── Ranked-SQL execution (Postgres only) ────────────────────────────────
+// Two-step pattern: raw SQL returns exactly the page of ranked document ids,
+// then only those ids are hydrated through the document service (same
+// fields/populate as the fallback finders) and reordered to the SQL order.
+
+type PageWindow = {
+  limit: number;
+  offset: number;
+  // Preview-only over-fetch (PREVIEW_BACKFILL): extra ranked rows fetched
+  // beyond `limit` so null-mapping or visibility-dropped rows backfill
+  // instead of shrinking the list. Undefined on group pages — pagination
+  // must not shift, so only preview backfills; a dropped row on a paged
+  // request shortens that page instead.
+  lookahead?: number;
+};
+
+function rankedConnection(strapi: Core.Strapi) {
+  const connection = (strapi.db as any)?.connection;
+  return connection && isPostgresClient(connection?.client?.config?.client)
+    ? connection
+    : null;
+}
+
+async function rankedRows(connection: any, query: SqlQuery): Promise<any[]> {
+  const result = await connection.raw(query.sql, query.bindings);
+  return result?.rows ?? [];
+}
+
+async function rankedDocumentIds(
+  connection: any,
+  query: SqlQuery,
+): Promise<string[]> {
+  return (await rankedRows(connection, query)).map((row) =>
+    String(row.document_id),
+  );
+}
+
+async function rankedTotal(connection: any, query: SqlQuery): Promise<number> {
+  const rows = await rankedRows(connection, query);
+  return Number(rows[0]?.total ?? 0);
+}
+
+// Hydration runs after the ranked-ID query, so a row can change state in
+// between (offer expires or unpublishes, entity loses its publish). The
+// caller's visibility filters are re-applied here so such a row is dropped
+// instead of served. Dropped ids still shrink the page — there is no
+// backfill at this layer; preview covers the gap with its PageWindow
+// lookahead over-fetch, while paged groups serve one short page until the
+// next request re-ranks.
+async function hydrateByDocumentId(
+  strapi: Core.Strapi,
+  uid: string,
+  documentIds: string[],
+  options: {
+    fields: string[];
+    populate: Record<string, any>;
+    visibility: Record<string, any>;
+  },
+) {
+  if (documentIds.length === 0) return [];
+  const documents = await strapi.documents(uid as any).findMany({
+    filters: {
+      $and: [{ documentId: { $in: documentIds } }, options.visibility],
+    },
+    fields: options.fields,
+    populate: options.populate,
+    limit: documentIds.length,
+  } as any);
+  const order = new Map(documentIds.map((id, index) => [id, index]));
+  return [...documents].sort(
+    (a: any, b: any) =>
+      (order.get(String(a?.documentId)) ?? 0) -
+      (order.get(String(b?.documentId)) ?? 0),
+  );
+}
+
+// ── Bootstrap mode selection and diagnostics ────────────────────────────
+// The request path never probes capabilities or changes mode. Strapi's
+// bootstrap fixes the mode from the configured database dialect alone.
+// pg_trgm and its expected indexes are observed separately because they are
+// performance aids, never correctness prerequisites.
+export type SearchMode = "postgres-sql" | "query-engine";
+export type InvalidExpectedIndex = { name: string; reason: string };
+export type SearchRuntimeStatus = {
+  mode: SearchMode;
+  pgTrgmAvailable: boolean;
+  missingExpectedIndexes: string[];
+  invalidExpectedIndexes: InvalidExpectedIndex[];
+};
+
+type SearchRuntime = { status: SearchRuntimeStatus; initialized: boolean };
+let searchRuntimes = new WeakMap<object, SearchRuntime>();
+
+export function configureSearchRuntime(
+  strapi: Core.Strapi,
+): SearchRuntimeStatus {
+  const mode: SearchMode = rankedConnection(strapi)
+    ? "postgres-sql"
+    : "query-engine";
+  const status: SearchRuntimeStatus = {
+    mode,
+    pgTrgmAvailable: false,
+    missingExpectedIndexes:
+      mode === "postgres-sql" ? [...EXPECTED_SEARCH_INDEXES] : [],
+    invalidExpectedIndexes: [],
+  };
+  searchRuntimes.set(strapi as object, { status, initialized: false });
+  return {
+    ...status,
+    missingExpectedIndexes: [...status.missingExpectedIndexes],
+    invalidExpectedIndexes: [],
+  };
+}
+
+function runtimeFor(strapi: Core.Strapi): SearchRuntime {
+  const runtime = searchRuntimes.get(strapi as object);
+  if (!runtime) {
+    throw new Error(
+      "Search runtime was not initialized during Strapi bootstrap",
+    );
+  }
+  return runtime;
+}
+
+function resultRows(result: any): any[] {
+  return Array.isArray(result?.rows) ? result.rows : [];
+}
+
+function configuredDatabaseSchema(
+  strapi: Core.Strapi,
+  connection: any,
+): string | null {
+  const configured =
+    (strapi as any)?.config?.get?.("database.connection.connection.schema") ??
+    connection?.client?.config?.connection?.schema;
+  return typeof configured === "string" && configured.trim()
+    ? configured.trim()
+    : null;
+}
+
+function quotedIdentifier(value: string): string {
+  return `"${value.replace(/"/gu, '""')}"`;
+}
+
+async function resolveSearchTableSchema(
+  strapi: Core.Strapi,
+  connection: any,
+): Promise<string | null> {
+  const configuredSchema = configuredDatabaseSchema(strapi, connection);
+  const tables = Array.from(
+    new Set(EXPECTED_SEARCH_INDEX_DEFINITIONS.map(({ table }) => table)),
+  );
+  const relationNames = tables.map((table) =>
+    configuredSchema
+      ? `${quotedIdentifier(configuredSchema)}.${quotedIdentifier(table)}`
+      : quotedIdentifier(table),
+  );
+  const result = await connection.raw(
+    "WITH candidates(relation_name) AS (SELECT unnest(?::text[])) " +
+      "SELECT table_namespace.nspname AS schema_name " +
+      "FROM candidates " +
+      "JOIN pg_class table_class " +
+      "ON table_class.oid = to_regclass(candidates.relation_name) " +
+      "JOIN pg_namespace table_namespace " +
+      "ON table_namespace.oid = table_class.relnamespace " +
+      "WHERE table_class.relkind IN ('r', 'p') " +
+      "GROUP BY table_namespace.nspname " +
+      "HAVING count(*) = ? " +
+      "LIMIT 1",
+    [relationNames, tables.length],
+  );
+  return oneString(resultRows(result)[0]?.schema_name);
+}
+
+function logSearchDiagnosticProblem(strapi: Core.Strapi, message: string) {
+  const log = (strapi as any).log;
+  if (process.env.NODE_ENV === "production") log?.error?.(message);
+  else log?.warn?.(message);
+}
+
+function canonicalIndexExpression(value: unknown): string {
+  return String(value ?? "")
+    .replace(/\s+/gu, "")
+    .replace(/::(?:text|charactervarying)/giu, "")
+    .replace(/"/gu, "")
+    .replace(/\(([a-z_][a-z0-9_$]*)\)/giu, "$1")
+    .replace(/^translate(?=\()/iu, "translate");
+}
+
+function expectedIndexExpression(column: string): string {
+  return (
+    `translate(${column},` +
+    `'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')`
+  );
+}
+
+function invalidIndexReason(
+  row: any,
+  expected: (typeof EXPECTED_SEARCH_INDEX_DEFINITIONS)[number],
+  pgTrgmSchema: string | null,
+): string | null {
+  const reasons: string[] = [];
+  const expectedSchema = String(row?.expected_schema ?? "");
+  if (
+    String(row?.table_schema ?? "") !== expectedSchema ||
+    String(row?.table_name ?? "") !== expected.table
+  ) {
+    reasons.push(`wrong table; expected ${expectedSchema}.${expected.table}`);
+  }
+  if (String(row?.access_method ?? "") !== "gin") {
+    reasons.push("access method is not GIN");
+  }
+  if (Number(row?.key_count) !== 1) {
+    reasons.push("expected exactly one indexed expression");
+  }
+  if (
+    canonicalIndexExpression(row?.expression) !==
+    expectedIndexExpression(expected.column)
+  ) {
+    reasons.push(
+      `wrong expression; expected deterministic ASCII fold of ${expected.column}`,
+    );
+  }
+  if (String(row?.opclass_name ?? "") !== "gin_trgm_ops") {
+    reasons.push("operator class is not gin_trgm_ops");
+  } else if (!pgTrgmSchema) {
+    reasons.push("pg_trgm schema is unavailable; operator class is unverifiable");
+  } else if (String(row?.opclass_schema ?? "") !== pgTrgmSchema) {
+    reasons.push(`gin_trgm_ops is not from ${pgTrgmSchema}`);
+  }
+  if (row?.predicate != null) reasons.push("index is partial");
+  if (row?.indisvalid !== true) reasons.push("index is not valid");
+  if (row?.indisready !== true) reasons.push("index is not ready");
+  return reasons.length > 0 ? reasons.join("; ") : null;
+}
+
+export async function initializeSearchRuntime(
+  strapi: Core.Strapi,
+): Promise<SearchRuntimeStatus> {
+  const existing = searchRuntimes.get(strapi as object);
+  if (existing?.initialized) return searchRuntimeStatus(strapi);
+  configureSearchRuntime(strapi);
+  const runtime = runtimeFor(strapi);
+  if (runtime.status.mode === "query-engine") {
+    runtime.initialized = true;
+    (strapi as any).log?.info?.("[search] mode=query-engine");
+    return searchRuntimeStatus(strapi);
+  }
+
+  const connection = rankedConnection(strapi)!;
+  let pgTrgmSchema: string | null = null;
+  try {
+    const extensionResult = await connection.raw(
+      "SELECT extension_namespace.nspname AS schema_name " +
+        "FROM pg_extension ext " +
+        "JOIN pg_namespace extension_namespace " +
+        "ON extension_namespace.oid = ext.extnamespace " +
+        "WHERE ext.extname = 'pg_trgm'",
+    );
+    pgTrgmSchema = oneString(resultRows(extensionResult)[0]?.schema_name);
+  } catch (error) {
+    logSearchDiagnosticProblem(
+      strapi,
+      "[search] could not inspect pg_trgm: " +
+        ((error as Error)?.message ?? String(error)),
+    );
+  }
+
+  let tableSchema: string | null = null;
+  try {
+    tableSchema = await resolveSearchTableSchema(strapi, connection);
+    if (!tableSchema) {
+      logSearchDiagnosticProblem(
+        strapi,
+        "[search] could not resolve the Strapi table schema for search index diagnostics",
+      );
+    }
+  } catch (error) {
+    logSearchDiagnosticProblem(
+      strapi,
+      "[search] could not resolve the Strapi table schema: " +
+        ((error as Error)?.message ?? String(error)),
+    );
+  }
+
+  let indexRows: any[] = [];
+  if (tableSchema) {
+    try {
+      const result = await connection.raw(
+        "SELECT index_class.relname AS indexname, " +
+          "?::text AS expected_schema, " +
+          "table_namespace.nspname AS table_schema, " +
+          "table_class.relname AS table_name, " +
+          "access_method.amname AS access_method, " +
+          "index_state.indnkeyatts AS key_count, " +
+          "pg_get_indexdef(index_state.indexrelid, 1, true) AS expression, " +
+          "opclass.opcname AS opclass_name, " +
+          "opclass_namespace.nspname AS opclass_schema, " +
+          "pg_get_expr(index_state.indpred, index_state.indrelid) AS predicate, " +
+          "index_state.indisvalid, index_state.indisready " +
+          "FROM pg_index index_state " +
+          "JOIN pg_class index_class ON index_class.oid = index_state.indexrelid " +
+          "JOIN pg_namespace index_namespace ON index_namespace.oid = index_class.relnamespace " +
+          "JOIN pg_class table_class ON table_class.oid = index_state.indrelid " +
+          "JOIN pg_namespace table_namespace ON table_namespace.oid = table_class.relnamespace " +
+          "JOIN pg_am access_method ON access_method.oid = index_class.relam " +
+          "LEFT JOIN pg_opclass opclass ON opclass.oid = index_state.indclass[0] " +
+          "LEFT JOIN pg_namespace opclass_namespace ON opclass_namespace.oid = opclass.opcnamespace " +
+          "WHERE index_namespace.nspname = ? " +
+          "AND index_class.relname = ANY(?::text[])",
+        [tableSchema, tableSchema, [...EXPECTED_SEARCH_INDEXES]],
+      );
+      indexRows = resultRows(result);
+    } catch (error) {
+      logSearchDiagnosticProblem(
+        strapi,
+        "[search] could not inspect expected indexes: " +
+          ((error as Error)?.message ?? String(error)),
+      );
+    }
+  }
+
+  const byName = new Map(
+    indexRows.map((row) => [String(row?.indexname ?? ""), row]),
+  );
+  const missingExpectedIndexes: string[] = [];
+  const invalidExpectedIndexes: InvalidExpectedIndex[] = [];
+  for (const expected of EXPECTED_SEARCH_INDEX_DEFINITIONS) {
+    const row = byName.get(expected.name);
+    if (!row) {
+      missingExpectedIndexes.push(expected.name);
+      continue;
+    }
+    const reason = invalidIndexReason(row, expected, pgTrgmSchema);
+    if (reason) invalidExpectedIndexes.push({ name: expected.name, reason });
+  }
+
+  runtime.status = {
+    mode: "postgres-sql",
+    pgTrgmAvailable: pgTrgmSchema !== null,
+    missingExpectedIndexes,
+    invalidExpectedIndexes,
+  };
+  runtime.initialized = true;
+  const status = searchRuntimeStatus(strapi);
+  if (
+    !status.pgTrgmAvailable ||
+    status.missingExpectedIndexes.length > 0 ||
+    status.invalidExpectedIndexes.length > 0
+  ) {
+    logSearchDiagnosticProblem(
+      strapi,
+      `[search] mode=${status.mode} pg_trgm=${status.pgTrgmAvailable ? "available" : "missing"}; ` +
+        `missing expected indexes: ${status.missingExpectedIndexes.join(", ") || "none"}; ` +
+        `invalid expected indexes: ${status.invalidExpectedIndexes
+          .map(({ name, reason }) => `${name} (${reason})`)
+          .join(", ") || "none"}. ` +
+        `Search results remain correct, but may be slow. ` +
+        `Automatic reconciliation runs after schema sync on every Strapi boot and will retry on the next boot; ` +
+        `ensure the application database role may create pg_trgm and indexes if this persists.`,
+    );
+  } else {
+    (strapi as any).log?.info?.(
+      `[search] mode=${status.mode} pg_trgm=available missing_indexes=0 invalid_indexes=0`,
+    );
+  }
+  return status;
+}
+
+export function searchRuntimeStatus(
+  strapi: Core.Strapi,
+): SearchRuntimeStatus {
+  const status = runtimeFor(strapi).status;
+  return {
+    ...status,
+    missingExpectedIndexes: [...status.missingExpectedIndexes],
+    invalidExpectedIndexes: status.invalidExpectedIndexes.map((index) => ({
+      ...index,
+    })),
+  };
+}
+
+// Test-only reset for suites that deliberately reuse one mock Strapi object.
+export function resetSearchRuntime() {
+  searchRuntimes = new WeakMap<object, SearchRuntime>();
+}
+
+function configuredSqlConnection(strapi: Core.Strapi) {
+  if (runtimeFor(strapi).status.mode === "query-engine") return null;
+  const connection = rankedConnection(strapi);
+  if (!connection) {
+    throw new Error(
+      "Search was bootstrapped for Postgres but its connection is unavailable",
+    );
+  }
+  return connection;
+}
+
+async function withSearchMode<T>(
+  strapi: Core.Strapi,
+  ranked: (connection: any) => Promise<T>,
+  fallback: () => Promise<T>,
+): Promise<T> {
+  const connection = configuredSqlConnection(strapi);
+  if (!connection) return fallback();
+  try {
+    return await ranked(connection);
+  } catch (error) {
+    // After bootstrap selects Postgres, a SQL failure is a real error: log it
+    // and let the request fail like any other service error. Falling back here
+    // would silently serve this page from a different scorer than its
+    // neighbours (the pagination-reorder bug the fixed mode prevents).
+    (strapi as any).log?.error?.(
+      "search: Postgres SQL failed (" + ((error as Error)?.message ?? "") + ")",
+    );
+    throw error;
+  }
+}
+
+async function entityPage(
+  strapi: Core.Strapi,
+  config: EntityConfig,
+  query: string,
+  window: PageWindow,
+  fallbackCache: FallbackRequestCache,
+) {
+  return withSearchMode(
+    strapi,
+    async (connection) => {
+      const ids = await rankedDocumentIds(
+        connection,
+        entityRankedQuery(config.key, searchNeedles(query), {
+          limit: window.limit + (window.lookahead ?? 0),
+          offset: window.offset,
+        }),
+      );
+      const documents = await hydrateByDocumentId(strapi, config.uid, ids, {
+        fields: entityFields(config),
+        populate: { [config.mediaField]: true },
+        // Same published constraint as the ranked SQL WHERE.
+        visibility: { publishedAt: { $notNull: true } },
+      });
+      return documents
+        .map((item) => mapEntity(item, config))
+        .filter(Boolean)
+        .slice(0, window.limit);
+    },
+    async () => {
+      const documents = await fallbackEntities(
+        strapi,
+        config,
+        query,
+        fallbackCache,
+      );
+      const ranked = rank(
+        documents,
+        query,
+        (item) => [{ value: item?.name ?? "", shift: 0 }],
+        (item) => item?.name ?? "",
+      );
+      // Preview (lookahead set) maps before slicing so a null-mapping row
+      // backfills from the full matching set; paged groups slice first —
+      // their LIMIT/OFFSET are exact and must not shift when a row maps to
+      // null, so only preview backfills.
+      if (window.lookahead !== undefined) {
+        return ranked
+          .map((item) => mapEntity(item, config))
+          .filter(Boolean)
+          .slice(0, window.limit);
+      }
+      return ranked
+        .slice(window.offset, window.offset + window.limit)
+        .map((item) => mapEntity(item, config))
+        .filter(Boolean);
+    },
+  );
+}
+
+async function entityTotal(
+  strapi: Core.Strapi,
+  config: EntityConfig,
+  query: string,
+  fallbackCache: FallbackRequestCache,
+) {
+  return withSearchMode(
+    strapi,
+    (connection) =>
+      rankedTotal(connection, entityCountQuery(config.key, searchNeedles(query))),
+    async () =>
+      (await fallbackEntities(strapi, config, query, fallbackCache)).length,
+  );
+}
+
+// Returns mapped offer hits in ranked, paged order.
+async function offerPage(
+  strapi: Core.Strapi,
+  kind: OfferKind,
+  query: string,
+  window: PageWindow,
+  fallbackCache: FallbackRequestCache,
+  nowIso: string,
+) {
+  return withSearchMode(
+    strapi,
+    async (connection) => {
+      const ids = await rankedDocumentIds(
+        connection,
+        offerRankedQuery(
+          kind,
+          searchNeedles(query),
+          {
+            limit: window.limit + (window.lookahead ?? 0),
+            offset: window.offset,
+          },
+          nowIso,
+        ),
+      );
+      const documents = await hydrateByDocumentId(
+        strapi,
+        kind === "coupon" ? "api::coupon.coupon" : "api::deal.deal",
+        ids,
+        // Same visibility as the ranked SQL WHERE (offerWhere): the
+        // contentStatus/expiresAt rule, plus the sale-price rule for deals.
+        kind === "coupon"
+          ? {
+              fields: COUPON_FIELDS,
+              populate: couponPopulate,
+              visibility: publishedOnlyFilters(nowIso),
+            }
+          : {
+              fields: DEAL_FIELDS,
+              populate: dealPopulate,
+              visibility: {
+                $and: [publishedOnlyFilters(nowIso), DEAL_SALE_PRICE_FILTER],
+              },
+            },
+      );
+      return documents
+        .map((item) => mapOffer(item, kind))
+        .filter(Boolean)
+        .slice(0, window.limit);
+    },
+    async () => {
+      const documents = await fallbackOffers(
+        strapi,
+        kind,
+        query,
+        fallbackCache,
+        nowIso,
+      );
+      const ranked = rankOfferDocuments(documents, kind, query);
+      if (window.lookahead !== undefined) {
+        return ranked
+          .map((item) => mapOffer(item, kind))
+          .filter(Boolean)
+          .slice(0, window.limit);
+      }
+      return ranked
+        .slice(window.offset, window.offset + window.limit)
+        .map((item) => mapOffer(item, kind))
+        .filter(Boolean);
+    },
+  );
+}
+
+async function offerTotal(
+  strapi: Core.Strapi,
+  kind: OfferKind,
+  query: string,
+  fallbackCache: FallbackRequestCache,
+  nowIso: string,
+) {
+  return withSearchMode(
+    strapi,
+    (connection) =>
+      rankedTotal(
+        connection,
+        offerCountQuery(kind, searchNeedles(query), nowIso),
+      ),
+    async () =>
+      (await fallbackOffers(strapi, kind, query, fallbackCache, nowIso)).length,
   );
 }
 
@@ -605,7 +1290,6 @@ function emptyResponse(query: string): any {
     banks: [],
     coupons: [],
     deals: [],
-    insights: [],
     totals: {
       stores: 0,
       brands: 0,
@@ -613,7 +1297,6 @@ function emptyResponse(query: string): any {
       banks: 0,
       coupons: 0,
       deals: 0,
-      insights: 0,
     },
     pagination: null,
     hasMore: {
@@ -623,58 +1306,72 @@ function emptyResponse(query: string): any {
       banks: false,
       coupons: false,
       deals: false,
-      insights: false,
     },
     partialSources: [],
   };
 }
 
-async function preview(strapi: Core.Strapi, request: SearchRequest) {
+async function preview(
+  strapi: Core.Strapi,
+  request: SearchRequest,
+  nowIso: string,
+) {
   const response = emptyResponse(request.query);
+  const fallbackCache: FallbackRequestCache = new Map();
+  const entityWindow = {
+    limit: PREVIEW_ENTITY_LIMIT,
+    offset: 0,
+    lookahead: PREVIEW_BACKFILL,
+  };
+  const offerWindow = {
+    limit: PREVIEW_OFFER_LIMIT,
+    offset: 0,
+    lookahead: PREVIEW_BACKFILL,
+  };
   const [
     entityResults,
-    coupons,
+    couponItems,
     couponCount,
-    deals,
+    dealItems,
     dealCount,
   ] = await Promise.all([
     Promise.all(
       ENTITIES.map(async (config) => {
-        const [documents, total] = await Promise.all([
-          findEntities(strapi, config, request.query, 30),
-          countEntities(strapi, config, request.query),
+        const [items, total] = await Promise.all([
+          entityPage(strapi, config, request.query, entityWindow, fallbackCache),
+          entityTotal(strapi, config, request.query, fallbackCache),
         ]);
-        return [config, documents, total] as const;
+        return [config, items, total] as const;
       }),
     ),
-    findCoupons(strapi, request.query, 30),
-    countCoupons(strapi, request.query),
-    findDeals(strapi, request.query, 30),
-    countDeals(strapi, request.query),
+    offerPage(
+      strapi,
+      "coupon",
+      request.query,
+      offerWindow,
+      fallbackCache,
+      nowIso,
+    ),
+    offerTotal(strapi, "coupon", request.query, fallbackCache, nowIso),
+    offerPage(
+      strapi,
+      "deal",
+      request.query,
+      offerWindow,
+      fallbackCache,
+      nowIso,
+    ),
+    offerTotal(strapi, "deal", request.query, fallbackCache, nowIso),
   ]);
 
-  for (const [config, documents, total] of entityResults) {
-    const items = rank(documents, request.query, (item) => item?.name ?? "")
-      .map((item) => mapEntity(item, config))
-      .filter(Boolean);
-    response[config.key] = items.slice(0, PREVIEW_ENTITY_LIMIT);
+  for (const [config, items, total] of entityResults) {
+    response[config.key] = items;
     response.totals[config.key] = total;
     response.hasMore[config.key] = total > PREVIEW_ENTITY_LIMIT;
   }
 
-  const couponItems = rankOffers(
-    coupons.map((item) => mapOffer(item, "coupon")),
-    request.query,
-  );
-  const dealItems = rankOffers(
-    deals.map((item) => mapOffer(item, "deal")),
-    request.query,
-  );
-
-  response.coupons = couponItems
-    .slice(0, PREVIEW_OFFER_LIMIT)
-    .map(toPublicOffer);
-  response.deals = dealItems.slice(0, PREVIEW_OFFER_LIMIT).map(toPublicOffer);
+  response.coupons = couponItems.map(toPublicOffer);
+  response.deals = dealItems.map(toPublicOffer);
   response.totals.coupons = couponCount;
   response.totals.deals = dealCount;
   response.hasMore.coupons = couponCount > PREVIEW_OFFER_LIMIT;
@@ -703,61 +1400,60 @@ async function preview(strapi: Core.Strapi, request: SearchRequest) {
   return response;
 }
 
-async function group(strapi: Core.Strapi, request: SearchRequest) {
+async function group(
+  strapi: Core.Strapi,
+  request: SearchRequest,
+  nowIso: string,
+) {
   const response = emptyResponse(request.query);
-  const offset = (request.page - 1) * request.pageSize;
-  // Rank the SAME candidate window on every page: a page-dependent window
-  // gets re-ranked differently per request, shifting items across page
-  // boundaries (duplicates on one page, omissions on another).
-  const limit = MAX_CANDIDATES;
+  const fallbackCache: FallbackRequestCache = new Map();
+  const window = {
+    limit: request.pageSize,
+    offset: (request.page - 1) * request.pageSize,
+  };
   let total = 0;
 
   if (request.group === "coupons" || request.group === "deals") {
-    const [couponTotal, dealTotal] = await Promise.all([
-      countCoupons(strapi, request.query),
-      countDeals(strapi, request.query),
+    const [couponCount, dealCount] = await Promise.all([
+      offerTotal(strapi, "coupon", request.query, fallbackCache, nowIso),
+      offerTotal(strapi, "deal", request.query, fallbackCache, nowIso),
     ]);
-    response.totals.coupons = couponTotal;
-    response.totals.deals = dealTotal;
+    response.totals.coupons = couponCount;
+    response.totals.deals = dealCount;
 
     if (request.group === "coupons") {
-      const documents = await findCoupons(strapi, request.query, limit);
-      const items = rankOffers(
-        documents.map((item) => mapOffer(item, "coupon")),
+      const items = await offerPage(
+        strapi,
+        "coupon",
         request.query,
+        window,
+        fallbackCache,
+        nowIso,
       );
-      response.coupons = items
-        .slice(offset, offset + request.pageSize)
-        .map(toPublicOffer);
-      total = couponTotal;
+      response.coupons = items.map(toPublicOffer);
+      total = couponCount;
     } else {
-      const dealDocuments = await findDeals(strapi, request.query, limit);
-      const items = rankOffers(
-        dealDocuments.map((item) => mapOffer(item, "deal")),
+      const items = await offerPage(
+        strapi,
+        "deal",
         request.query,
+        window,
+        fallbackCache,
+        nowIso,
       );
-      response.deals = items
-        .slice(offset, offset + request.pageSize)
-        .map(toPublicOffer);
-      total = dealTotal;
+      response.deals = items.map(toPublicOffer);
+      total = dealCount;
     }
   } else {
     const config = ENTITIES.find((item) => item.key === request.group);
     if (config) {
-      const [documents, entityTotal] = await Promise.all([
-        findEntities(strapi, config, request.query, limit),
-        countEntities(strapi, config, request.query),
+      const [items, entityCount] = await Promise.all([
+        entityPage(strapi, config, request.query, window, fallbackCache),
+        entityTotal(strapi, config, request.query, fallbackCache),
       ]);
-      response[config.key] = rank(
-        documents,
-        request.query,
-        (item) => item?.name ?? "",
-      )
-        .slice(offset, offset + request.pageSize)
-        .map((item) => mapEntity(item, config))
-        .filter(Boolean);
-      response.totals[config.key] = entityTotal;
-      total = entityTotal;
+      response[config.key] = items;
+      response.totals[config.key] = entityCount;
+      total = entityCount;
     }
   }
 
@@ -779,9 +1475,13 @@ async function group(strapi: Core.Strapi, request: SearchRequest) {
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   parseRequest,
+  status() {
+    return searchRuntimeStatus(strapi);
+  },
   async search(request: SearchRequest) {
+    const nowIso = new Date().toISOString();
     return request.mode === "group"
-      ? group(strapi, request)
-      : preview(strapi, request);
+      ? group(strapi, request, nowIso)
+      : preview(strapi, request, nowIso);
   },
 });

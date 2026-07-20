@@ -34,6 +34,7 @@ flowchart LR
 - `deploy/site.nginx.conf`
 - `.github/workflows/release-deploy.yml`
 - `docs/strapi-production-deployment.md`
+- `database/search-index-migration.js` — shared best-effort DDL helper used by both search-index migrations and post-schema-sync bootstrap reconciliation
 
 The runtime configuration is also updated in:
 
@@ -621,6 +622,113 @@ docker compose --env-file .env.production -f docker.compose.yml logs --tail=200 
 docker image ls 'ghcr.io/*'
 ```
 
+### Search: cache and index semantics
+
+> Deploy-facing summary only. Two companion documents own the detail:
+> **[docs/search-operations.md](./search-operations.md)** — the 11 expected
+> trigram indexes and what each backs, the index-validity rules, the
+> `/api/search/status` payload and its auth, and the automatic migration plus
+> post-schema-sync reconciliation path; and
+> **[docs/public-api.md](./public-api.md)** — the search request/response
+> contract the ISR gateway and the UI code against. Prefer editing those; keep
+> this section to what bears on a deploy.
+
+The three things that bear on a deploy: mode follows the database dialect and
+never changes at runtime, so index problems degrade speed and never
+correctness; search-index reconciliation runs automatically after schema sync
+on every PostgreSQL boot; and the insights contract couples a Strapi rollback
+to a gateway rollback.
+
+Search mode is fixed during Strapi bootstrap, before the instance serves
+traffic. The configured database dialect is the only selector: PostgreSQL
+always uses the full-set SQL ranker in
+`src/api/search/services/search-sql.ts`; any non-Postgres database uses the
+query-engine implementation. `pg_trgm` never changes row membership or
+ranking and is only a performance aid. A SQL error after bootstrap is
+returned as a real request error; the process never switches scorers between
+pages.
+
+Both implementations use the same scoring tiers: literal direct-field matches
+occupy tiers 0–3, derived singular/plural matches 4–7, relation-name matches
+8–15, and slug-only matches tier 99. Coupon `code` is a direct field. Within
+a tier, both rankers order by normalized label and then `documentId`.
+PostgreSQL uses the stable bytewise `C` collation; JavaScript compares UTF-8
+bytes to mirror it. Both paths rank, count, and page the full matching set.
+The non-Postgres fallback reads visible documents in deterministic 500-row
+batches and performs literal membership in JavaScript, so `%`, `_`, and
+backslash are ordinary query characters rather than LIKE wildcards.
+
+Bootstrap checks the `pg_trgm` catalog entry and all 11 expected indexes once.
+Call the uncached diagnostic endpoint with
+`Authorization: Bearer $ISR_REVALIDATE_SECRET`; missing configuration, a
+missing header, or a mismatch is denied. Its payload returns `mode`,
+`pgTrgmAvailable`, `missingExpectedIndexes`, and
+`invalidExpectedIndexes: [{name, reason}]`. Health validation covers the
+owning table, indexed expression, GIN access method, `gin_trgm_ops` from the
+extension's actual schema, and valid/ready state. Missing, invalid, or
+uninspectable performance aids log at **error** level in production (warn
+elsewhere), but PostgreSQL search remains in SQL mode.
+
+The `2026.07.12T01.00.00.add-public-search-indexes.js` and
+`2026.07.19T00.00.00.add-search-rank-indexes.js` migrations isolate optional
+extension/index DDL behind nested savepoints. Expected permission, extension,
+lock, or timeout failures therefore do not leave the surrounding migration
+transaction aborted; unexpected schema errors still fail the migration. The
+DDL path applies a transaction-local 5-second lock timeout and 30-second
+statement timeout, so optional work cannot hold startup indefinitely. The later
+migration reconciles all 11 indexes, including any skipped by the earlier one,
+and structurally replaces a wrong or invalid same-name index. The drop and
+replacement create share one savepoint, so an optional create failure restores
+the prior index. Reconciliation uses ordinary transactional `CREATE INDEX`,
+never `CONCURRENTLY` inside a migration transaction. Both paths discover the
+schema that owns `pg_trgm` and schema-qualify `gin_trgm_ops`.
+
+On a completely fresh database, Strapi 5 runs user migrations before schema
+sync creates the content tables. The migration logs one consolidated skip, then
+`bootstrap` invokes the same structural reconciler after schema sync and creates
+the indexes automatically. It also runs on every later PostgreSQL boot, so an
+already-migrated database with a missing, invalid, or wrong-expression index is
+repaired without editing `strapi_migrations` or running a server SQL script.
+Migrations and bootstrap share a transaction advisory lock; a concurrent
+instance skips its pass immediately rather than delaying startup.
+
+If the application role cannot create the extension or indexes, boot still
+succeeds and search remains correct but may be slower. Production logs name the
+problem, `/api/search/status` retains the missing/invalid diagnostics, and the
+next boot retries automatically. Grant the application role the required schema
+DDL capability through normal database provisioning if the warning persists.
+Verify after deploy:
+
+```bash
+curl -fsS \
+  -H "Authorization: Bearer $ISR_REVALIDATE_SECRET" \
+  https://cms.couponzguru.com/api/search/status
+# expect mode=postgres-sql, pgTrgmAvailable=true, and both index arrays empty
+```
+
+The public contract contains exactly six result groups: `stores`, `brands`,
+`categories`, `banks`, `coupons`, and `deals`. `insights` is not a compatibility
+group: `group=insights` is invalid, and an upstream payload containing an
+`insights` result, total, or `hasMore` key is rejected by the gateway.
+
+Rollback coupling: rolling Strapi back across the insights-removal boundary
+(to a build whose search payloads still carry `insights` keys) requires
+rolling back the ISR gateway — and the UI — in the same window. The current
+gateway rejects such old-contract 200s as invalid upstream payloads, so
+every uncached search request would 502 until the gateway is rolled back
+too. There is no transitional or backward-compatibility handling for
+`insights`: deploy and roll back Strapi, the ISR gateway, and the UI as one
+search-contract unit.
+
+Freshness is cache-bounded, not instant. Strapi keeps a 30-second in-process
+route cache (`global::cache`). Each ISR gateway then keeps its own bounded
+in-memory LRU — never Redis — fresh for 120 seconds and stale-servable through
+600 seconds while a coalesced background refresh runs. A successful refresh
+normally exposes changes after the fresh window; during upstream failures a
+served stale body can reflect data fetched up to roughly 630 seconds earlier.
+Browser responses remain `no-store`, and restarting a gateway starts its
+search cache cold.
+
 ## 12. Rollback procedure
 
 Because deployments use immutable `sha-*` tags, rollback is straightforward:
@@ -636,6 +744,10 @@ Find the previously known-good image tag from:
 - previous workflow run logs
 - GHCR package tags page
 - the last successful release commit SHA
+
+If the rollback crosses the search insights-removal boundary, roll back the
+ISR gateway (and UI) in the same window — see the rollback-coupling note in
+[Search: cache and index semantics](#search-cache-and-index-semantics).
 
 ## 13. Scaling horizontally
 

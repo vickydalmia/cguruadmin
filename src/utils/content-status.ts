@@ -33,14 +33,15 @@ export function computeContentStatus(input: {
 // the window before it runs. The expiry clause is wrapped in $and because
 // several call sites spread this object into filters that already carry a
 // top-level $or (e.g. store service), which a bare $or key would clobber.
-export function publishedOnlyFilters() {
+export function publishedOnlyFilters(cutoff: Date | string = new Date()) {
+  const cutoffIso = cutoff instanceof Date ? cutoff.toISOString() : cutoff;
   return {
     contentStatus: { $eq: "published" as const },
     $and: [
       {
         $or: [
           { expiresAt: { $null: true } },
-          { expiresAt: { $gt: new Date().toISOString() } },
+          { expiresAt: { $gt: cutoffIso } },
         ],
       },
     ],

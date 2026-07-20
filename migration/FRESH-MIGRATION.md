@@ -60,10 +60,29 @@ yarn migrate
 
 One command runs every phase in order. Each phase checkpoints on completion,
 so if anything fails you fix the cause and re-run `yarn migrate` — it resumes
-where it stopped. (`yarn migrate:fresh` resets checkpoints but keeps the ID
-maps; `yarn migrate:phase <name>` runs a single phase.)
+where it stopped. To re-run one phase against existing data, use
+`yarn migrate:phase <name>`.
 
-Phase order:
+### What `--clean` destroys
+
+> 🛑 **`yarn migrate:fresh` is `tsx src/index.ts --clean` — the most
+> destructive command in this repo. It is not a checkpoint reset.** Against
+> whatever `PG_CONNECTION_STRING` and `S3_BUCKET` point at, and with no
+> confirmation prompt, it deletes:
+
+| # | What | Detail |
+|---|---|---|
+| 1 | Checkpoint files | `.checkpoints/*.json` — every phase becomes eligible again |
+| 2 | **All six ID map files** | `termIdMap` / `postIdMap` / `mediaIdMap` / `poolIdMap` / `poolNameMap` / `userIdMap` `.json` are unlinked from disk (`clearAllMaps()`). Relationship data from earlier phases is **not** retained |
+| 3 | Every migrated table | `TRUNCATE … RESTART IDENTITY CASCADE` over the explicit list in [`src/index.ts`](./src/index.ts) — coupons, deals, stores, brands, categories, banks, unique pools/codes, `files`, all link tables, all `components_*` tables — **plus** every `*_cmps` / `*_lnk` table auto-discovered from `information_schema` under the owned-prefix allowlist |
+| 4 | **The four singles** | `homepages`, `menus`, `footers`, `globals` and their component join tables are in that truncate list. A "fresh" run therefore wipes the curated homepage, menu, footer and global settings, and phase 13 reseeds them from WordPress |
+| 5 | Migration-created admin users | `admin_users` rows whose `document_id` starts with `wp_` (phase 06a's accounts) and their role links. Accounts created by hand in the admin — including the super admin — survive |
+| 6 | **The whole S3 prefix** | `clearS3Bucket()` deletes every object under `S3_ROOT_PATH/` in `S3_BUCKET`. It refuses to run when `S3_ROOT_PATH` is empty (that would empty the entire bucket) and is skipped when S3 is not configured |
+
+> Only the admin-user step and the S3 prefix guard are scoped. Nothing else is
+> reversible without a database backup. On a live catalog, take one first.
+
+### Phase order
 
 | Phase | What it does |
 |---|---|
@@ -116,7 +135,21 @@ bypasses Strapi validation.
 All of these live in this package, share `.env.migration` targeting, print
 their target, and **refuse destructive actions without a `--yes-i-mean-<target>`
 flag** matching that target — the Postgres host, or the S3 bucket for
-`fix:cache-headers`. Every `fix:*` script defaults to a dry run.
+`fix:cache-headers`.
+
+Every one of them defaults to a dry run **except `reset-homepage`, which has
+no preview mode**: given its confirmation flag it backs the homepage tables up
+to `backups/` and then deletes immediately. Without the flag it prints the
+target and exits non-zero.
+
+| Script | Purpose |
+|---|---|
+| `yarn tsx src/reset-homepage.ts` | Back up and delete the homepage row so phase 13 can reseed it — **no dry run; deletes as soon as it is confirmed** |
+| `yarn fix:markdown-richtext` | Repair markdown artifacts left by the old admin editor |
+| `yarn fix:cache-headers` | Stamp immutable `Cache-Control` on already-uploaded S3 objects |
+| `yarn fix:content-srcsets` | Rebuild rich-text `<img>` srcsets from the current `files.formats` |
+| `yarn backfill:offer-fields` | Fill `badge` / `offerText` / `cashbackText` / `bankOfferText` on offers migrated before those fields existed |
+| `yarn cleanup:legacy-fields` | Drop the columns, component rows and tables left orphaned by removed features |
 
 ### Reseed only the homepage
 
@@ -165,6 +198,42 @@ until the next rebuild:
 ```bash
 yarn fix:content-srcsets                                 # dry-run: prints the diff
 yarn fix:content-srcsets --apply --yes-i-mean-<pg-host>
+```
+
+### Backfill the newer offer fields
+
+For databases migrated **before** `badge` / `offerText` / `cashbackText` /
+`bankOfferText` existed. It is **fill-only** — every field is written only
+where it is currently NULL, so editor edits and re-runs are never clobbered —
+and it uses the same extractor as phases 07/08, so backfilled values match a
+fresh run. Deploy the new schema and **boot Strapi once first** so it creates
+the nullable columns; the script only fills them, and warns-and-skips per
+table if a column is missing. Run it **before** `cleanup:legacy-fields`, which
+drops the `is_popular` column that the `badge` backfill reads:
+
+```bash
+yarn backfill:offer-fields                               # dry-run: prints counts
+yarn backfill:offer-fields --apply --yes-i-mean-<pg-host>
+```
+
+Add `--reextract` to re-derive offer/cashback/bank text for **all** rows
+(clearing them first) after improving the extractor — `badge` is left
+untouched.
+
+### Drop legacy columns and tables
+
+Strapi never drops columns or tables when a field is removed from a schema (it
+orphans them to avoid data loss), so this cleans up after the tag / offerType /
+Amazon-deal / isPopular / cashbackItems removals: the `is_popular` and
+`offer_type` columns on coupons/deals, the two Amazon columns on `globals`,
+the `amazonTopBanner` media morph rows, the `cashbackItems` component rows and
+their `components_shared_chips` table, and the `tags` table with its two link
+tables. Every step is guarded (`IF EXISTS` / scoped `DELETE`s), so a database
+that never had a given object is a safe no-op and re-runs are idempotent:
+
+```bash
+yarn cleanup:legacy-fields                               # dry-run: reports what exists
+yarn cleanup:legacy-fields --apply --yes-i-mean-<pg-host>
 ```
 
 ### Targeting a different database ad hoc

@@ -1,6 +1,16 @@
-# Admin Taxonomy Side Panel — Line-by-Line Reference
+# Admin Edit-View Customizations
 
-A deep walkthrough of the custom Strapi v5 admin side panel we built for managing taxonomy relations (`stores`, `brands`, `categories`, `banks`) on the `deal` and `coupon` content types.
+How the Strapi v5 admin bundle is customized: the **Taxonomies** side panel this
+file is named after, the two panels that grew beside it, the four replaced field
+types, and the server-side bootstrap that keeps the edit view consistent with
+them.
+
+> **What this doc is for.** It explains *why* these customizations exist and what
+> contract each one holds, so you can change them without re-deriving the intent.
+> It is deliberately not a transcription: the maintained references are
+> [`src/admin/app.tsx`](../src/admin/app.tsx) (everything client-side) and
+> [`src/index.ts`](../src/index.ts) (everything server-side). When this doc and
+> the code disagree, the code wins.
 
 ---
 
@@ -8,813 +18,354 @@ A deep walkthrough of the custom Strapi v5 admin side panel we built for managin
 
 ### Problem
 
-Strapi v5's default relation widget fetches relation options one small batch at a time and renders a dropdown. When the target collection is large (we have thousands of stores and brands), this UX becomes painful:
+Strapi v5's default relation widget fetches options one small batch at a time and
+renders a dropdown. Our taxonomy collections hold thousands of stores and brands,
+which makes that UX painful: scrolling is sluggish, finding an item by name is
+awkward, bulk-selecting costs many round trips — and every relation field gets
+its own widget, so a deal or coupon edit view is dominated by them.
 
-- Scrolling the dropdown is sluggish.
-- Finding an item by name is awkward.
-- Bulk selecting multiple items requires many round trips.
-- Every relation field in the main form gets its own widget, and a deal/coupon has five of them — the edit view becomes noisy.
+Separately, several stock field inputs did not survive QA: the markdown editor
+could not edit the HTML our richtext fields actually store, the datetime picker
+stepped in 15-minute jumps, booleans flipped on a stray click, and the UID input
+seeded new entries with the model name (`store`) as their slug.
 
 ### Solution
 
-1. Build a **custom side panel** ("Taxonomies") that renders a compact checkbox + selected-chip UI for all four relations in one place, with search, pagination, and infinite scroll.
-2. **Hide the default relation widgets** for those four fields from the edit view, so nothing is duplicated and the main form stays clean.
+1. Replace the relation widgets with **side panels** that render a compact
+   search + checkbox + selected-list UI, with pagination and infinite scroll.
+2. **Hide the default relation widgets** for the fields those panels own, so
+   nothing is duplicated and the main form stays clean.
+3. Replace the four problem field types globally in the admin `register()` hook,
+   so every content type inherits the fix without per-field configuration.
 
 ### Files
 
 | File | Purpose |
 |------|---------|
-| `src/admin/app.tsx` | The panel UI — React component, fetch logic, form integration |
-| `src/index.ts` | Server bootstrap hook that rewrites the content-manager layout to hide those relations |
+| [`src/admin/app.tsx`](../src/admin/app.tsx) | The whole admin customization: field-type registrations, admin config/translations, and all three side panels |
+| [`src/admin/components/RichTextEditor.tsx`](../src/admin/components/RichTextEditor.tsx) | TipTap WYSIWYG registered for `richtext` |
+| [`src/admin/components/DateTimeInput.tsx`](../src/admin/components/DateTimeInput.tsx) | `datetime` picker with 5-minute steps |
+| [`src/admin/components/BooleanConfirmInput.tsx`](../src/admin/components/BooleanConfirmInput.tsx) | `boolean` toggle behind a confirmation dialog |
+| [`src/admin/components/SlugInput.tsx`](../src/admin/components/SlugInput.tsx) | `uid` input that starts empty and auto-fills from `name` |
+| [`src/index.ts`](../src/index.ts) | Server bootstrap: hides the panel-owned relations from the content-manager layout, plus the rest of the boot-time view config |
+| [`src/constants/homepage-sections.ts`](../src/constants/homepage-sections.ts), [`src/constants/deal-of-the-day-sections.ts`](../src/constants/deal-of-the-day-sections.ts), [`src/constants/homepage-images.ts`](../src/constants/homepage-images.ts) | Section labels and image size rules shared by the admin bundle and the server |
+
+The field replacements are the implementation of several QA fixes; see
+[`docs/qa-fixes-2026-07.md`](./qa-fixes-2026-07.md) for the operator-facing view
+of that batch.
 
 ---
 
-## 2. Entry Point — `app.tsx` default export (lines 461–469)
+## 2. The admin entry point
 
-```tsx
-export default {
-  config: {
-    locales: [],
-  },
-  bootstrap(app: StrapiApp) {
-    const apis = (app.getPlugin('content-manager') as any).apis;
-    apis.addEditViewSidePanel([RelationMultiSelectPanel]);
-  },
-};
-```
+The default export of [`src/admin/app.tsx`](../src/admin/app.tsx) implements
+three of Strapi's admin hooks.
 
-- **`config.locales: []`** — Required field in Strapi's admin customization contract. Empty array because we're not adding locales; Strapi would warn at boot if the key were missing.
-- **`bootstrap(app: StrapiApp)`** — Strapi calls this once, after the admin JS bundle loads but before the UI renders. It's the hook for registering injection zones, plugins, and side panels.
-- **`app.getPlugin('content-manager')`** — Returns the content-manager plugin instance.
-- **`.apis`** — The mutation API for the content manager (add side panels, bulk actions, document actions, header actions). We cast to `any` because `getPlugin` is typed loosely and `.apis` isn't on the public surface; the plugin's `ContentManagerPlugin` class (`node_modules/@strapi/content-manager/.../content-manager.d.ts`) exposes `addEditViewSidePanel` on `.config.apis` but the runtime shape is what we hit here.
-- **`addEditViewSidePanel([RelationMultiSelectPanel])`** — Registers our panel. The array form is the static-registration path; the alternative (reducer function) lets you reorder existing panels, which we don't need.
+### `register(app)` — global field-type replacements
 
----
+Four `app.addFields({ type, Component })` calls swap the built-in input for every
+field of that type, across every content type:
 
-## 3. Panel Component Contract — `RelationMultiSelectPanel` (lines 452–459)
+| Type | Component | Why |
+|---|---|---|
+| `richtext` | `RichTextEditor` | Fields store HTML (WP-migrated, rendered raw on the site); the stock markdown editor cannot edit it. Anything outside the server allowlist is stripped on save by [`src/utils/sanitize-richtext.ts`](../src/utils/sanitize-richtext.ts). |
+| `datetime` | `DateTimeInput` | 5-minute time steps instead of 15, for coupon scheduling precision. |
+| `boolean` | `BooleanConfirmInput` | Confirmation dialog before the toggle flips; the form value changes only after the editor confirms. |
+| `uid` | `SlugInput` | Starts empty instead of seeding the model's singular name, auto-fills from `name` until hand-edited, and offers a "Regenerate" button. Trades away Strapi's live availability indicator — uniqueness is still enforced by the schema on save. |
 
-```tsx
-const RelationMultiSelectPanel: PanelComponent = ({ model, documentId }) => {
-  if (!RELATION_CONFIG[model]) return null;
+The registry key must be the **raw attribute type**. In particular `richtext`,
+not the Strapi v4 `wysiwyg` key, which silently does nothing in v5.
 
-  return {
-    title: 'Taxonomies',
-    content: <PanelBody model={model} documentId={documentId} />,
-  };
-};
-```
+### `config` — branding, locale, translations
 
-- **`PanelComponent`** — Imported from `@strapi/content-manager/strapi-admin`. Defined as `DescriptionComponent<PanelComponentProps, PanelDescription>`. Props are `EditViewContext`, which includes `activeTab`, `collectionType`, `document`, `documentId`, `meta`, and `model`.
-- **Early return `null`** — When the current content type isn't in `RELATION_CONFIG` (e.g. a blog post), we return `null` so Strapi skips rendering this panel. Without this guard the panel would try to render for every content type and crash on the missing config.
-- **Return shape `{ title, content }`** — This is **not JSX**. `PanelComponent` returns a `PanelDescription` object — a data description Strapi uses to render the actual `<Panel>` chrome. The `content` field is where JSX lives. First-time plugin authors often return JSX directly and get a cryptic error; the `PanelComponent` type is what steers us to the right shape.
-- **`title: 'Taxonomies'`** — The section heading shown in the side rail.
-- **`content: <PanelBody ... />`** — Our actual component tree.
+Replaces the Strapi logo in the auth and menu views, declares `locales: ['en']`,
+and supplies a translations block. The translation overrides are load-bearing,
+not cosmetic: they rewrite the login welcome copy, relabel the media-library
+dialog's confirm action, and — most importantly — replace the generic
+content-manager validation error with a message that points editors at the
+Validation problems panel (§5). The pre-save check never reaches the server, so
+that panel is the only place the real problem is visible.
 
----
+### `bootstrap(app)` — panels and two document-level behaviors
 
-## 4. Declarative Relation Config (lines 17–38)
+Registers all three panels in one `addEditViewSidePanel` call on the
+content-manager plugin's `apis` object, in order: Taxonomies, Top Pick Coupons,
+Validation problems. Each panel decides for itself whether it applies to the
+current model (§3–§5), so registration is unconditional.
 
-```tsx
-type RelationConfig = {
-  field: string;
-  target: string;
-  label: string;
-};
+`bootstrap` also installs two document-level behaviors, both guarded on
+`document` being defined:
 
-const RELATION_CONFIG: Record<string, RelationConfig[]> = {
-  'api::deal.deal': [
-    { field: 'stores', target: 'api::store.store', label: 'Stores' },
-    { field: 'brands', target: 'api::brand.brand', label: 'Brands' },
-    { field: 'categories', target: 'api::category.category', label: 'Categories' },
-    { field: 'banks', target: 'api::bank.bank', label: 'Banks' },
-  ],
-  'api::coupon.coupon': [
-    /* same four */
-  ],
-};
-```
-
-- **`field`** — the attribute name on the parent content type (matches the form key).
-- **`target`** — the related content type's UID (used to build the candidate-list URL).
-- **`label`** — display name in the panel heading and search placeholder.
-- Keyed by content-type UID. Adding a new taxonomy to deals is a one-line change. Adding a third content type (e.g. a promotional banner) is just a new top-level key.
-- Both `deal` and `coupon` share the same four relations because they share the same taxonomy model.
+- **Title rewriter.** Replaces `Strapi` with `CouponzGuru` in `document.title`,
+  and keeps doing so via a `MutationObserver` on the `<title>` element as the
+  admin SPA navigates.
+- **Enter-key suppressor.** A capture-phase `keydown` listener that swallows
+  Enter on single-line text inputs inside `/content-manager/` routes, because
+  pressing Enter while typing a name used to submit the form and create the
+  entry. It deliberately leaves comboboxes, autocomplete inputs, textareas, and
+  the rich-text editor alone, and — critically — skips inputs inside
+  `form[role="search"]`: Strapi's search bar has no submit button, so Enter is
+  its only trigger and swallowing it would break search on every content type.
 
 ---
 
-## 5. Type Model for Relation Commands (lines 40–52)
+## 3. The Taxonomies panel
 
-```tsx
-type Candidate = { id: number; documentId: string; name: string };
-type RelationCommand = Candidate & {
-  apiData: {
-    id: number;
-    documentId: string;
-    locale: string | null;
-    isTemporary?: boolean;
-  };
-};
-type RelationFormValue = {
-  connect?: RelationCommand[];
-  disconnect?: RelationCommand[];
-};
-```
+`RelationMultiSelectPanel` renders for any model present in `RELATION_CONFIG`,
+and returns `null` for everything else. Today that map covers `api::deal.deal`
+and `api::coupon.coupon`, each with the same four relations — stores, brands,
+categories, banks.
 
-Three distinct shapes, each for a specific purpose:
+A `PanelComponent` returns a **description object**, `{ title, content }`, not
+JSX. Strapi renders the panel chrome itself and mounts `content` inside it;
+returning JSX directly fails with an unhelpful error.
 
-- **`Candidate`** — the minimal info we need in UI state: the numeric `id` (for React keys / some legacy paths), the `documentId` (canonical v5 identifier), and a display `name`. That's all the UI ever shows.
-- **`RelationCommand`** — what Strapi v5's form state expects when you push an entry into `connect` or `disconnect`. It extends `Candidate` with an `apiData` nested object. This shape mirrors Strapi's own `handleConnect` at `node_modules/@strapi/content-manager/dist/admin/pages/EditView/components/FormInputs/Relations/Relations.mjs:186-192` and `handleDisconnect` at `:47-54`. If you diverge from this shape, Strapi's save path silently drops the command.
-  - `apiData.id` / `apiData.documentId` — repeated inside for Strapi's internal serializer.
-  - `apiData.locale: string | null` — added defensively. Strapi includes it in its own commands; if i18n is later enabled on these targets, omitting it would route connects to the wrong locale.
-  - `apiData.isTemporary?: true` — marks a connect that hasn't been saved yet. Strapi uses this to grey out the chip in its default UI; in our panel it's cosmetic for Strapi but required for parity.
-- **`RelationFormValue`** — what `useForm` exposes for a relation field: **a diff**, not the current list. This is the single most important thing to internalize about Strapi v5 relation forms.
-  - `connect[]` — commands to add.
-  - `disconnect[]` — commands to remove.
-  - The actual current list is fetched separately (via `/content-manager/relations/...`). Strapi's own default widget also does this — it keeps a server-sourced list in RTK Query cache and shows `connect`/`disconnect` on top of it.
+### The config shape
 
-### Type Guard (lines 56–62)
-
-```tsx
-const isRelationFormValue = (value: unknown): value is RelationFormValue =>
-  Boolean(
-    value &&
-      typeof value === 'object' &&
-      !Array.isArray(value) &&
-      ('connect' in value || 'disconnect' in value)
-  );
-```
-
-Distinguishes the diff shape from a legacy array-of-current-values shape. Even though v5 should always hand us the diff, being explicit here gives us a fall-through path (see §10c Branch A).
-
----
-
-## 6. Identity Helper — `getRelationDocumentId` (lines 64–65)
-
-```tsx
-const getRelationDocumentId = (relation: any): string | undefined =>
-  relation?.apiData?.documentId ?? relation?.documentId;
-```
-
-- **Why `documentId` over `id`** — In Strapi v5, `documentId` (a stable CUID) is the canonical identifier. The numeric `id` is still returned but represents a specific row in a specific locale and isn't durable across migrations/environments.
-- **Fallback chain** — Commands from `toRelationCommand` have `apiData.documentId` *and* a top-level `documentId`. Commands from Strapi's own code paths sometimes only have one or the other. The `??` chain tolerates both.
-
----
-
-## 7. Command Factory — `toRelationCommand` (lines 67–80)
-
-```tsx
-const toRelationCommand = (
-  candidate: Candidate,
-  options: { isTemporary?: boolean } = {}
-): RelationCommand => ({
-  id: candidate.id,
-  documentId: candidate.documentId,
-  name: candidate.name,
-  apiData: {
-    id: candidate.id,
-    documentId: candidate.documentId,
-    locale: null,
-    ...(options.isTemporary ? { isTemporary: true } : {}),
-  },
-});
-```
-
-- Single function that produces both `connect` and `disconnect` commands.
-- `isTemporary: true` is set only for connects of brand-new selections (see `toggle` at §10i). Disconnects never get `isTemporary` — they refer to items that already exist on the server.
-- `locale: null` is unconditional. If this project adopts i18n for taxonomies later, swap this for the document's active locale.
-
----
-
-## 8. Deferred Mount Hook — `useDeferredMount` (lines 82–94)
-
-```tsx
-function useDeferredMount(): boolean {
-  const [ready, setReady] = React.useState(false);
-  React.useEffect(() => {
-    const w = window as any;
-    if (typeof w.requestIdleCallback === 'function') {
-      const id = w.requestIdleCallback(() => setReady(true), { timeout: 1000 });
-      return () => w.cancelIdleCallback?.(id);
-    }
-    const id = setTimeout(() => setReady(true), 400);
-    return () => clearTimeout(id);
-  }, []);
-  return ready;
-}
-```
-
-- **Problem solved** — Side panels mount with the rest of the edit view. If all four sections kicked off network requests on first render, the first paint of the edit view would compete with 8+ XHRs (one for the current relation list plus one for candidates, per section).
-- **Strategy** — Return `false` immediately, flip to `true` when the browser is idle (or after a 400 ms fallback timeout for browsers without `requestIdleCallback`, notably older Safari).
-- **`timeout: 1000`** — cap the idle wait at 1 second so slow devices don't get stuck showing an empty panel forever.
-- Every data-fetch `useEffect` in `RelationSection` guards on `if (!deferred) return`, so the whole network flurry is deferred until the main form is interactive.
-- Cleanup cancels the pending idle callback / timeout if the component unmounts first.
-
----
-
-## 9. `PanelBody` — Per-Model Section Layout (lines 427–450)
-
-```tsx
-function PanelBody({ model, documentId }: { model: string; documentId?: string }) {
-  const deferred = useDeferredMount();
-  return (
-    <Box width="100%">
-      {RELATION_CONFIG[model].map((cfg, idx) => (
-        <React.Fragment key={cfg.field}>
-          {idx > 0 ? <Divider /> : null}
-          <RelationSection
-            config={cfg}
-            deferred={deferred}
-            model={model}
-            documentId={documentId}
-          />
-        </React.Fragment>
-      ))}
-    </Box>
-  );
-}
-```
-
-- `useDeferredMount` is called **once** here (not inside each `RelationSection`). All four sections share the same `deferred` signal, so we spend only one idle slot instead of four.
-- `<Divider />` between sections — not before the first.
-- `key={cfg.field}` is stable because `config.field` is a constant string per relation.
-- `documentId` is forwarded. When undefined (creating a new entry), the selected-fetch effect inside `RelationSection` silently skips; only the candidate-list fetch runs.
-
----
-
-## 10. `RelationSection` — The Heart of the Panel
-
-Signature (lines 96–106):
-
-```tsx
-function RelationSection({
-  config,
-  deferred,
-  model,
-  documentId,
-}: {
-  config: RelationConfig;
-  deferred: boolean;
-  model: string;
-  documentId?: string;
-}) { /* ... */ }
-```
-
-### 10a. Form Integration (lines 107–113)
-
-```tsx
-const { get } = useFetchClient();
-
-const formValue = useForm(
-  'RelationSection',
-  (state) => state.values?.[config.field]
-);
-const onChangeForm = useForm('RelationSection', (state) => state.onChange);
-```
-
-- **`useFetchClient()`** — Strapi's auth-aware fetch wrapper. The returned `get` automatically attaches the admin JWT and base URL. We use it for both the candidate list and the existing-relations list.
-- **`useForm('RelationSection', selector)`** — Strapi's form state hook. The string is a consumer name used in error messages if the hook is called outside a `FormProvider`. The selector is key: `useForm` only re-renders this component when the **selected slice** changes. We subscribe to `state.values?.[config.field]` — the form state slot for *this* relation only. Edits to `title`, `content`, other relations, etc. do not re-render this section.
-- **Second call for `onChange`** — Again with a selector, so the dispatcher reference is stable and we don't pay for re-renders when unrelated form state mutates.
-
-### 10b. State Inventory
-
-| Name | Line | Purpose |
-|------|------|---------|
-| `selectedList` | 115 | Denormalized list of currently-selected items. Drives the chip strip and the `checked` prop on checkboxes. |
-| `formValueRef` | 117 | Latest `formValue` mirrored for async fetches to read (avoids stale closures). |
-| `candidates` | 231 | Current page(s) of available options loaded from the server. |
-| `page` / `pageCount` | 232–233 | Infinite-scroll pagination cursor. |
-| `loading` | 234 | Shows the `Loader` while a page is in-flight. |
-| `initialLoaded` | 235 | Tracks whether the first page completed so we can show either a loading spinner or an empty-state message. |
-| `search` / `debouncedSearch` | 236–237 | Live text input + its 250 ms debounced mirror. |
-| `sentinelRef` | 340 | The 1px `<div>` at the bottom of the scroll container that the IntersectionObserver watches. |
-
-### 10c. Form → Local State Sync Effect (lines 122–165)
-
-```tsx
-React.useEffect(() => {
-  if (Array.isArray(formValue) && formValue.length > 0) {
-    setSelectedList(
-      formValue.map((v: any) => ({
-        id: v.id,
-        documentId: v.documentId,
-        name: v.name ?? v.title ?? String(v.id),
-      }))
-    );
-    return;
-  }
-
-  if (isRelationFormValue(formValue)) {
-    setSelectedList((current) => {
-      const disconnectDocIds = new Set(
-        (formValue.disconnect ?? [])
-          .map((relation) => getRelationDocumentId(relation))
-          .filter((docId): docId is string => Boolean(docId))
-      );
-      const next = current.filter(
-        (relation) => !disconnectDocIds.has(relation.documentId)
-      );
-
-      for (const relation of formValue.connect ?? []) {
-        const docId = getRelationDocumentId(relation);
-        if (
-          !docId ||
-          disconnectDocIds.has(docId) ||
-          next.some((item) => item.documentId === docId)
-        ) {
-          continue;
-        }
-        next.push({
-          id: relation.id,
-          documentId: docId,
-          name: relation.name ?? String(relation.id),
-        });
-      }
-
-      return next;
-    });
-  }
-}, [formValue]);
-```
-
-Two branches cover two possible `formValue` shapes:
-
-**Branch A — legacy array (lines 123–132).** Rare in Strapi v5 (the form stores diffs, not arrays), but if some code path hydrates the form with a pre-populated array, we handle it by mapping straight into `Candidate`. The `name ?? title ?? String(id)` fallback covers both `name`-keyed taxonomies and `title`-keyed ones.
-
-**Branch B — diff shape (lines 134–164).** The common case. We reconcile the diff on top of current `selectedList`:
-
-1. **Build `disconnectDocIds` Set** — a lookup of pending disconnects. `.filter((docId): docId is string => Boolean(docId))` narrows the type so the Set contains only strings.
-2. **Filter current** — remove any item the user has queued for disconnection.
-3. **Walk `connect[]`** — for each:
-   - Skip if we can't determine a `documentId`.
-   - Skip if this docId is in `disconnectDocIds` (net-zero: connect + disconnect cancel each other).
-   - Skip if it's already in `next` (prevents double-add when the `toggle` handler already did an optimistic insert).
-   - Otherwise push a lightweight `Candidate`.
-
-**Why functional setter.** `setSelectedList((current) => ...)` reads the truly-latest `current`, so even when React batches `setSelectedList(next)` + `onChangeForm(...)` from the `toggle` handler, this effect doesn't reset state.
-
-**Dependency `[formValue]`.** Every form diff retriggers this. Since `selectedList` updates inside the setter use the latest `current`, this is O(|connect| + |disconnect|) per edit.
-
-### 10d. `formValueRef` Mirror (lines 117–120)
-
-```tsx
-const formValueRef = React.useRef(formValue);
-React.useEffect(() => {
-  formValueRef.current = formValue;
-}, [formValue]);
-```
-
-- **Why a ref?** The initial-selected-relations fetch (§10f) runs async. When it resolves, the `formValue` captured in its closure is stale. Adding `formValue` to its dep array would re-fire the entire paginated fetch on every edit — a waste. Instead we capture a ref.
-- The effect is a one-liner that keeps `.current` in lockstep with the subscribed value.
-
-### 10e. Debounced Search (lines 239–242)
-
-```tsx
-React.useEffect(() => {
-  const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
-  return () => clearTimeout(t);
-}, [search]);
-```
-
-- Every keystroke rewrites the pending timeout; only the last one survives the 250 ms quiet window.
-- Only `debouncedSearch` enters the fetch effect's dep list, so API calls don't fire per keystroke.
-- `.trim()` prevents `" tag "` from becoming a distinct search (network-redundant).
-
-### 10f. Initial Selected-Relations Fetch (lines 167–224)
-
-The asymmetric-important effect. Runs once per `(deferred, documentId, model, config.field, get)` tuple:
-
-```tsx
-React.useEffect(() => {
-  if (!deferred || !documentId) return;
-  let cancelled = false;
-  const run = async () => {
-    try {
-      const all: Candidate[] = [];
-      for (let page = 1; page <= 50; page++) {
-        const res = await get(
-          `/content-manager/relations/${model}/${documentId}/${config.field}?page=${page}&pageSize=100`
-        );
-        const body = res?.data?.data ?? res?.data;
-        const results: any[] = body?.results ?? [];
-        all.push(
-          ...results.map((r: any) => ({
-            id: r.id,
-            documentId: r.documentId,
-            name: r.name ?? r.title ?? String(r.id),
-          }))
-        );
-        const pageCount = body?.pagination?.pageCount ?? 1;
-        if (page >= pageCount || results.length === 0) break;
-      }
-      if (cancelled) return;
-      setSelectedList(() => {
-        const latest = formValueRef.current;
-        if (!isRelationFormValue(latest)) return all;
-        /* ...reconcile disconnect/connect on top of `all`... */
-      });
-    } catch (err) {
-      console.error(`[taxonomy-panel] Failed to load selected ${config.field}`, err);
-    }
-  };
-  run();
-  return () => { cancelled = true; };
-}, [deferred, documentId, model, config.field, get]);
-```
-
-- **Gate** — skip if not yet idle, or if there's no `documentId` (create flow: nothing is persisted yet, so there's nothing to fetch).
-- **`cancelled` flag + cleanup** — the cleanup sets `cancelled = true`; in-flight fetches check this before touching state. Prevents "Can't perform a React state update on an unmounted component" warnings and stale writes after deps change.
-- **Paginated loop** — up to 50 pages × 100 rows = 5000 selected items max. Early exit when `page >= pageCount` or we get an empty page.
-- **Endpoint** — `/content-manager/relations/{model}/{documentId}/{field}`. Confirmed against Strapi v5 source at `node_modules/@strapi/content-manager/dist/admin/services/relations.mjs:9`. In v5 the URL path uses `documentId`, **not** numeric id — this is a critical v4→v5 difference.
-- **`body = res?.data?.data ?? res?.data`** — tolerates both the plain and wrapped envelope shapes Strapi occasionally returns.
-- **Mapping** — `name ?? title ?? String(id)` fallback for targets with non-standard label fields.
-- **Race-safe apply** — after the await, we `setSelectedList(() => ...)` with a functional setter that reads `formValueRef.current`. If the user toggled anything while the fetch was in flight, we replay those pending `connect`/`disconnect` operations on top of the server list instead of clobbering them. Without this, a fast clicker could lose their selection.
-- **Why `formValue` is NOT a dep** — if it were, every toggle would re-fire the paginated fetch. We use the ref so this effect runs only when structural inputs change.
-
-### 10g. Candidate-List Reset Effect (lines 244–249)
-
-```tsx
-React.useEffect(() => {
-  setCandidates([]);
-  setPage(1);
-  setPageCount(1);
-  setInitialLoaded(false);
-}, [debouncedSearch, config.target]);
-```
-
-- When the user changes the search query (or the target config changes), discard the cached pages so they don't mix with the new query's results.
-- Runs *before* the fetch effect below (React orders effects by declaration), so by the time the fetch fires, state is clean.
-
-### 10h. Candidate Fetch Effect (lines 251–284)
-
-```tsx
-React.useEffect(() => {
-  if (!deferred) return;
-  let cancelled = false;
-  const run = async () => {
-    setLoading(true);
-    try {
-      const searchParam = debouncedSearch
-        ? `&filters[name][$containsi]=${encodeURIComponent(debouncedSearch)}`
-        : '';
-      const res = await get(
-        `/content-manager/collection-types/${config.target}?page=${page}&pageSize=${PAGE_SIZE}&sort=name:ASC${searchParam}`
-      );
-      const body = res?.data?.data ?? res?.data;
-      const results: any[] = body?.results ?? [];
-      if (cancelled) return;
-      const list: Candidate[] = results.map((r: any) => ({
-        id: r.id,
-        documentId: r.documentId,
-        name: r.name ?? r.title ?? String(r.id),
-      }));
-      setCandidates((prev) => (page === 1 ? list : [...prev, ...list]));
-      setPageCount(body?.pagination?.pageCount ?? 1);
-      setInitialLoaded(true);
-    } catch (err) {
-      console.error(`[taxonomy-panel] Failed to load ${config.field}`, err);
-    } finally {
-      if (!cancelled) setLoading(false);
-    }
-  };
-  run();
-  return () => { cancelled = true; };
-}, [deferred, page, debouncedSearch, config.target, config.field, get]);
-```
-
-- **Endpoint** — `/content-manager/collection-types/{uid}`. Returns paginated entries with a `pagination.pageCount` hint.
-- **Search** — `filters[name][$containsi]=<query>` (case-insensitive substring). All five taxonomies have a `name: string` attribute, so this works uniformly.
-- **Sort** — `name:ASC`. Alphabetical is intuitive and stable.
-- **`PAGE_SIZE = 30`** (line 54). Small enough for quick first paint, large enough that a typical search fits on one page.
-- **Append vs replace** — `page === 1 ? list : [...prev, ...list]`. The observer increments `page` to load more; page 1 after a search change replaces the cache.
-- **`pageCount`** drives `hasMore` (line 341) which in turn drives the observer.
-- **`initialLoaded: true`** — switches the empty-state copy from nothing to "No matches" / "No {label} available".
-- **`finally` clears `loading`** only if not cancelled (we don't want to setState on an unmounted component).
-
-### 10i. Toggle Handler (lines 286–338)
-
-The single function that writes back to Strapi's form. Every checkbox click and every chip-close routes through here.
-
-```tsx
-const toggle = (c: Candidate) => {
-  const exists = selectedList.some((s) => s.documentId === c.documentId);
-  const next = exists
-    ? selectedList.filter((s) => s.documentId !== c.documentId)
-    : [...selectedList, c];
-  const currentValue = isRelationFormValue(formValue) ? formValue : {};
-  const currentConnect = currentValue.connect ?? [];
-  const currentDisconnect = currentValue.disconnect ?? [];
-
-  setSelectedList(next);
-
-  if (exists) {
-    /* unselect branch */
-  } else {
-    /* select branch */
-  }
-};
-```
-
-**Preamble (lines 287–295):**
-- `exists` — is the candidate currently in `selectedList`? (Matched by `documentId`.)
-- `next` — the optimistic new `selectedList`.
-- `currentValue / currentConnect / currentDisconnect` — read the form's current pending diff.
-- `setSelectedList(next)` — **paint first**. Instant feedback; the form state catches up below.
-
-**Unselect branch (lines 297–316):**
-```tsx
-const wasOnlyPendingConnect = currentConnect.some(
-  (relation) => getRelationDocumentId(relation) === c.documentId
-);
-
-onChangeForm(config.field, {
-  connect: currentConnect.filter(
-    (relation) => getRelationDocumentId(relation) !== c.documentId
-  ),
-  disconnect: wasOnlyPendingConnect
-    ? currentDisconnect
-    : [
-        ...currentDisconnect.filter(
-          (relation) => getRelationDocumentId(relation) !== c.documentId
-        ),
-        toRelationCommand(c),
-      ],
-});
-```
-- `wasOnlyPendingConnect` — was this item added earlier in this session but not yet saved?
-- Always strip the item from `connect`.
-- If it was an unsaved addition, don't push a disconnect either — the net effect should be zero. Otherwise push a new disconnect command.
-
-**Select branch (lines 319–337):**
-```tsx
-const wasPendingDisconnect = currentDisconnect.some(
-  (relation) => getRelationDocumentId(relation) === c.documentId
-);
-
-onChangeForm(config.field, {
-  connect: wasPendingDisconnect
-    ? currentConnect.filter(
-        (relation) => getRelationDocumentId(relation) !== c.documentId
-      )
-    : [
-        ...currentConnect.filter(
-          (relation) => getRelationDocumentId(relation) !== c.documentId
-        ),
-        toRelationCommand(c, { isTemporary: true }),
-      ],
-  disconnect: currentDisconnect.filter(
-    (relation) => getRelationDocumentId(relation) !== c.documentId
-  ),
-});
-```
-- `wasPendingDisconnect` — did the user remove this item earlier in this session?
-- If yes, just cancel the disconnect (don't add a connect; the item was never gone server-side).
-- If no, push a new `isTemporary: true` connect.
-- Always strip the item from `disconnect`.
-
-### Truth Table
-
-| Starting server state | User action | Result in `connect` | Result in `disconnect` |
-|------|------|------|------|
-| Not connected | Select | `[..., X]` | (unchanged) |
-| Not connected | Select → Deselect | (removed) | (unchanged) |
-| Connected | Deselect | (unchanged) | `[..., X]` |
-| Connected | Deselect → Select | (unchanged) | (removed) |
-
-This four-branch idempotency is what makes the UI feel predictable: clicking an item an even number of times always leaves the form in a clean diff state.
-
-### 10j. Infinite Scroll Observer (lines 343–356)
-
-```tsx
-const sentinelRef = React.useRef<HTMLDivElement>(null);
-const hasMore = page < pageCount;
-
-React.useEffect(() => {
-  const el = sentinelRef.current;
-  if (!el || !hasMore || loading) return;
-  const observer = new IntersectionObserver(
-    (entries) => {
-      if (entries[0]?.isIntersecting) {
-        setPage((p) => p + 1);
-      }
-    },
-    { root: el.parentElement, rootMargin: '50px' }
-  );
-  observer.observe(el);
-  return () => observer.disconnect();
-}, [hasMore, loading, candidates.length]);
-```
-
-- `sentinelRef` points at the 1px div at the bottom of the scroll container (line 421 in the render tree).
-- `root: el.parentElement` — observe intersection relative to the scroll container (`maxHeight: 220; overflow-y: auto`), not the whole document.
-- `rootMargin: '50px'` — start fetching 50px before the sentinel enters the viewport.
-- Early exits:
-  - `!el` — ref not yet attached (first render).
-  - `!hasMore` — we're on the last page; nothing to fetch.
-  - `loading` — don't trigger a second fetch while one is in flight.
-- `setPage((p) => p + 1)` — functional setter safe against stale closures.
-- **Dep list** — `[hasMore, loading, candidates.length]`. `candidates.length` is included because as new rows render, the sentinel's position shifts; we need to re-observe against the updated layout.
-- Cleanup `.disconnect()` — on every dep change or unmount.
-
-### 10k. Render Tree (lines 358–424)
-
-```tsx
-return (
-  <Box paddingTop={3} paddingBottom={3} width="100%">
-    <Flex justifyContent="space-between" alignItems="center" paddingBottom={2}>
-      <Typography variant="sigma" textColor="neutral600">
-        {config.label} ({selectedList.length})
-      </Typography>
-    </Flex>
-
-    {selectedList.length > 0 ? (
-      <Box paddingBottom={2} width="100%">
-        <Flex gap={1} wrap="wrap">
-          {selectedList.map((c) => (
-            <Tag key={c.documentId} icon={<Cross />} onClick={() => toggle(c)}>
-              {c.name}
-            </Tag>
-          ))}
-        </Flex>
-      </Box>
-    ) : null}
-
-    <Box paddingBottom={2} width="100%">
-      <TextInput
-        aria-label={`Search ${config.label}`}
-        placeholder={`Search ${config.label.toLowerCase()}...`}
-        value={search}
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
-        size="S"
-      />
-    </Box>
-
-    <Box
-      hasRadius
-      background="neutral0"
-      borderColor="neutral200"
-      padding={2}
-      width="100%"
-      style={{ maxHeight: 220, overflowY: 'auto', boxSizing: 'border-box' }}
-    >
-      {candidates.map((c) => (
-        <Box key={c.documentId} paddingBottom={1}>
-          <Checkbox
-            checked={selectedDocIds.has(c.documentId)}
-            onCheckedChange={() => toggle(c)}
-          >
-            {c.name}
-          </Checkbox>
-        </Box>
-      ))}
-
-      {initialLoaded && candidates.length === 0 ? (
-        <Typography variant="pi" textColor="neutral500">
-          {debouncedSearch ? 'No matches.' : `No ${config.label.toLowerCase()} available.`}
-        </Typography>
-      ) : null}
-
-      {loading ? (
-        <Flex justifyContent="center" padding={2}>
-          <Loader small>Loading</Loader>
-        </Flex>
-      ) : null}
-
-      <div ref={sentinelRef} style={{ height: 1 }} />
-    </Box>
-  </Box>
-);
-```
-
-Four visual layers, top to bottom:
-
-1. **Header row** — `Typography variant="sigma"` (Strapi's small-caps heading style) showing `{label} ({count})`.
-2. **Selected chips** (only when non-empty) — `Tag` chips with an `<Cross />` icon; clicking a chip calls `toggle(c)` which routes through the unselect branch.
-3. **Search input** — controlled `TextInput` wired to `search` → debounced → triggers the candidate fetch.
-4. **Scroll box** — fixed `maxHeight: 220; overflow-y: auto`. Contains:
-   - Each `Candidate` rendered as a `Checkbox`. `checked` reads from `selectedDocIds` — a memoized `Set<string>` (lines 226–229) for O(1) lookup even when the scroll box holds hundreds of rows.
-   - `onCheckedChange={() => toggle(c)}` — Strapi's Checkbox fires this on both check and uncheck; the `toggle` function routes to the correct branch.
-   - Empty state (only when `initialLoaded` is true to avoid flashing).
-   - Inline `Loader` while a page is fetching.
-   - **Sentinel `<div ref={sentinelRef} style={{ height: 1 }} />`** — observed by the IntersectionObserver.
-
----
-
-## 11. Performance Characteristics
-
-Everything the panel does to stay fast:
-
-- **Deferred mount (§8).** Zero network work until the browser goes idle (capped at 1 s). First paint of the edit view is never blocked by the panel's fetches.
-- **Shared deferred signal (§9).** All four sections share a single `requestIdleCallback` slot instead of racing for four.
-- **Per-section isolation.** Each `RelationSection` owns its own state and effects. Typing in "Stores" search doesn't re-render or refetch "Brands".
-- **Selector-based `useForm` (§10a).** Each section subscribes only to its own form slot. Edits to `title`, `content`, unrelated relations, etc. do not trigger a re-render here.
-- **Debounced search (§10e).** 250 ms coalesces bursty typing into a single request.
-- **Paginated candidates (§10h).** 30 rows/page. A target with 10,000 rows still loads instantly.
-- **Infinite scroll via IntersectionObserver (§10j).** No scroll-handler listeners; the browser tells us when the sentinel is near.
-- **Memoized `selectedDocIds` Set (lines 226–229).** O(1) membership lookup in the candidate render loop. Without this, the `checked` computation would be O(selectedList × candidates) — quadratic in the worst case.
-- **Functional setter + ref pattern (§10d, §10f).** The initial-selected fetch reads the latest `formValue` through a ref, so (a) user edits during the fetch aren't clobbered and (b) the fetch effect doesn't need `formValue` in its deps — it only runs when *structural* inputs change.
-- **Optimistic UI (§10i).** `setSelectedList(next)` paints before any form-state write lands; the form diff is authoritative at save time, so the UI feels instant and the server stays consistent.
-- **Cancel flags on every async (§10f, §10h).** Fetches that get superseded don't write stale state.
-
----
-
-## 12. Hiding the Default Relation Widgets — `src/index.ts`
-
-The panel would be redundant if the default relation widgets also rendered for those four fields. `src/index.ts` rewrites the content-manager's layout configuration on boot to hide them.
+One `RelationConfig` describes one section of the panel:
 
 ```ts
-import type { Core } from '@strapi/strapi';
-
-const HIDE_FROM_EDIT: Record<string, string[]> = {
-  'api::deal.deal': ['stores', 'brands', 'categories', 'banks'],
-  'api::coupon.coupon': ['stores', 'brands', 'categories', 'banks'],
-};
-
-async function hideRelationsFromContentManager(strapi: Core.Strapi): Promise<void> {
-  const service: any = strapi.plugin('content-manager').service('content-types');
-  if (!service) return;
-
-  for (const [uid, fieldsToHide] of Object.entries(HIDE_FROM_EDIT)) {
-    try {
-      const contentType = strapi.contentType(uid as any);
-      if (!contentType) continue;
-
-      const config = await service.findConfiguration(contentType);
-      const hidden = new Set(fieldsToHide);
-
-      const prevEdit = config.layouts?.edit ?? [];
-      const prevList = config.layouts?.list ?? [];
-
-      const nextEdit = prevEdit
-        .map((row: any[]) => row.filter((cell) => !hidden.has(cell.name)))
-        .filter((row: any[]) => row.length > 0);
-      const nextList = prevList.filter((name: string) => !hidden.has(name));
-
-      const changed =
-        JSON.stringify(nextEdit) !== JSON.stringify(prevEdit) ||
-        JSON.stringify(nextList) !== JSON.stringify(prevList);
-
-      if (!changed) continue;
-
-      await service.updateConfiguration(contentType, {
-        settings: config.settings,
-        metadatas: config.metadatas,
-        layouts: { ...config.layouts, edit: nextEdit, list: nextList },
-        options: config.options,
-      });
-      strapi.log.info(`[content-manager] hid relations from ${uid} layout`);
-    } catch (err: any) {
-      strapi.log.warn(
-        `[content-manager] failed to rewrite layout for ${uid}: ${err?.message ?? err}`
-      );
-    }
-  }
-}
-
-export default {
-  register() {},
-  async bootstrap({ strapi }: { strapi: Core.Strapi }) {
-    await hideRelationsFromContentManager(strapi);
-  },
+type RelationConfig = {
+  field: string;                  // attribute name on the parent (form key)
+  target: string;                 // related content-type UID
+  label: string;                  // heading + search placeholder
+  mainField?: 'name' | 'title';   // label/search/sort attribute; defaults to 'name'
+  scopeRelationField?: 'stores' | 'brands' | 'categories' | 'banks';
+  minSelections?: number;
+  maxSelections?: number;
 };
 ```
 
-Line by line:
+The first three members are all the Taxonomies panel uses. The last four exist
+for the Top Pick Coupons panel (§4) and are what let both panels share one
+`RelationSection` implementation. Adding another taxonomy to deals is one entry;
+adding another *content type* to the Taxonomies panel is one more top-level key
+in `RELATION_CONFIG` — but adding a differently-shaped panel is not, as §4 shows.
 
-- **`HIDE_FROM_EDIT` map** — content-type UID → field names to strip from both edit and list layouts. Matches the keys in `RELATION_CONFIG` on the admin side.
-- **`strapi.plugin('content-manager').service('content-types')`** — internal service that persists layout configuration in `strapi_core_store_settings`.
-- **`strapi.contentType(uid)`** — resolves the schema model (throws if UID doesn't exist; wrapped in try/catch just in case).
-- **`service.findConfiguration(ct)`** — reads current config. Returns `{ uid, settings, metadatas, layouts: { edit, editRelations, list }, options }`.
-- **Building `nextEdit`:**
-  - Each `row` is an array of cells (one row per horizontal group in the edit view).
-  - `row.filter((cell) => !hidden.has(cell.name))` drops hidden cells.
-  - `.filter((row) => row.length > 0)` drops rows that became empty (otherwise the view renders visible empty rows).
-- **Building `nextList`:** Just a flat array of column names. Filter the hidden ones.
-- **`changed` diff via `JSON.stringify`.** A simple but effective structural equality. If neither layout mutated, we skip the write — this matters because bootstrap runs on every server start, and `updateConfiguration` is a DB write.
-- **`service.updateConfiguration(ct, {...})`** — persists the rewritten layout. We pass through `settings`, `metadatas`, and `options` unchanged (passing partial config here wipes the omitted keys).
-- **Error path** — `strapi.log.warn`, not throw. A cosmetic layout tweak should never block the server from starting.
-- **`bootstrap` hook** — Strapi runs this once per process start, after services initialize and before the HTTP server accepts connections. Safe place to call internal services.
+### Form state is a diff, not a list
+
+This is the single most important thing to internalize. For a relation field,
+Strapi v5's form state holds `{ connect, disconnect }` command arrays — the
+*pending change* — not the current relations. The current list is fetched
+separately from the content-manager relations endpoint. Strapi's own widget works
+the same way.
+
+Each command mirrors the shape Strapi's built-in relation input produces: a
+display-level `{ id, documentId, name }` plus a nested `apiData` object repeating
+`id`/`documentId` with a `locale` and, for not-yet-saved additions, an
+`isTemporary` marker. Diverging from that shape makes Strapi's save path silently
+drop the command. `documentId` — not the numeric `id` — is the identity used
+everywhere, since it is the durable v5 identifier; a small helper tolerates
+commands that carry it at either level.
+
+### Section behavior
+
+Each `RelationSection` owns its own state and effects, so typing in the Stores
+search neither re-renders nor refetches Brands. It subscribes to form state
+through a selector scoped to its own field, so edits elsewhere in the form do not
+re-render it.
+
+- **Deferred mount.** Nothing fetches until the browser goes idle
+  (`requestIdleCallback` with a 1s cap, or a short timeout fallback). The hook is
+  called once in the panel body and the signal shared by all sections, so the
+  edit view's first paint never competes with the panel's requests.
+- **Selected list.** On an existing entry, the panel walks the content-manager
+  relations endpoint page by page (bounded) to build the true current list. It
+  reads the *latest* form diff through a ref when the fetch resolves and replays
+  any pending connects/disconnects on top of the server list, so toggling during
+  a slow fetch is never clobbered. Keeping the diff out of the effect's
+  dependencies is what stops every toggle from re-running the paginated fetch.
+- **Candidates.** Fetched from the content-manager collection-types endpoint,
+  30 per page, sorted by `mainField` ascending, filtered with a `$containsi`
+  match on `mainField` when a search is active. Search input is debounced ~250ms
+  and trimmed; changing the query resets the accumulated pages. More pages load
+  through an `IntersectionObserver` on a sentinel at the bottom of the fixed-
+  height scroll box, rooted on that box rather than the document.
+- **Toggling.** Every checkbox click and every remove-button click goes through
+  one handler that paints optimistically, then rewrites the form diff:
+
+  | Server state | Action | `connect` | `disconnect` |
+  |---|---|---|---|
+  | Not connected | Select | item added | unchanged |
+  | Not connected | Select → Deselect | item removed | unchanged |
+  | Connected | Deselect | unchanged | item added |
+  | Connected | Deselect → Select | unchanged | item removed |
+
+  Clicking an item an even number of times always leaves a clean diff. That
+  four-branch idempotency is what makes the panel feel predictable.
+- **Failure mode.** Both fetches log to the console under `[taxonomy-panel]` and
+  leave the section empty rather than throwing; a superseded fetch is dropped via
+  a cancellation flag rather than writing stale state.
 
 ---
 
-## 13. Verification
+## 4. The Top Pick Coupons panel
 
-How to confirm everything works end-to-end:
+`EntityTopPickCouponPanel` renders for the four taxonomy content types — store,
+brand, category, bank — driven by `ENTITY_TOP_PICK_CONFIG`. Each entry points at
+the entity's `topPickCoupons` relation, targets coupons, labels them by `title`,
+and sets a 2–4 selection range plus the `scopeRelationField` naming the inverse
+relation back to this entity type.
 
-1. **Boot.** Run `yarn develop`. Server log should include `[content-manager] hid relations from api::deal.deal layout` (or the equivalent for coupons) on first boot. Subsequent boots will be quiet because the diff short-circuits.
-2. **Panel renders.** Open a deal or coupon edit view → look at the right rail. A "Taxonomies" panel should appear with four sections: Stores, Brands, Categories, Banks.
-3. **Default widgets are gone.** Scan the main edit form. The default relation inputs for those four fields should NOT be present (only `title`, `code`, rich text, media, etc.).
-4. **Select a category.** Click a checkbox in any section. The chip appears immediately in the selected row. Save. Reload the page. The selection persists.
-5. **Deselect a category.** Click the `X` on a chip (or uncheck). Save. Reload. The selection is gone server-side.
-6. **Idempotency.** Select → deselect → save. The diff should be clean (nothing added or removed).
-7. **Debounce.** Open DevTools Network. Type rapidly in a search box. Confirm requests fire roughly every 250 ms, not per keystroke.
-8. **Pagination.** Find a relation with more than 30 options. Scroll to the bottom of its scroll box. Watch Network: a request with `?page=2` should fire. Keep scrolling — `?page=3`, etc.
-9. **Race-safety.** With Network throttled to "Slow 3G", open an existing deal and immediately toggle a selection while the initial relations fetch is still in flight. The toggle should survive (chip remains) once the fetch resolves.
-10. **Create flow.** Create a new deal or coupon. The panel should render; the selected-fetch is skipped (no `documentId`). Picking items still works — they'll be persisted on first save.
+It reuses `RelationSection` unchanged. The extra config members change its
+behavior in four visible ways:
+
+- **Scoped candidates.** With `scopeRelationField` set, the candidate query is
+  filtered to coupons related to *this* entity and to `contentStatus=published`.
+  An editor picking store top-picks only ever sees that store's live coupons.
+- **Requires a saved entity.** Scoping needs a `documentId`, so on a brand-new
+  entry the panel renders "Save this entry first" instead of an unusable list.
+- **Hard cap.** The heading shows `n/max`, unselected checkboxes disable once the
+  maximum is reached, and the toggle handler refuses additions past it.
+- **Explanatory copy.** The panel states the selection range and how the picks
+  are consumed (first two shown live, the next two as expiry buffers, clearing
+  all falls back to the latest two).
+
+The cap is a UI affordance, not the guarantee. The authoritative check is
+server-side in
+[`src/utils/entity-top-pick-validation.ts`](../src/utils/entity-top-pick-validation.ts),
+run from the documents middleware in [`src/index.ts`](../src/index.ts) on create
+and update; it re-resolves the resulting relation set and rejects out-of-range or
+unrelated selections regardless of how the write arrived.
 
 ---
 
-## Further Reading
+## 5. The Validation problems panel
 
-- Strapi v5 relations endpoint: `node_modules/@strapi/content-manager/dist/admin/services/relations.mjs` (line 9 for the URL shape).
-- Command shape reference: `node_modules/@strapi/content-manager/dist/admin/pages/EditView/components/FormInputs/Relations/Relations.mjs` (lines 47–54 for disconnect, 186–192 for connect).
-- Type definitions (`PanelComponent`, `PanelDescription`, `EditViewContext`): `node_modules/@strapi/content-manager/dist/admin/src/content-manager.d.ts`.
+`ValidationProblemsPanel` applies to the homepage and Deal-of-the-Day single
+types plus coupon, deal, store, category, bank, and brand. It reads the form's
+error state, flattens it, and returns `null` when there is nothing to report — so
+it is invisible until a save fails.
+
+The problem it solves: client-side required-field checks and the server-side
+validators (homepage image sizes, Deal-of-the-Day section limits, offer word
+caps, taxonomy cross-field rules) all deposit errors into the same nested,
+per-section error object. Editors saw a generic toast and had to hunt through
+every section for the red field.
+
+Its contract:
+
+- **Flattening treats two message shapes as leaves.** Client-side errors are
+  react-intl message descriptors; server-side ones are plain strings. A
+  descriptor is an object, so the flattener must recognize it as a leaf rather
+  than recursing into it.
+- **Paths become human locations.** The first path segment is translated through
+  the section-label constants for that model (falling back to a de-camel-cased
+  field name), later segments are de-camel-cased, and array indices are folded
+  into the preceding segment as `#n` — yielding e.g.
+  `7 · Fresh Drops › items #2 › card image`.
+- **Generic client messages get a size hint.** For homepage media fields, a
+  bare "this value is required" is replaced with the exact pixel dimensions
+  required, looked up from [`src/constants/homepage-images.ts`](../src/constants/homepage-images.ts).
+  Server messages are already specific and are shown as-is.
+- **Hook order is model-independent.** The form-state selector runs before the
+  applicability check, because a conditional hook would break React's rules when
+  the panel mounts on a non-listed model.
+
+---
+
+## 6. Server side — `src/index.ts`
+
+### Hiding the panel-owned relations
+
+The panels would be redundant if the default widgets still rendered. On boot,
+`hideRelationsFromContentManager` rewrites the content-manager's stored layout
+configuration for each entry in its `HIDE_FROM_EDIT` map — the four taxonomies on
+deal and coupon, and `topPickCoupons` on store, brand, bank, and category. Note
+this map is the server-side twin of the admin bundle's `RELATION_CONFIG` and
+`ENTITY_TOP_PICK_CONFIG`: **adding a panel means adding its fields here too**, or
+the widget and the panel both render.
+
+For each content type it reads the current configuration, drops the hidden cells
+from the edit layout (and any row that becomes empty, which would otherwise
+render as a visible gap), drops the hidden names from the list layout, and writes
+back only if something actually changed. The change check matters — bootstrap
+runs on every start and `updateConfiguration` is a database write. Failures are
+logged as warnings, never thrown: a cosmetic layout tweak must not stop the
+server from booting.
+
+### The rest of bootstrap
+
+The search-index reconciler plus layout hiding are part of the awaited bootstrap
+sequence. The full sequence, in order:
+
+1. **`reconcileSearchIndexesAfterSchemaSync`** — on PostgreSQL, structurally
+   checks and best-effort repairs all expected search indexes after schema sync.
+   Healthy indexes are left untouched; DDL failures are logged and retried on
+   the next boot without blocking Strapi.
+2. **`initializeSearchRuntime`** — reads the configured database dialect and
+   pins this process to ranked SQL (PostgreSQL) or the full-set query-engine
+   fallback. On PostgreSQL it separately resolves the Strapi table schema and
+   inspects `pg_trgm` plus structural index health; diagnostics never change the
+   selected mode. Fixed per process; changing it requires a restart.
+3. **`hideRelationsFromContentManager`** — above.
+4. **`ensurePublicReadPermissions`** — grants the public role read access to the
+   taxonomy collections and the four site-content single types.
+5. **`restrictSingleTypesToSuperAdmin`** — strips content-manager permissions for
+   Footer and Global Settings from every non-super-admin role.
+6. **`ensureUploadSettings`** — turns on size optimization, responsive
+   dimensions, and auto-orientation in the Media Library settings.
+7. **`ensureComponentEntryTitles`** — pins the collapsed-row label field for each
+   repeatable component.
+8. **`ensureComponentFieldDescriptions`** — writes the help text under each
+   size-enforced homepage media field, derived from the same image rules the
+   validator and the Validation problems panel use.
+9. **`ensureSingleTypeEntryTitles`** — pins single types' header label to `title`
+   instead of the migrated `wp_<hash>` document id.
+10. **`ensureOfferListStatusColumn`** — appends `contentStatus` to the coupon and
+   deal list views so editors can see and filter expired offers.
+11. **`ensureSectionLabels`** — pins section labels, help text, and edit-form
+    order from the shared section constants. Called twice, once for the homepage
+    UID and once for Deal of the Day, which is what makes twelve awaits.
+
+Everything here is **config-as-code**: these routines re-apply on every boot, so
+changing any of them through the admin UI will not stick across a restart. Edit
+the constant or the list in source instead. Bootstrap then logs an error (never
+throws) if production is running without `S3_UPLOAD_ENABLED=true`, and logs
+whether the rebuild queue is enabled.
+
+`register` is not empty either — it installs the documents middleware that
+sanitizes richtext, runs the validators, invalidates offer-redeem caches, and
+computes rebuild scopes. `destroy` tears down the rebuild queue.
+
+---
+
+## 7. Verification
+
+1. **Boot.** `yarn develop`. The first boot logs
+   `[content-manager] hid relations from …` for each affected type; later boots
+   are quiet because the change check short-circuits.
+2. **Panels render.** Open a deal or coupon → the right rail shows "Taxonomies"
+   with four sections. Open a store, brand, category, or bank → "Top Pick
+   Coupons".
+3. **Default widgets are gone.** The four taxonomy inputs (and `topPickCoupons`)
+   must not appear in the main form.
+4. **Round-trip.** Select an item, save, reload — it persists. Remove it, save,
+   reload — it is gone.
+5. **Idempotency.** Select then deselect then save: no change server-side.
+6. **Debounce and pagination.** With DevTools open, type quickly in a search box
+   (requests coalesce, not one per keystroke) and scroll a >30-option list to the
+   bottom (a `page=2` request fires).
+7. **Race safety.** Throttle the network, open an existing entry, and toggle
+   while the initial relations fetch is still in flight — the toggle survives.
+8. **Create flow.** On a new deal or coupon the Taxonomies panel works with no
+   `documentId`. On a new store the Top Pick panel shows the "save first" notice.
+9. **Scope and cap.** On a store, the Top Pick list contains only that store's
+   published coupons, and a fifth selection is refused.
+10. **Validation panel.** Save a homepage with a wrong-sized image: the panel
+    lists the section path and the exact required pixel dimensions.
+11. **Field replacements.** A richtext field opens as a WYSIWYG, a datetime
+    picker offers 5-minute steps, a boolean asks for confirmation, and a new
+    store's slug starts empty rather than reading `store`.
+
+---
+
+## Further reading
+
+- Strapi's own relation input and relations service (the command shape and
+  endpoint this panel mirrors) live under
+  `node_modules/@strapi/content-manager/dist/admin/`.
+- `PanelComponent`, `PanelDescription`, and `EditViewContext` are exported from
+  `@strapi/content-manager/strapi-admin`.
+- [`docs/qa-fixes-2026-07.md`](./qa-fixes-2026-07.md) — the QA batch that
+  produced the field replacements and the Enter-key suppressor.

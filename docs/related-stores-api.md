@@ -1,5 +1,8 @@
 # Related Stores API
 
+One family of the public read surface catalogued in
+[public-api.md](./public-api.md).
+
 Public endpoints, cached for 60 seconds:
 
 - `GET /api/stores/:slug/related-stores`
@@ -79,18 +82,35 @@ explain the match.
 
 ## Fallback
 
-The sidebar should always have Store suggestions. When the source has no usable
-categories, or none of the related candidates has displayable Store artwork,
-the service falls back to Stores sorted by:
+The fallback is a best effort to keep the sidebar populated, not a guarantee.
+When the source has no usable categories, or none of the related candidates has
+displayable Store artwork, the service falls back to high-rated Stores.
+
+It first applies a `ratingAverage: { $notNull: true }` filter, then sorts by:
 
 1. Rating average.
 2. Rating count.
 3. Most recently updated.
 4. Name.
 
-Fallback results still require a name, slug, and logo. On a Store page, the
-current Store remains excluded. Fallback metrics are zero because those Stores
-were not selected through category overlap.
+The `$notNull` pre-filter is load-bearing: PostgreSQL sorts NULLs first on
+`ratingAverage DESC`, so without it the unrated Stores inherited from the
+WordPress migration would fill the pool and crowd out every genuinely rated
+Store.
+
+Ratings come from the separate anonymous star-rating system — the
+`POST /api/{stores|brands|categories|banks}/:slug/rating` vote endpoint, whose
+aggregates land on `ratingAverage` / `ratingCount`. **A catalog where nobody
+has voted yet has no rated Stores at all, so the fallback correctly returns an
+empty `stores` array.** Consumers must render an empty sidebar rather than
+assume at least one suggestion.
+
+The fallback pool is bounded at `max(limit * 3, 24)` rows, and the name / slug
+/ logo requirement is applied **after** that cap. On a catalog where most rated
+Stores lack a logo, a large `?limit=` can therefore under-fill. On a Store
+page, the current Store remains excluded. Fallback metrics (`offerCount`,
+`sharedCategoryCount`) are zero because those Stores were not selected through
+category overlap.
 
 ## Operational Guarantees
 
