@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import type { Core } from "@strapi/strapi";
 import { publishedOnlyFilters } from "../../../utils/content-status";
 import {
@@ -712,6 +714,29 @@ type PageWindow = {
   lookahead?: number;
 };
 
+// Per-request phase accounting for slow-search diagnostics. Requests fan out
+// concurrently (Promise.all across groups), so the sums are cumulative
+// busy-time per phase, not wall time — their ratio says which phase dominates
+// a slow request. Threaded via AsyncLocalStorage so the many helper
+// signatures stay untouched. Logging is bounded to requests slower than
+// SEARCH_SLOW_LOG_MS (default 500ms, 0 disables) and never includes the
+// query text.
+const SEARCH_SLOW_LOG_MS = Number(process.env.SEARCH_SLOW_LOG_MS ?? 500);
+type SearchPhaseStats = {
+  sql: number;
+  sqlCalls: number;
+  hydrate: number;
+  hydrateCalls: number;
+};
+const searchPhaseStorage = new AsyncLocalStorage<SearchPhaseStats>();
+
+function recordPhase(phase: "sql" | "hydrate", startedAt: number) {
+  const stats = searchPhaseStorage.getStore();
+  if (!stats) return;
+  stats[phase] += Date.now() - startedAt;
+  stats[phase === "sql" ? "sqlCalls" : "hydrateCalls"] += 1;
+}
+
 function rankedConnection(strapi: Core.Strapi) {
   const connection = (strapi.db as any)?.connection;
   return connection && isPostgresClient(connection?.client?.config?.client)
@@ -720,8 +745,13 @@ function rankedConnection(strapi: Core.Strapi) {
 }
 
 async function rankedRows(connection: any, query: SqlQuery): Promise<any[]> {
-  const result = await connection.raw(query.sql, query.bindings);
-  return result?.rows ?? [];
+  const startedAt = Date.now();
+  try {
+    const result = await connection.raw(query.sql, query.bindings);
+    return result?.rows ?? [];
+  } finally {
+    recordPhase("sql", startedAt);
+  }
 }
 
 async function rankedDocumentIds(
@@ -756,14 +786,18 @@ async function hydrateByDocumentId(
   },
 ) {
   if (documentIds.length === 0) return [];
-  const documents = await strapi.documents(uid as any).findMany({
-    filters: {
-      $and: [{ documentId: { $in: documentIds } }, options.visibility],
-    },
-    fields: options.fields,
-    populate: options.populate,
-    limit: documentIds.length,
-  } as any);
+  const startedAt = Date.now();
+  const documents = await strapi
+    .documents(uid as any)
+    .findMany({
+      filters: {
+        $and: [{ documentId: { $in: documentIds } }, options.visibility],
+      },
+      fields: options.fields,
+      populate: options.populate,
+      limit: documentIds.length,
+    } as any)
+    .finally(() => recordPhase("hydrate", startedAt));
   const order = new Map(documentIds.map((id, index) => [id, index]));
   return [...documents].sort(
     (a: any, b: any) =>
@@ -1480,8 +1514,29 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
   },
   async search(request: SearchRequest) {
     const nowIso = new Date().toISOString();
-    return request.mode === "group"
-      ? group(strapi, request, nowIso)
-      : preview(strapi, request, nowIso);
+    const stats: SearchPhaseStats = {
+      sql: 0,
+      sqlCalls: 0,
+      hydrate: 0,
+      hydrateCalls: 0,
+    };
+    const startedAt = Date.now();
+    try {
+      return await searchPhaseStorage.run(stats, () =>
+        request.mode === "group"
+          ? group(strapi, request, nowIso)
+          : preview(strapi, request, nowIso),
+      );
+    } finally {
+      const totalMs = Date.now() - startedAt;
+      if (SEARCH_SLOW_LOG_MS > 0 && totalMs >= SEARCH_SLOW_LOG_MS) {
+        (strapi as any).log?.info?.(
+          `[search] slow ${request.mode} total=${totalMs}ms ` +
+            `sql=${stats.sql}ms/${stats.sqlCalls}q ` +
+            `hydrate=${stats.hydrate}ms/${stats.hydrateCalls}q ` +
+            "(phase sums are concurrent busy-time, not wall time)",
+        );
+      }
+    }
   },
 });

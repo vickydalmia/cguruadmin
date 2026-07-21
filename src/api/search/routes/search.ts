@@ -20,7 +20,10 @@ export default {
         auth: false,
         middlewares: [
           { name: 'global::rate-limit', config: { maxRequests: 120, windowMs: 60_000 } },
-          { name: 'global::cache', config: { ttlMs: 30_000 } },
+          // Safe above the old 30s: every content write (and the 5-minute
+          // offer-expiry cron's writes) purges this cache via
+          // purgeResponseCaches, so the TTL only bounds purge-less drift.
+          { name: 'global::cache', config: { ttlMs: 120_000 } },
         ],
       },
     },
