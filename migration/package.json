@@ -14,6 +14,8 @@
     "fix:content-srcsets": "tsx src/fix-content-srcsets.ts",
     "backfill:offer-fields": "tsx src/backfill-offer-fields.ts",
     "cleanup:legacy-fields": "tsx src/drop-legacy-fields.ts",
+    "diagnose:search": "tsx src/diagnose-search.ts",
+    "check:types": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {

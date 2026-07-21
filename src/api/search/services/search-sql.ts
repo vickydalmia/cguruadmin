@@ -207,7 +207,31 @@ const OFFER_DIRECT_COLUMNS: Record<OfferKind, string[]> = {
   deal: ["o.title"],
 };
 
-function relationExists(
+// Membership arms for `o.id IN (...)`. Each arm is independently
+// index-driven: the direct arm scans the offer's own trigram indexes; each
+// relation arm finds the few matching relation rows by trigram index first,
+// then fans out to offer ids through the link table's target-column index.
+// UNION ALL keeps duplicates — IN() is a semijoin, so they are harmless and
+// the dedup sort a plain UNION would add is wasted work.
+function directMembershipArm(
+  kind: OfferKind,
+  needles: SearchNeedles,
+  bindings: Array<string | number>,
+): string {
+  const clauses = matchClauses(
+    {
+      contains: OFFER_DIRECT_COLUMNS[kind].map((column) =>
+        column.replace(/^o\./u, "d."),
+      ),
+      prefix: [],
+    },
+    needles,
+    bindings,
+  );
+  return `SELECT d.id FROM ${OFFER_TABLE[kind]} d WHERE ${clauses.join(" OR ")}`;
+}
+
+function relationMembershipArm(
   relation: OfferRelation,
   needles: SearchNeedles,
   bindings: Array<string | number>,
@@ -218,9 +242,9 @@ function relationExists(
     bindings,
   );
   return (
-    `EXISTS (SELECT 1 FROM ${relation.link} l ` +
+    `SELECT l.${relation.ownerColumn} FROM ${relation.link} l ` +
     `JOIN ${relation.table} r ON r.id = l.${relation.targetColumn} ` +
-    `WHERE l.${relation.ownerColumn} = o.id AND (${clauses.join(" OR ")}))`
+    `WHERE ${clauses.join(" OR ")}`
   );
 }
 
@@ -240,6 +264,15 @@ function relationTier(
 // Mirrors publishedOnlyFilters (content-status.ts) plus the product-deal
 // sale_price rule from productDealFilters; published_at is defensive (all
 // offer types have draftAndPublish disabled, so it is always set).
+//
+// Membership is `o.id IN (direct arm UNION ALL relation arms)` rather than
+// `direct LIKE OR EXISTS(...) OR ...`: the OR-of-EXISTS shape cannot be
+// served by any single index, so the planner seq-scans every offer row —
+// and its wildly inflated cost estimate (it assumes most rows match) also
+// pushes the query over the JIT compilation thresholds, which dominated
+// production latency on small instances (observed: 17s of a 19s count was
+// LLVM JIT). The UNION ALL arms are each index-driven, keep the identical
+// row set, and carry an honest cost estimate.
 function offerWhere(
   kind: OfferKind,
   needles: SearchNeedles,
@@ -251,15 +284,13 @@ function offerWhere(
     "o.published_at IS NOT NULL AND o.content_status = 'published' " +
     "AND (o.expires_at IS NULL OR o.expires_at > ?)" +
     (kind === "deal" ? " AND o.sale_price IS NOT NULL AND o.sale_price > 0" : "");
-  const direct = matchClauses(
-    { contains: OFFER_DIRECT_COLUMNS[kind], prefix: [] },
-    needles,
-    bindings,
-  );
-  const relations = OFFER_RELATIONS[kind].map((relation) =>
-    relationExists(relation, needles, bindings),
-  );
-  return `${visibility} AND (${[...direct, ...relations].join(" OR ")})`;
+  const arms = [
+    directMembershipArm(kind, needles, bindings),
+    ...OFFER_RELATIONS[kind].map((relation) =>
+      relationMembershipArm(relation, needles, bindings),
+    ),
+  ];
+  return `${visibility} AND o.id IN (${arms.join(" UNION ALL ")})`;
 }
 
 export function offerRankedQuery(
