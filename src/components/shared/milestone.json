@@ -1,0 +1,28 @@
+{
+  "collectionName": "components_shared_milestones",
+  "info": {
+    "displayName": "Milestone",
+    "icon": "clock",
+    "description": "One dated entry on the company timeline. `year` is a string so \"2011\" and copy like \"2026 →\" both render; the connecting rail between entries is drawn by the component."
+  },
+  "attributes": {
+    "year": {
+      "type": "string",
+      "required": true,
+      "maxLength": 12
+    },
+    "title": {
+      "type": "string",
+      "required": true,
+      "maxLength": 80
+    },
+    "body": {
+      "type": "text",
+      "maxLength": 320
+    },
+    "regionLabel": {
+      "type": "string",
+      "maxLength": 40
+    }
+  }
+}

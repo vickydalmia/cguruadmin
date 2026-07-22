@@ -1,0 +1,24 @@
+{
+  "collectionName": "components_shared_logo_items",
+  "info": {
+    "displayName": "Logo Item",
+    "icon": "picture",
+    "description": "A publication or partner logo. `name` is required even though the design shows only the image — it supplies the alt text and the accessible name when the logo links out."
+  },
+  "attributes": {
+    "image": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": ["images"]
+    },
+    "name": {
+      "type": "string",
+      "required": true,
+      "maxLength": 80
+    },
+    "url": {
+      "type": "string",
+      "maxLength": 500
+    }
+  }
+}

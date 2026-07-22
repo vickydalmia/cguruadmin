@@ -175,6 +175,17 @@ const COMPONENT_ENTRY_TITLES: Record<string, string> = {
   'shared.cta': 'label',
   'shared.telegram-cta': 'heading',
   'shared.newsletter': 'heading',
+  'shared.section-header': 'heading',
+  'shared.paragraph': 'body',
+  'shared.icon-card': 'title',
+  'shared.stat': 'label',
+  // Year over title: a collapsed timeline reads as 2011 / 2014 / 2018, which
+  // is what an editor scans for when reordering milestones.
+  'shared.milestone': 'year',
+  'shared.logo-item': 'name',
+  'shared.breadcrumb-item': 'label',
+  'about.hero': 'heading',
+  'about.founder': 'name',
   'error-page.hero': 'heading',
   'error-page.link-card': 'title',
   'error-page.explore': 'heading',

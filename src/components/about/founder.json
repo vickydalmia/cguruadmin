@@ -1,0 +1,46 @@
+{
+  "collectionName": "components_about_founders",
+  "info": {
+    "displayName": "About Founder Letter",
+    "icon": "user",
+    "description": "Personal statement from the founder: portrait card with name and role, a large pull quote, then body paragraphs. The quotation marks around the pull quote are drawn by the component — do not type them into the field."
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "eyebrow": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "portrait": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": ["images"]
+    },
+    "portraitAlt": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "name": {
+      "type": "string",
+      "required": true,
+      "maxLength": 80
+    },
+    "role": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "pullQuote": {
+      "type": "text",
+      "maxLength": 400
+    },
+    "paragraphs": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.paragraph",
+      "max": 6
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "collectionName": "components_shared_icon_cards",
+  "info": {
+    "displayName": "Icon Card",
+    "icon": "grid",
+    "description": "Circular icon badge over a title and short body. Used by the Mission/Vision pillars and the trust-verification card grid. The icon is picked from a fixed set and rendered as inline SVG — no media upload, so it costs no extra request."
+  },
+  "attributes": {
+    "iconKey": {
+      "type": "enumeration",
+      "required": true,
+      "default": "verified",
+      "enum": [
+        "search",
+        "verified",
+        "refresh",
+        "ready",
+        "target",
+        "eye",
+        "globe",
+        "shield",
+        "clock",
+        "tag"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "required": true,
+      "maxLength": 80
+    },
+    "body": {
+      "type": "text",
+      "maxLength": 320
+    }
+  }
+}

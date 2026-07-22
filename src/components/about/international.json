@@ -1,0 +1,19 @@
+{
+  "collectionName": "components_about_internationals",
+  "info": {
+    "displayName": "About International Presence",
+    "icon": "globe",
+    "description": "Country flag cards. The countries themselves are NOT edited here — they come from the shared list in Footer → Countries, so the site has one home for them and the footer and this section can never disagree. Edit them there."
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "header": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.section-header"
+    }
+  }
+}

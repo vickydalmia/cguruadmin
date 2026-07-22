@@ -1,0 +1,25 @@
+{
+  "collectionName": "components_about_presses",
+  "info": {
+    "displayName": "About Press Coverage",
+    "icon": "star",
+    "description": "\"As featured in\" logo wall. Upload logos with transparent backgrounds at roughly 2x their rendered size (240px wide is plenty) — they sit on white cards and are weight-sensitive."
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "header": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.section-header"
+    },
+    "logos": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.logo-item",
+      "max": 12
+    }
+  }
+}

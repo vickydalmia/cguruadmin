@@ -1,0 +1,31 @@
+{
+  "collectionName": "components_about_mission_visions",
+  "info": {
+    "displayName": "About Mission & Vision",
+    "icon": "bulletList",
+    "description": "Two dark pillar cards over a gradient stats band. The design uses exactly two pillars and four stats; fewer render fine, more are capped."
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "header": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.section-header"
+    },
+    "pillars": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.icon-card",
+      "max": 2
+    },
+    "stats": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.stat",
+      "max": 4
+    }
+  }
+}

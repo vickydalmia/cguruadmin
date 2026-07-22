@@ -1,0 +1,15 @@
+{
+  "collectionName": "components_shared_paragraphs",
+  "info": {
+    "displayName": "Paragraph",
+    "icon": "align-justify",
+    "description": "One body paragraph. Repeatable so each block can be reordered and length-governed individually; the page never uses rich text for prose."
+  },
+  "attributes": {
+    "body": {
+      "type": "text",
+      "required": true,
+      "maxLength": 900
+    }
+  }
+}

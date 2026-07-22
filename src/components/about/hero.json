@@ -1,0 +1,32 @@
+{
+  "collectionName": "components_about_heroes",
+  "info": {
+    "displayName": "About Hero",
+    "icon": "picture",
+    "description": "Top-of-page hero: glass eyebrow pill, headline, intro line and a full-bleed background photograph. This image is the page's LCP element — upload the largest original available (2880px wide or more); the site generates the responsive ladder."
+  },
+  "attributes": {
+    "eyebrow": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "heading": {
+      "type": "string",
+      "required": true,
+      "maxLength": 120
+    },
+    "subheading": {
+      "type": "text",
+      "maxLength": 320
+    },
+    "image": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": ["images"]
+    },
+    "imageAlt": {
+      "type": "string",
+      "maxLength": 160
+    }
+  }
+}

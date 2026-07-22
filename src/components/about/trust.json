@@ -1,0 +1,31 @@
+{
+  "collectionName": "components_about_trusts",
+  "info": {
+    "displayName": "About Trust & Verification",
+    "icon": "shield",
+    "description": "Explains how offers are checked before publication: narrative column plus a grid of short feature cards. The grid stays two-up on mobile rather than collapsing to one."
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "header": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.section-header"
+    },
+    "paragraphs": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.paragraph",
+      "max": 3
+    },
+    "cards": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.icon-card",
+      "max": 4
+    }
+  }
+}

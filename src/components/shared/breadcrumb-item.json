@@ -1,0 +1,19 @@
+{
+  "collectionName": "components_shared_breadcrumb_items",
+  "info": {
+    "displayName": "Breadcrumb Item",
+    "icon": "chevronRight",
+    "description": "One step in a breadcrumb trail, ordered root first. Leave `url` empty on the final entry — the site renders the last item as the current page and never links it."
+  },
+  "attributes": {
+    "label": {
+      "type": "string",
+      "required": true,
+      "maxLength": 60
+    },
+    "url": {
+      "type": "string",
+      "maxLength": 500
+    }
+  }
+}

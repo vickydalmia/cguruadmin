@@ -1,0 +1,25 @@
+{
+  "collectionName": "components_about_journeys",
+  "info": {
+    "displayName": "About Journey Timeline",
+    "icon": "clock",
+    "description": "Dated company milestones on a connecting rail. Entries render in the order listed here — the design shows five, oldest first. Alternating left/right on desktop, single rail below 1024px."
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "header": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.section-header"
+    },
+    "milestones": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.milestone",
+      "max": 8
+    }
+  }
+}

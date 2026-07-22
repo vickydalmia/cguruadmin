@@ -1,0 +1,34 @@
+{
+  "collectionName": "components_about_our_stories",
+  "info": {
+    "displayName": "About Our Story",
+    "icon": "book",
+    "description": "Origin-story band: section header, prose paragraphs and a supporting photograph. Two columns on desktop, stacked below 768px with the image after the text."
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "header": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.section-header"
+    },
+    "paragraphs": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.paragraph",
+      "max": 4
+    },
+    "image": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": ["images"]
+    },
+    "imageAlt": {
+      "type": "string",
+      "maxLength": 160
+    }
+  }
+}

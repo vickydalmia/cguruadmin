@@ -441,6 +441,59 @@ export interface AdminUser extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiAboutPageAboutPage extends Struct.SingleTypeSchema {
+  collectionName: 'about_pages';
+  info: {
+    description: 'Every piece of copy, image and link on the public /about-us/ page. Sections render in the fixed order shown here; each can be switched off with its own Enabled toggle.';
+    displayName: 'About Page';
+    pluralName: 'about-pages';
+    singularName: 'about-page';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    breadcrumbAriaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }> &
+      Schema.Attribute.DefaultTo<'Breadcrumb'>;
+    breadcrumbItems: Schema.Attribute.Component<
+      'shared.breadcrumb-item',
+      true
+    > &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 5;
+        },
+        number
+      >;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    founder: Schema.Attribute.Component<'about.founder', false>;
+    hero: Schema.Attribute.Component<'about.hero', false>;
+    international: Schema.Attribute.Component<'about.international', false>;
+    journey: Schema.Attribute.Component<'about.journey', false>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::about-page.about-page'
+    > &
+      Schema.Attribute.Private;
+    missionVision: Schema.Attribute.Component<'about.mission-vision', false>;
+    ourStory: Schema.Attribute.Component<'about.our-story', false>;
+    press: Schema.Attribute.Component<'about.press', false>;
+    publishedAt: Schema.Attribute.DateTime;
+    seo: Schema.Attribute.Component<'shared.seo', false>;
+    title: Schema.Attribute.String & Schema.Attribute.DefaultTo<'About Page'>;
+    trust: Schema.Attribute.Component<'about.trust', false>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiBankBank extends Struct.CollectionTypeSchema {
   collectionName: 'banks';
   info: {
@@ -1624,6 +1677,7 @@ declare module '@strapi/strapi' {
       'admin::transfer-token': AdminTransferToken;
       'admin::transfer-token-permission': AdminTransferTokenPermission;
       'admin::user': AdminUser;
+      'api::about-page.about-page': ApiAboutPageAboutPage;
       'api::bank.bank': ApiBankBank;
       'api::brand.brand': ApiBrandBrand;
       'api::category.category': ApiCategoryCategory;

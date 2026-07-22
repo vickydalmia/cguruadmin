@@ -1,0 +1,23 @@
+{
+  "collectionName": "components_shared_section_headers",
+  "info": {
+    "displayName": "Section Header",
+    "icon": "layout",
+    "description": "Eyebrow label, heading and optional intro copy shared by every About page band. The accent bar beside the eyebrow is decorative and is drawn by the component, not stored here."
+  },
+  "attributes": {
+    "eyebrow": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "heading": {
+      "type": "string",
+      "required": true,
+      "maxLength": 120
+    },
+    "description": {
+      "type": "text",
+      "maxLength": 320
+    }
+  }
+}

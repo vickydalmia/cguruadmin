@@ -14,6 +14,11 @@ const OFFER_UIDS = new Set(['api::coupon.coupon', 'api::deal.deal']);
 // there and do not carry it.
 const DEAL_OF_THE_DAY_SLUG = 'deal-of-the-day';
 const DOTD_PAGE_UID = 'api::deal-of-the-day-page.deal-of-the-day-page';
+// The About page is a standalone editorial route with no entity relations, so
+// an edit rebuilds exactly one page. Its country cards read from the Footer
+// single type, which is in CHROME_UIDS and already triggers a full rebuild.
+const ABOUT_PAGE_UID = 'api::about-page.about-page';
+const ABOUT_PAGE_SLUG = 'about-us';
 const ERROR_PAGE_UID = 'api::error-page.error-page';
 const ERROR_DOCUMENT_SLUGS = [
   'error-pages/400',
@@ -131,6 +136,7 @@ export async function computeScope(
 
   if (uid === 'api::homepage.homepage') return { homepage: true };
   if (uid === DOTD_PAGE_UID) return { slugs: [DEAL_OF_THE_DAY_SLUG] };
+  if (uid === ABOUT_PAGE_UID) return { slugs: [ABOUT_PAGE_SLUG] };
   if (uid === ERROR_PAGE_UID) return { slugs: [...ERROR_DOCUMENT_SLUGS] };
   if (CHROME_UIDS.has(uid)) return { full: true };
 
