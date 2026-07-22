@@ -202,6 +202,272 @@ export interface AboutTrust extends Struct.ComponentSchema {
   };
 }
 
+export interface CareerBenefitCard extends Struct.ComponentSchema {
+  collectionName: 'components_career_benefit_cards';
+  info: {
+    displayName: 'Career Benefit Card';
+    icon: 'star';
+  };
+  attributes: {
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 320;
+      }>;
+    icon: Schema.Attribute.Enumeration<
+      ['bolt', 'language', 'trending', 'favorite']
+    > &
+      Schema.Attribute.DefaultTo<'bolt'>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 70;
+      }>;
+  };
+}
+
+export interface CareerHero extends Struct.ComponentSchema {
+  collectionName: 'components_career_heroes';
+  info: {
+    displayName: 'Career Hero';
+    icon: 'briefcase';
+  };
+  attributes: {
+    ctaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    ctaUrl: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }>;
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 700;
+      }>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 180;
+      }>;
+    image: Schema.Attribute.Media<'images'>;
+    imageAlt: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 180;
+      }>;
+    locationLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 120;
+      }>;
+  };
+}
+
+export interface CareerJobDetailCopy extends Struct.ComponentSchema {
+  collectionName: 'components_career_job_detail_copies';
+  info: {
+    displayName: 'Job Detail Page Copy';
+    icon: 'file';
+  };
+  attributes: {
+    aboutEyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    aboutHeading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    benefitsEyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    benefitsHeading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    emailLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    emailPlaceholder: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    errorMessage: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 220;
+      }>;
+    formDescription: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 220;
+      }>;
+    formHeading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    heroImage: Schema.Attribute.Media<'images'>;
+    heroImageAlt: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 180;
+      }>;
+    linkedInLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    linkedInPlaceholder: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    messageLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    messagePlaceholder: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+    moreJobsEyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    moreJobsHeading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    nameLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    namePlaceholder: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    phoneLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    phonePlaceholder: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    requirementsEyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    requirementsHeading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    responsibilitiesEyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    responsibilitiesHeading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    resumeHelper: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 120;
+      }>;
+    resumeLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    submitLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    successMessage: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 220;
+      }>;
+    uploadCtaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+  };
+}
+
+export interface CareerJobsSection extends Struct.ComponentSchema {
+  collectionName: 'components_career_jobs_sections';
+  info: {
+    displayName: 'Career Jobs Section';
+    icon: 'briefcase';
+  };
+  attributes: {
+    applyLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    emptyMessage: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 220;
+      }>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    resumeCtaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    resumeEmail: Schema.Attribute.Email;
+    resumePrompt: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 220;
+      }>;
+  };
+}
+
+export interface CareerLife extends Struct.ComponentSchema {
+  collectionName: 'components_career_life_sections';
+  info: {
+    displayName: 'Life at CouponzGuru';
+    icon: 'picture';
+  };
+  attributes: {
+    header: Schema.Attribute.Component<'shared.section-header', false>;
+    image: Schema.Attribute.Media<'images'>;
+    imageAlt: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 180;
+      }>;
+    paragraphs: Schema.Attribute.Component<'shared.paragraph', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 4;
+        },
+        number
+      >;
+  };
+}
+
+export interface CareerValueCard extends Struct.ComponentSchema {
+  collectionName: 'components_career_value_cards';
+  info: {
+    displayName: 'Career Value';
+    icon: 'heart';
+  };
+  attributes: {
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 180;
+      }>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 50;
+      }>;
+  };
+}
+
 export interface DealDayDealsByStore extends Struct.ComponentSchema {
   collectionName: 'components_deal_day_deals_by_stores';
   info: {
@@ -1057,6 +1323,12 @@ declare module '@strapi/strapi' {
       'about.our-story': AboutOurStory;
       'about.press': AboutPress;
       'about.trust': AboutTrust;
+      'career.benefit-card': CareerBenefitCard;
+      'career.hero': CareerHero;
+      'career.job-detail-copy': CareerJobDetailCopy;
+      'career.jobs-section': CareerJobsSection;
+      'career.life': CareerLife;
+      'career.value-card': CareerValueCard;
       'deal-day.deals-by-store': DealDayDealsByStore;
       'deal-day.section-heading': DealDaySectionHeading;
       'deal-day.store-tab': DealDayStoreTab;

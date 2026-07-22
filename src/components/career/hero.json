@@ -1,0 +1,14 @@
+{
+  "collectionName": "components_career_heroes",
+  "info": { "displayName": "Career Hero", "icon": "briefcase" },
+  "attributes": {
+    "eyebrow": { "type": "string", "maxLength": 60 },
+    "heading": { "type": "string", "maxLength": 180 },
+    "description": { "type": "text", "maxLength": 700 },
+    "ctaLabel": { "type": "string", "maxLength": 60 },
+    "ctaUrl": { "type": "string", "maxLength": 300 },
+    "locationLabel": { "type": "string", "maxLength": 120 },
+    "image": { "type": "media", "multiple": false, "allowedTypes": ["images"] },
+    "imageAlt": { "type": "string", "maxLength": 180 }
+  }
+}

@@ -19,6 +19,9 @@ const DOTD_PAGE_UID = 'api::deal-of-the-day-page.deal-of-the-day-page';
 // single type, which is in CHROME_UIDS and already triggers a full rebuild.
 const ABOUT_PAGE_UID = 'api::about-page.about-page';
 const ABOUT_PAGE_SLUG = 'about-us';
+const CAREER_PAGE_UID = 'api::career-page.career-page';
+const JOB_UID = 'api::job.job';
+const CAREER_PAGE_SLUG = 'careers';
 const ERROR_PAGE_UID = 'api::error-page.error-page';
 const ERROR_DOCUMENT_SLUGS = [
   'error-pages/400',
@@ -137,6 +140,22 @@ export async function computeScope(
   if (uid === 'api::homepage.homepage') return { homepage: true };
   if (uid === DOTD_PAGE_UID) return { slugs: [DEAL_OF_THE_DAY_SLUG] };
   if (uid === ABOUT_PAGE_UID) return { slugs: [ABOUT_PAGE_SLUG] };
+  if (uid === CAREER_PAGE_UID) {
+    const jobs: any[] = await strapi.documents(JOB_UID as any).findMany({
+      filters: { isActive: true } as any,
+      fields: ['slug'] as any,
+    });
+    return {
+      slugs: [
+        CAREER_PAGE_SLUG,
+        ...jobs.map((job) => `careers/${job.slug}`).filter((slug) => !slug.endsWith('/undefined')),
+      ],
+    };
+  }
+  // A job changes both the listing and one or more build routes. Creation,
+  // deletion, or a slug edit also changes the route manifest/sitemap, so use
+  // the existing full rebuild safety path for every editor operation.
+  if (uid === JOB_UID) return { full: true };
   if (uid === ERROR_PAGE_UID) return { slugs: [...ERROR_DOCUMENT_SLUGS] };
   if (CHROME_UIDS.has(uid)) return { full: true };
 

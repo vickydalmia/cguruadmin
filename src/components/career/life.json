@@ -1,0 +1,10 @@
+{
+  "collectionName": "components_career_life_sections",
+  "info": { "displayName": "Life at CouponzGuru", "icon": "picture" },
+  "attributes": {
+    "header": { "type": "component", "repeatable": false, "component": "shared.section-header" },
+    "paragraphs": { "type": "component", "repeatable": true, "component": "shared.paragraph", "max": 4 },
+    "image": { "type": "media", "multiple": false, "allowedTypes": ["images"] },
+    "imageAlt": { "type": "string", "maxLength": 180 }
+  }
+}

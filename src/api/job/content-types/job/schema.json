@@ -1,0 +1,26 @@
+{
+  "kind": "collectionType",
+  "collectionName": "jobs",
+  "info": {
+    "singularName": "job",
+    "pluralName": "jobs",
+    "displayName": "Job",
+    "description": "Career openings shown on /careers and their detail pages."
+  },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "title": { "type": "string", "required": true, "maxLength": 120 },
+    "slug": { "type": "uid", "targetField": "title", "required": true },
+    "category": { "type": "string", "required": true, "maxLength": 60 },
+    "experience": { "type": "string", "maxLength": 60 },
+    "employmentType": { "type": "string", "maxLength": 60 },
+    "location": { "type": "string", "maxLength": 100 },
+    "sortOrder": { "type": "integer", "default": 0, "min": 0 },
+    "isActive": { "type": "boolean", "default": true },
+    "opportunityParagraphs": { "type": "component", "repeatable": true, "component": "shared.paragraph", "max": 6 },
+    "responsibilities": { "type": "component", "repeatable": true, "component": "shared.paragraph", "max": 16 },
+    "requirements": { "type": "component", "repeatable": true, "component": "shared.paragraph", "max": 16 },
+    "benefits": { "type": "component", "repeatable": true, "component": "shared.paragraph", "max": 16 },
+    "seo": { "type": "component", "repeatable": false, "component": "shared.seo" }
+  }
+}

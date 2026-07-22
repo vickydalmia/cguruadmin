@@ -30,8 +30,14 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       .documents('api::about-page.about-page')
       .findFirst({ populate: ABOUT_POPULATE as any });
 
+    // An unsaved single type is valid for this aggregate: the storefront has
+    // a complete committed fallback and needs a stable 200 envelope to decide
+    // that locally. Returning an HTTP 404 here makes infrastructure treat the
+    // public /about-us/ document as absent and can enter the ISR negative-cache
+    // path even though the Astro route itself is valid. This matches the
+    // career-page-full contract.
     if (!page) {
-      return ctx.notFound('About page not found');
+      return ctx.send({ data: null });
     }
 
     const sanitized = await sanitizeOutput(

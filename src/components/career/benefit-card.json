@@ -1,0 +1,9 @@
+{
+  "collectionName": "components_career_benefit_cards",
+  "info": { "displayName": "Career Benefit Card", "icon": "star" },
+  "attributes": {
+    "icon": { "type": "enumeration", "enum": ["bolt", "language", "trending", "favorite"], "default": "bolt" },
+    "title": { "type": "string", "required": true, "maxLength": 70 },
+    "description": { "type": "text", "maxLength": 320 }
+  }
+}

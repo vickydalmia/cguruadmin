@@ -1,0 +1,8 @@
+{
+  "collectionName": "components_career_value_cards",
+  "info": { "displayName": "Career Value", "icon": "heart" },
+  "attributes": {
+    "title": { "type": "string", "required": true, "maxLength": 50 },
+    "description": { "type": "text", "maxLength": 180 }
+  }
+}

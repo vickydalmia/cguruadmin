@@ -84,9 +84,11 @@ const PUBLIC_READ_ACTIONS = [
   ...['store', 'brand', 'category', 'bank'].flatMap(
     (name) => [`api::${name}.${name}.find`, `api::${name}.${name}.findOne`]
   ),
-  ...['homepage', 'global', 'menu', 'footer', 'error-page'].map(
+  ...['homepage', 'global', 'menu', 'footer', 'error-page', 'career-page'].map(
     (name) => `api::${name}.${name}.find`
   ),
+  'api::job.job.find',
+  'api::job.job.findOne',
 ];
 
 async function ensurePublicReadPermissions(strapi: Core.Strapi): Promise<void> {
@@ -186,6 +188,12 @@ const COMPONENT_ENTRY_TITLES: Record<string, string> = {
   'shared.breadcrumb-item': 'label',
   'about.hero': 'heading',
   'about.founder': 'name',
+  'career.hero': 'heading',
+  'career.benefit-card': 'title',
+  'career.value-card': 'title',
+  'career.jobs-section': 'heading',
+  'career.life': 'imageAlt',
+  'career.job-detail-copy': 'formHeading',
   'error-page.hero': 'heading',
   'error-page.link-card': 'title',
   'error-page.explore': 'heading',
@@ -279,6 +287,7 @@ const SINGLE_TYPE_ENTRY_TITLES = [
   'api::footer.footer',
   'api::global.global',
   'api::error-page.error-page',
+  'api::career-page.career-page',
 ] as const;
 
 async function ensureSingleTypeEntryTitles(strapi: Core.Strapi): Promise<void> {

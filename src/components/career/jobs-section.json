@@ -1,0 +1,13 @@
+{
+  "collectionName": "components_career_jobs_sections",
+  "info": { "displayName": "Career Jobs Section", "icon": "briefcase" },
+  "attributes": {
+    "eyebrow": { "type": "string", "maxLength": 60 },
+    "heading": { "type": "string", "maxLength": 100 },
+    "applyLabel": { "type": "string", "maxLength": 40 },
+    "emptyMessage": { "type": "text", "maxLength": 220 },
+    "resumePrompt": { "type": "text", "maxLength": 220 },
+    "resumeCtaLabel": { "type": "string", "maxLength": 80 },
+    "resumeEmail": { "type": "email" }
+  }
+}

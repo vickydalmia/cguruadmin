@@ -610,6 +610,65 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiCareerPageCareerPage extends Struct.SingleTypeSchema {
+  collectionName: 'career_pages';
+  info: {
+    description: 'All editable copy and media shared by the Careers listing and job detail pages. Missing fields use the deployed Figma fallback.';
+    displayName: 'Career Page';
+    pluralName: 'career-pages';
+    singularName: 'career-page';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    benefits: Schema.Attribute.Component<'career.benefit-card', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 4;
+        },
+        number
+      >;
+    careersBreadcrumbLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }> &
+      Schema.Attribute.DefaultTo<'Careers'>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    hero: Schema.Attribute.Component<'career.hero', false>;
+    homeBreadcrumbLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }> &
+      Schema.Attribute.DefaultTo<'Home'>;
+    jobDetail: Schema.Attribute.Component<'career.job-detail-copy', false>;
+    jobsSection: Schema.Attribute.Component<'career.jobs-section', false>;
+    life: Schema.Attribute.Component<'career.life', false>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::career-page.career-page'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    seo: Schema.Attribute.Component<'shared.seo', false>;
+    title: Schema.Attribute.String & Schema.Attribute.DefaultTo<'Career Page'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    values: Schema.Attribute.Component<'career.value-card', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 4;
+        },
+        number
+      >;
+    whyJoinHeader: Schema.Attribute.Component<'shared.section-header', false>;
+  };
+}
+
 export interface ApiCategoryCategory extends Struct.CollectionTypeSchema {
   collectionName: 'categories';
   info: {
@@ -980,6 +1039,149 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
     title: Schema.Attribute.String & Schema.Attribute.DefaultTo<'Homepage'>;
     topDeals: Schema.Attribute.Component<'home.deal-list', false>;
     topOffers: Schema.Attribute.Component<'home.top-offers', false>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiJobApplicationJobApplication
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'job_applications';
+  info: {
+    description: 'Applications submitted from public job detail pages. Public core routes are not exposed.';
+    displayName: 'Job Application';
+    pluralName: 'job-applications';
+    singularName: 'job-application';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    email: Schema.Attribute.Email & Schema.Attribute.Required;
+    fullName: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 120;
+      }>;
+    job: Schema.Attribute.Relation<'manyToOne', 'api::job.job'>;
+    linkedInUrl: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::job-application.job-application'
+    > &
+      Schema.Attribute.Private;
+    message: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 2000;
+      }>;
+    phone: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    publishedAt: Schema.Attribute.DateTime;
+    resume: Schema.Attribute.Media<'files'>;
+    status: Schema.Attribute.Enumeration<
+      ['new', 'reviewing', 'shortlisted', 'rejected', 'hired']
+    > &
+      Schema.Attribute.DefaultTo<'new'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiJobJob extends Struct.CollectionTypeSchema {
+  collectionName: 'jobs';
+  info: {
+    description: 'Career openings shown on /careers and their detail pages.';
+    displayName: 'Job';
+    pluralName: 'jobs';
+    singularName: 'job';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    benefits: Schema.Attribute.Component<'shared.paragraph', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 16;
+        },
+        number
+      >;
+    category: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    employmentType: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    experience: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    isActive: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<'oneToMany', 'api::job.job'> &
+      Schema.Attribute.Private;
+    location: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    opportunityParagraphs: Schema.Attribute.Component<
+      'shared.paragraph',
+      true
+    > &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 6;
+        },
+        number
+      >;
+    publishedAt: Schema.Attribute.DateTime;
+    requirements: Schema.Attribute.Component<'shared.paragraph', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 16;
+        },
+        number
+      >;
+    responsibilities: Schema.Attribute.Component<'shared.paragraph', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 16;
+        },
+        number
+      >;
+    seo: Schema.Attribute.Component<'shared.seo', false>;
+    slug: Schema.Attribute.UID<'title'> & Schema.Attribute.Required;
+    sortOrder: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 0;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<0>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 120;
+      }>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1680,6 +1882,7 @@ declare module '@strapi/strapi' {
       'api::about-page.about-page': ApiAboutPageAboutPage;
       'api::bank.bank': ApiBankBank;
       'api::brand.brand': ApiBrandBrand;
+      'api::career-page.career-page': ApiCareerPageCareerPage;
       'api::category.category': ApiCategoryCategory;
       'api::coupon.coupon': ApiCouponCoupon;
       'api::deal-of-the-day-page.deal-of-the-day-page': ApiDealOfTheDayPageDealOfTheDayPage;
@@ -1688,6 +1891,8 @@ declare module '@strapi/strapi' {
       'api::footer.footer': ApiFooterFooter;
       'api::global.global': ApiGlobalGlobal;
       'api::homepage.homepage': ApiHomepageHomepage;
+      'api::job-application.job-application': ApiJobApplicationJobApplication;
+      'api::job.job': ApiJobJob;
       'api::menu.menu': ApiMenuMenu;
       'api::store.store': ApiStoreStore;
       'api::unique-code.unique-code': ApiUniqueCodeUniqueCode;
