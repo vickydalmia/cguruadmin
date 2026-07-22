@@ -1,0 +1,34 @@
+{
+  "kind": "singleType",
+  "collectionName": "error_pages",
+  "info": {
+    "singularName": "error-page",
+    "pluralName": "error-pages",
+    "displayName": "Error Page"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "default": "Error Page"
+    },
+    "hero": {
+      "type": "component",
+      "component": "error-page.hero",
+      "repeatable": false
+    },
+    "explore": {
+      "type": "component",
+      "component": "error-page.explore",
+      "repeatable": false
+    },
+    "trustBanner": {
+      "type": "component",
+      "component": "error-page.trust-banner",
+      "repeatable": false
+    }
+  }
+}

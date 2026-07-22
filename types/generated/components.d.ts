@@ -63,6 +63,71 @@ export interface DealDayTelegramDeals extends Struct.ComponentSchema {
   };
 }
 
+export interface ErrorPageExplore extends Struct.ComponentSchema {
+  collectionName: 'components_error_page_explores';
+  info: {
+    displayName: 'Error Explore Section';
+    icon: 'grid';
+  };
+  attributes: {
+    couponsCard: Schema.Attribute.Component<'error-page.link-card', false>;
+    electronicsCard: Schema.Attribute.Component<'error-page.link-card', false>;
+    eyebrow: Schema.Attribute.String;
+    heading: Schema.Attribute.String;
+    storesCard: Schema.Attribute.Component<'error-page.link-card', false>;
+    travelCard: Schema.Attribute.Component<'error-page.link-card', false>;
+  };
+}
+
+export interface ErrorPageHero extends Struct.ComponentSchema {
+  collectionName: 'components_error_page_heroes';
+  info: {
+    displayName: 'Error Hero';
+    icon: 'warning';
+  };
+  attributes: {
+    actionsLabel: Schema.Attribute.String;
+    dealsCta: Schema.Attribute.Component<'shared.cta', false>;
+    description: Schema.Attribute.Text;
+    heading: Schema.Attribute.String;
+    homeCta: Schema.Attribute.Component<'shared.cta', false>;
+    searchButtonLabel: Schema.Attribute.String;
+    searchLabel: Schema.Attribute.String;
+    searchPlaceholder: Schema.Attribute.String;
+    ticketDescription: Schema.Attribute.String;
+    ticketTitle: Schema.Attribute.String & Schema.Attribute.DefaultTo<'OOPS!'>;
+  };
+}
+
+export interface ErrorPageLinkCard extends Struct.ComponentSchema {
+  collectionName: 'components_error_page_link_cards';
+  info: {
+    displayName: 'Error Discovery Card';
+    icon: 'apps';
+  };
+  attributes: {
+    ctaLabel: Schema.Attribute.String;
+    description: Schema.Attribute.Text;
+    mobileTitle: Schema.Attribute.String;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
+    url: Schema.Attribute.String;
+  };
+}
+
+export interface ErrorPageTrustBanner extends Struct.ComponentSchema {
+  collectionName: 'components_error_page_trust_banners';
+  info: {
+    displayName: 'Error Trust Banner';
+    icon: 'shield';
+  };
+  attributes: {
+    ctaLabel: Schema.Attribute.String;
+    description: Schema.Attribute.Text;
+    heading: Schema.Attribute.String;
+    url: Schema.Attribute.String;
+  };
+}
+
 export interface FooterCountry extends Struct.ComponentSchema {
   collectionName: 'components_footer_countries';
   info: {
@@ -576,7 +641,10 @@ export interface SharedNewsletter extends Struct.ComponentSchema {
     ctaLabel: Schema.Attribute.String;
     description: Schema.Attribute.Text;
     disclaimer: Schema.Attribute.String;
+    emailLabel: Schema.Attribute.String;
+    emailPlaceholder: Schema.Attribute.String;
     heading: Schema.Attribute.String;
+    mobileHeading: Schema.Attribute.String;
   };
 }
 
@@ -616,6 +684,10 @@ declare module '@strapi/strapi' {
       'deal-day.section-heading': DealDaySectionHeading;
       'deal-day.store-tab': DealDayStoreTab;
       'deal-day.telegram-deals': DealDayTelegramDeals;
+      'error-page.explore': ErrorPageExplore;
+      'error-page.hero': ErrorPageHero;
+      'error-page.link-card': ErrorPageLinkCard;
+      'error-page.trust-banner': ErrorPageTrustBanner;
       'footer.country': FooterCountry;
       'footer.link-section': FooterLinkSection;
       'footer.partner-card': FooterPartnerCard;

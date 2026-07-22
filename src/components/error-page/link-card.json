@@ -1,0 +1,14 @@
+{
+  "collectionName": "components_error_page_link_cards",
+  "info": {
+    "displayName": "Error Discovery Card",
+    "icon": "apps"
+  },
+  "attributes": {
+    "title": { "type": "string", "required": true },
+    "mobileTitle": { "type": "string" },
+    "description": { "type": "text" },
+    "ctaLabel": { "type": "string" },
+    "url": { "type": "string" }
+  }
+}

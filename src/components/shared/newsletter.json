@@ -8,8 +8,17 @@
     "heading": {
       "type": "string"
     },
+    "mobileHeading": {
+      "type": "string"
+    },
     "description": {
       "type": "text"
+    },
+    "emailLabel": {
+      "type": "string"
+    },
+    "emailPlaceholder": {
+      "type": "string"
     },
     "ctaLabel": {
       "type": "string"

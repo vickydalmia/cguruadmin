@@ -1,0 +1,27 @@
+{
+  "collectionName": "components_error_page_heroes",
+  "info": {
+    "displayName": "Error Hero",
+    "icon": "warning"
+  },
+  "attributes": {
+    "ticketTitle": { "type": "string", "default": "OOPS!" },
+    "ticketDescription": { "type": "string" },
+    "heading": { "type": "string" },
+    "description": { "type": "text" },
+    "searchPlaceholder": { "type": "string" },
+    "searchLabel": { "type": "string" },
+    "searchButtonLabel": { "type": "string" },
+    "actionsLabel": { "type": "string" },
+    "homeCta": {
+      "type": "component",
+      "component": "shared.cta",
+      "repeatable": false
+    },
+    "dealsCta": {
+      "type": "component",
+      "component": "shared.cta",
+      "repeatable": false
+    }
+  }
+}

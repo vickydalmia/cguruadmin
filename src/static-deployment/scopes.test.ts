@@ -120,6 +120,37 @@ describe('deal-of-the-day landing page scope', () => {
   });
 });
 
+describe('error page scope', () => {
+  it('revalidates only the internal error documents', async () => {
+    const { computeScope } = await import('./scopes');
+    const strapi = strapiWithFindOne(async () => {
+      throw new Error('must not be called');
+    });
+    const scope = await computeScope(
+      strapi,
+      'api::error-page.error-page',
+      'update',
+      'doc1',
+    );
+    expect(scope).toEqual({
+      slugs: [
+        'error-pages/400',
+        'error-pages/403',
+        'error-pages/404',
+        'error-pages/405',
+        'error-pages/414',
+        'error-pages/416',
+        'error-pages/500',
+        'error-pages/501',
+        'error-pages/502',
+        'error-pages/503',
+        'error-pages/504',
+        'error-pages/template',
+      ],
+    });
+  });
+});
+
 describe('entity edits baked into the deal landing page', () => {
   it('adds the landing slug for store and category updates', async () => {
     const { computeScope } = await import('./scopes');

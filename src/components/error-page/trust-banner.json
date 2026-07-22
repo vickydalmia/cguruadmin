@@ -1,0 +1,13 @@
+{
+  "collectionName": "components_error_page_trust_banners",
+  "info": {
+    "displayName": "Error Trust Banner",
+    "icon": "shield"
+  },
+  "attributes": {
+    "heading": { "type": "string" },
+    "description": { "type": "text" },
+    "ctaLabel": { "type": "string" },
+    "url": { "type": "string" }
+  }
+}

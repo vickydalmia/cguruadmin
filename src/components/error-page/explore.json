@@ -1,0 +1,31 @@
+{
+  "collectionName": "components_error_page_explores",
+  "info": {
+    "displayName": "Error Explore Section",
+    "icon": "grid"
+  },
+  "attributes": {
+    "eyebrow": { "type": "string" },
+    "heading": { "type": "string" },
+    "couponsCard": {
+      "type": "component",
+      "component": "error-page.link-card",
+      "repeatable": false
+    },
+    "storesCard": {
+      "type": "component",
+      "component": "error-page.link-card",
+      "repeatable": false
+    },
+    "travelCard": {
+      "type": "component",
+      "component": "error-page.link-card",
+      "repeatable": false
+    },
+    "electronicsCard": {
+      "type": "component",
+      "component": "error-page.link-card",
+      "repeatable": false
+    }
+  }
+}

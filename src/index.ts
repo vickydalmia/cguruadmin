@@ -84,7 +84,7 @@ const PUBLIC_READ_ACTIONS = [
   ...['store', 'brand', 'category', 'bank'].flatMap(
     (name) => [`api::${name}.${name}.find`, `api::${name}.${name}.findOne`]
   ),
-  ...['homepage', 'global', 'menu', 'footer'].map(
+  ...['homepage', 'global', 'menu', 'footer', 'error-page'].map(
     (name) => `api::${name}.${name}.find`
   ),
 ];
@@ -175,6 +175,10 @@ const COMPONENT_ENTRY_TITLES: Record<string, string> = {
   'shared.cta': 'label',
   'shared.telegram-cta': 'heading',
   'shared.newsletter': 'heading',
+  'error-page.hero': 'heading',
+  'error-page.link-card': 'title',
+  'error-page.explore': 'heading',
+  'error-page.trust-banner': 'heading',
   'nav.link': 'label',
   'nav.category-section': 'title',
   'footer.link-section': 'title',
@@ -263,6 +267,7 @@ const SINGLE_TYPE_ENTRY_TITLES = [
   'api::menu.menu',
   'api::footer.footer',
   'api::global.global',
+  'api::error-page.error-page',
 ] as const;
 
 async function ensureSingleTypeEntryTitles(strapi: Core.Strapi): Promise<void> {
