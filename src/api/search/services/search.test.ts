@@ -132,6 +132,15 @@ describe("public search entity boundaries", () => {
     ).toEqual({ ok: false, message: "A valid search group is required" });
   });
 
+  it("rejects queries shorter than 3 characters (pg_trgm index floor)", () => {
+    const { service } = searchService();
+    expect(service.parseRequest({ query: "ta" })).toEqual({
+      ok: false,
+      message: "Search query must be between 3 and 80 characters",
+    });
+    expect(service.parseRequest({ query: "tat" })).toMatchObject({ ok: true });
+  });
+
   it("keeps no-code Coupon records in the Coupon result group", async () => {
     const { calls, service } = searchService();
     const response = await service.search({

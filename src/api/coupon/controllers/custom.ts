@@ -20,6 +20,7 @@ const visibilityFilters = () => publishedOnlyFilters();
 // Default page size for the global /offers and /deals listings (max 100 via
 // clampPageSize). Matches the "24 per page" grid the frontend renders.
 const DEFAULT_LIST_PAGE_SIZE = 24;
+const OFFER_ID_PATTERN = /^[1-9]\d{0,14}$/;
 const REDEEM_DOCUMENT_ID_PATTERN = /^[a-zA-Z0-9_-]{1,160}$/;
 const REDEEM_UIDS = {
   coupon: 'api::coupon.coupon',
@@ -85,6 +86,34 @@ const DEAL_PUBLIC_FIELDS = [
   'updatedAt',
   'publishedAt',
 ];
+const COUPON_PAGE_FIELDS = COUPON_PUBLIC_FIELDS.filter(
+  (field) => field !== 'affiliateLink',
+);
+const DEAL_PAGE_FIELDS = DEAL_PUBLIC_FIELDS.filter(
+  (field) => field !== 'affiliateLink',
+);
+const RELATED_DEAL_PAGE_FIELDS = DEAL_PUBLIC_FIELDS.filter(
+  (field) => field !== 'affiliateLink',
+);
+const COUPON_PAGE_RELATED_LIMIT = 4;
+const COUPON_PAGE_RELATED_DEAL_LIMIT = 6;
+const COUPON_PAGE_RELATED_DEAL_QUERY_LIMIT = 40;
+const DEAL_PAGE_RELATED_LIMIT = 4;
+const DEAL_PAGE_RELATED_QUERY_LIMIT = 40;
+
+function isRenderableCouponPageDeal(deal: any): boolean {
+  const rawPrice =
+    typeof deal?.salePrice === 'string'
+      ? deal.salePrice.replaceAll(',', '').trim()
+      : deal?.salePrice;
+  const salePrice = Number(rawPrice);
+  return (
+    typeof deal?.dealImage?.url === 'string' &&
+    deal.dealImage.url.trim().length > 0 &&
+    Number.isFinite(salePrice) &&
+    salePrice > 0
+  );
+}
 
 // Related-entity refs expose only name/slug (+ logo/icon media, +logoAlt for
 // alt text). Nothing else about a store/bank/brand/category leaks into a listing.
@@ -112,6 +141,30 @@ const DEAL_PUBLIC_POPULATE = {
   categories: categoryRef,
   brands: brandRef,
 };
+
+const PRIMARY_ENTITY_RELATIONS = [
+  ['stores', 'store'],
+  ['brands', 'brand'],
+  ['banks', 'bank'],
+  ['categories', 'category'],
+] as const;
+
+function couponPagePrimaryEntity(coupon: any) {
+  for (const [field, kind] of PRIMARY_ENTITY_RELATIONS) {
+    const relation = Array.isArray(coupon?.[field]) ? coupon[field][0] : null;
+    if (relation?.documentId && relation?.slug) {
+      return { kind, ...relation };
+    }
+  }
+  return null;
+}
+
+function dealPagePrimaryEntity(deal: any) {
+  if (deal?.primaryStore?.documentId && deal.primaryStore.slug) {
+    return { kind: 'store', ...deal.primaryStore };
+  }
+  return couponPagePrimaryEntity(deal);
+}
 
 // Shared driver for the global /offers and /deals listings: published-only
 // filter, whitelisted fields + populate, sanitized output, and a { data,
@@ -320,6 +373,194 @@ async function listEntityOffers(
 }
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
+
+  async getCouponPage(ctx) {
+    const rawId = String(ctx.params?.id ?? '').trim();
+    if (!OFFER_ID_PATTERN.test(rawId)) return ctx.notFound('Coupon not found');
+    const couponId = Number(rawId);
+    if (!Number.isSafeInteger(couponId)) return ctx.notFound('Coupon not found');
+
+    const couponQuery = await sanitizeDocumentQuery(
+      strapi,
+      ctx,
+      'api::coupon.coupon',
+      {
+        filters: { id: couponId, ...visibilityFilters() },
+        fields: COUPON_PAGE_FIELDS,
+        populate: COUPON_PUBLIC_POPULATE,
+        limit: 1,
+      },
+    );
+    const coupon = (await strapi
+      .documents('api::coupon.coupon')
+      .findMany(couponQuery))[0];
+    if (!coupon) return ctx.notFound('Coupon not found');
+
+    const primaryEntity = couponPagePrimaryEntity(coupon);
+    let relatedCoupons: any[] = [];
+    let relatedDeals: any[] = [];
+    let similarStores: any[] = [];
+
+    if (primaryEntity) {
+      const relatedCouponQuery = await sanitizeDocumentQuery(
+        strapi,
+        ctx,
+        'api::coupon.coupon',
+        {
+          filters: {
+            ...entityOfferFilters(
+              primaryEntity.kind,
+              primaryEntity.documentId,
+              'coupon',
+            ),
+            documentId: { $ne: coupon.documentId },
+          },
+          fields: COUPON_PAGE_FIELDS,
+          populate: COUPON_PUBLIC_POPULATE,
+          sort: DEFAULT_OFFER_SORT,
+          limit: COUPON_PAGE_RELATED_LIMIT,
+        },
+      );
+      const relatedDealQuery = await sanitizeDocumentQuery(
+        strapi,
+        ctx,
+        'api::deal.deal',
+        {
+          filters: entityOfferFilters(
+            primaryEntity.kind,
+            primaryEntity.documentId,
+            'deal',
+          ),
+          fields: RELATED_DEAL_PAGE_FIELDS,
+          populate: DEAL_PUBLIC_POPULATE,
+          sort: DEFAULT_OFFER_SORT,
+          limit: COUPON_PAGE_RELATED_DEAL_QUERY_LIMIT,
+        },
+      );
+
+      [relatedCoupons, relatedDeals] = await Promise.all([
+        strapi.documents('api::coupon.coupon').findMany(relatedCouponQuery),
+        strapi.documents('api::deal.deal').findMany(relatedDealQuery),
+      ]);
+
+      try {
+        const related = await strapi
+          .service('api::store.custom' as any)
+          .relatedStores(primaryEntity.kind, primaryEntity.slug, {
+            limit: COUPON_PAGE_RELATED_LIMIT,
+          });
+        similarStores = related?.stores ?? [];
+      } catch (error: any) {
+        strapi.log.warn(
+          `[coupon-page] related stores unavailable for ${couponId}: ${error?.message ?? error}`,
+        );
+      }
+    }
+
+    const [safeCoupon, safeRelatedCoupons, safeRelatedDealCandidates] = await Promise.all([
+      sanitizeDocumentOutput(strapi, ctx, 'api::coupon.coupon', coupon),
+      sanitizeDocumentOutput(
+        strapi,
+        ctx,
+        'api::coupon.coupon',
+        relatedCoupons,
+      ),
+      sanitizeDocumentOutput(strapi, ctx, 'api::deal.deal', relatedDeals),
+    ]);
+    const safeRelatedDeals = (Array.isArray(safeRelatedDealCandidates)
+      ? safeRelatedDealCandidates
+      : [])
+      .filter(isRenderableCouponPageDeal)
+      .slice(0, COUPON_PAGE_RELATED_DEAL_LIMIT);
+
+    return ctx.send({
+      coupon: arrayizeOfferText(safeCoupon),
+      primaryEntity: couponPagePrimaryEntity(safeCoupon),
+      relatedCoupons: arrayizeOfferText(safeRelatedCoupons),
+      relatedDeals: arrayizeOfferText(safeRelatedDeals),
+      similarStores,
+    });
+  },
+
+  async getDealPage(ctx) {
+    const rawId = String(ctx.params?.id ?? '').trim();
+    if (!OFFER_ID_PATTERN.test(rawId)) return ctx.notFound('Deal not found');
+    const dealId = Number(rawId);
+    if (!Number.isSafeInteger(dealId)) return ctx.notFound('Deal not found');
+
+    const dealQuery = await sanitizeDocumentQuery(
+      strapi,
+      ctx,
+      'api::deal.deal',
+      {
+        filters: { id: dealId, ...visibilityFilters() },
+        fields: DEAL_PAGE_FIELDS,
+        populate: DEAL_PUBLIC_POPULATE,
+        limit: 1,
+      },
+    );
+    const deal = (await strapi.documents('api::deal.deal').findMany(dealQuery))[0];
+    if (!deal) return ctx.notFound('Deal not found');
+
+    const primaryEntity = dealPagePrimaryEntity(deal);
+    let relatedDeals: any[] = [];
+    let similarStores: any[] = [];
+
+    if (primaryEntity) {
+      const relatedDealQuery = await sanitizeDocumentQuery(
+        strapi,
+        ctx,
+        'api::deal.deal',
+        {
+          filters: {
+            ...entityOfferFilters(
+              primaryEntity.kind,
+              primaryEntity.documentId,
+              'deal',
+            ),
+            documentId: { $ne: deal.documentId },
+          },
+          fields: DEAL_PAGE_FIELDS,
+          populate: DEAL_PUBLIC_POPULATE,
+          sort: DEFAULT_OFFER_SORT,
+          limit: DEAL_PAGE_RELATED_QUERY_LIMIT,
+        },
+      );
+      relatedDeals = await strapi
+        .documents('api::deal.deal')
+        .findMany(relatedDealQuery);
+
+      try {
+        const related = await strapi
+          .service('api::store.custom' as any)
+          .relatedStores(primaryEntity.kind, primaryEntity.slug, {
+            limit: DEAL_PAGE_RELATED_LIMIT,
+          });
+        similarStores = related?.stores ?? [];
+      } catch (error: any) {
+        strapi.log.warn(
+          `[deal-page] related stores unavailable for ${dealId}: ${error?.message ?? error}`,
+        );
+      }
+    }
+
+    const [safeDeal, safeRelatedCandidates] = await Promise.all([
+      sanitizeDocumentOutput(strapi, ctx, 'api::deal.deal', deal),
+      sanitizeDocumentOutput(strapi, ctx, 'api::deal.deal', relatedDeals),
+    ]);
+    const safeRelatedDeals = (Array.isArray(safeRelatedCandidates)
+      ? safeRelatedCandidates
+      : [])
+      .filter(isRenderableCouponPageDeal)
+      .slice(0, DEAL_PAGE_RELATED_LIMIT);
+
+    return ctx.send({
+      deal: arrayizeOfferText(safeDeal),
+      primaryEntity: dealPagePrimaryEntity(safeDeal),
+      relatedDeals: arrayizeOfferText(safeRelatedDeals),
+      similarStores,
+    });
+  },
 
   async getRedeemOffer(ctx) {
     if (!isRedeemResolverAuthorized(ctx)) return ctx.unauthorized();

@@ -1,5 +1,29 @@
 export default {
   routes: [
+    {
+      method: 'GET',
+      path: '/coupon-page/:id',
+      handler: 'custom.getCouponPage',
+      config: {
+        auth: false,
+        middlewares: [
+          { name: 'global::rate-limit', config: { maxRequests: 60, windowMs: 60_000 } },
+          { name: 'global::cache', config: { ttlMs: 60_000 } },
+        ],
+      },
+    },
+    {
+      method: 'GET',
+      path: '/deal-page/:id',
+      handler: 'custom.getDealPage',
+      config: {
+        auth: false,
+        middlewares: [
+          { name: 'global::rate-limit', config: { maxRequests: 60, windowMs: 60_000 } },
+          { name: 'global::cache', config: { ttlMs: 60_000 } },
+        ],
+      },
+    },
     // Private gateway-only resolver. Core Coupon/Deal findOne routes stay
     // disabled so unique-code pools cannot be populated by public callers.
     {

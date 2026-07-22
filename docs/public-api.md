@@ -20,6 +20,7 @@ ceiling on staleness, not a fixed delay.
 | `GET /api/deal-of-the-day-full` | anonymous | 60 / 60s | 60s, keyed by path |
 | `GET /api/site-chrome` | anonymous | — | 300s |
 | `GET /api/offers`, `GET /api/deals` | anonymous | 60 / 60s | 60s |
+| `GET /api/coupon-page/:id` | anonymous | 60 / 60s | 60s |
 | `GET /api/{stores\|brands\|categories\|banks}/:slug/{coupons\|deals}` | anonymous | — | none |
 | `GET /api/{stores\|brands\|categories\|banks}/:slug/related-stores` | anonymous | — | 60s |
 | `POST /api/{stores\|brands\|categories\|banks}/:slug/rating` | anonymous | 5 / 60s | none (never cached) |
@@ -235,6 +236,18 @@ Anonymous, and never cached — every vote must reach the controller. Guards:
 Success returns `{ ok: true, ratingAverage, ratingCount }`. A non-integer or
 out-of-range `value` is a 400; an unknown slug is a 404. These aggregates are
 what the high-rated fallback in `related-stores` sorts on.
+
+## Coupon detail aggregate
+
+`GET /api/coupon-page/:id` accepts the Coupon's positive numeric Strapi `id`.
+It returns `{ coupon, primaryEntity, relatedCoupons,
+relatedDeals, similarStores }` for a published Coupon. The Coupon and related
+offer field lists deliberately omit `affiliateLink`; browser activation still
+uses the private redeem resolver. Unique-pool relations expose only their name
+and Strapi relation identity, never pool codes.
+
+The public URL uses the compact database `id`; redemption continues to use the
+Coupon's Strapi `documentId` internally.
 
 ## Offer redeem resolver
 

@@ -41,4 +41,5 @@ describe('offer redeem cache invalidation', () => {
     });
     expect(init.body).not.toContain('affiliateLink');
   });
+
 });

@@ -17,7 +17,10 @@ import {
   type SqlQuery,
 } from "./search-sql";
 
-const MIN_QUERY_LENGTH = 2;
+// 3 is a hard floor for performance, not taste: pg_trgm needs a full
+// trigram, so an unanchored LIKE '%xx%' with a 2-char needle can never use
+// the GIN indexes and every membership arm seq-scans (observed ~2s previews).
+const MIN_QUERY_LENGTH = 3;
 const MAX_QUERY_LENGTH = 80;
 const PREVIEW_ENTITY_LIMIT = 7;
 const PREVIEW_OFFER_LIMIT = 3;
@@ -170,7 +173,7 @@ function parseRequest(raw: Record<string, unknown>) {
   if (length < MIN_QUERY_LENGTH || length > MAX_QUERY_LENGTH) {
     return {
       ok: false as const,
-      message: "Search query must be between 2 and 80 characters",
+      message: `Search query must be between ${MIN_QUERY_LENGTH} and ${MAX_QUERY_LENGTH} characters`,
     };
   }
 

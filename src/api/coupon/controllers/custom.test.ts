@@ -36,6 +36,10 @@ function createHarness() {
   const sanitizeQuery = vi.fn(async (query: any) => query);
   const strapi = {
     documents,
+    log: { warn: vi.fn() },
+    service: vi.fn(() => ({
+      relatedStores: vi.fn().mockResolvedValue({ stores: [] }),
+    })),
     contentType: vi.fn(() => ({})),
     contentAPI: {
       validate: { query: vi.fn(async () => undefined) },
@@ -71,6 +75,135 @@ function createHarness() {
     entityFindMany,
   };
 }
+
+describe('public Coupon detail aggregate', () => {
+  it('resolves a numeric Coupon id without exposing affiliate destinations', async () => {
+    const harness = createHarness();
+    harness.ctx.params = { id: '123' } as any;
+    harness.couponFindMany
+      .mockResolvedValueOnce([
+        {
+          id: 123,
+          documentId: 'coupon-document-1',
+          title: 'Save 20%',
+          affiliateLink: 'https://merchant.invalid/private',
+          stores: [
+            {
+              documentId: 'store-amazon',
+              name: 'Amazon',
+              slug: 'amazon-coupons',
+            },
+          ],
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 456,
+          documentId: 'coupon-document-2',
+          title: 'Save 10%',
+        },
+      ]);
+    harness.dealFindMany.mockResolvedValue([
+      {
+        documentId: 'deal-invalid-image',
+        title: 'Not renderable',
+        salePrice: 999,
+      },
+      ...Array.from({ length: 7 }, (_, index) => ({
+        documentId: `deal-document-${index + 1}`,
+        title: `Related deal ${index + 1}`,
+        salePrice: index + 1 === 1 ? '1,299' : 999 + index,
+        dealImage: { url: `/uploads/deal-${index + 1}.webp` },
+      })),
+    ]);
+
+    const payload = await harness.controller.getCouponPage(harness.ctx as any);
+
+    const detailQuery = harness.couponFindMany.mock.calls[0][0];
+    expect(detailQuery.filters.id).toBe(123);
+    expect(detailQuery.fields).not.toContain('affiliateLink');
+    expect(payload.primaryEntity).toMatchObject({
+      kind: 'store',
+      slug: 'amazon-coupons',
+    });
+    expect(payload.relatedCoupons).toHaveLength(1);
+    expect(payload.relatedDeals).toHaveLength(6);
+    expect(payload.relatedDeals[0].documentId).toBe('deal-document-1');
+    expect(harness.dealFindMany.mock.calls[0][0].limit).toBe(40);
+  });
+
+  it.each(['coupon-document-1', '0', '-1', '01', '9007199254740992'])(
+    'rejects invalid Coupon id %s on the public route',
+    async (id) => {
+      const harness = createHarness();
+      harness.ctx.params = { id } as any;
+
+      await harness.controller.getCouponPage(harness.ctx as any);
+
+      expect(harness.ctx.notFound).toHaveBeenCalledWith('Coupon not found');
+      expect(harness.couponFindMany).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe('public Deal detail aggregate', () => {
+  it('resolves a numeric Deal id with related product deals and no affiliate destinations', async () => {
+    const harness = createHarness();
+    harness.ctx.params = { id: '321' } as any;
+    harness.dealFindMany
+      .mockResolvedValueOnce([
+        {
+          id: 321,
+          documentId: 'deal-document-1',
+          title: 'ThinkBook 16',
+          affiliateLink: 'https://merchant.invalid/private',
+          salePrice: 55191,
+          dealImage: { url: '/uploads/thinkbook.webp' },
+          primaryStore: {
+            documentId: 'store-lenovo',
+            name: 'Lenovo',
+            slug: 'lenovo-coupons',
+          },
+        },
+      ])
+      .mockResolvedValueOnce([
+        { documentId: 'invalid', title: 'Missing product image', salePrice: 999 },
+        ...Array.from({ length: 5 }, (_, index) => ({
+          id: index + 400,
+          documentId: `related-deal-${index + 1}`,
+          title: `Related product ${index + 1}`,
+          salePrice: 999 + index,
+          dealImage: { url: `/uploads/related-${index + 1}.webp` },
+        })),
+      ]);
+
+    const payload = await harness.controller.getDealPage(harness.ctx as any);
+
+    const detailQuery = harness.dealFindMany.mock.calls[0][0];
+    expect(detailQuery.filters.id).toBe(321);
+    expect(detailQuery.fields).not.toContain('affiliateLink');
+    expect(payload.primaryEntity).toMatchObject({
+      kind: 'store',
+      slug: 'lenovo-coupons',
+    });
+    expect(payload.relatedDeals).toHaveLength(4);
+    expect(payload.relatedDeals[0].documentId).toBe('related-deal-1');
+    expect(harness.dealFindMany.mock.calls[1][0].limit).toBe(40);
+  });
+
+  it.each(['deal-document-1', '0', '-1', '01', '9007199254740992'])(
+    'rejects invalid Deal id %s on the public route',
+    async (id) => {
+      const harness = createHarness();
+      harness.ctx.params = { id } as any;
+
+      await harness.controller.getDealPage(harness.ctx as any);
+
+      expect(harness.ctx.notFound).toHaveBeenCalledWith('Deal not found');
+      expect(harness.dealFindMany).not.toHaveBeenCalled();
+    },
+  );
+});
 
 describe('private offer redeem resolver', () => {
   it('resolves a Coupon with only the required safe pool reference', async () => {

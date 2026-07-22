@@ -31,6 +31,7 @@ import RichTextEditor from './components/RichTextEditor';
 import DateTimeInput from './components/DateTimeInput';
 import BooleanConfirmInput from './components/BooleanConfirmInput';
 import SlugInput from './components/SlugInput';
+import PublicOfferLinkAction from './components/PublicOfferLinkAction';
 
 type RelationConfig = {
   field: string;
@@ -865,6 +866,7 @@ export default {
   },
   bootstrap(app: StrapiApp) {
     const apis = (app.getPlugin('content-manager') as any).apis;
+    apis.addDocumentAction([PublicOfferLinkAction]);
     apis.addEditViewSidePanel([
       RelationMultiSelectPanel,
       EntityTopPickCouponPanel,

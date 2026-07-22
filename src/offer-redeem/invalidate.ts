@@ -44,5 +44,7 @@ export async function invalidateOfferRedeemCache(
     throw new Error(`gateway returned ${response.status}`);
   }
 
-  strapi.log.info(`[offer-redeem] invalidated ${entityType}:${documentId}`);
+  strapi.log.info(
+    `[offer-redeem] invalidated ${entityType}:${documentId}`,
+  );
 }
