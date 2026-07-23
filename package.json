@@ -4,7 +4,9 @@
   "private": true,
   "description": "A Strapi application",
   "scripts": {
+    "prebuild": "yarn build:unique-coupon",
     "build": "strapi build",
+    "build:unique-coupon": "yarn --cwd src/plugins/unique-coupon build",
     "console": "strapi console",
     "deploy": "strapi deploy",
     "dev": "strapi develop",
@@ -43,6 +45,7 @@
     "styled-components": "^6.0.0"
   },
   "devDependencies": {
+    "@strapi/sdk-plugin": "5.4.0",
     "@types/node": "^20",
     "@types/pg": "^8.20.0",
     "@types/react": "^18",

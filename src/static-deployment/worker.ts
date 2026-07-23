@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile);
 export interface RebuildJob {
   full: boolean;
   homepage: boolean;
+  sitemap: boolean;
   slugs: string[];
   reasons: string[];
 }
@@ -156,6 +157,19 @@ async function deploySurgical(
 // POSTed to the ISR gateway's /revalidate — the gateway re-renders those
 // pages into Redis and CloudFront picks them up within its s-maxage window.
 // Full/chrome scopes send all=true (real full re-render, gateway-side).
+export function redisRevalidatePayload(job: RebuildJob) {
+  return job.full
+    ? { all: true }
+    : {
+        paths: [
+          ...(job.homepage ? ['/'] : []),
+          ...(job.sitemap ? ['/sitemap.xml'] : []),
+          ...job.slugs.map((slug) => `/${slug}/`),
+        ],
+        ...(job.sitemap ? { scopes: ['routes'] } : {}),
+      };
+}
+
 async function executeRedisRevalidate(strapi: Core.Strapi, job: RebuildJob): Promise<void> {
   const gatewayUrl = process.env.ISR_GATEWAY_URL?.trim();
   const secret = process.env.ISR_REVALIDATE_SECRET?.trim();
@@ -163,14 +177,7 @@ async function executeRedisRevalidate(strapi: Core.Strapi, job: RebuildJob): Pro
     throw new Error('REBUILD_MODE=redis requires ISR_GATEWAY_URL and ISR_REVALIDATE_SECRET');
   }
 
-  const payload = job.full
-    ? { all: true }
-    : {
-        paths: [
-          ...(job.homepage ? ['/'] : []),
-          ...job.slugs.map((slug) => `/${slug}/`),
-        ],
-      };
+  const payload = redisRevalidatePayload(job);
 
   // Generous timeout: the gateway answers 202 after a Redis enqueue, but when
   // it is busy (mid-sweep) a tight timeout aborts an ALREADY-ACCEPTED request

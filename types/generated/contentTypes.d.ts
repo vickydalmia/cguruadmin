@@ -760,8 +760,14 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
       'manyToMany',
       'api::category.category'
     >;
-    code: Schema.Attribute.String;
-    content: Schema.Attribute.RichText;
+    code: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 64;
+      }>;
+    content: Schema.Attribute.RichText &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 50000;
+      }>;
     contentStatus: Schema.Attribute.Enumeration<
       ['published', 'scheduled', 'expired']
     > &
@@ -785,7 +791,11 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
     publishedAt: Schema.Attribute.DateTime;
     scheduledAt: Schema.Attribute.DateTime;
     stores: Schema.Attribute.Relation<'manyToMany', 'api::store.store'>;
-    title: Schema.Attribute.String & Schema.Attribute.Required;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 200;
+      }>;
     uniqueCouponPool: Schema.Attribute.Relation<
       'manyToOne',
       'api::unique-coupon-pool.unique-coupon-pool'
@@ -871,7 +881,10 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
       'api::category.category'
     >;
     code: Schema.Attribute.Text;
-    content: Schema.Attribute.RichText;
+    content: Schema.Attribute.RichText &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 50000;
+      }>;
     contentStatus: Schema.Attribute.Enumeration<
       ['published', 'scheduled', 'expired']
     > &
@@ -886,14 +899,30 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'> &
       Schema.Attribute.Private;
-    mrp: Schema.Attribute.Decimal;
+    mrp: Schema.Attribute.Decimal &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 0;
+        },
+        number
+      >;
     offerText: Schema.Attribute.String;
     primaryStore: Schema.Attribute.Relation<'manyToOne', 'api::store.store'>;
     publishedAt: Schema.Attribute.DateTime;
-    salePrice: Schema.Attribute.Decimal;
+    salePrice: Schema.Attribute.Decimal &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 0;
+        },
+        number
+      >;
     scheduledAt: Schema.Attribute.DateTime;
     stores: Schema.Attribute.Relation<'manyToMany', 'api::store.store'>;
-    title: Schema.Attribute.String & Schema.Attribute.Required;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 200;
+      }>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1215,6 +1244,62 @@ export interface ApiMenuMenu extends Struct.SingleTypeSchema {
     topStores: Schema.Attribute.Relation<'oneToMany', 'api::store.store'>;
     topStoresViewAllUrl: Schema.Attribute.String &
       Schema.Attribute.DefaultTo<'/stores/'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiRedirectRedirect extends Struct.CollectionTypeSchema {
+  collectionName: 'redirects';
+  info: {
+    description: 'Editor-managed URL redirects, applied by the ISR frontend middleware before any built-in canonicalisation.';
+    displayName: 'Redirect';
+    pluralName: 'redirects';
+    singularName: 'redirect';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    active: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    from: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Unique &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 512;
+      }>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::redirect.redirect'
+    > &
+      Schema.Attribute.Private;
+    note: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }>;
+    publishedAt: Schema.Attribute.DateTime;
+    statusCode: Schema.Attribute.Integer &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 302;
+          min: 301;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<301>;
+    to: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 1024;
+      }>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1894,6 +1979,7 @@ declare module '@strapi/strapi' {
       'api::job-application.job-application': ApiJobApplicationJobApplication;
       'api::job.job': ApiJobJob;
       'api::menu.menu': ApiMenuMenu;
+      'api::redirect.redirect': ApiRedirectRedirect;
       'api::store.store': ApiStoreStore;
       'api::unique-code.unique-code': ApiUniqueCodeUniqueCode;
       'api::unique-coupon-pool.unique-coupon-pool': ApiUniqueCouponPoolUniqueCouponPool;

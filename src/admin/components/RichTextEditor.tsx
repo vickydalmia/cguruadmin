@@ -41,52 +41,7 @@ import TableRow from '@tiptap/extension-table-row';
 import TableHeader from '@tiptap/extension-table-header';
 import TableCell from '@tiptap/extension-table-cell';
 
-/**
- * WP-migrated content joins visual lines with <br> inside ONE block, so a
- * heading/list (which are block-level formats) applies to every line in that
- * block at once — the reported "H2 on the first line makes every line H2".
- * Split each block on <br> into separate paragraphs/headings on load, so one
- * visual line = one block and per-line formatting works as editors expect.
- * (A stray Shift+Enter soft break likewise normalizes to a paragraph on load.)
- */
-function normalizeBreaksToBlocks(html: string): string {
-  if (!html || !/<br/i.test(html)) return html;
-  if (typeof DOMParser === 'undefined') return html;
-
-  const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
-  const body = doc.body;
-
-  // Loose <br>-separated text with no block wrapper → wrap so the split applies.
-  const BLOCKS = 'p,h1,h2,h3,h4,h5,h6,ul,ol,blockquote,table,pre';
-  if (!body.querySelector(BLOCKS)) {
-    const p = doc.createElement('p');
-    while (body.firstChild) p.appendChild(body.firstChild);
-    body.appendChild(p);
-  }
-
-  body.querySelectorAll('p,h1,h2,h3,h4,h5,h6').forEach((block) => {
-    if (!block.querySelector('br')) return;
-    const tag = block.tagName.toLowerCase();
-
-    // Group the block's children into runs separated by <br>.
-    const groups: Node[][] = [[]];
-    block.childNodes.forEach((node) => {
-      if (node.nodeName === 'BR') groups.push([]);
-      else groups[groups.length - 1].push(node);
-    });
-
-    // One new same-tag block per run; drop empty runs (from consecutive <br>).
-    const out: HTMLElement[] = [];
-    for (const group of groups) {
-      const el = doc.createElement(tag);
-      group.forEach((n) => el.appendChild(n.cloneNode(true)));
-      if ((el.textContent ?? '').trim() !== '' || el.querySelector('img')) out.push(el);
-    }
-    if (out.length) block.replaceWith(...out);
-  });
-
-  return body.innerHTML;
-}
+import { normalizeBreaksToBlocks } from '../utils/normalize-breaks';
 
 const EXTENSIONS = [
   // Legacy WP content has h1/h4-h6 — accept all levels so loading + saving a
@@ -152,6 +107,17 @@ const Toolbar = styled(Flex)`
   padding: ${({ theme }) => theme.spaces[1]} ${({ theme }) => theme.spaces[2]};
   flex-wrap: wrap;
   gap: ${({ theme }) => theme.spaces[1]};
+`;
+
+/* Block-vs-inline is the recurring confusion in these fields: H2/H3 and the
+   list buttons look like the bold/italic buttons next to them but apply to the
+   whole block, so an editor who joined lines with Shift+Enter sees one click
+   reformat all of them. State the rule in the UI, not only in the schema hint. */
+const FormatNote = styled.p`
+  margin-top: ${({ theme }) => theme.spaces[1]};
+  color: ${({ theme }) => theme.colors.neutral600};
+  font-size: 1.2rem;
+  line-height: 1.4;
 `;
 
 /* Text-glyph buttons for actions without a fitting @strapi/icons icon. */
@@ -300,6 +266,19 @@ const RichTextEditor = ({
     extensions: EXTENSIONS,
     content: normalizeBreaksToBlocks(field.value ?? ''),
     editable: !disabled,
+    editorProps: {
+      // Load-time normalization alone left a second door open: pasting Word/WP
+      // markup drops <br>-joined lines into ONE block, so applying H2 or a list
+      // afterwards reformats every visual line in it. Normalize the paste the
+      // same way the loaded document is normalized. hardBreak stays enabled on
+      // purpose — a Shift+Enter the editor types is a deliberate soft break and
+      // survives while it stays in the document. Note this hook runs on EVERY
+      // paste, including content copied from this same editor — so a hardBreak
+      // that round-trips through copy/paste is split into separate blocks too.
+      // Accepted trade: there is no reliable way to tell "own" clipboard HTML
+      // from outside markup here.
+      transformPastedHTML: (html: string) => normalizeBreaksToBlocks(html),
+    },
     // Don't re-render the whole component (and its ~20 toolbar buttons) on
     // every keystroke — the useEditorState selector below re-renders only
     // when a toolbar-relevant flag actually flips.
@@ -512,6 +491,12 @@ const RichTextEditor = ({
         </Toolbar>
         <EditorContent editor={editor} />
       </EditorShell>
+      <FormatNote>
+        Heading (H2/H3) and the list buttons are block formats: they apply to the whole
+        block, not just the selected words. Press Enter to start a new block you can
+        format on its own — Shift+Enter adds a soft line break that stays inside the
+        current block and takes whatever formatting that block has.
+      </FormatNote>
       <Field.Hint />
       <Field.Error />
     </Field.Root>

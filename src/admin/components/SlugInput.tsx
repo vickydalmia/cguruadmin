@@ -6,28 +6,23 @@
  * ("store", "brand", …) when the source field is empty, so a fresh entry opens
  * with a bogus "store" slug the editor has to delete first (QC bug). This
  * version starts EMPTY and mirrors the useful part of the stock behavior:
- * while the slug hasn't been hand-edited, it auto-fills from the `name` field
- * (slugified) — and an empty name yields an empty slug, never "store". A
- * "Regenerate" button re-derives it on demand.
+ * while the slug hasn't been hand-edited, it auto-fills from the schema's
+ * `targetField` (slugified) — and an empty source yields an empty slug, never
+ * "store". A "Regenerate" button re-derives it on demand.
  *
  * Trade-off: this drops Strapi's live availability indicator. Uniqueness is
- * still enforced by the schema (`required` + `uid`) on save. All UID fields in
- * this project target `name`, so the source field is hardcoded to `name`.
+ * still enforced by the schema (`required` + `uid`) on save.
  */
 
 import * as React from 'react';
 import { useField, useForm } from '@strapi/strapi/admin';
 import { Button, Field, Flex, TextInput } from '@strapi/design-system';
+import { slugify } from '../../constants/slugify';
 
-const SOURCE_FIELD = 'name';
-
-const slugify = (value: string): string =>
-  value
-    .normalize('NFKD')
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+// Used only if the layout gives us no attribute to read `targetField` from.
+// Every uid field in this project targets one of these two (stores/brands/
+// banks/categories use `name`, jobs use `title`).
+const FALLBACK_SOURCE_FIELDS = ['name', 'title'] as const;
 
 interface SlugInputProps {
   name: string;
@@ -36,6 +31,11 @@ interface SlugInputProps {
   disabled?: boolean;
   required?: boolean;
   labelAction?: React.ReactNode;
+  // Strapi's InputRenderer spreads the whole layout entry into components
+  // registered via app.addFields, so the uid attribute — and with it the
+  // schema's `targetField` — arrives as a prop. Optional because nothing in
+  // the type contract guarantees it across upgrades; see the fallback above.
+  attribute?: { targetField?: string };
 }
 
 const SlugInput = ({
@@ -45,11 +45,15 @@ const SlugInput = ({
   disabled,
   required,
   labelAction,
+  attribute,
 }: SlugInputProps) => {
   const field = useField<string>(name);
-  const source = useForm('SlugInput', (state) => state.values?.[SOURCE_FIELD]) as
-    | string
-    | undefined;
+  const targetField = attribute?.targetField;
+  const source = useForm('SlugInput', (state) => {
+    const values = state.values ?? {};
+    if (targetField) return values[targetField];
+    return FALLBACK_SOURCE_FIELDS.map((key) => values[key]).find(Boolean);
+  }) as string | undefined;
 
   // Lock auto-fill once the slug is hand-edited, and treat an already-saved
   // slug (present on mount) as locked so we never clobber a custom slug.
@@ -84,7 +88,7 @@ const SlugInput = ({
           value={field.value ?? ''}
           onChange={onManualChange}
           disabled={disabled}
-          placeholder="auto-generated from the name"
+          placeholder="auto-generated"
         />
         <Button
           variant="tertiary"

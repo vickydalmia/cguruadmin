@@ -6,18 +6,33 @@
   },
   "attributes": {
     "metaTitle": {
-      "type": "string"
+      "type": "string",
+      "maxLength": 70
     },
     "metaDescription": {
-      "type": "text"
+      "type": "text",
+      "maxLength": 170
     },
     "canonicalUrl": {
       "type": "string"
+    },
+    "noIndex": {
+      "type": "boolean",
+      "default": false
+    },
+    "ogTitle": {
+      "type": "string"
+    },
+    "ogDescription": {
+      "type": "text"
     },
     "ogImage": {
       "type": "media",
       "multiple": false,
       "allowedTypes": ["images"]
+    },
+    "ogImageAlt": {
+      "type": "string"
     }
   }
 }

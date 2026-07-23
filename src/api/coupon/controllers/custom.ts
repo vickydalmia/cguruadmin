@@ -7,6 +7,28 @@ const MAX_PAGE_SIZE = 100;
 const clampPageSize = (raw: unknown, fallback: number) =>
   Math.max(1, Math.min(Number(raw) || fallback, MAX_PAGE_SIZE));
 
+// How many drag-ordered offers lead an entity listing before newest-first
+// members take over. Strapi 5 manyToMany joins carry an order column, so a
+// newly connected offer lands at the TAIL of the curated order — uncapped, a
+// category with 1300+ members pushed brand-new offers past page 26, far outside
+// the frontend's bounded read window, so they rendered on the store page but
+// never on the category page.
+//
+// INVARIANT: must stay <= OFFER_PAGE_SIZE * (OFFER_PAGE_CAP - 1) in the
+// frontend (currently 50 * 3 = 150; see features/entity/api/get-entity-page.ts
+// and requests/entity-offers-request.ts). That guarantees at least one whole
+// page of newest-first content is always inside the window, so recently tagged
+// offers surface no matter how large the curated relation grows.
+//
+// Also bounds the `documentId: { $notIn: [...] }` in the rest query to 50
+// elements instead of 1300+ — that query shape is close to one that previously
+// caused 504s on this database.
+//
+// The cap is enforced IN the relation populate query (see listEntityOffers),
+// so the id-only relation read is itself bounded to 50 link-ordered rows; the
+// JS slice merely re-asserts the bound.
+const CURATED_HEAD_LIMIT = 50;
+
 // Map singular entityType to plural relation field name on coupons/deals
 const PLURAL_FIELD: Record<string, string> = {
   store: 'stores',
@@ -272,11 +294,13 @@ async function sanitizeDocumentOutput(
   })) as any;
 }
 
-// Return an entity's offers with the admin-curated relation (drag) order first,
-// then every other offer that belongs to the entity — newest-first — filling
-// the rest. Editors reorder the coupons/deals relation on the entity's edit
-// page; Strapi persists that order, and populating the relation returns offers
-// in it.
+// Return an entity's offers with the admin-curated relation (drag) order first
+// — capped at CURATED_HEAD_LIMIT — then every other offer that belongs to the
+// entity, newest-first, filling the rest. Editors reorder the coupons/deals
+// relation on the entity's edit page; Strapi persists that order, and
+// populating the relation returns offers in it. Drag positions past the cap are
+// not honoured: they fall into the newest-first remainder instead (still
+// counted, still reachable — see CURATED_HEAD_LIMIT for why).
 //
 // The "rest" matters because the drag-ordered relation is not always the full
 // membership: a Store's `deals` manyToMany omits deals linked only via
@@ -287,8 +311,11 @@ async function sanitizeDocumentOutput(
 // This also subsumes the "empty relation" case: with no drag order, every offer
 // comes from the newest-first member query. Returns null when the slug misses.
 //
-// NOTE: relies on Strapi returning the populated relation in its stored order
-// and without a low default cap — verify against the live instance (see plan).
+// NOTE: relies on Strapi ordering the populated relation by the link table's
+// order column (getJoinTableOrderBy in @strapi/database populate/apply) and on
+// a nested populate `limit` applying to that same ordered query — which it
+// does with a single parent row. Both are exercised by the tests below this
+// controller.
 async function listEntityOffers(
   strapi: Core.Strapi,
   ctx: any,
@@ -316,12 +343,26 @@ async function listEntityOffers(
     },
     limit: 1,
   });
+  // Push the curated-head cap into the relation populate itself. The db layer
+  // sorts a manyToMany populate by the link table's order column and applies
+  // `limit` to that one query — and with a single parent row (limit: 1 above)
+  // that is a per-entity cap — so this fetches exactly the first
+  // CURATED_HEAD_LIMIT visible members in drag order: the same ids the slice
+  // below kept, without hydrating a 1300+-member relation first. Injected
+  // AFTER sanitizeDocumentQuery because the content-API validator rejects
+  // `limit` as a non-attribute populate key, while the query engine
+  // (convert-query-params → db populate) supports it.
+  const relationPopulate = entityQuery?.populate?.[relationField];
+  if (relationPopulate && typeof relationPopulate === 'object') {
+    relationPopulate.limit = CURATED_HEAD_LIMIT;
+  }
   const entity = (await strapi.documents(apiId as any).findMany(entityQuery))[0];
   if (!entity) return null;
 
   const orderedIds: string[] = (Array.isArray(entity[relationField]) ? entity[relationField] : [])
     .map((offer: any) => offer?.documentId)
-    .filter(Boolean);
+    .filter(Boolean)
+    .slice(0, CURATED_HEAD_LIMIT);
   // Strip the (potentially large) id-only relation before sanitizing for output.
   delete entity[relationField];
   const sanitizedEntity = await sanitizeDocumentOutput(strapi, ctx, apiId, entity);

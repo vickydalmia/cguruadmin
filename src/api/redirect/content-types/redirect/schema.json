@@ -1,0 +1,30 @@
+{
+  "kind": "collectionType",
+  "collectionName": "redirects",
+  "info": {
+    "singularName": "redirect",
+    "pluralName": "redirects",
+    "displayName": "Redirect",
+    "description": "Editor-managed URL redirects, applied by the ISR frontend middleware before any built-in canonicalisation."
+  },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "from": {
+      "type": "string",
+      "required": true,
+      "unique": true,
+      "maxLength": 512,
+      "regex": "^/(?:[A-Za-z0-9._~/-]|%[0-9A-Fa-f]{2})*$"
+    },
+    "to": { "type": "string", "required": true, "maxLength": 1024 },
+    "statusCode": {
+      "type": "integer",
+      "min": 301,
+      "max": 302,
+      "default": 301,
+      "required": true
+    },
+    "active": { "type": "boolean", "default": true, "required": true },
+    "note": { "type": "text", "maxLength": 500, "private": true }
+  }
+}

@@ -18,6 +18,41 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
 
     upload: {
       config: {
+        // Server-side MIME allow list. @strapi/upload 5.50 reads exactly this
+        // key (`plugin::upload.security`) in utils/mime-validation and applies
+        // it in BOTH upload controllers — the admin media library and
+        // POST /api/upload. It sniffs the file's magic bytes and rejects when
+        // content, extension and declared Content-Type disagree, so a renamed
+        // .html/.php cannot get in on its extension. Without the key the
+        // plugin allows every type and only logs a warning per request; the
+        // boot check in src/index.ts catches that regression loudly.
+        //
+        // No SVG: an SVG can carry inline <script> and is served same-origin,
+        // so src/extensions/upload already rejects it outright — this list
+        // just moves that refusal earlier, before the file is written.
+        //
+        // Resume document types (PDF/DOC/DOCX) ARE listed: resumes normally
+        // reach the media library through the upload SERVICE
+        // (src/api/job-application/controllers/submit.ts), which this
+        // controller-level gate does not see — that endpoint does its own
+        // magic-byte validation in src/utils/resume-upload-validation.ts. They
+        // are allowed here so that if that path is ever routed through the
+        // controller gate, resume submissions keep working. Deliberate side
+        // effect: the admin Media Library's upload endpoint now also accepts
+        // these document types from editors (its UI picker is unchanged — it
+        // filters by asset category, not by this list).
+        security: {
+          allowedTypes: [
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+            'image/avif',
+            'image/gif',
+            'application/pdf',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          ],
+        },
         // Breakpoints live OUTSIDE the S3 gate: the variant matrix must be
         // identical whether uploads land on S3 or local disk (values in
         // src/constants/image.ts, shared with the migration pipeline).

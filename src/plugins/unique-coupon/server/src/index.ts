@@ -7,8 +7,18 @@ export default {
   register({ strapi }) {
     // Register phase: runs before bootstrap
   },
-  bootstrap({ strapi }) {
-    // Bootstrap phase: plugin is fully loaded
+  async bootstrap({ strapi }) {
+    // Admin RBAC action enforced by the upload/stats routes (routes/index.ts)
+    // and checked by the admin panel before showing the import side panel.
+    // Grantable per role under Settings > Roles > Plugins.
+    await strapi.service('admin::permission').actionProvider.registerMany([
+      {
+        section: 'plugins',
+        displayName: 'Import unique codes',
+        uid: 'codes.import',
+        pluginName: 'unique-coupon',
+      },
+    ]);
   },
   destroy({ strapi }) {
     // Cleanup phase

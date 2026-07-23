@@ -11,16 +11,49 @@ import { purgeResponseCaches } from './middlewares/cache';
 import { invalidateOfferRedeemCache } from './offer-redeem/invalidate';
 import { initializeSearchRuntime } from './api/search/services/search';
 import { destroyRebuildQueue, enqueue, type ScopeRequest } from './static-deployment/queue';
-import { computeScope, preDeleteScope } from './static-deployment/scopes';
-import { validateEntityFields } from './utils/entity-field-validation';
+import {
+  computeScope,
+  isRedirectNoteOnlyChange,
+  preDeleteScope,
+} from './static-deployment/scopes';
+import {
+  appendListColumns,
+  isSortableListColumn,
+  pinFieldToFullRow,
+  type EditLayout,
+} from './utils/content-manager-layout';
+import {
+  changedFieldHints,
+  changedFieldSeoHints,
+  validateChangedFields,
+} from './utils/changed-field-validation';
+import { validateEntityFieldsForWrite } from './utils/entity-field-validation';
 import {
   isEntityTopPickUid,
   validateEntityTopPickCoupons,
 } from './utils/entity-top-pick-validation';
 import { validateDealOfTheDaySectionLimits } from './utils/deal-of-the-day-validation';
 import { validateHomepageImages } from './utils/homepage-image-validation';
-import { validateOfferFields } from './utils/offer-field-validation';
+import {
+  isCouponUid,
+  normaliseCouponTypeFields,
+  validateCouponTypeFields,
+} from './utils/coupon-type-consistency';
+import { isIdentityUid, validateIdentity } from './utils/identity-validation';
+import {
+  isOfferLifecycleUid,
+  validateOfferLifecycle,
+} from './utils/offer-lifecycle-validation';
+import { validateOfferFieldsForWrite, WORD_LIMITS } from './utils/offer-field-validation';
+import { validateRedirect } from './utils/redirect-validation';
 import { sanitizeRichtextData } from './utils/sanitize-richtext';
+import { acquireWriteSerializationLock } from './utils/write-serialization';
+import { isHumanWrite } from './utils/write-origin';
+import {
+  normaliseTextFields,
+  textFieldHints,
+  validateTextFieldsForWrite,
+} from './utils/text-field-validation';
 
 const HIDE_FROM_EDIT: Record<string, string[]> = {
   'api::deal.deal': ['stores', 'brands', 'categories', 'banks'],
@@ -89,6 +122,10 @@ const PUBLIC_READ_ACTIONS = [
   ),
   'api::job.job.find',
   'api::job.job.findOne',
+  // The storefront middleware reads the active redirect map on every request.
+  // Without this the fetch 403s and get-redirects fails open to an empty
+  // table, so every authored redirect silently stops firing.
+  'api::redirect.redirect.find',
 ];
 
 async function ensurePublicReadPermissions(strapi: Core.Strapi): Promise<void> {
@@ -234,15 +271,18 @@ async function ensureComponentEntryTitles(strapi: Core.Strapi): Promise<void> {
   }
 }
 
-// Field help text under each size-enforced homepage media field, derived from
-// HOMEPAGE_IMAGE_RULES so the enforced size and the admin instruction can
-// never drift apart. Same DB config store + config-as-code approach as the
-// entry titles above.
-const COMPONENT_FIELD_DESCRIPTIONS: Record<string, Record<string, string>> = {};
+// Field help text pinned into the Content Manager on every boot. Homepage
+// image guidance is derived from HOMEPAGE_IMAGE_RULES so the enforced size and
+// instruction cannot drift; other business-input guidance is declared here.
+// Uses the same DB config store + config-as-code approach as entry titles.
+// Exported for hint-coverage.test.ts only.
+export const COMPONENT_FIELD_DESCRIPTIONS: Record<string, Record<string, string>> = {};
 for (const rule of HOMEPAGE_IMAGE_RULES) {
   (COMPONENT_FIELD_DESCRIPTIONS[rule.componentUid] ??= {})[rule.field] =
     imageRuleDescription(rule);
 }
+(COMPONENT_FIELD_DESCRIPTIONS['shared.seo'] ??= {}).canonicalUrl =
+  'Enter only a URL or site path, for example /airport-tour-coupons/. Do not paste HTML such as <link rel="canonical" href="..." />.';
 async function ensureComponentFieldDescriptions(strapi: Core.Strapi): Promise<void> {
   const service: any = strapi.plugin('content-manager').service('components');
   if (!service) return;
@@ -269,6 +309,190 @@ async function ensureComponentFieldDescriptions(strapi: Core.Strapi): Promise<vo
 
       if (!changed) continue;
       await service.updateConfiguration(component, { ...config, metadatas });
+      strapi.log.info(`[content-manager] field descriptions set for ${uid}`);
+    } catch (err: any) {
+      strapi.log.warn(
+        `[content-manager] field descriptions for ${uid} failed: ${err?.message ?? err}`
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Editor-facing field hints for every validated field
+// ---------------------------------------------------------------------------
+// Every field a write-time validator enforces gets a grey description hint
+// under it in the admin edit form, visible BEFORE the editor types — so limits
+// are learnable without tripping them. Hints for rules living in
+// changed-field-validation.ts and text-field-validation.ts are DERIVED from
+// those rule tables (single source of truth). Rules owned by other validators
+// are mirrored by hand below; each entry names the file it mirrors — keep them
+// in step when that validator changes. hint-coverage.test.ts asserts the
+// derived tables stay fully wired.
+
+// Word caps are DERIVED from WORD_LIMITS in offer-field-validation.ts (the same
+// table the validator enforces), so the number in the hint can never drift from
+// the number in the rule.
+const OFFER_WORD_CAP_HINTS = WORD_LIMITS.map(({ field, max }) => ({
+  field,
+  hint: `Up to ${max} word${max === 1 ? '' : 's'} — fills a fixed card slot.`,
+}));
+
+const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }> = [
+  ...['api::coupon.coupon', 'api::deal.deal'].flatMap((uid) => [
+    ...OFFER_WORD_CAP_HINTS.map(({ field, hint }) => ({ uid, field, hint })),
+    // Mirrors offer-lifecycle-validation.ts: past dates rejected, scheduledAt
+    // must precede expiresAt, contentStatus derived from these two dates.
+    {
+      uid,
+      field: 'scheduledAt',
+      hint:
+        'Optional. Must be in the future and before Expires at; leave empty to ' +
+        'publish immediately. Status is set automatically from these dates.',
+    },
+    {
+      uid,
+      field: 'expiresAt',
+      hint:
+        'Optional. Must be in the future and after Scheduled at; leave empty to ' +
+        'keep the offer live. Status is set automatically from these dates.',
+    },
+  ]),
+  // Mirrors coupon-type-consistency.ts: code and uniqueCouponPool are mutually
+  // exclusive, keyed off couponType.
+  {
+    uid: 'api::coupon.coupon',
+    field: 'code',
+    hint:
+      'Shared code for "static" coupons. Cleared automatically when Coupon ' +
+      'type is "unique".',
+  },
+  {
+    uid: 'api::coupon.coupon',
+    field: 'uniqueCouponPool',
+    hint:
+      'Required when Coupon type is "unique" — codes are handed out from this ' +
+      'pool. Cleared automatically for static coupons.',
+  },
+  // Mirrors redirect-validation.ts: from must be a rooted on-site path that
+  // shadows nothing live; to must be a rooted path or absolute http(s) URL
+  // and must not close a loop.
+  {
+    uid: 'api::redirect.redirect',
+    field: 'from',
+    hint:
+      'Path on this site starting with "/", e.g. /old-page. Must not be a ' +
+      "live page, a reserved route, or another active redirect's From.",
+  },
+  {
+    uid: 'api::redirect.redirect',
+    field: 'to',
+    hint:
+      'Path starting with "/" or a full http(s):// address. Must not point ' +
+      'back at From or close a redirect loop.',
+  },
+  // Mirrors identity-validation.ts: name unique per type; slug unique across
+  // all four taxonomies and off the reserved-route list.
+  ...['store', 'brand', 'category', 'bank'].flatMap((name) => [
+    {
+      uid: `api::${name}.${name}`,
+      field: 'name',
+      hint:
+        `Unique among ${name.endsWith('y') ? `${name.slice(0, -1)}ies` : `${name}s`} — ` +
+        'compared ignoring capitalisation and surrounding spaces.',
+    },
+    {
+      uid: `api::${name}.${name}`,
+      field: 'slug',
+      hint:
+        'Public URL segment. Must be unique across stores, brands, categories ' +
+        'and banks, and must not match a reserved page or an active redirect.',
+    },
+  ]),
+];
+
+// Merge the three hint sources. When several validators constrain the same
+// field the sentences are concatenated (required-ness first, then format
+// limits, then the mirrored notes), so the editor sees one combined hint.
+// Exported for hint-coverage.test.ts only.
+export const CONTENT_TYPE_FIELD_HINTS: Record<string, Record<string, string>> = {};
+{
+  const componentHints: Record<string, Record<string, string>> = {};
+  const append = (
+    table: Record<string, Record<string, string>>,
+    key: string,
+    field: string,
+    hint: string,
+  ) => {
+    if (!hint) return;
+    const fields = (table[key] ??= {});
+    const prev = fields[field];
+    fields[field] = prev ? (prev.includes(hint) ? prev : `${prev} ${hint}`) : hint;
+  };
+
+  for (const entry of textFieldHints()) {
+    if (entry.componentUid) {
+      append(componentHints, entry.componentUid, entry.field, entry.hint);
+    } else {
+      append(CONTENT_TYPE_FIELD_HINTS, entry.uid, entry.field, entry.hint);
+    }
+  }
+  for (const { uid, field, hint } of changedFieldHints()) {
+    append(CONTENT_TYPE_FIELD_HINTS, uid, field, hint);
+  }
+  for (const { componentUid, field, hint } of changedFieldSeoHints()) {
+    append(componentHints, componentUid, field, hint);
+  }
+  for (const { uid, field, hint } of VALIDATOR_MIRROR_HINTS) {
+    append(CONTENT_TYPE_FIELD_HINTS, uid, field, hint);
+  }
+
+  // Component hints ride the existing component pass. An explicit description
+  // declared above (homepage images, the canonicalUrl HTML warning) always
+  // wins over a derived hint — skip keys already present.
+  for (const [componentUid, fields] of Object.entries(componentHints)) {
+    for (const [field, hint] of Object.entries(fields)) {
+      if (COMPONENT_FIELD_DESCRIPTIONS[componentUid]?.[field]) continue;
+      (COMPONENT_FIELD_DESCRIPTIONS[componentUid] ??= {})[field] = hint;
+    }
+  }
+}
+
+// Content-type counterpart of ensureComponentFieldDescriptions: pins the
+// merged hints into metadatas[attr].edit.description for top-level attributes.
+// Same DB config store + config-as-code + idempotent-boot approach — second
+// restart compares equal and logs nothing.
+async function ensureFieldDescriptions(strapi: Core.Strapi): Promise<void> {
+  const service: any = strapi.plugin('content-manager').service('content-types');
+  if (!service) return;
+
+  for (const [uid, fields] of Object.entries(CONTENT_TYPE_FIELD_HINTS)) {
+    try {
+      const contentType = strapi.contentType(uid as any);
+      if (!contentType) continue;
+
+      const config = await service.findConfiguration(contentType);
+      const metadatas = { ...(config.metadatas ?? {}) };
+      let changed = false;
+
+      for (const [field, description] of Object.entries(fields)) {
+        if (!contentType.attributes?.[field]) {
+          strapi.log.warn(`[content-manager] ${uid} has no field "${field}" — description skipped`);
+          continue;
+        }
+        const prev = metadatas[field] ?? {};
+        if (prev.edit?.description === description) continue;
+        metadatas[field] = { ...prev, edit: { ...(prev.edit ?? {}), description } };
+        changed = true;
+      }
+
+      if (!changed) continue;
+      await service.updateConfiguration(contentType, {
+        settings: config.settings,
+        metadatas,
+        layouts: config.layouts,
+        options: config.options,
+      });
       strapi.log.info(`[content-manager] field descriptions set for ${uid}`);
     } catch (err: any) {
       strapi.log.warn(
@@ -483,6 +707,127 @@ async function ensureOfferListStatusColumn(strapi: Core.Strapi): Promise<void> {
   }
 }
 
+// Content-manager sizes a `string` input at 6 of 12 columns, so a Coupon's
+// title renders half-width beside offerText. Title is the longest value an
+// editor types and the one they scan the form for, so give it a whole row.
+// Same DB config store + config-as-code approach as the layouts above:
+// resizing it back in "Configure the view" will not survive a restart.
+const EDIT_FULL_WIDTH_FIELDS: Record<string, string[]> = {
+  'api::coupon.coupon': ['title'],
+};
+
+async function ensureFullWidthEditFields(strapi: Core.Strapi): Promise<void> {
+  const service: any = strapi.plugin('content-manager').service('content-types');
+  if (!service) return;
+
+  for (const [uid, fields] of Object.entries(EDIT_FULL_WIDTH_FIELDS)) {
+    try {
+      const contentType = strapi.contentType(uid as any);
+      if (!contentType) continue;
+
+      const config = await service.findConfiguration(contentType);
+      let edit: EditLayout = config.layouts?.edit ?? [];
+      const widened: string[] = [];
+
+      for (const field of fields) {
+        if (!contentType.attributes?.[field]) {
+          strapi.log.warn(`[content-manager] ${uid} has no field "${field}" — full width skipped`);
+          continue;
+        }
+        const next = pinFieldToFullRow(edit, field);
+        if (!next) continue;
+        edit = next;
+        widened.push(field);
+      }
+
+      if (!widened.length) continue;
+      await service.updateConfiguration(contentType, {
+        settings: config.settings,
+        metadatas: config.metadatas,
+        layouts: { ...config.layouts, edit },
+        options: config.options,
+      });
+      strapi.log.info(`[content-manager] ${uid} full-width fields: ${widened.join(', ')}`);
+    } catch (err: any) {
+      strapi.log.warn(
+        `[content-manager] full-width layout for ${uid} failed: ${err?.message ?? err}`
+      );
+    }
+  }
+}
+
+// The admin list view can only sort by a column it DISPLAYS, and the default
+// layout is just the first four listable attributes — which is why scheduling
+// dates could not be sorted on offers, and why Bank offered nothing worth
+// ordering by. Pin the useful sortable columns per list. Bank deliberately
+// skips slug (sorts the same as name), the long descriptions and the logo
+// (media is never sortable).
+const LIST_SORT_COLUMNS: Record<string, string[]> = {
+  'api::coupon.coupon': ['scheduledAt', 'expiresAt'],
+  'api::deal.deal': ['scheduledAt', 'expiresAt'],
+  'api::bank.bank': ['name', 'isVerified', 'ratingAverage', 'ratingCount'],
+};
+
+async function ensureSortableListColumns(strapi: Core.Strapi): Promise<void> {
+  const service: any = strapi.plugin('content-manager').service('content-types');
+  if (!service) return;
+
+  for (const [uid, columns] of Object.entries(LIST_SORT_COLUMNS)) {
+    try {
+      const contentType = strapi.contentType(uid as any);
+      if (!contentType) continue;
+
+      const usable = columns.filter((name) => {
+        const attribute = contentType.attributes?.[name];
+        if (!attribute) {
+          strapi.log.warn(`[content-manager] ${uid} has no field "${name}" — column skipped`);
+          return false;
+        }
+        if (!isSortableListColumn(attribute)) {
+          strapi.log.warn(
+            `[content-manager] ${uid}.${name} is a ${attribute.type} — not sortable, column skipped`
+          );
+          return false;
+        }
+        return true;
+      });
+      if (!usable.length) continue;
+
+      const config = await service.findConfiguration(contentType);
+      const prevList: string[] = config.layouts?.list ?? [];
+      const nextList = appendListColumns(prevList, usable);
+
+      // Displaying a column is not enough: the header renders a sort control
+      // only when its metadata says sortable, and that flag is togglable per
+      // field in "Configure the view". Re-assert it for the columns we pin.
+      const metadatas = { ...(config.metadatas ?? {}) };
+      const unsortable = usable.filter((name) => metadatas[name]?.list?.sortable === false);
+      for (const name of unsortable) {
+        const prev = metadatas[name];
+        metadatas[name] = { ...prev, list: { ...prev.list, sortable: true } };
+      }
+
+      if (!nextList && !unsortable.length) continue;
+      await service.updateConfiguration(contentType, {
+        settings: config.settings,
+        metadatas,
+        layouts: { ...config.layouts, list: nextList ?? prevList },
+        options: config.options,
+      });
+      strapi.log.info(
+        `[content-manager] ${uid} sortable columns pinned: ${(nextList ?? prevList)
+          .slice(prevList.length)
+          .concat(unsortable.map((name) => `${name} (re-enabled)`))
+          .join(', ')}`
+      );
+    } catch (err: any) {
+      strapi.log.warn(
+        `[content-manager] sortable columns for ${uid} failed: ${err?.message ?? err}`
+      );
+    }
+  }
+}
+
 export default {
   register({ strapi }: { strapi: Core.Strapi }) {
     // NOTE: no custom /_health route — Strapi core already serves /_health
@@ -491,10 +836,56 @@ export default {
     // deploy.sh curl both hit the built-in.
 
     strapi.documents.use(async (context: any, next: any) => {
+      // "Clean as you touch": a human editing in the admin must save a FULLY
+      // valid record — every rule enforced on the whole record, including
+      // dirty untouched fields on WordPress-migrated rows. The status cron
+      // (partial {contentStatus} writes over possibly-dirty rows) has no HTTP
+      // request context, so it stays grandfathered/touched-only and never
+      // throws on migrated data. Computed once; passed to each validator.
+      const strictWrite = isHumanWrite(strapi);
+
       // Richtext fields hold HTML rendered raw on the public site — enforce
       // the migration-era allowlist on every write, whatever the editor.
       if (['create', 'update', 'clone'].includes(context.action)) {
         sanitizeRichtextData(context.uid, context.params?.data);
+        // Trim/collapse before ANY validator reads a value, so what is checked
+        // is byte-identical to what is stored. Collapse is string-only —
+        // collapsing a text/richtext field would destroy paragraph breaks.
+        normaliseTextFields(context.uid, context.action, context.params?.data);
+      }
+
+      // A coupon owns exactly one of `code` / `uniqueCouponPool`. The admin
+      // hides the irrelevant one, which means it is OMITTED from the payload
+      // and the stored value stays attached — clear it explicitly. No-ops when
+      // couponType is absent, so the cron's partial updates never detach a
+      // scheduled coupon's pool.
+      if (
+        isCouponUid(context.uid) &&
+        ['create', 'update', 'clone'].includes(context.action)
+      ) {
+        normaliseCouponTypeFields(context.params?.data);
+        await validateCouponTypeFields(
+          strapi,
+          context.action,
+          context.params?.data,
+          context.params?.documentId,
+          strictWrite,
+        );
+      }
+
+      // Constraints introduced on populated fields cannot live in the Strapi
+      // schema: the admin sends a full form on update and schema validation
+      // cannot grandfather an unchanged legacy value. Validate only creates,
+      // clones, and actual field changes after comparing with the stored row.
+      if (['create', 'update', 'clone'].includes(context.action)) {
+        await validateChangedFields(
+          strapi,
+          context.uid,
+          context.action,
+          context.params?.data,
+          context.params?.documentId,
+          strictWrite,
+        );
       }
 
       // Homepage section images must match their Figma sizes exactly — reject
@@ -530,106 +921,241 @@ export default {
       // fixed card slots — reject over-long values with an inline field error.
       if (
         ['api::coupon.coupon', 'api::deal.deal'].includes(context.uid) &&
-        ['create', 'update'].includes(context.action)
+        ['create', 'update', 'clone'].includes(context.action)
       ) {
-        validateOfferFields(context.params?.data);
+        await validateOfferFieldsForWrite(
+          strapi,
+          context.uid,
+          context.action,
+          context.params?.data,
+          context.params?.documentId,
+          strictWrite,
+        );
       }
 
       // Taxonomy cross-field checks (rating range, FAQ-enabled-but-empty, brand
       // required SEO) — reject with an inline field error instead of a raw 500.
-      if (['create', 'update'].includes(context.action)) {
-        validateEntityFields(context.uid, context.action, context.params?.data);
-      }
-
-      // Offer changes: capture relations BEFORE the write. For deletes the
-      // doc disappears entirely; for updates a relation may be REMOVED — the
-      // removed store/bank/category/brand page must also rebuild, so the
-      // final scope is the union of before + after relations.
-      let preScope: ScopeRequest | null = null;
-      if (['delete', 'update', 'publish', 'unpublish', 'discardDraft'].includes(context.action)) {
-        try {
-          preScope = await preDeleteScope(
-            strapi,
-            context.uid,
-            context.params?.documentId,
-            context.action
-          );
-        } catch {
-          preScope = null;
-        }
-      }
-
-      const result = await next();
-
-      if (
-        ['api::coupon.coupon', 'api::deal.deal'].includes(context.uid) &&
-        [
-          'create',
-          'clone',
-          'update',
-          'publish',
-          'unpublish',
-          'discardDraft',
-          'delete',
-        ].includes(context.action)
-      ) {
-        const offerDocumentId =
-          (result as any)?.documentId ?? context.params?.documentId;
-        void invalidateOfferRedeemCache(
+      if (['create', 'update', 'clone'].includes(context.action)) {
+        await validateEntityFieldsForWrite(
           strapi,
           context.uid,
-          offerDocumentId,
-        ).catch((err: any) => {
-          strapi.log.warn(
-            `[offer-redeem] invalidation failed for ${context.uid}:${offerDocumentId}: ${err?.message ?? err}`
-          );
-        });
+          context.action,
+          context.params?.data,
+          context.params?.documentId,
+          strictWrite,
+        );
       }
 
+      // contentStatus is DERIVED from scheduledAt/expiresAt, never editor-set.
+      // Merges the payload over the stored row before deriving — deriving from
+      // the payload alone would read the cron's partial {contentStatus} update
+      // as "no dates" and flip every expired offer back to published, forever.
       if (
-        [
-          'api::homepage.homepage',
-          'api::deal-of-the-day-page.deal-of-the-day-page',
-        ].includes(context.uid) &&
-        ['create', 'update', 'publish'].includes(context.action)
+        isOfferLifecycleUid(context.uid) &&
+        ['create', 'update', 'clone'].includes(context.action)
       ) {
-        try {
-          await fillHomepageOverrides(strapi);
-        } catch (err: any) {
-          strapi.log.warn(`[homepage] override auto-fill failed: ${err?.message ?? err}`);
-        }
+        await validateOfferLifecycle(
+          strapi,
+          context.uid,
+          context.action,
+          context.params?.data,
+          context.params?.documentId,
+          strictWrite,
+        );
       }
 
-      // Rebuild scope — never fails the save (deployment-runbook.md §3).
+      // Blank-after-trim rejection and required-field enforcement. Only fields
+      // the payload actually changes are checked, so a legacy row stays
+      // saveable when an editor touches something else on the same form.
+      if (['create', 'update', 'clone'].includes(context.action)) {
+        await validateTextFieldsForWrite(
+          strapi,
+          context.uid,
+          context.action,
+          context.params?.data,
+          context.params?.documentId,
+          strictWrite,
+        );
+      }
+
+      // Slug and redirect invariants below are validated with plain reads and
+      // committed by an INDEPENDENT write — two concurrent saves can both pass
+      // validation on the same committed snapshot and both commit: one flat
+      // route claimed by two taxonomy types (the ISR server silently drops the
+      // loser), case-folded duplicate redirect `from`s, or /a→/b + /b→/a
+      // closing a cycle. A unique index on the NORMALIZED values cannot be
+      // added over legacy duplicates (identity-validation.ts), so serialize
+      // the validate+commit window with one advisory lock per invariant domain
+      // instead. No-op on non-Postgres; on lock failure the save proceeds
+      // unserialized (the pre-existing rare race, never an outage).
+      const writeLockDomain = ['create', 'update', 'clone'].includes(context.action)
+        ? isIdentityUid(context.uid)
+          ? ('identity' as const)
+          : context.uid === 'api::redirect.redirect'
+            ? ('redirect' as const)
+            : null
+        : null;
+      const releaseWriteLock = writeLockDomain
+        ? await acquireWriteSerializationLock(strapi, writeLockDomain)
+        : null;
       try {
-        const documentId =
-          (result as any)?.documentId ?? context.params?.documentId;
-        let scope =
-          context.action === 'delete' && preScope
-            ? preScope
-            : await computeScope(strapi, context.uid, context.action, documentId);
-
-        // Union before+after relation pages for offer updates (a store
-        // removed from a coupon must rebuild too).
-        if (scope && preScope && context.action !== 'delete') {
-          scope = {
-            full: Boolean(scope.full || preScope.full),
-            homepage: Boolean(scope.homepage || preScope.homepage),
-            slugs: [...new Set([...(scope.slugs ?? []), ...(preScope.slugs ?? [])])],
-          };
+        // Name unique per type, slug unique across all four taxonomies (the
+        // public URL space is flat, so a Bank and a Store sharing a slug is a
+        // real route collision), and no collision with a reserved Astro route.
+        if (['create', 'update', 'clone'].includes(context.action)) {
+          await validateIdentity(
+            strapi,
+            context.uid,
+            context.action,
+            context.params?.data,
+            context.params?.documentId,
+            strictWrite,
+          );
         }
 
-        if (scope) {
-          // Cached /homepage-full & /site-chrome responses predate this edit;
-          // purge so revalidate renders never bake stale data into Redis.
-          purgeResponseCaches();
-          enqueue(strapi, scope, `${context.uid} ${context.action}`);
+        // Redirects are evaluated by the storefront middleware on EVERY request,
+        // before routing, with no code review between the editor and production.
+        // A `from` shadowing a live entity or a reserved page makes that page
+        // unreachable site-wide, so reject that, self-redirects, and any write
+        // that closes a loop across the existing active rules.
+        if (['create', 'update', 'clone'].includes(context.action)) {
+          await validateRedirect(
+            strapi,
+            context.uid,
+            context.action,
+            context.params?.data,
+            context.params?.documentId,
+            strictWrite,
+          );
         }
-      } catch (err: any) {
-        strapi.log.warn(`[rebuild] scope computation failed: ${err?.message ?? err}`);
+
+        // Redirect `note` is editor-only metadata, but the redirect UID scopes
+        // to a FULL sweep (scopes.ts). Read the material fields before the
+        // write so a note-only edit can skip the rebuild entirely (redirects
+        // have draftAndPublish:false — update IS the live write). A failed
+        // read means unknown before-state → keep the sweep.
+        let redirectBefore: Record<string, unknown> | null = null;
+        if (
+          context.uid === 'api::redirect.redirect' &&
+          context.action === 'update' &&
+          context.params?.documentId
+        ) {
+          try {
+            redirectBefore = await strapi
+              .documents('api::redirect.redirect')
+              .findOne({
+                documentId: context.params.documentId,
+                fields: ['from', 'to', 'statusCode', 'active'] as any,
+              });
+          } catch {
+            redirectBefore = null;
+          }
+        }
+
+        // Offer changes: capture relations BEFORE the write. For deletes the
+        // doc disappears entirely; for updates a relation may be REMOVED — the
+        // removed store/bank/category/brand page must also rebuild, so the
+        // final scope is the union of before + after relations.
+        let preScope: ScopeRequest | null = null;
+        if (['delete', 'update', 'publish', 'unpublish', 'discardDraft'].includes(context.action)) {
+          try {
+            preScope = await preDeleteScope(
+              strapi,
+              context.uid,
+              context.params?.documentId,
+              context.action
+            );
+          } catch {
+            preScope = null;
+          }
+        }
+
+        const result = await next();
+
+        if (
+          ['api::coupon.coupon', 'api::deal.deal'].includes(context.uid) &&
+          [
+            'create',
+            'clone',
+            'update',
+            'publish',
+            'unpublish',
+            'discardDraft',
+            'delete',
+          ].includes(context.action)
+        ) {
+          const offerDocumentId =
+            (result as any)?.documentId ?? context.params?.documentId;
+          void invalidateOfferRedeemCache(
+            strapi,
+            context.uid,
+            offerDocumentId,
+          ).catch((err: any) => {
+            strapi.log.warn(
+              `[offer-redeem] invalidation failed for ${context.uid}:${offerDocumentId}: ${err?.message ?? err}`
+            );
+          });
+        }
+
+        if (
+          [
+            'api::homepage.homepage',
+            'api::deal-of-the-day-page.deal-of-the-day-page',
+          ].includes(context.uid) &&
+          ['create', 'update', 'publish'].includes(context.action)
+        ) {
+          try {
+            await fillHomepageOverrides(strapi);
+          } catch (err: any) {
+            strapi.log.warn(`[homepage] override auto-fill failed: ${err?.message ?? err}`);
+          }
+        }
+
+        // Rebuild scope — never fails the save (deployment-runbook.md §3).
+        try {
+          const documentId =
+            (result as any)?.documentId ?? context.params?.documentId;
+          let scope =
+            context.action === 'delete' && preScope
+              ? preScope
+              : await computeScope(strapi, context.uid, context.action, documentId);
+
+          // Union before+after relation pages for offer updates (a store
+          // removed from a coupon must rebuild too).
+          if (scope && preScope && context.action !== 'delete') {
+            scope = {
+              full: Boolean(scope.full || preScope.full),
+              homepage: Boolean(scope.homepage || preScope.homepage),
+              sitemap: Boolean(scope.sitemap || preScope.sitemap),
+              slugs: [...new Set([...(scope.slugs ?? []), ...(preScope.slugs ?? [])])],
+            };
+          }
+
+          if (
+            scope &&
+            redirectBefore &&
+            isRedirectNoteOnlyChange(redirectBefore, context.params?.data)
+          ) {
+            strapi.log.info(
+              '[rebuild] redirect note-only edit — nothing public changed, skipping rebuild'
+            );
+            scope = null;
+          }
+
+          if (scope) {
+            // Cached public aggregates and route metadata predate this edit;
+            // purge so revalidate renders never bake stale data into Redis.
+            purgeResponseCaches();
+            enqueue(strapi, scope, `${context.uid} ${context.action}`);
+          }
+        } catch (err: any) {
+          strapi.log.warn(`[rebuild] scope computation failed: ${err?.message ?? err}`);
+        }
+
+        return result;
+      } finally {
+        if (releaseWriteLock) await releaseWriteLock();
       }
-
-      return result;
     });
   },
 
@@ -654,6 +1180,18 @@ export default {
       (strapi as any).db.connection,
       strapi.log
     );
+    const uniqueCodeIntegrityPath = join(
+      (strapi as any).dirs.app.root,
+      'database',
+      'unique-code-integrity.js'
+    );
+    const { reconcileUniqueCodeIntegrityAfterSchemaSync } = require(
+      uniqueCodeIntegrityPath
+    );
+    await reconcileUniqueCodeIntegrityAfterSchemaSync(
+      (strapi as any).db.connection,
+      strapi.log
+    );
     // Fix the search implementation for this process before serving traffic:
     // the database dialect alone selects Postgres full-set SQL or the
     // non-Postgres full-set query-engine path. pg_trgm/index checks are
@@ -665,8 +1203,11 @@ export default {
     await ensureUploadSettings(strapi);
     await ensureComponentEntryTitles(strapi);
     await ensureComponentFieldDescriptions(strapi);
+    await ensureFieldDescriptions(strapi);
     await ensureSingleTypeEntryTitles(strapi);
     await ensureOfferListStatusColumn(strapi);
+    await ensureSortableListColumns(strapi);
+    await ensureFullWidthEditFields(strapi);
     await ensureSectionLabels(strapi, HOMEPAGE_UID, HOMEPAGE_SECTION_LABELS);
     await ensureSectionLabels(strapi, DOTD_UID, DOTD_SECTION_LABELS);
 
@@ -682,6 +1223,24 @@ export default {
       strapi.log.error(
         '[upload] S3_UPLOAD_ENABLED is not "true" — uploads will go to LOCAL DISK ' +
           '(ephemeral tmpfs, lost on redeploy). Set S3_UPLOAD_ENABLED=true in the production env.'
+      );
+    }
+
+    // The upload MIME allow list is FILE config (config/plugins.ts →
+    // plugin::upload.security), not the plugin store, so nothing in the DB
+    // records that it was ever set. Drop the key and @strapi/upload silently
+    // goes back to accepting every file type, warning only once per upload
+    // request in the request log — far too easy to miss. Check it at boot.
+    const uploadAllowedTypes = strapi.config.get(['plugin::upload', 'security', 'allowedTypes']);
+    if (!Array.isArray(uploadAllowedTypes)) {
+      strapi.log.error(
+        '[upload] plugin::upload.security.allowedTypes is missing — the Media Library ' +
+          'will accept ANY file type. Restore the `security` block in config/plugins.ts.'
+      );
+    } else if (uploadAllowedTypes.length === 0) {
+      strapi.log.error(
+        '[upload] plugin::upload.security.allowedTypes is empty — EVERY upload will be ' +
+          'rejected. List the permitted MIME types in config/plugins.ts.'
       );
     }
 

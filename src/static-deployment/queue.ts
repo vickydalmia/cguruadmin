@@ -9,12 +9,15 @@ import { executeRebuild, type RebuildJob } from './worker';
 export interface ScopeRequest {
   full?: boolean;
   homepage?: boolean;
+  /** Refresh /sitemap.xml with the storefront's shared routes cache busted. */
+  sitemap?: boolean;
   slugs?: string[];
 }
 
 interface PendingScope {
   full: boolean;
   homepage: boolean;
+  sitemap: boolean;
   slugs: Set<string>;
   reasons: string[];
 }
@@ -22,6 +25,7 @@ interface PendingScope {
 const emptyScope = (): PendingScope => ({
   full: false,
   homepage: false,
+  sitemap: false,
   slugs: new Set(),
   reasons: [],
 });
@@ -64,6 +68,7 @@ function describe(scope: PendingScope): string {
   if (scope.full) return 'FULL';
   const parts: string[] = [];
   if (scope.homepage) parts.push('homepage');
+  if (scope.sitemap) parts.push('sitemap + routes cache');
   if (scope.slugs.size) parts.push(`${scope.slugs.size} page(s): ${[...scope.slugs].slice(0, 8).join(', ')}${scope.slugs.size > 8 ? '…' : ''}`);
   return parts.join(' + ') || 'nothing';
 }
@@ -73,6 +78,7 @@ export function enqueue(strapi: Core.Strapi, request: ScopeRequest, reason: stri
 
   if (request.full) pending.full = true;
   if (request.homepage) pending.homepage = true;
+  if (request.sitemap) pending.sitemap = true;
   for (const slug of request.slugs ?? []) pending.slugs.add(slug);
   pending.reasons.push(reason);
 
@@ -106,13 +112,18 @@ function schedule(strapi: Core.Strapi, delayMs: number): void {
 async function run(strapi: Core.Strapi): Promise<void> {
   if (building) return; // the finally-block reschedules if anything is pending
 
-  const hasWork = pending.full || pending.homepage || pending.slugs.size > 0;
+  const hasWork =
+    pending.full ||
+    pending.homepage ||
+    pending.sitemap ||
+    pending.slugs.size > 0;
   if (!hasWork) return;
 
   batchStartedAt = null;
   const job: RebuildJob = {
     full: pending.full,
     homepage: pending.homepage,
+    sitemap: pending.sitemap,
     slugs: [...pending.slugs],
     reasons: pending.reasons,
   };
@@ -139,11 +150,25 @@ async function run(strapi: Core.Strapi): Promise<void> {
       strapi.log.error(
         `[rebuild] build/deploy failed (attempt ${deliveryFailures}/${maxRetries}): ${err?.message ?? err} — will retry`
       );
-      enqueue(strapi, { full: job.full, homepage: job.homepage, slugs: job.slugs }, 'retry after failure');
+      enqueue(
+        strapi,
+        {
+          full: job.full,
+          homepage: job.homepage,
+          sitemap: job.sitemap,
+          slugs: job.slugs,
+        },
+        'retry after failure',
+      );
     }
   } finally {
     building = false;
-    if (pending.full || pending.homepage || pending.slugs.size > 0) {
+    if (
+      pending.full ||
+      pending.homepage ||
+      pending.sitemap ||
+      pending.slugs.size > 0
+    ) {
       schedule(strapi, rebuildConfig().debounceMs);
     }
   }

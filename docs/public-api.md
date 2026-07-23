@@ -19,9 +19,11 @@ ceiling on staleness, not a fixed delay.
 | `GET /api/homepage-full` | anonymous | 60 / 60s | 60s |
 | `GET /api/deal-of-the-day-full` | anonymous | 60 / 60s | 60s, keyed by path |
 | `GET /api/site-chrome` | anonymous | — | 300s |
+| `GET /api/public-route-metadata` | anonymous | 60 / 60s | 60s, keyed by path |
+| `GET /api/redirects` | anonymous (core `find`, public role) | 60 / 60s | 60s |
 | `GET /api/offers`, `GET /api/deals` | anonymous | 60 / 60s | 60s |
 | `GET /api/coupon-page/:id` | anonymous | 60 / 60s | 60s |
-| `GET /api/{stores\|brands\|categories\|banks}/:slug/{coupons\|deals}` | anonymous | — | none |
+| `GET /api/{stores\|brands\|categories\|banks}/:slug/{coupons\|deals}` | anonymous | 60 / 60s | 60s |
 | `GET /api/{stores\|brands\|categories\|banks}/:slug/related-stores` | anonymous | — | 60s |
 | `POST /api/{stores\|brands\|categories\|banks}/:slug/rating` | anonymous | 5 / 60s | none (never cached) |
 | `GET /api/offer-redeem/:entityType/:documentId` | **bearer secret** | — | none |
@@ -29,7 +31,7 @@ ceiling on staleness, not a fixed delay.
 | `GET /unique-coupon/stats/:poolDocumentId` | **admin session** | — | none |
 | `POST /unique-coupon/upload` | **admin session** | — | none |
 
-The two `keyByPath` entries ignore the query string entirely, so `?nonce=1`,
+The `keyByPath` entries ignore the query string entirely, so `?nonce=1`,
 `?nonce=2`, … all share one cache entry and cannot be used to force repeated
 full-catalog scans.
 
@@ -39,6 +41,7 @@ Route definitions: [`src/api/search/routes/search.ts`](../src/api/search/routes/
 [`src/api/deal-of-the-day-page/routes/custom.ts`](../src/api/deal-of-the-day-page/routes/custom.ts),
 [`src/api/coupon/routes/custom.ts`](../src/api/coupon/routes/custom.ts),
 [`src/api/store/routes/custom.ts`](../src/api/store/routes/custom.ts),
+[`src/api/redirect/routes/redirect.ts`](../src/api/redirect/routes/redirect.ts),
 [`src/plugins/unique-coupon/server/src/routes/index.ts`](../src/plugins/unique-coupon/server/src/routes/index.ts).
 
 ---
@@ -196,6 +199,30 @@ hydrated with media. Only published, unexpired offers are counted.
 - `GET /api/site-chrome` — `{ menu, footer, global }` in one call, each `null`
   if that single type is unseeded. This is the header/footer payload; its 300s
   cache is the longest on the public surface because chrome changes rarely.
+
+## Route metadata and redirects
+
+- `GET /api/public-route-metadata` — `{ data }`, a flat list of
+  `{ path, updatedAt, noIndex }` entries for the managed single-type pages plus
+  every active job's `/careers/:slug/` route. The ISR gateway consumes it to
+  drive sitemap/revalidation and to honour per-route `noIndex`. Rate-limited
+  60/60s and cached 60s keyed by path (the query string is ignored).
+- `GET /api/redirects` — the Strapi **core `find`** route for the Redirect
+  collection, granted to the public role, with the `find` action overridden in
+  [`src/api/redirect/controllers/redirect.ts`](../src/api/redirect/controllers/redirect.ts).
+  Returns the standard `{ data, meta }` envelope of editor-managed redirects
+  with a **fixed projection** (`from`, `to`, `statusCode`, `active`); the ISR
+  frontend middleware loads it and applies matches before any built-in
+  canonicalisation. The controller forces the query shape: results are always
+  **active rules only**, sorted by `from`, and caller-supplied `filters`,
+  `fields`, `sort` and `populate` are ignored — only `pagination[page]` /
+  `pagination[pageSize]` (clamped to 100) are honoured, so inactive/planned
+  rules and the editorial `note` field (also `private` in the schema) are never
+  readable anonymously. Carries the same guards as the other public reads:
+  60/60s rate limit and a 60s response cache keyed by the full URL (the query
+  string is pagination, so it is semantically meaningful), attached via the
+  `find` action's `config.middlewares` in
+  [`src/api/redirect/routes/redirect.ts`](../src/api/redirect/routes/redirect.ts).
 
 ## Offer listings
 

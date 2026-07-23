@@ -14,16 +14,29 @@
   "attributes": {
     "title": {
       "type": "string",
-      "required": true
+      "required": true,
+      "maxLength": 200
     },
     "offerText": {
       "type": "string"
     },
     "content": {
-      "type": "richtext"
+      "type": "richtext",
+      "maxLength": 50000
     },
     "code": {
-      "type": "string"
+      "type": "string",
+      "maxLength": 64,
+      "conditions": {
+        "visible": {
+          "==": [
+            {
+              "var": "couponType"
+            },
+            "static"
+          ]
+        }
+      }
     },
     "couponType": {
       "type": "enumeration",
@@ -38,7 +51,17 @@
       "type": "relation",
       "relation": "manyToOne",
       "target": "api::unique-coupon-pool.unique-coupon-pool",
-      "inversedBy": "coupons"
+      "inversedBy": "coupons",
+      "conditions": {
+        "visible": {
+          "==": [
+            {
+              "var": "couponType"
+            },
+            "unique"
+          ]
+        }
+      }
     },
     "badge": {
       "type": "enumeration",
@@ -65,7 +88,8 @@
       ]
     },
     "affiliateLink": {
-      "type": "text"
+      "type": "text",
+      "regex": "^https?://[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?([.][a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+(:[0-9]{1,5})?([/?#]\\S*)?$"
     },
     "expiresAt": {
       "type": "datetime"

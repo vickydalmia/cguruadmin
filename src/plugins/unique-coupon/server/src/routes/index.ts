@@ -13,7 +13,16 @@ export default [
     path: '/upload',
     handler: 'unique-coupon.uploadCodes',
     config: {
-      policies: ['admin::isAuthenticatedAdmin'],
+      policies: [
+        'admin::isAuthenticatedAdmin',
+        // Authentication alone is not enough: any admin role (even read-only)
+        // could import codes. Require the dedicated action, granted per role
+        // under Settings > Roles > Plugins (registered in ../index.ts).
+        {
+          name: 'admin::hasPermissions',
+          config: { actions: ['plugin::unique-coupon.codes.import'] },
+        },
+      ],
     },
   },
   {
@@ -21,7 +30,13 @@ export default [
     path: '/stats/:poolDocumentId',
     handler: 'unique-coupon.getStats',
     config: {
-      policies: ['admin::isAuthenticatedAdmin'],
+      policies: [
+        'admin::isAuthenticatedAdmin',
+        {
+          name: 'admin::hasPermissions',
+          config: { actions: ['plugin::unique-coupon.codes.import'] },
+        },
+      ],
     },
   },
 ];

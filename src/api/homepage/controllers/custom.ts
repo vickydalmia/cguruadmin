@@ -351,6 +351,30 @@ async function attachOfferCounts(strapi: Core.Strapi, homepage: any) {
   return homepage;
 }
 
+const MANAGED_SINGLE_ROUTES = [
+  ['api::homepage.homepage', '/'],
+  ['api::about-page.about-page', '/about-us/'],
+  ['api::career-page.career-page', '/careers/'],
+  [
+    'api::deal-of-the-day-page.deal-of-the-day-page',
+    '/deal-of-the-day/',
+  ],
+] as const;
+
+function routeMetadata(path: string, row: any) {
+  const updatedAt =
+    row?.updatedAt instanceof Date
+      ? row.updatedAt.toISOString()
+      : typeof row?.updatedAt === 'string'
+        ? row.updatedAt
+        : undefined;
+  return {
+    path,
+    ...(updatedAt ? { updatedAt } : {}),
+    noIndex: row?.seo?.noIndex === true,
+  };
+}
+
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   async homepageFull(ctx) {
     // Homepage has draftAndPublish disabled — every entry is live; no status filter.
@@ -395,5 +419,38 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       footer: sanitizedFooter,
       global: sanitizedGlobal,
     });
+  },
+
+  async publicRouteMetadata(ctx) {
+    const [singleRows, jobs] = await Promise.all([
+      Promise.all(
+        MANAGED_SINGLE_ROUTES.map(([uid]) =>
+          strapi.documents(uid as any).findFirst({
+            fields: ['documentId', 'updatedAt'] as any,
+            populate: {
+              seo: { fields: ['noIndex'] },
+            } as any,
+          }),
+        ),
+      ),
+      strapi.documents('api::job.job' as any).findMany({
+        filters: { isActive: true } as any,
+        fields: ['documentId', 'slug', 'updatedAt'] as any,
+        populate: {
+          seo: { fields: ['noIndex'] },
+        } as any,
+      }),
+    ]);
+
+    const pages = singleRows.flatMap((row, index) =>
+      row ? [routeMetadata(MANAGED_SINGLE_ROUTES[index]![1], row)] : [],
+    );
+    const jobRoutes = (Array.isArray(jobs) ? jobs : []).flatMap((job: any) => {
+      const slug = typeof job?.slug === 'string' ? job.slug.trim() : '';
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) return [];
+      return [routeMetadata(`/careers/${slug}/`, job)];
+    });
+
+    return ctx.send({ data: [...pages, ...jobRoutes] });
   },
 });

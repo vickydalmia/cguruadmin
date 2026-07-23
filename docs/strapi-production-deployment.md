@@ -601,6 +601,21 @@ The standard production deployment process is:
 5. The script verifies the container health check.
 6. Validate the site and admin panel after deployment.
 
+### One-time unique-code integrity migration
+
+The release containing
+`2026.07.23T00.00.00.enforce-unique-pool-codes.js` must have a brief writer
+pause while the new container first boots. Stop any separate import/migration
+jobs and make sure only one Strapi writer is starting. The normal single-
+container `deploy.sh` replacement provides this pause; a multi-replica
+deployment must scale to one writer first.
+
+On boot, the migration keeps one deterministic row for each duplicate
+`(pool_id, code)` pair (preserving redeemed history), recalculates pool
+counters, and creates the blocking composite unique index. Do not resume
+imports until the container is healthy. Later boots inspect the index and make
+no counter writes when the database is already healthy.
+
 ## 11. Post-release validation checklist
 
 After every release, verify:

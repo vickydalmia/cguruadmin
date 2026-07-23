@@ -2,10 +2,10 @@ import type { Core } from '@strapi/strapi';
 
 /**
  * In-process TTL response cache for expensive public GET aggregate endpoints
- * (/homepage-full, /site-chrome). These change only when content is
- * republished (the cron rebuild hook fires on change), so a short TTL is safe
- * and blunts the DB cost of the deep populate + per-store count queries under
- * load or abuse.
+ * (/homepage-full, /site-chrome, /public-route-metadata). These change only
+ * when content is republished (the cron rebuild hook fires on change), so a
+ * short TTL is safe and blunts the DB cost of the deep populate + per-store
+ * count queries under load or abuse.
  *
  * Per-instance only (not shared across horizontally-scaled nodes) — good
  * enough as a DoS dampener; a CDN in front should be the primary cache.

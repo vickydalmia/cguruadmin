@@ -4,18 +4,18 @@ import os from 'os';
 import path from 'path';
 import sharp from 'sharp';
 import { IMAGE_BREAKPOINTS, IMAGE_OPTIMIZATION as OPT } from '../../constants/image';
+import { slugify } from '../../constants/slugify';
 
 const bytesToKbytes = (bytes: number) => Math.round((bytes / 1000) * 100) / 100;
 
-// SEO slug for filenames (twin of the migration's slugifyFileName).
-const slugify = (name: string): string => {
-  const slug = name
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80);
+// SEO slug for filenames. Shares the admin's slugify so an uploaded logo and
+// the entity it belongs to fold accents/ligatures the same way. Only the
+// length cap and the empty-input fallback are local concerns.
+// NOTE: the migration's slugifyFileName is a now-divergent copy — leave it be,
+// it reproduces the keys already stored for the WordPress import.
+const slugifyFileName = (name: string): string => {
+  // Re-strip edge dashes: the cap can land mid-word and leave a trailing one.
+  const slug = slugify(name).slice(0, 80).replace(/-+$/, '');
   return slug || 'image';
 };
 
@@ -129,7 +129,9 @@ export default (plugin: any) => {
     // (now slash-containing) hash, so precreate the tmp subdirs they'll hit.
     const existing = splitFolderHash(file.hash ?? '');
     if (!existing && file.tmpWorkingDirectory) {
-      const slug = slugify(path.basename(file.name ?? 'image', path.extname(file.name ?? '')));
+      const slug = slugifyFileName(
+        path.basename(file.name ?? 'image', path.extname(file.name ?? ''))
+      );
       const randSource = (file.hash ?? '').split('_').pop() ?? '';
       const rand8 = (randSource || crypto.randomBytes(6).toString('hex')).slice(0, 8);
       const folder = `${slug}-${rand8}`;

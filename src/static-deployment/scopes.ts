@@ -1,5 +1,9 @@
 import type { Core } from '@strapi/strapi';
 import type { ScopeRequest } from './queue';
+import {
+  toRouteSlug,
+  type IdentityKind,
+} from '../utils/route-normalization';
 
 // Maps a Strapi document change to the pages that must rebuild — the
 // "what rebuilds when" matrix in cguru-ui/docs/deployment-runbook.md §3.
@@ -22,6 +26,18 @@ const ABOUT_PAGE_SLUG = 'about-us';
 const CAREER_PAGE_UID = 'api::career-page.career-page';
 const JOB_UID = 'api::job.job';
 const CAREER_PAGE_SLUG = 'careers';
+// A redirect is evaluated by cguru-ui/src/middleware.ts on EVERY request,
+// before routing — it is URL resolution itself, not page content. Nothing
+// narrower than `full` is correct here: the affected URL set is not derivable
+// from the row (a redirect names a path that has no page and therefore no
+// slug in the scope vocabulary), and the change also moves the route manifest
+// the ISR gateway admits paths against. Redirect edits are rare, so paying for
+// a full sweep is the cheap side of the trade. Two refinements ride on top:
+// the gateway eagerly reloads its authored-redirect map when an event carries
+// the "redirects" scope (every all=true event does — see the gateway's
+// revalidationScopes), and note-only edits skip the sweep entirely via
+// isRedirectNoteOnlyChange below.
+const REDIRECT_UID = 'api::redirect.redirect';
 const ERROR_PAGE_UID = 'api::error-page.error-page';
 const ERROR_DOCUMENT_SLUGS = [
   'error-pages/400',
@@ -42,28 +58,32 @@ function withDealLandingSlug(uid: string, slugs: string[]): string[] {
   if (uid !== 'api::deal.deal') return slugs;
   return [...new Set([...slugs, DEAL_OF_THE_DAY_SLUG])];
 }
-const ENTITY_UIDS: Record<string, string> = {
+const ENTITY_UIDS: Record<string, IdentityKind> = {
   'api::store.store': 'store',
   'api::brand.brand': 'brand',
   'api::category.category': 'category',
   'api::bank.bank': 'bank',
 };
-const RELEVANT_ACTIONS = new Set(['create', 'update', 'delete', 'publish', 'unpublish', 'discardDraft']);
+const RELEVANT_ACTIONS = new Set([
+  'create',
+  'clone',
+  'update',
+  'delete',
+  'publish',
+  'unpublish',
+  'discardDraft',
+]);
 
 // Public URLs are flat: strip an optional type prefix from source slugs
 // (mirror of cguru-ui/src/lib/entity-links.ts#normalizeTypedSlug).
-function publicSlug(value: string | null | undefined, kind: string): string | null {
-  const slug = value?.trim().replace(/^\/+|\/+$/g, '');
-  if (!slug) return null;
-  const [namespace, ...rest] = slug.split('/');
-  const plural = kind === 'category' ? 'categories' : `${kind}s`;
-  if (rest.length > 0 && (namespace === kind || namespace === plural)) {
-    return rest.join('/');
-  }
-  return slug;
+function publicSlug(
+  value: string | null | undefined,
+  kind: IdentityKind,
+): string | null {
+  return toRouteSlug(value, kind) || null;
 }
 
-const RELATION_KINDS: Array<[field: string, kind: string]> = [
+const RELATION_KINDS: Array<[field: string, kind: IdentityKind]> = [
   ['stores', 'store'],
   ['brands', 'brand'],
   ['categories', 'category'],
@@ -137,9 +157,15 @@ export async function computeScope(
 ): Promise<ScopeRequest | null> {
   if (!RELEVANT_ACTIONS.has(action)) return null;
 
-  if (uid === 'api::homepage.homepage') return { homepage: true };
-  if (uid === DOTD_PAGE_UID) return { slugs: [DEAL_OF_THE_DAY_SLUG] };
-  if (uid === ABOUT_PAGE_UID) return { slugs: [ABOUT_PAGE_SLUG] };
+  if (uid === 'api::homepage.homepage') {
+    return { homepage: true, sitemap: true };
+  }
+  if (uid === DOTD_PAGE_UID) {
+    return { slugs: [DEAL_OF_THE_DAY_SLUG], sitemap: true };
+  }
+  if (uid === ABOUT_PAGE_UID) {
+    return { slugs: [ABOUT_PAGE_SLUG], sitemap: true };
+  }
   if (uid === CAREER_PAGE_UID) {
     const jobs: any[] = await strapi.documents(JOB_UID as any).findMany({
       filters: { isActive: true } as any,
@@ -150,12 +176,14 @@ export async function computeScope(
         CAREER_PAGE_SLUG,
         ...jobs.map((job) => `careers/${job.slug}`).filter((slug) => !slug.endsWith('/undefined')),
       ],
+      sitemap: true,
     };
   }
   // A job changes both the listing and one or more build routes. Creation,
   // deletion, or a slug edit also changes the route manifest/sitemap, so use
   // the existing full rebuild safety path for every editor operation.
   if (uid === JOB_UID) return { full: true };
+  if (uid === REDIRECT_UID) return { full: true };
   if (uid === ERROR_PAGE_UID) return { slugs: [...ERROR_DOCUMENT_SLUGS] };
   if (CHROME_UIDS.has(uid)) return { full: true };
 
@@ -172,7 +200,9 @@ export async function computeScope(
   const kind = ENTITY_UIDS[uid];
   if (kind) {
     // Routes list + sitemap change; S3 page deletion needs a full sync.
-    if (action === 'create' || action === 'delete') return { full: true };
+    if (action === 'create' || action === 'clone' || action === 'delete') {
+      return { full: true };
+    }
     if (!documentId) return { full: true };
     const doc: any = await strapi.documents(uid as any).findOne({
       documentId,
@@ -186,8 +216,30 @@ export async function computeScope(
       kind === 'store' || kind === 'category'
         ? [...new Set([slug, DEAL_OF_THE_DAY_SLUG])]
         : [slug];
-    return { slugs, homepage: true };
+    return { slugs, homepage: true, sitemap: true };
   }
 
   return null; // unrelated content type (pools, users…)
+}
+
+// `note` is editor-facing metadata: it renders nowhere public (the public
+// find projection excludes it), yet the redirect UID scopes to a FULL sweep
+// above. The middleware reads these fields before the write and skips the
+// rebuild when nothing material changed.
+const REDIRECT_MATERIAL_FIELDS = ['from', 'to', 'statusCode', 'active'] as const;
+
+/**
+ * True when an update payload leaves every publicly-visible redirect field
+ * untouched. Uncertainty must return false — the cost of a wrong `true` is a
+ * silently stale redirect, while a wrong `false` merely keeps today's sweep.
+ */
+export function isRedirectNoteOnlyChange(
+  before: Record<string, unknown> | null | undefined,
+  data: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!before || !data) return false;
+  return REDIRECT_MATERIAL_FIELDS.every((field) => {
+    if (!(field in data)) return true; // omitted from the payload → unchanged
+    return (data[field] ?? null) === (before[field] ?? null);
+  });
 }
