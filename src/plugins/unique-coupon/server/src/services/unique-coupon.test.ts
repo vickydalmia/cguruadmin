@@ -2,183 +2,246 @@ import { describe, expect, it, vi } from 'vitest';
 
 import uniqueCouponService from './unique-coupon';
 
-type ImportHarnessOptions = {
+type HarnessOptions = {
   client?: string;
-  /** `null` simulates a missing pool (an explicit `undefined` would just
-   * re-trigger the destructuring default). */
-  poolRow?: { id: number } | null;
-  /** One entry per insert batch, in order (pg shape: `{ rowCount }`). */
-  insertResults?: any[];
-  /** One entry per awaited `count().first()`, in order (`{ count }`). */
-  countResults?: any[];
+  poolRow?: { id: number; name?: string; document_id?: string } | null;
+  existingCodes?: string[];
+  redeemCode?: {
+    id: number;
+    code: string;
+    is_used: boolean;
+    version: number;
+  } | null;
+  stats?: { total: string; used: string };
 };
 
-/**
- * Minimal knex stand-in for importCodes: `trx` is callable per table, the
- * pool query chain is thenable (so `.forUpdate()` can be tacked on before the
- * await, exactly like knex), and every write is recorded for assertions.
- */
-function createImportHarness({
+function createHarness({
   client = 'pg',
-  poolRow = { id: 7 },
-  insertResults = [],
-  countResults = [],
-}: ImportHarnessOptions = {}) {
+  poolRow = { id: 7, name: 'Summer', document_id: 'pool-doc' },
+  existingCodes = [],
+  redeemCode = null,
+  stats = { total: '0', used: '0' },
+}: HarnessOptions = {}) {
+  let insertedId = 100;
   const calls = {
+    tables: [] as string[],
+    joins: [] as string[],
     forUpdate: 0,
-    inserts: [] as any[][],
-    increments: [] as Array<{ column: string; amount: number }>,
+    codeInserts: [] as any[][],
+    linkInserts: [] as any[][],
     updates: [] as any[],
-    counts: 0,
+    increments: [] as Array<{ table: string; column: string; amount: number }>,
   };
-  const insertQueue = [...insertResults];
-  const countQueue = [...countResults];
 
-  const makePoolBuilder = () => {
-    const builder: any = {
-      where: () => builder,
-      select: () => builder,
-      first: () => builder,
+  function makeBuilder(table: string) {
+    const state = {
+      first: false,
+      insertRows: undefined as any[] | undefined,
+      updateValues: undefined as any,
+    };
+    const chain: any = {
+      join: (joined: string) => {
+        calls.joins.push(joined);
+        return chain;
+      },
+      where: () => chain,
+      whereIn: () => chain,
+      select: () => chain,
+      orderBy: () => chain,
+      count: () => chain,
+      sum: () => chain,
+      first: () => {
+        state.first = true;
+        return chain;
+      },
       forUpdate: () => {
         calls.forUpdate += 1;
-        return builder;
+        return chain;
+      },
+      insert: (rows: any[]) => {
+        state.insertRows = rows;
+        if (table === 'unique_codes') calls.codeInserts.push(rows);
+        if (table === 'unique_codes_pool_lnk') calls.linkInserts.push(rows);
+        return chain;
+      },
+      returning: async () =>
+        (state.insertRows ?? []).map((row) => ({
+          id: insertedId++,
+          code: row.code,
+        })),
+      update: (values: any) => {
+        state.updateValues = values;
+        calls.updates.push(values);
+        return chain;
       },
       increment: (column: string, amount: number) => {
-        calls.increments.push({ column, amount });
+        calls.increments.push({ table, column, amount });
         return Promise.resolve(1);
       },
-      update: (values: any) => {
-        calls.updates.push(values);
-        return Promise.resolve(1);
-      },
-      then: (resolve: any, reject: any) =>
-        Promise.resolve(poolRow).then(resolve, reject),
-    };
-    return builder;
-  };
-
-  const makeCodesBuilder = () => {
-    const builder: any = {
-      where: () => builder,
-      count: () => builder,
-      first: () => builder,
-      insert: (rows: any[]) => {
-        calls.inserts.push(rows);
-        return {
-          onConflict: () => ({
-            ignore: () => Promise.resolve(insertQueue.shift()),
-          }),
-        };
-      },
-      // Awaiting the builder is only ever the COUNT(*) fallback path.
       then: (resolve: any, reject: any) => {
-        calls.counts += 1;
-        return Promise.resolve(countQueue.shift()).then(resolve, reject);
+        let result: any;
+        if (table === 'unique_coupon_pools') {
+          result = poolRow;
+        } else if (table.startsWith('unique_codes as')) {
+          if (state.first) {
+            result = redeemCode;
+          } else {
+            result = existingCodes.map((code) => ({ code }));
+          }
+        } else if (table === 'unique_codes' && state.updateValues) {
+          result = 1;
+        } else {
+          result = state.insertRows ?? [];
+        }
+        return Promise.resolve(result).then(resolve, reject);
       },
     };
-    return builder;
-  };
+    calls.tables.push(table);
+    return chain;
+  }
 
-  const trx = Object.assign(
-    (table: string) =>
-      table === 'unique_coupon_pools' ? makePoolBuilder() : makeCodesBuilder(),
-    { client: { config: { client } } },
+  const trx: any = Object.assign(
+    (table: string) => makeBuilder(table),
+    {
+      client: { config: { client } },
+      raw: vi.fn((sql: string) => {
+        if (sql.includes('COUNT(*)')) return stats;
+        return {};
+      }),
+    },
   );
-  const knex = {
-    client: { config: { client } },
-    transaction: (fn: (trx: any) => Promise<any>) => fn(trx),
-  };
+  const knex: any = Object.assign(
+    (table: string) => makeBuilder(table),
+    {
+      client: { config: { client } },
+      raw: trx.raw,
+      transaction: (fn: (transaction: any) => Promise<any>) => fn(trx),
+    },
+  );
   const strapi = {
     db: { connection: knex },
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   } as any;
 
-  return { service: uniqueCouponService({ strapi }), calls };
+  return {
+    service: uniqueCouponService({ strapi }),
+    calls,
+    log: strapi.log,
+  };
 }
 
-describe('importCodes lock hold', () => {
-  it('on Postgres increments total_codes by the rows actually inserted — no recount', async () => {
-    // 5 codes in batches of 2; the middle batch hits an existing code, so the
-    // driver reports 2 + 1 + 1 inserted rows.
-    const harness = createImportHarness({
-      insertResults: [{ rowCount: 2 }, { rowCount: 1 }, { rowCount: 1 }],
-    });
+describe('importCodes with Strapi relation table', () => {
+  it('inserts only missing codes and creates links without a duplicate pool id', async () => {
+    const harness = createHarness({ existingCodes: ['B'] });
 
     const result = await harness.service.importCodes(
       'pool-doc',
-      ['A', 'B', 'C', 'D', 'E'],
+      ['A', 'B', 'A', 'C'],
       2,
     );
 
-    expect(result).toEqual({ imported: 4, skipped: 1, total: 5 });
-    expect(harness.calls.inserts).toHaveLength(3);
-    // The pool row stays locked for the whole transaction...
+    expect(result).toEqual({ imported: 2, skipped: 2, total: 4 });
     expect(harness.calls.forUpdate).toBe(1);
-    // ...but the work under it is O(chunk): counter increment, no recount.
-    expect(harness.calls.increments).toEqual([
-      { column: 'total_codes', amount: 4 },
+    expect(harness.calls.codeInserts.flat().map((row) => row.code)).toEqual([
+      'A',
+      'C',
     ]);
-    expect(harness.calls.counts).toBe(0);
-    expect(harness.calls.updates).toEqual([]);
+    expect(
+      harness.calls.codeInserts.flat().every((row) => !('pool_id' in row)),
+    ).toBe(true);
+    expect(harness.calls.linkInserts.flat()).toEqual([
+      {
+        unique_code_id: 100,
+        unique_coupon_pool_id: 7,
+        unique_code_ord: 1,
+      },
+      {
+        unique_code_id: 101,
+        unique_coupon_pool_id: 7,
+        unique_code_ord: 1,
+      },
+    ]);
+    expect(harness.calls.increments).toEqual([
+      {
+        table: 'unique_coupon_pools',
+        column: 'total_codes',
+        amount: 2,
+      },
+    ]);
   });
 
-  it('skips the counter write entirely when every code already existed', async () => {
-    const harness = createImportHarness({
-      insertResults: [{ rowCount: 0 }],
-    });
+  it('does not insert or change counters when every code already exists', async () => {
+    const harness = createHarness({ existingCodes: ['A', 'B'] });
 
-    const result = await harness.service.importCodes('pool-doc', ['A', 'B'], 100);
-
-    expect(result).toEqual({ imported: 0, skipped: 2, total: 2 });
-    expect(harness.calls.increments).toEqual([]);
-    expect(harness.calls.updates).toEqual([]);
-  });
-
-  it('falls back to a COUNT(*)-only recount on dialects without an insert row count', async () => {
-    // mysql2's insert response carries no inserted-row figure through knex, so
-    // the before/after count decides `imported` and total_codes is set
-    // absolutely — but used_codes is no longer recalculated here.
-    const harness = createImportHarness({
-      client: 'mysql2',
-      insertResults: [[0]],
-      countResults: [{ count: 10 }, { count: 13 }],
-    });
-
-    const result = await harness.service.importCodes(
-      'pool-doc',
-      ['A', 'B', 'C'],
-      100,
-    );
-
-    expect(result).toEqual({ imported: 3, skipped: 0, total: 3 });
-    expect(harness.calls.counts).toBe(2);
-    expect(harness.calls.forUpdate).toBe(1);
-    expect(harness.calls.updates).toEqual([{ total_codes: 13 }]);
+    await expect(
+      harness.service.importCodes('pool-doc', ['A', 'B']),
+    ).resolves.toEqual({ imported: 0, skipped: 2, total: 2 });
+    expect(harness.calls.codeInserts).toEqual([]);
+    expect(harness.calls.linkInserts).toEqual([]);
     expect(harness.calls.increments).toEqual([]);
   });
 
   it('keeps the POOL_NOT_FOUND error contract', async () => {
-    const harness = createImportHarness({ poolRow: null });
+    const harness = createHarness({ poolRow: null });
 
     await expect(
       harness.service.importCodes('missing-pool', ['A']),
     ).rejects.toMatchObject({ code: 'POOL_NOT_FOUND' });
   });
+
+  it('fails clearly outside PostgreSQL instead of using an unsafe fallback', async () => {
+    const harness = createHarness({ client: 'better-sqlite3' });
+
+    await expect(
+      harness.service.importCodes('pool-doc', ['A']),
+    ).rejects.toThrow(/require PostgreSQL/);
+  });
 });
 
-describe('redeemCode dialect support', () => {
-  it('fails fast on SQLite instead of retrying FOR UPDATE SKIP LOCKED into a 503', async () => {
-    const strapi = {
-      db: {
-        // Never called: the guard must throw before any query runs.
-        connection: { client: { config: { client: 'better-sqlite3' } } },
+describe('redeemCode with Strapi relation table', () => {
+  it('locks the pool, selects through the link, redeems, and updates the counter', async () => {
+    const harness = createHarness({
+      redeemCode: {
+        id: 22,
+        code: 'PROMO-22',
+        is_used: false,
+        version: 3,
       },
-      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    } as any;
-    const service = uniqueCouponService({ strapi });
+    });
 
-    await expect(service.redeemCode('pool-doc')).rejects.toThrow(
-      /requires PostgreSQL or MySQL 8\+/,
+    await expect(harness.service.redeemCode('pool-doc')).resolves.toEqual({
+      success: true,
+      code: 'PROMO-22',
+    });
+    expect(harness.calls.joins).toContain(
+      'unique_codes_pool_lnk as pool_link',
+    );
+    expect(harness.calls.forUpdate).toBe(2);
+    expect(harness.calls.updates).toContainEqual(
+      expect.objectContaining({ is_used: true, version: 4 }),
+    );
+    expect(harness.calls.increments).toContainEqual({
+      table: 'unique_coupon_pools',
+      column: 'used_codes',
+      amount: 1,
+    });
+  });
+
+  it('returns NO_CODES_AVAILABLE without changing the counter', async () => {
+    const harness = createHarness({ redeemCode: null });
+
+    await expect(harness.service.redeemCode('pool-doc')).resolves.toMatchObject({
+      success: false,
+      error: 'NO_CODES_AVAILABLE',
+    });
+    expect(harness.calls.increments).toEqual([]);
+  });
+
+  it('fails fast outside PostgreSQL', async () => {
+    const harness = createHarness({ client: 'better-sqlite3' });
+
+    await expect(harness.service.redeemCode('pool-doc')).rejects.toThrow(
+      /require PostgreSQL/,
     );
   });
 });

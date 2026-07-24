@@ -6,7 +6,8 @@ const {
 
 /**
  * Deployment procedure: briefly pause admin/import writers while this
- * migration deduplicates stock and creates the blocking unique index.
+ * migration deduplicates stock through Strapi's relation table and installs
+ * the PostgreSQL relation/code guards.
  * Redemption history wins deterministically when duplicate rows already
  * exist; pool counters are recalculated from the retained rows.
  */

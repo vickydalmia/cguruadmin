@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 const {
-  POOL_CODE_INDEX,
+  CODE_GUARD_TRIGGER,
+  LINK_GUARD_TRIGGER,
+  POOL_CODE_GUARD,
+  POOL_LINK_TABLE,
   chooseDuplicateKeeper,
-  indexDefinitionIsExpected,
   reconcileUniqueCodeIntegrity,
 } = require('../../database/unique-code-integrity.js');
 
@@ -52,110 +54,108 @@ describe('unique-code integrity migration', () => {
       ]),
     ).toMatchObject({ id: 8 });
   });
-
-  it('accepts only the exact SQLite composite unique-index shape', () => {
-    const sqlite = { client: { config: { client: 'better-sqlite3' } } };
-
-    expect(
-      indexDefinitionIsExpected(sqlite, {
-        unique: true,
-        columns: ['pool_id', 'code'],
-      }),
-    ).toBe(true);
-    expect(
-      indexDefinitionIsExpected(sqlite, {
-        unique: true,
-        columns: ['code', 'pool_id'],
-      }),
-    ).toBe(false);
-    expect(
-      indexDefinitionIsExpected(sqlite, {
-        unique: false,
-        columns: ['pool_id', 'code'],
-      }),
-    ).toBe(false);
-  });
 });
 
-// Minimal SQLite-flavoured knex stand-in. Table queries record which tables
-// were touched and resolve empty (no duplicate groups, no pool counts);
-// knex.raw serves the PRAGMA index lookups and records DDL.
-function makeSqliteKnex({ indexExists, indexUnique = 1 }: { indexExists: boolean; indexUnique?: 0 | 1 }) {
+type HarnessOptions = {
+  guardsExist?: boolean;
+  missingLinkTable?: boolean;
+};
+
+function createPostgresHarness({
+  guardsExist = false,
+  missingLinkTable = false,
+}: HarnessOptions = {}) {
   const tableQueries: string[] = [];
   const rawStatements: string[] = [];
 
-  const builder = () => {
-    const chain: any = {};
-    for (const method of [
-      'select', 'whereNotNull', 'groupBy', 'havingRaw',
-      'where', 'whereIn', 'update', 'count', 'sum', 'delete',
-    ]) {
-      chain[method] = () => chain;
-    }
-    chain.then = (resolve: any, reject: any) => Promise.resolve([]).then(resolve, reject);
+  const builder = (table: string) => {
+    const chain: any = {
+      join: () => chain,
+      select: () => chain,
+      where: () => chain,
+      whereNotNull: () => chain,
+      whereIn: () => chain,
+      groupBy: () => chain,
+      havingRaw: () => chain,
+      count: () => chain,
+      sum: () => chain,
+      update: () => chain,
+      delete: () => chain,
+      then: (resolve: any, reject: any) =>
+        Promise.resolve([]).then(resolve, reject),
+    };
+    tableQueries.push(table);
     return chain;
   };
 
-  const knex: any = (table: string) => {
-    tableQueries.push(table);
-    return builder();
+  const knex: any = (table: string) => builder(table);
+  knex.client = { config: { client: 'pg' } };
+  knex.schema = {
+    hasTable: async (table: string) =>
+      !(missingLinkTable && table === POOL_LINK_TABLE),
   };
-  knex.client = { config: { client: 'better-sqlite3' } };
-  knex.schema = { hasTable: async () => true };
   knex.raw = (sql: string) => {
     rawStatements.push(sql);
-    if (sql.includes('index_list')) {
-      return Promise.resolve(
-        indexExists ? [{ name: POOL_CODE_INDEX, unique: indexUnique }] : [],
-      );
+    if (sql.includes('FROM pg_trigger')) {
+      return Promise.resolve({
+        rows: [{ count: guardsExist ? 2 : 0 }],
+      });
     }
-    if (sql.includes('index_info')) {
-      return Promise.resolve([
-        { seqno: 0, name: 'pool_id' },
-        { seqno: 1, name: 'code' },
-      ]);
-    }
-    return Promise.resolve([]);
+    return Promise.resolve({ rows: [] });
   };
 
   return { knex, tableQueries, rawStatements };
 }
 
-describe('reconcileUniqueCodeIntegrity boot ordering', () => {
+describe('reconcileUniqueCodeIntegrity Strapi relation schema', () => {
   const logger = () => ({ info: vi.fn(), warn: vi.fn() });
 
-  it('skips the duplicate scan entirely when the unique index already exists', async () => {
-    const { knex, tableQueries, rawStatements } = makeSqliteKnex({ indexExists: true });
+  it('waits for schema sync when the Strapi link table does not exist yet', async () => {
+    const { knex, rawStatements } = createPostgresHarness({
+      missingLinkTable: true,
+    });
     const log = logger();
 
-    const result = await reconcileUniqueCodeIntegrity(knex, log);
+    await expect(reconcileUniqueCodeIntegrity(knex, log)).resolves.toEqual({
+      attempted: false,
+      removed: 0,
+      guardCreated: false,
+    });
+    expect(rawStatements).toEqual([]);
+    expect(log.info).toHaveBeenCalled();
+  });
 
-    expect(result).toEqual({ attempted: true, removed: 0, indexCreated: false });
-    // No table query at all: neither the GROUP BY duplicate scan nor the pool
-    // recount runs on a healthy boot.
+  it('skips the duplicate scan when both PostgreSQL guards already exist', async () => {
+    const { knex, tableQueries } = createPostgresHarness({
+      guardsExist: true,
+    });
+
+    await expect(reconcileUniqueCodeIntegrity(knex, logger())).resolves.toEqual({
+      attempted: true,
+      removed: 0,
+      guardCreated: false,
+    });
     expect(tableQueries).toEqual([]);
-    expect(rawStatements.some((sql) => sql.includes('CREATE UNIQUE INDEX'))).toBe(false);
-    expect(log.warn).not.toHaveBeenCalled();
   });
 
-  it('still dedupes BEFORE creating the index when it is missing', async () => {
-    const { knex, tableQueries, rawStatements } = makeSqliteKnex({ indexExists: false });
+  it('deduplicates through the Strapi link table and installs both guards', async () => {
+    const { knex, tableQueries, rawStatements } = createPostgresHarness();
 
-    const result = await reconcileUniqueCodeIntegrity(knex, logger());
+    await expect(reconcileUniqueCodeIntegrity(knex, logger())).resolves.toEqual({
+      attempted: true,
+      removed: 0,
+      guardCreated: true,
+    });
 
-    expect(result).toEqual({ attempted: true, removed: 0, indexCreated: true });
-    // The duplicate scan ran (a unique index cannot be created over a table
-    // that still holds duplicates), then the index DDL, then the recount.
-    expect(tableQueries[0]).toBe('unique_codes');
-    expect(rawStatements.some((sql) => sql.includes('CREATE UNIQUE INDEX'))).toBe(true);
-    expect(tableQueries).toContain('unique_coupon_pools');
-  });
-
-  it('still refuses a same-named index of the wrong shape', async () => {
-    const { knex } = makeSqliteKnex({ indexExists: true, indexUnique: 0 });
-
-    await expect(reconcileUniqueCodeIntegrity(knex, logger())).rejects.toThrow(
-      /not the expected unique/,
+    expect(tableQueries[0]).toBe(`${POOL_LINK_TABLE} as pool_link`);
+    expect(rawStatements.join('\n')).toContain(
+      `NEW."unique_coupon_pool_id"`,
+    );
+    expect(rawStatements.join('\n')).toContain(POOL_CODE_GUARD);
+    expect(rawStatements.join('\n')).toContain(LINK_GUARD_TRIGGER);
+    expect(rawStatements.join('\n')).toContain(CODE_GUARD_TRIGGER);
+    expect(rawStatements.join('\n')).not.toContain(
+      'ON "unique_codes" ("pool_id", "code")',
     );
   });
 });

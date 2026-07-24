@@ -14,7 +14,7 @@
  * DEFAULT_CHUNK_SIZE codes — exactly the batches chunkCodes produces.
  *
  * Re-upload is safe: the service ignores conflicts against the database's
- * unique (pool_id, code) index. Dedupe here still removes within-file repeats
+ * pool/code relation guard. Dedupe here still removes within-file repeats
  * early so they do not consume request space.
  */
 

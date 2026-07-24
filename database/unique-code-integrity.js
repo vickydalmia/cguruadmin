@@ -2,11 +2,17 @@
 
 const UNIQUE_CODES_TABLE = "unique_codes";
 const POOLS_TABLE = "unique_coupon_pools";
-const POOL_CODE_INDEX = "unique_codes_pool_code_unique";
-const RECONCILE_LOCK = "couponzguru.unique-code-integrity.v1";
+const POOL_LINK_TABLE = "unique_codes_pool_lnk";
+const POOL_LINK_CODE_COLUMN = "unique_code_id";
+const POOL_LINK_POOL_COLUMN = "unique_coupon_pool_id";
+const POOL_CODE_GUARD = "unique_codes_pool_code_unique";
+const LINK_GUARD_TRIGGER = "unique_codes_pool_code_link_guard_v1";
+const CODE_GUARD_TRIGGER = "unique_codes_pool_code_value_guard_v1";
+const LINK_GUARD_FUNCTION = "cguru_unique_code_link_guard_v1";
+const CODE_GUARD_FUNCTION = "cguru_unique_code_value_guard_v1";
+const RECONCILE_LOCK = "couponzguru.unique-code-integrity.v2";
 
 const POSTGRES_CLIENTS = new Set(["pg", "postgres", "postgresql"]);
-const SQLITE_CLIENTS = new Set(["sqlite", "sqlite3", "better-sqlite3"]);
 
 function databaseClient(knex) {
   return String(knex?.client?.config?.client || "").toLowerCase();
@@ -14,10 +20,6 @@ function databaseClient(knex) {
 
 function isPostgres(knex) {
   return POSTGRES_CLIENTS.has(databaseClient(knex));
-}
-
-function isSqlite(knex) {
-  return SQLITE_CLIENTS.has(databaseClient(knex));
 }
 
 function isUsed(row) {
@@ -32,10 +34,10 @@ function timestamp(value) {
 }
 
 /**
- * Pick the single row retained from one duplicate (pool_id, code) group.
- * A redeemed code wins over an unused copy so a migration never makes a code
- * redeemable again. Among redeemed copies, the earliest redemption is the
- * canonical history; ids provide a deterministic final tie-break.
+ * Pick the single row retained from one duplicate (pool, code) group.
+ * A redeemed code wins over an unused copy so reconciliation never makes a
+ * redeemed code available again. Existing Strapi ids/documentIds are retained;
+ * reconciliation never manufactures another pool identity.
  */
 function chooseDuplicateKeeper(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return undefined;
@@ -63,116 +65,171 @@ async function acquireReconcileLock(knex) {
   );
 }
 
-async function namedIndexDefinition(knex) {
-  if (isPostgres(knex)) {
-    const result = await knex.raw(
-      "SELECT indexdef FROM pg_indexes " +
-        "WHERE schemaname = current_schema() AND tablename = ? AND indexname = ?",
-      [UNIQUE_CODES_TABLE, POOL_CODE_INDEX],
-    );
-    return result?.rows?.[0]?.indexdef ?? null;
-  }
-
-  if (isSqlite(knex)) {
-    const result = await knex.raw(`PRAGMA index_list('${UNIQUE_CODES_TABLE}')`);
-    const rows = Array.isArray(result) ? result : result?.rows ?? [];
-    const found = rows.find((row) => row?.name === POOL_CODE_INDEX);
-    if (!found) return null;
-
-    const columnsResult = await knex.raw(
-      `PRAGMA index_info('${POOL_CODE_INDEX}')`,
-    );
-    const columns = Array.isArray(columnsResult)
-      ? columnsResult
-      : columnsResult?.rows ?? [];
-    return {
-      unique: Number(found.unique) === 1,
-      columns: [...columns]
-        .sort((left, right) => Number(left.seqno) - Number(right.seqno))
-        .map((row) => String(row.name)),
-    };
-  }
-
+async function postgresGuardsExist(knex) {
+  if (!isPostgres(knex)) return false;
   const result = await knex.raw(
-    "SELECT non_unique, column_name, seq_in_index " +
-      "FROM information_schema.statistics " +
-      "WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? " +
-      "ORDER BY seq_in_index",
-    [UNIQUE_CODES_TABLE, POOL_CODE_INDEX],
+    `SELECT COUNT(*)::int AS count
+       FROM pg_trigger
+      WHERE NOT tgisinternal
+        AND tgname IN (?, ?)`,
+    [LINK_GUARD_TRIGGER, CODE_GUARD_TRIGGER],
   );
-  const rows = result?.[0] ?? result?.rows ?? [];
-  if (!Array.isArray(rows) || rows.length === 0) return null;
-  return rows;
+  return Number(result?.rows?.[0]?.count ?? 0) === 2;
 }
 
-function indexDefinitionIsExpected(knex, definition) {
-  if (!definition) return false;
+/**
+ * PostgreSQL cannot express a unique constraint whose key spans the Strapi
+ * relation table and the related row's code value. Two small triggers provide
+ * that final database boundary without adding a duplicate pool_id column:
+ *
+ * - linking a code to a pool rejects an existing equal code in that pool;
+ * - changing a linked code value performs the same check.
+ */
+async function installPostgresGuards(knex) {
+  if (!isPostgres(knex)) return false;
 
-  if (isPostgres(knex)) {
-    const canonical = String(definition)
-      .toLowerCase()
-      .replace(/["`\s]/gu, "");
-    return canonical.includes("createuniqueindex") &&
-      canonical.includes(UNIQUE_CODES_TABLE) &&
-      canonical.includes("(pool_id,code)");
-  }
+  await knex.raw(`
+    CREATE OR REPLACE FUNCTION "${LINK_GUARD_FUNCTION}"()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    DECLARE
+      candidate_code text;
+    BEGIN
+      SELECT "code"
+        INTO candidate_code
+        FROM "${UNIQUE_CODES_TABLE}"
+       WHERE "id" = NEW."${POOL_LINK_CODE_COLUMN}";
 
-  if (isSqlite(knex)) {
-    return definition.unique === true &&
-      definition.columns?.length === 2 &&
-      definition.columns[0] === "pool_id" &&
-      definition.columns[1] === "code";
-  }
+      IF candidate_code IS NULL THEN
+        RETURN NEW;
+      END IF;
 
-  return definition.length === 2 &&
-    definition.every((row) => Number(row.non_unique) === 0) &&
-    String(definition[0].column_name) === "pool_id" &&
-    String(definition[1].column_name) === "code";
-}
+      IF EXISTS (
+        SELECT 1
+          FROM "${POOL_LINK_TABLE}" existing_link
+          JOIN "${UNIQUE_CODES_TABLE}" existing_code
+            ON existing_code."id" = existing_link."${POOL_LINK_CODE_COLUMN}"
+         WHERE existing_link."${POOL_LINK_POOL_COLUMN}" =
+               NEW."${POOL_LINK_POOL_COLUMN}"
+           AND existing_link."${POOL_LINK_CODE_COLUMN}" <>
+               NEW."${POOL_LINK_CODE_COLUMN}"
+           AND existing_code."code" = candidate_code
+      ) THEN
+        RAISE EXCEPTION 'duplicate unique coupon code in pool'
+          USING ERRCODE = '23505',
+                CONSTRAINT = '${POOL_CODE_GUARD}';
+      END IF;
 
-async function ensurePoolCodeUniqueIndex(knex) {
-  const existing = await namedIndexDefinition(knex);
-  if (existing) {
-    if (!indexDefinitionIsExpected(knex, existing)) {
-      throw new Error(
-        `${POOL_CODE_INDEX} exists but is not the expected unique (pool_id, code) index`,
-      );
-    }
-    return false;
-  }
+      RETURN NEW;
+    END;
+    $$;
+  `);
 
-  if (isPostgres(knex) || isSqlite(knex)) {
-    await knex.raw(
-      `CREATE UNIQUE INDEX IF NOT EXISTS "${POOL_CODE_INDEX}" ` +
-        `ON "${UNIQUE_CODES_TABLE}" ("pool_id", "code")`,
-    );
-  } else {
-    await knex.schema.alterTable(UNIQUE_CODES_TABLE, (table) => {
-      table.unique(["pool_id", "code"], POOL_CODE_INDEX);
-    });
-  }
+  await knex.raw(`
+    CREATE OR REPLACE FUNCTION "${CODE_GUARD_FUNCTION}"()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    BEGIN
+      IF NEW."code" IS NOT DISTINCT FROM OLD."code" THEN
+        RETURN NEW;
+      END IF;
+
+      IF EXISTS (
+        SELECT 1
+          FROM "${POOL_LINK_TABLE}" own_link
+          JOIN "${POOL_LINK_TABLE}" existing_link
+            ON existing_link."${POOL_LINK_POOL_COLUMN}" =
+               own_link."${POOL_LINK_POOL_COLUMN}"
+           AND existing_link."${POOL_LINK_CODE_COLUMN}" <> NEW."id"
+          JOIN "${UNIQUE_CODES_TABLE}" existing_code
+            ON existing_code."id" =
+               existing_link."${POOL_LINK_CODE_COLUMN}"
+         WHERE own_link."${POOL_LINK_CODE_COLUMN}" = NEW."id"
+           AND existing_code."code" = NEW."code"
+      ) THEN
+        RAISE EXCEPTION 'duplicate unique coupon code in pool'
+          USING ERRCODE = '23505',
+                CONSTRAINT = '${POOL_CODE_GUARD}';
+      END IF;
+
+      RETURN NEW;
+    END;
+    $$;
+  `);
+
+  await knex.raw(
+    `DROP TRIGGER IF EXISTS "${LINK_GUARD_TRIGGER}" ` +
+      `ON "${POOL_LINK_TABLE}"`,
+  );
+  await knex.raw(`
+    CREATE TRIGGER "${LINK_GUARD_TRIGGER}"
+    BEFORE INSERT OR UPDATE OF
+      "${POOL_LINK_CODE_COLUMN}", "${POOL_LINK_POOL_COLUMN}"
+    ON "${POOL_LINK_TABLE}"
+    FOR EACH ROW
+    EXECUTE FUNCTION "${LINK_GUARD_FUNCTION}"()
+  `);
+
+  await knex.raw(
+    `DROP TRIGGER IF EXISTS "${CODE_GUARD_TRIGGER}" ` +
+      `ON "${UNIQUE_CODES_TABLE}"`,
+  );
+  await knex.raw(`
+    CREATE TRIGGER "${CODE_GUARD_TRIGGER}"
+    BEFORE UPDATE OF "code"
+    ON "${UNIQUE_CODES_TABLE}"
+    FOR EACH ROW
+    EXECUTE FUNCTION "${CODE_GUARD_FUNCTION}"()
+  `);
+
   return true;
 }
 
 async function removeDuplicateCodes(knex) {
-  const groups = await knex(UNIQUE_CODES_TABLE)
-    .select("pool_id", "code")
-    .whereNotNull("pool_id")
-    .whereNotNull("code")
-    .groupBy("pool_id", "code")
+  const groups = await knex(`${POOL_LINK_TABLE} as pool_link`)
+    .join(
+      `${UNIQUE_CODES_TABLE} as unique_code`,
+      `unique_code.id`,
+      `pool_link.${POOL_LINK_CODE_COLUMN}`,
+    )
+    .select(
+      `pool_link.${POOL_LINK_POOL_COLUMN} as pool_id`,
+      "unique_code.code",
+    )
+    .whereNotNull(`pool_link.${POOL_LINK_POOL_COLUMN}`)
+    .whereNotNull("unique_code.code")
+    .groupBy(
+      `pool_link.${POOL_LINK_POOL_COLUMN}`,
+      "unique_code.code",
+    )
     .havingRaw("COUNT(*) > 1");
 
   let removed = 0;
   for (const group of groups) {
-    const rows = await knex(UNIQUE_CODES_TABLE)
-      .where({ pool_id: group.pool_id, code: group.code })
-      .select("id", "is_used", "used_at");
+    const rows = await knex(`${POOL_LINK_TABLE} as pool_link`)
+      .join(
+        `${UNIQUE_CODES_TABLE} as unique_code`,
+        "unique_code.id",
+        `pool_link.${POOL_LINK_CODE_COLUMN}`,
+      )
+      .where(`pool_link.${POOL_LINK_POOL_COLUMN}`, group.pool_id)
+      .where("unique_code.code", group.code)
+      .select(
+        "unique_code.id",
+        "unique_code.is_used",
+        "unique_code.used_at",
+      );
     const keeper = chooseDuplicateKeeper(rows);
     const duplicateIds = rows
       .filter((row) => row.id !== keeper?.id)
       .map((row) => row.id);
 
     if (duplicateIds.length > 0) {
+      await knex(POOL_LINK_TABLE)
+        .whereIn(POOL_LINK_CODE_COLUMN, duplicateIds)
+        .delete();
       await knex(UNIQUE_CODES_TABLE).whereIn("id", duplicateIds).delete();
       removed += duplicateIds.length;
     }
@@ -183,17 +240,22 @@ async function removeDuplicateCodes(knex) {
 async function recountPools(knex) {
   await knex(POOLS_TABLE).update({ total_codes: 0, used_codes: 0 });
 
-  const counts = await knex(UNIQUE_CODES_TABLE)
-    .select("pool_id")
-    .whereNotNull("pool_id")
+  const counts = await knex(`${POOL_LINK_TABLE} as pool_link`)
+    .join(
+      `${UNIQUE_CODES_TABLE} as unique_code`,
+      "unique_code.id",
+      `pool_link.${POOL_LINK_CODE_COLUMN}`,
+    )
+    .select(`pool_link.${POOL_LINK_POOL_COLUMN} as pool_id`)
+    .whereNotNull(`pool_link.${POOL_LINK_POOL_COLUMN}`)
     .count({ total_codes: "*" })
     .sum({
       used_codes: knex.raw("CASE WHEN ?? = ? THEN 1 ELSE 0 END", [
-        "is_used",
+        "unique_code.is_used",
         true,
       ]),
     })
-    .groupBy("pool_id");
+    .groupBy(`pool_link.${POOL_LINK_POOL_COLUMN}`);
 
   for (const row of counts) {
     await knex(POOLS_TABLE)
@@ -207,49 +269,38 @@ async function recountPools(knex) {
 
 /**
  * Run inside the caller's transaction. Strapi runs user migrations before
- * schema sync on a fresh database, so an absent table is an expected skip;
- * bootstrap invokes the same function after schema sync.
+ * schema sync on a fresh database, so absent relation tables are an expected
+ * skip; bootstrap invokes the same function again after schema sync.
  */
 async function reconcileUniqueCodeIntegrity(knex, logger = console) {
-  const hasCodes = await knex.schema.hasTable(UNIQUE_CODES_TABLE);
-  const hasPools = await knex.schema.hasTable(POOLS_TABLE);
-  if (!hasCodes || !hasPools) {
+  const [hasCodes, hasPools, hasLinks] = await Promise.all([
+    knex.schema.hasTable(UNIQUE_CODES_TABLE),
+    knex.schema.hasTable(POOLS_TABLE),
+    knex.schema.hasTable(POOL_LINK_TABLE),
+  ]);
+  if (!hasCodes || !hasPools || !hasLinks) {
     logger.info(
       "Unique-code integrity: tables are not available yet; bootstrap will retry after schema sync",
     );
-    return { attempted: false, removed: 0, indexCreated: false };
+    return { attempted: false, removed: 0, guardCreated: false };
   }
 
   await acquireReconcileLock(knex);
 
-  // Creating the unique index REQUIRES a duplicate-free table, so the
-  // duplicate scan cannot simply run after it. But once the index exists it
-  // makes duplicates impossible, so the full-table GROUP BY that
-  // removeDuplicateCodes pays is pointless on every healthy boot. Check the
-  // index first (without creating): present and well-formed → skip the scan
-  // entirely; missing → dedupe, then create, exactly as before.
-  const existingIndex = await namedIndexDefinition(knex);
-  if (existingIndex) {
-    if (!indexDefinitionIsExpected(knex, existingIndex)) {
-      throw new Error(
-        `${POOL_CODE_INDEX} exists but is not the expected unique (pool_id, code) index`,
-      );
-    }
-    return { attempted: true, removed: 0, indexCreated: false };
+  if (await postgresGuardsExist(knex)) {
+    return { attempted: true, removed: 0, guardCreated: false };
   }
 
   const removed = await removeDuplicateCodes(knex);
-  const indexCreated = await ensurePoolCodeUniqueIndex(knex);
-  if (removed > 0 || indexCreated) {
-    await recountPools(knex);
-  }
+  const guardCreated = await installPostgresGuards(knex);
+  await recountPools(knex);
 
   if (removed > 0) {
     logger.warn(
       `Unique-code integrity: removed ${removed} duplicate row${removed === 1 ? "" : "s"}`,
     );
   }
-  return { attempted: true, removed, indexCreated };
+  return { attempted: true, removed, guardCreated };
 }
 
 async function reconcileUniqueCodeIntegrityAfterSchemaSync(
@@ -260,9 +311,13 @@ async function reconcileUniqueCodeIntegrityAfterSchemaSync(
 }
 
 module.exports = {
-  POOL_CODE_INDEX,
+  CODE_GUARD_TRIGGER,
+  LINK_GUARD_TRIGGER,
+  POOL_CODE_GUARD,
+  POOL_LINK_TABLE,
   chooseDuplicateKeeper,
-  indexDefinitionIsExpected,
+  installPostgresGuards,
+  postgresGuardsExist,
   reconcileUniqueCodeIntegrity,
   reconcileUniqueCodeIntegrityAfterSchemaSync,
 };

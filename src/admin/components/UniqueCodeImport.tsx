@@ -23,7 +23,7 @@
  * DEFAULT_CHUNK_SIZE (2,000) instead — worst case ~514 KB per request.
  *
  * Re-upload is idempotent per pool: the service ignores rows already protected
- * by the database's unique (pool_id, code) index. If an HTTP batch fails, the
+ * by the database's pool/code relation guards. If an HTTP batch fails, the
  * reducer keeps exactly that batch available for retry and clears every batch
  * the server accepted.
  */
@@ -147,7 +147,8 @@ const UniqueCodeImport = ({ documentId }: { documentId?: string }) => {
     setProgress({ done: 0, total: chunks.length });
 
     // Sequential requests keep progress and retry boundaries predictable.
-    // The server transaction + unique index still provide concurrency safety.
+    // The pool-row lock plus PostgreSQL relation guards provide concurrency
+    // safety across requests and direct relation writes.
     for (const [index, chunk] of chunks.entries()) {
       try {
         const { data } = await post(UPLOAD_PATH, {
