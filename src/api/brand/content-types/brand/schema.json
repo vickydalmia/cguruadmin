@@ -18,7 +18,8 @@
     "slug": {
       "type": "uid",
       "targetField": "name",
-      "required": true
+      "required": true,
+      "regex": "^[a-z0-9]+([-.][a-z0-9]+)*$"
     },
     "description": {
       "type": "richtext",
@@ -43,7 +44,7 @@
     },
     "websiteUrl": {
       "type": "string",
-      "regex": "^https?://.+",
+      "regex": "^https?://[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?([.][a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+(:[0-9]{1,5})?([/?#]\\S*)?$",
       "searchable": false
     },
     "ratingAverage": {

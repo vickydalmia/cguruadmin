@@ -275,3 +275,86 @@ describe('homepage aggregate offer population', () => {
     expect(harness.findManyDeals).not.toHaveBeenCalled();
   });
 });
+
+describe('public route metadata aggregate', () => {
+  it('returns only managed page and active-job indexing metadata', async () => {
+    const rows: Record<string, any> = {
+      'api::homepage.homepage': {
+        documentId: 'home-1',
+        updatedAt: '2026-07-23T10:00:00.000Z',
+        seo: { noIndex: true },
+      },
+      'api::about-page.about-page': {
+        documentId: 'about-1',
+        updatedAt: new Date('2026-07-22T10:00:00.000Z'),
+        seo: { noIndex: false },
+      },
+      'api::career-page.career-page': null,
+      'api::deal-of-the-day-page.deal-of-the-day-page': {
+        documentId: 'dotd-1',
+        seo: { noIndex: true },
+      },
+    };
+    const findFirstByUid = new Map<string, ReturnType<typeof vi.fn>>();
+    const findManyJobs = vi.fn().mockResolvedValue([
+      {
+        documentId: 'job-1',
+        slug: 'seo-editor',
+        updatedAt: '2026-07-21T10:00:00.000Z',
+        seo: { noIndex: true },
+      },
+      { documentId: 'job-bad', slug: '../admin', seo: { noIndex: false } },
+    ]);
+    const documents = vi.fn((uid: string) => {
+      if (uid === 'api::job.job') return { findMany: findManyJobs };
+      const findFirst =
+        findFirstByUid.get(uid) ??
+        vi.fn().mockResolvedValue(rows[uid] ?? null);
+      findFirstByUid.set(uid, findFirst);
+      return { findFirst };
+    });
+    const controller = createHomepageController({
+      strapi: { documents } as any,
+    });
+    const ctx = { send: vi.fn((payload: any) => payload) };
+
+    const response = await controller.publicRouteMetadata(ctx as any);
+
+    expect(response.data).toEqual([
+      {
+        path: '/',
+        updatedAt: '2026-07-23T10:00:00.000Z',
+        noIndex: true,
+      },
+      {
+        path: '/about-us/',
+        updatedAt: '2026-07-22T10:00:00.000Z',
+        noIndex: false,
+      },
+      {
+        path: '/deal-of-the-day/',
+        noIndex: true,
+      },
+      {
+        path: '/careers/seo-editor/',
+        updatedAt: '2026-07-21T10:00:00.000Z',
+        noIndex: true,
+      },
+    ]);
+    expect(findManyJobs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filters: { isActive: true },
+        fields: ['documentId', 'slug', 'updatedAt'],
+        populate: { seo: { fields: ['noIndex'] } },
+      }),
+    );
+    for (const findFirst of findFirstByUid.values()) {
+      expect(findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fields: ['documentId', 'updatedAt'],
+          populate: { seo: { fields: ['noIndex'] } },
+        }),
+      );
+    }
+  });
+});

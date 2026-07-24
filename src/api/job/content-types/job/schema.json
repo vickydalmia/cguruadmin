@@ -10,7 +10,7 @@
   "options": { "draftAndPublish": false },
   "attributes": {
     "title": { "type": "string", "required": true, "maxLength": 120 },
-    "slug": { "type": "uid", "targetField": "title", "required": true },
+    "slug": { "type": "uid", "targetField": "title", "required": true, "regex": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
     "category": { "type": "string", "required": true, "maxLength": 60 },
     "experience": { "type": "string", "maxLength": 60 },
     "employmentType": { "type": "string", "maxLength": 60 },

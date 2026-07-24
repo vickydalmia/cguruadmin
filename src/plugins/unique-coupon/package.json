@@ -2,6 +2,15 @@
   "name": "unique-coupon",
   "version": "1.0.0",
   "description": "Manage unique coupon code pools with race-condition safe redemption",
+  "exports": {
+    "./strapi-server": {
+      "source": "./server/src/index.ts",
+      "import": "./dist/server/index.mjs",
+      "require": "./dist/server/index.js",
+      "default": "./dist/server/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "strapi": {
     "name": "unique-coupon",
     "displayName": "Unique Coupon",

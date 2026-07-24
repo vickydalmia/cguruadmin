@@ -1,7 +1,7 @@
 import Logo from './extensions/logo-icon.svg';
 
 import type { StrapiApp } from '@strapi/strapi/admin';
-import { useFetchClient, useForm } from '@strapi/strapi/admin';
+import { useFetchClient, useForm, useRBAC } from '@strapi/strapi/admin';
 import type { PanelComponent } from '@strapi/content-manager/strapi-admin';
 import * as React from 'react';
 import {
@@ -32,6 +32,9 @@ import DateTimeInput from './components/DateTimeInput';
 import BooleanConfirmInput from './components/BooleanConfirmInput';
 import SlugInput from './components/SlugInput';
 import PublicOfferLinkAction from './components/PublicOfferLinkAction';
+import EntryLinkCell from './components/EntryLinkCell';
+import UniqueCodeImport from './components/UniqueCodeImport';
+import { isLinkableCellType } from './utils/entry-link';
 
 type RelationConfig = {
   field: string;
@@ -656,6 +659,34 @@ const EntityTopPickCouponPanel: PanelComponent = ({ model, documentId }) => {
   };
 };
 
+// Bulk code import. The server-side importer already existed and was fully
+// implemented — this panel is the only thing that was missing, so editors had
+// no way to load a pool without hitting the API by hand.
+const UNIQUE_CODE_IMPORT_UID = 'api::unique-coupon-pool.unique-coupon-pool';
+
+// Registered by the plugin server (src/plugins/unique-coupon/server/src/
+// index.ts) and enforced on its upload/stats routes; granted per role under
+// Settings > Roles > Plugins. Module-level so useRBAC sees a stable reference.
+const UNIQUE_CODE_IMPORT_PERMISSIONS = [
+  { action: 'plugin::unique-coupon.codes.import' },
+];
+
+const UniqueCodeImportPanel: PanelComponent = ({ model, documentId }) => {
+  // Called before the model early-return so the hook order never changes.
+  const { isLoading, allowedActions } = useRBAC(UNIQUE_CODE_IMPORT_PERMISSIONS);
+
+  if (model !== UNIQUE_CODE_IMPORT_UID) return null;
+
+  // While permissions load, show nothing rather than flashing a panel that may
+  // disappear; the server enforces the same action, this only hides the UI.
+  if (isLoading || !allowedActions.canImport) return null;
+
+  return {
+    title: 'Import codes',
+    content: <UniqueCodeImport documentId={documentId} />,
+  };
+};
+
 // ---------------------------------------------------------------------------
 // Validation-problems panel (homepage and Deal of the Day). Client-side checks
 // and the server-side image validator put their errors into the same nested
@@ -824,6 +855,56 @@ const ValidationProblemsPanel: PanelComponent = ({ model }) => {
   };
 };
 
+/**
+ * Content-manager list rows are `<tr>`s with a JS click handler, so middle-click,
+ * Cmd-click and right-click → "Open in New Tab" all do nothing and editors can't
+ * fan a review queue out into tabs. Strapi CE exposes no cell override; the only
+ * supported seam is this waterfall, whose `cellFormatter` fully owns a cell's
+ * rendering — so re-render the lead column as a real `<a href>` to the edit view.
+ *
+ * Scoped to the FIRST column (the one editors aim at) and to plain-text
+ * attributes on purpose: taking over a relation/media/component cell would mean
+ * reimplementing its popovers and thumbnails, and a broken list view blocks all
+ * content editing. i18n appends its "Available in" column to the END of this
+ * same list, so the first entry is always a real content column.
+ */
+const INJECT_COLUMN_IN_TABLE = 'Admin/CM/pages/ListView/inject-column-in-table';
+
+type ListViewHeaders = { displayedHeaders: any[]; layout: unknown };
+
+const linkifyFirstColumnHook = ({ displayedHeaders, layout }: ListViewHeaders) => {
+  const [first, ...rest] = displayedHeaders ?? [];
+
+  // Leave the table untouched unless the lead column is plain text and no other
+  // plugin has already claimed its rendering.
+  if (!first || first.cellFormatter || !isLinkableCellType(first.attribute?.type)) {
+    return { displayedHeaders, layout };
+  }
+
+  return {
+    layout,
+    displayedHeaders: [
+      {
+        ...first,
+        // Returning an element (not calling hooks here) matters: cellFormatter is
+        // invoked inline in the row loop, so useHref must live one component down.
+        cellFormatter: (row: any, header: any, meta: any) => (
+          <EntryLinkCell
+            collectionType={meta?.collectionType}
+            model={meta?.model}
+            documentId={row?.documentId}
+            // Same lookup Strapi's own CellContent does: the header name is
+            // suffixed with `.mainField` before it reaches us.
+            content={row?.[String(header?.name ?? '').split('.')[0]]}
+            withTooltip={header?.attribute?.type === 'string'}
+          />
+        ),
+      },
+      ...rest,
+    ],
+  };
+};
+
 export default {
   register(app: StrapiApp) {
     // Replace the built-in markdown editor for ALL `richtext` fields with the
@@ -870,8 +951,13 @@ export default {
     apis.addEditViewSidePanel([
       RelationMultiSelectPanel,
       EntityTopPickCouponPanel,
+      UniqueCodeImportPanel,
       ValidationProblemsPanel,
     ]);
+
+    // Registered after every plugin's bootstrap, so this sees (and preserves)
+    // any column i18n or review-workflows already injected.
+    app.registerHook(INJECT_COLUMN_IN_TABLE, linkifyFirstColumnHook);
 
     if (typeof document !== 'undefined') {
       const rewrite = () => {

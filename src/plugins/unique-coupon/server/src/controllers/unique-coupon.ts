@@ -1,5 +1,13 @@
 import type { Core } from '@strapi/strapi';
 
+/**
+ * Per-request ceiling for uploadCodes. The admin client already posts in
+ * batches of 2,000 (DEFAULT_CHUNK_SIZE in src/admin/utils/parse-codes.ts);
+ * this rejects hand-rolled API calls that would hold the pool import lock
+ * for an unbounded number of rows in a single transaction.
+ */
+export const MAX_CODES_PER_REQUEST = 2000;
+
 const uniqueCouponController = ({ strapi }: { strapi: Core.Strapi }) => ({
 
   async redeem(ctx) {
@@ -28,7 +36,11 @@ const uniqueCouponController = ({ strapi }: { strapi: Core.Strapi }) => ({
   async uploadCodes(ctx) {
     const { poolDocumentId, codes } = ctx.request.body;
 
-    if (!poolDocumentId || !codes || !Array.isArray(codes)) {
+    if (
+      typeof poolDocumentId !== 'string' ||
+      !poolDocumentId.trim() ||
+      !Array.isArray(codes)
+    ) {
       return ctx.badRequest('poolDocumentId and codes array required');
     }
 
@@ -36,16 +48,51 @@ const uniqueCouponController = ({ strapi }: { strapi: Core.Strapi }) => ({
       return ctx.badRequest('Codes array cannot be empty');
     }
 
-    if (codes.length > 100000) {
-      return ctx.badRequest('Maximum 100,000 codes per upload');
+    // Matches the admin client's chunker (DEFAULT_CHUNK_SIZE in
+    // src/admin/utils/parse-codes.ts) — one import request holds the pool row
+    // lock for the whole transaction, so a bounded chunk keeps that hold short.
+    if (codes.length > MAX_CODES_PER_REQUEST) {
+      return ctx.badRequest(
+        `Maximum ${MAX_CODES_PER_REQUEST.toLocaleString('en-US')} codes per request — split larger imports into chunks of at most ${MAX_CODES_PER_REQUEST.toLocaleString('en-US')} codes`,
+      );
     }
 
-    const result = await strapi
-      .plugin('unique-coupon')
-      .service('unique-coupon')
-      .importCodes(poolDocumentId, codes);
+    const normalizedCodes: string[] = [];
+    for (const [index, value] of codes.entries()) {
+      if (typeof value !== 'string') {
+        return ctx.badRequest(`Code ${index + 1} must be a string`);
+      }
+      const code = value.trim();
+      if (!code) {
+        return ctx.badRequest(`Code ${index + 1} cannot be blank`);
+      }
+      if (code.length > 255) {
+        return ctx.badRequest(`Code ${index + 1} exceeds 255 characters`);
+      }
+      if (/[\u0000-\u001f\u007f-\u009f]/u.test(code)) {
+        return ctx.badRequest(`Code ${index + 1} contains control characters`);
+      }
+      normalizedCodes.push(code);
+    }
 
-    return ctx.send({ success: true, imported: result.imported, total: result.total });
+    try {
+      const result = await strapi
+        .plugin('unique-coupon')
+        .service('unique-coupon')
+        .importCodes(poolDocumentId.trim(), normalizedCodes);
+
+      return ctx.send({
+        success: true,
+        imported: result.imported,
+        skipped: result.skipped,
+        total: result.total,
+      });
+    } catch (error) {
+      if ((error as any)?.code === 'POOL_NOT_FOUND') {
+        return ctx.notFound('Pool not found');
+      }
+      throw error;
+    }
   },
 
   async getStats(ctx) {

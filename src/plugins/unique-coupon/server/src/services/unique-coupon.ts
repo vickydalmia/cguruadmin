@@ -29,6 +29,15 @@ function isPostgres(knex: any): boolean {
   return ['pg', 'postgres', 'postgresql'].includes(client);
 }
 
+function isSqlite(knex: any): boolean {
+  const client = knex?.client?.config?.client ?? '';
+  return ['sqlite', 'sqlite3', 'better-sqlite3'].includes(client);
+}
+
+function countValue(row: any, column = 'count'): number {
+  return Number(row?.[column] ?? 0) || 0;
+}
+
 const uniqueCouponService = ({ strapi }: { strapi: Core.Strapi }) => ({
 
   /**
@@ -39,6 +48,15 @@ const uniqueCouponService = ({ strapi }: { strapi: Core.Strapi }) => ({
     const knex = strapi.db.connection;
     let retries = 0;
     const useAdvisoryLock = isPostgres(knex);
+
+    // The non-Postgres fallback below issues a raw FOR UPDATE SKIP LOCKED,
+    // which SQLite cannot parse — every attempt would error until the loop
+    // gives up with MAX_RETRIES_EXCEEDED. Fail fast with the real reason.
+    if (!useAdvisoryLock && isSqlite(knex)) {
+      throw new Error(
+        'unique-code redemption requires PostgreSQL or MySQL 8+ (SQLite does not support FOR UPDATE SKIP LOCKED)',
+      );
+    }
 
     const pool = await resolvePool(knex, poolDocumentId, ['id', 'name']);
     if (!pool) {
@@ -125,42 +143,99 @@ const uniqueCouponService = ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   /**
-   * Bulk import codes into a pool.
-   * Generates Strapi v5-compatible document_id for every row.
+   * Bulk import codes into a pool atomically.
+   *
+   * The pool row serializes concurrent imports while the database's composite
+   * unique index on (pool_id, code) is the final safety boundary. Existing
+   * codes are ignored.
+   *
+   * The pool row lock also blocks redeemCode's counter increment, so the work
+   * held under it must stay O(chunk), not O(pool size): on Postgres the driver
+   * reports how many rows each INSERT .. ON CONFLICT DO NOTHING actually wrote
+   * (pg's rowCount excludes ignored conflicts), and total_codes is incremented
+   * by that sum. Other dialects don't surface that count through knex's insert
+   * response, so they fall back to a before/after COUNT(*). used_codes is not
+   * touched here — an import never changes usage, and redeemCode maintains it.
    */
   async importCodes(poolDocumentId: string, codes: string[], batchSize = 100) {
     const knex = strapi.db.connection;
     const totalCodes = codes.length;
-    let imported = 0;
-
-    const pool = await resolvePool(knex, poolDocumentId, ['id']);
-    if (!pool) {
-      throw new Error(`Pool not found: ${poolDocumentId}`);
-    }
-
     const uniqueCodes = [...new Set(codes.map((c) => c.trim()).filter((c) => c))];
+    const safeBatchSize = Math.max(1, Math.floor(batchSize));
 
-    for (let i = 0; i < uniqueCodes.length; i += batchSize) {
-      const now = new Date();
-      const batch = uniqueCodes.slice(i, i + batchSize).map((code) => ({
-        document_id: createId(),
-        code,
-        pool_id: pool.id,
-        is_used: false,
-        version: 0,
-        created_at: now,
-        updated_at: now,
-      }));
+    return knex.transaction(async (trx) => {
+      const poolQuery = trx('unique_coupon_pools')
+        .where({ document_id: poolDocumentId })
+        .select('id')
+        .first();
+      if (!isSqlite(trx)) poolQuery.forUpdate();
+      const pool = await poolQuery;
 
-      await knex('unique_codes').insert(batch);
-      imported += batch.length;
+      if (!pool) {
+        const error = new Error(`Pool not found: ${poolDocumentId}`);
+        (error as any).code = 'POOL_NOT_FOUND';
+        throw error;
+      }
 
-      await knex('unique_coupon_pools')
-        .where({ id: pool.id })
-        .update({ total_codes: knex.raw('total_codes + ?', [batch.length]) });
-    }
+      const countInsertedRows = isPostgres(trx);
 
-    return { imported, total: totalCodes };
+      const before = countInsertedRows
+        ? undefined
+        : await trx('unique_codes')
+            .where({ pool_id: pool.id })
+            .count({ count: '*' })
+            .first();
+
+      let insertedRows = 0;
+      for (let i = 0; i < uniqueCodes.length; i += safeBatchSize) {
+        const now = new Date();
+        const batch = uniqueCodes.slice(i, i + safeBatchSize).map((code) => ({
+          document_id: createId(),
+          code,
+          pool_id: pool.id,
+          is_used: false,
+          version: 0,
+          created_at: now,
+          updated_at: now,
+        }));
+
+        const result = await trx('unique_codes')
+          .insert(batch)
+          .onConflict(['pool_id', 'code'])
+          .ignore();
+
+        // knex + pg returns the driver's Result for an INSERT without
+        // RETURNING; its rowCount counts only the rows actually written.
+        if (countInsertedRows) {
+          insertedRows += Number((result as any)?.rowCount ?? 0) || 0;
+        }
+      }
+
+      let imported: number;
+      if (countInsertedRows) {
+        imported = insertedRows;
+        if (imported > 0) {
+          await trx('unique_coupon_pools')
+            .where({ id: pool.id })
+            .increment('total_codes', imported);
+        }
+      } else {
+        const after = await trx('unique_codes')
+          .where({ pool_id: pool.id })
+          .count({ count: '*' })
+          .first();
+        imported = Math.max(0, countValue(after) - countValue(before));
+        await trx('unique_coupon_pools')
+          .where({ id: pool.id })
+          .update({ total_codes: countValue(after) });
+      }
+
+      return {
+        imported,
+        skipped: Math.max(0, totalCodes - imported),
+        total: totalCodes,
+      };
+    });
   },
 
   /**

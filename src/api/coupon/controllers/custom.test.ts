@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 function createHarness() {
-  vi.stubEnv('ISR_REVALIDATE_SECRET', REDEEM_TEST_SECRET);
+  vi.stubEnv('ISR_ADMIN_SECRET', REDEEM_TEST_SECRET);
 
   const couponFindMany = vi.fn().mockResolvedValue([]);
   const couponFindOne = vi.fn().mockResolvedValue(null);
@@ -75,6 +75,42 @@ function createHarness() {
     entityFindMany,
   };
 }
+
+describe('ISR offer route inventory', () => {
+  it('returns every currently visible Coupon and Deal singular route', async () => {
+    const harness = createHarness();
+    harness.couponFindMany.mockResolvedValue([
+      { id: 123, updatedAt: '2026-07-24T10:00:00.000Z' },
+      { id: 0, updatedAt: 'invalid-id-is-skipped' },
+    ]);
+    harness.dealFindMany.mockResolvedValue([
+      { id: 456, updatedAt: '2026-07-24T11:00:00.000Z' },
+    ]);
+
+    await harness.controller.getIsrOfferRoutes(harness.ctx);
+
+    expect(harness.ctx.send).toHaveBeenCalledWith({
+      data: [
+        {
+          path: '/coupon/123/',
+          updatedAt: '2026-07-24T10:00:00.000Z',
+        },
+        {
+          path: '/deal/456/',
+          updatedAt: '2026-07-24T11:00:00.000Z',
+        },
+      ],
+    });
+    expect(harness.couponFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fields: ['updatedAt'],
+        start: 0,
+        limit: 100,
+      }),
+    );
+    expect(harness.dealFindMany).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('public Coupon detail aggregate', () => {
   it('resolves a numeric Coupon id without exposing affiliate destinations', async () => {
@@ -318,6 +354,92 @@ describe('entity Coupon population', () => {
     ]);
     expect(payload.pagination.total).toBe(2);
   });
+
+  it('pushes the curated-head cap into the relation populate query itself', async () => {
+    const harness = createHarness();
+
+    await harness.controller.getCouponsByEntity(harness.ctx as any);
+
+    // The id-only relation read is bounded in SQL (link-table order + LIMIT),
+    // not just by the JS slice: with a 1300+-member category the unbounded
+    // populate was the expensive part.
+    const entityQuery = harness.entityFindMany.mock.calls[0]?.[0];
+    expect(entityQuery.populate.coupons).toMatchObject({
+      fields: ['documentId'],
+      limit: 50,
+    });
+    // Only the drag-order head is capped — the curated Top Picks populate keeps
+    // its own (validator-enforced) bound.
+    expect(entityQuery.populate.topPickCoupons.limit).toBeUndefined();
+  });
+
+  it('caps the curated head so newly tagged offers stay inside the frontend read window', async () => {
+    const harness = createHarness();
+    harness.ctx.state.entityType = 'category';
+    harness.ctx.query.pageSize = '50';
+    // A large category: 120 coupons dragged into the relation. Strapi appends
+    // newly connected coupons at the tail, so without a cap the newest ones sit
+    // past page 2 — outside the frontend's 4-page window.
+    const orderedIds = Array.from({ length: 120 }, (_, index) =>
+      `c-${String(index).padStart(3, '0')}`,
+    );
+    harness.entityFindMany.mockResolvedValue([
+      {
+        documentId: 'category-articles',
+        name: 'Articles',
+        slug: 'articles',
+        coupons: orderedIds.map((documentId) => ({ documentId })),
+      },
+    ]);
+    // The 70 members displaced out of the curated head become "rest".
+    harness.couponCount.mockResolvedValue(70);
+    harness.couponFindMany.mockResolvedValue(
+      orderedIds.slice(0, 50).map((documentId) => ({ documentId, title: documentId })),
+    );
+
+    const payload = await harness.controller.getCouponsByEntity(harness.ctx as any);
+
+    // Only the first 50 drag positions are hydrated.
+    const hydrationQuery = harness.couponFindMany.mock.calls[0]?.[0];
+    expect(hydrationQuery.filters.documentId.$in).toHaveLength(50);
+    expect(hydrationQuery.filters.documentId.$in[0]).toBe('c-000');
+    expect(hydrationQuery.filters.documentId.$in[49]).toBe('c-049');
+    // The $notIn exclusion shrinks from 120 to 50 elements — the query-cost
+    // shape that previously produced 504s on this database.
+    const restCountQuery = harness.couponCount.mock.calls[0]?.[0];
+    expect(restCountQuery.filters.documentId.$notIn).toHaveLength(50);
+    // Membership is unchanged: the displaced 70 are still counted and reachable.
+    expect(payload.coupons).toHaveLength(50);
+    expect(payload.pagination.total).toBe(120);
+  });
+
+  it('leaves an entity below the cap behaving exactly as before', async () => {
+    const harness = createHarness();
+    harness.ctx.state.entityType = 'category';
+    const orderedIds = Array.from({ length: 10 }, (_, index) => `c-${index}`);
+    harness.entityFindMany.mockResolvedValue([
+      {
+        documentId: 'category-small',
+        name: 'Small',
+        slug: 'small',
+        coupons: orderedIds.map((documentId) => ({ documentId })),
+      },
+    ]);
+    harness.couponCount.mockResolvedValue(0);
+    harness.couponFindMany.mockResolvedValue(
+      orderedIds.map((documentId) => ({ documentId, title: documentId })),
+    );
+
+    const payload = await harness.controller.getCouponsByEntity(harness.ctx as any);
+
+    // Every drag position is honoured — nothing is truncated below the cap.
+    const hydrationQuery = harness.couponFindMany.mock.calls[0]?.[0];
+    expect(hydrationQuery.filters.documentId.$in).toEqual(orderedIds);
+    const restCountQuery = harness.couponCount.mock.calls[0]?.[0];
+    expect(restCountQuery.filters.documentId.$notIn).toEqual(orderedIds);
+    expect(payload.coupons.map((c: any) => c.documentId)).toEqual(orderedIds);
+    expect(payload.pagination.total).toBe(10);
+  });
 });
 
 describe('entity product Deal population', () => {
@@ -350,6 +472,18 @@ describe('entity product Deal population', () => {
       { publishedAt: 'desc' },
       { updatedAt: 'desc' },
     ]);
+  });
+
+  it('pushes the curated-head cap into the deals relation populate too', async () => {
+    const harness = createHarness();
+
+    await harness.controller.getDealsByEntity(harness.ctx as any);
+
+    const entityQuery = harness.entityFindMany.mock.calls[0]?.[0];
+    expect(entityQuery.populate.deals).toMatchObject({
+      fields: ['documentId'],
+      limit: 50,
+    });
   });
 
   it('appends primaryStore-only deals after the drag-ordered relation', async () => {

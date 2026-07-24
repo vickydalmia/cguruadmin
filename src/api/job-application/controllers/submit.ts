@@ -1,11 +1,11 @@
 import type { Core } from '@strapi/strapi';
 
-const MAX_RESUME_BYTES = 5 * 1024 * 1024;
-const RESUME_MIME_TYPES = new Set([
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-]);
+import {
+  readFirstBytes,
+  validateResumeUpload,
+} from '../../../utils/resume-upload-validation';
+
+const RESUME_TYPE_ERROR = 'Resume must be a PDF or DOCX file.';
 
 const clean = (value: unknown, max: number) =>
   typeof value === 'string' ? value.trim().slice(0, max) : '';
@@ -34,11 +34,35 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       }
     }
     if (!resumeFile) return ctx.badRequest('Please attach your resume.');
-    if (Number(resumeFile.size ?? 0) > MAX_RESUME_BYTES) {
-      return ctx.badRequest('Resume must be 5 MB or smaller.');
+
+    // SECURITY GATE — must stay ahead of the upload service call below. That
+    // service call bypasses the upload plugin's own MIME gate (its controllers
+    // apply security.allowedTypes, its service does not), and the declared
+    // Content-Type is attacker-controlled, so the verdict comes from the
+    // file's magic bytes (src/utils/resume-upload-validation.ts). Size cap
+    // (5 MB) is enforced in the same module.
+    let firstBytes: Uint8Array;
+    try {
+      // Property fallbacks mirror @strapi/upload's mime-validation: formidable
+      // uses `filepath`, older parsers `path`/`tempFilePath`.
+      const tempPath =
+        resumeFile.filepath ?? resumeFile.path ?? resumeFile.tempFilePath;
+      if (!tempPath) throw new Error('uploaded file has no temp path');
+      firstBytes = await readFirstBytes(String(tempPath));
+    } catch {
+      return ctx.badRequest(RESUME_TYPE_ERROR);
     }
-    if (!RESUME_MIME_TYPES.has(String(resumeFile.type ?? resumeFile.mimetype ?? ''))) {
-      return ctx.badRequest('Resume must be a PDF, DOC, or DOCX file.');
+
+    const verdict = await validateResumeUpload({
+      firstBytes,
+      declaredMime: String(resumeFile.type ?? resumeFile.mimetype ?? ''),
+      filename: String(resumeFile.name ?? resumeFile.originalFilename ?? ''),
+      size: Number(resumeFile.size ?? 0),
+    });
+    if (verdict.ok === false) {
+      return verdict.reason === 'too-large'
+        ? ctx.badRequest('Resume must be 5 MB or smaller.')
+        : ctx.badRequest(RESUME_TYPE_ERROR);
     }
 
     const job: any = await strapi.documents('api::job.job' as any).findFirst({

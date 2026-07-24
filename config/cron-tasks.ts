@@ -1,23 +1,5 @@
 import { computeContentStatus } from '../src/utils/content-status';
-import { enqueue } from '../src/static-deployment/queue';
-
-// NOTE on rebuilds: the scheduler flips offers through the Document Service,
-// so every update below passes through the documents middleware in
-// src/index.ts — which enqueues the correct surgical rebuild scope (the
-// offer's related entity pages + homepage) automatically. No explicit
-// enqueue is needed here. BUILD_HOOK_URL remains as an optional external
-// ping (e.g. future CI) — unset it when unused.
-async function triggerRebuild(strapi: any) {
-  const buildHookUrl = process.env.BUILD_HOOK_URL?.trim();
-  if (!buildHookUrl) return;
-
-  try {
-    await fetch(buildHookUrl, { method: 'POST' });
-    strapi.log.info('[scheduler] Triggered frontend rebuild via BUILD_HOOK_URL');
-  } catch (error) {
-    strapi.log.warn(`[scheduler] Failed to trigger frontend rebuild: ${error}`);
-  }
-}
+import { enqueueStandaloneIsrEvent } from '../src/isr-outbox/runtime';
 
 export default {
   scheduler: {
@@ -68,9 +50,11 @@ export default {
           }
         }
       }
-
       if (changed > 0) {
-        await triggerRebuild(strapi);
+        strapi.log.info({
+          event: 'content.expiry_status_updated',
+          changed,
+        });
       }
     },
     options: {
@@ -78,12 +62,23 @@ export default {
     },
   },
 
-  // Nightly full rebuild: the consistency net for everything surgical builds
-  // deliberately leave stale (nav labels after entity renames, scopes lost to
-  // restarts). See cguru-ui/docs/deployment-runbook.md §8.
-  nightlyFullRebuild: {
+  // Low-priority consistency event. The gateway makes every page logically
+  // stale in O(1) and BullMQ converges in the background; no build runs here.
+  nightlyIsrConsistency: {
     task: async ({ strapi }: { strapi: any }) => {
-      enqueue(strapi, { full: true }, 'nightly consistency build');
+      await enqueueStandaloneIsrEvent(strapi, {
+        reason: 'nightly ISR consistency',
+        payload: {
+          all: true,
+          scopes: [
+            'routes',
+            'redirects',
+            'chrome',
+            'insights',
+            'error-page',
+          ],
+        },
+      });
     },
     options: {
       rule: "30 3 * * *",

@@ -1,8 +1,8 @@
 # CouponzGuru CMS (Strapi 5)
 
 The backend for CouponzGuru: a Strapi 5 application that is simultaneously the
-editorial CMS, the public read API the website consumes, and the producer that
-triggers static/ISR rebuilds when content changes.
+editorial CMS, the public read API the website consumes, and the producer of
+durable persistent-ISR invalidation events.
 
 It does three jobs:
 
@@ -13,8 +13,9 @@ It does three jobs:
    redeem) consumed by the ISR gateway and the Astro frontend. Core Strapi
    `find`/`findOne` routes for offers stay **disabled**; see
    [docs/public-api.md](./docs/public-api.md).
-3. **Rebuild producer** — content changes enqueue rebuild/revalidate work for
-   the frontend (`src/static-deployment/`).
+3. **ISR producer** — content changes commit a transactional outbox event in
+   PostgreSQL; the dispatcher delivers it to the gateway for targeted
+   regeneration.
 
 Media lives in S3 behind a CDN, with responsive variants (and AVIF twins)
 generated at upload time from the shared knobs in
@@ -75,13 +76,11 @@ this project ships. The real path is:
 
 GitHub Actions only builds and pushes the image; deployment is a deliberate
 manual step on the server, and rollback is `./deploy.sh <previous-tag>` against
-an immutable tag. The full procedure — droplet provisioning, environment
-reference, nginx, S3, health checks, rollback and troubleshooting — is in
-**[docs/strapi-production-deployment.md](./docs/strapi-production-deployment.md)**.
-
-One deploy-order rule worth knowing before you ship: rolling Strapi back across
-the search "insights" contract boundary requires rolling the ISR gateway back
-in the same window.
+an immutable tag. The cross-system procedure—provisioning, release order,
+first launch, health checks, rollback, and recovery—is the canonical
+[production deployment guide](https://github.com/vickydalmia/cguru-ui/blob/main/docs/deployment.md).
+Required and optional CMS values are in the canonical
+[environment guide](https://github.com/vickydalmia/cguru-ui/blob/main/docs/environment.md).
 
 ## Migrating from WordPress
 
@@ -108,10 +107,14 @@ before running it against anything you care about.
 | [docs/public-api.md](./docs/public-api.md) | The public read contract: search params/groups/envelope, directory, page aggregates, offer listings, ratings, redeem and unique-coupon endpoints, with each route's auth, rate limit and cache |
 | [docs/search-operations.md](./docs/search-operations.md) | Operator reference for search: execution modes, the 11 expected trigram indexes, `/api/search/status`, and automatic migration/bootstrap reconciliation |
 | [docs/related-stores-api.md](./docs/related-stores-api.md) | The four `/related-stores` endpoints: ranking, category profile, and the high-rated fallback |
-| [docs/strapi-production-deployment.md](./docs/strapi-production-deployment.md) | End-to-end production deployment, environment reference, nginx, rollback, troubleshooting |
 | [docs/admin-taxonomy-panel.md](./docs/admin-taxonomy-panel.md) | How the admin bundle is customized: the Taxonomies panel and the custom field components |
 | [docs/wordpress-migration.md](./docs/wordpress-migration.md) | Deep walkthrough of the migration pipeline's internals |
-| [docs/qa-fixes-2026-07.md](./docs/qa-fixes-2026-07.md) | Point-in-time record of the July 2026 backend QA batch, including manual operator steps |
+
+Production operations live in the UI repository's
+[deployment](https://github.com/vickydalmia/cguru-ui/blob/main/docs/deployment.md)
+and
+[environment](https://github.com/vickydalmia/cguru-ui/blob/main/docs/environment.md)
+guides so the two services cannot drift into separate release instructions.
 
 Agent-facing Strapi v5 reference material lives in `.agents/skills/` and is not
 part of the human documentation set.
