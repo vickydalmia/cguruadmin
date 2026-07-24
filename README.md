@@ -76,11 +76,12 @@ this project ships. The real path is:
 
 GitHub Actions only builds and pushes the image; deployment is a deliberate
 manual step on the server, and rollback is `./deploy.sh <previous-tag>` against
-an immutable tag. The cross-system procedure—provisioning, release order,
-first launch, health checks, rollback, and recovery—is the canonical
+an immutable tag. Use the local
+[Strapi production deployment guide](./docs/deployment.md) for the complete CMS
+environment, legacy-variable cleanup, deployment, health checks, and rollback.
+The cross-system release order, first frontend warm, CloudFront cutover, and
+recovery procedure remains in the UI repository's
 [production deployment guide](https://github.com/vickydalmia/cguru-ui/blob/main/docs/deployment.md).
-Required and optional CMS values are in the canonical
-[environment guide](https://github.com/vickydalmia/cguru-ui/blob/main/docs/environment.md).
 
 ## Migrating from WordPress
 
@@ -104,6 +105,7 @@ before running it against anything you care about.
 
 | Document | What it covers |
 |---|---|
+| [docs/deployment.md](./docs/deployment.md) | Strapi production environment, legacy-variable removal, immutable-image deployment, verification, outbox checks, and rollback |
 | [docs/public-api.md](./docs/public-api.md) | The public read contract: search params/groups/envelope, directory, page aggregates, offer listings, ratings, redeem and unique-coupon endpoints, with each route's auth, rate limit and cache |
 | [docs/search-operations.md](./docs/search-operations.md) | Operator reference for search: execution modes, the 11 expected trigram indexes, `/api/search/status`, and automatic migration/bootstrap reconciliation |
 | [docs/related-stores-api.md](./docs/related-stores-api.md) | The four `/related-stores` endpoints: ranking, category profile, and the high-rated fallback |
