@@ -15,6 +15,7 @@
     "start": "strapi start",
     "strapi": "strapi",
     "test": "vitest run",
+    "test:postgres": "vitest run src/utils/unique-code-integrity.postgres.test.ts",
     "test:watch": "vitest",
     "types:generate": "strapi ts:generate-types",
     "upgrade": "npx @strapi/upgrade latest",

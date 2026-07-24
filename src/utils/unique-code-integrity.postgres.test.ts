@@ -182,11 +182,13 @@ postgresDescribe('unique-code integrity PostgreSQL integration', () => {
         unique_code_ord: 1,
       });
 
-      const competingInsert = second('unique_codes_pool_lnk').insert({
-        unique_code_id: codes[1].id,
-        unique_coupon_pool_id: pool.id,
-        unique_code_ord: 1,
-      });
+      const competingInsert = Promise.resolve(
+        second('unique_codes_pool_lnk').insert({
+          unique_code_id: codes[1].id,
+          unique_coupon_pool_id: pool.id,
+          unique_code_ord: 1,
+        }),
+      );
       const earlyState = await Promise.race([
         competingInsert.then(
           () => 'accepted',
