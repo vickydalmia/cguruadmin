@@ -355,21 +355,18 @@ describe('entity Coupon population', () => {
     expect(payload.pagination.total).toBe(2);
   });
 
-  it('pushes the curated-head cap into the relation populate query itself', async () => {
+  it('keeps the ordered relation populate compatible with Document Service validation', async () => {
     const harness = createHarness();
 
     await harness.controller.getCouponsByEntity(harness.ctx as any);
 
-    // The id-only relation read is bounded in SQL (link-table order + LIMIT),
-    // not just by the JS slice: with a 1300+-member category the unbounded
-    // populate was the expensive part.
+    // Strapi rejects nested `limit` with "Invalid key limit at coupons".
+    // The controller caps the ID-only relation in JavaScript after fetching it.
     const entityQuery = harness.entityFindMany.mock.calls[0]?.[0];
     expect(entityQuery.populate.coupons).toMatchObject({
       fields: ['documentId'],
-      limit: 50,
     });
-    // Only the drag-order head is capped — the curated Top Picks populate keeps
-    // its own (validator-enforced) bound.
+    expect(entityQuery.populate.coupons.limit).toBeUndefined();
     expect(entityQuery.populate.topPickCoupons.limit).toBeUndefined();
   });
 
@@ -474,7 +471,7 @@ describe('entity product Deal population', () => {
     ]);
   });
 
-  it('pushes the curated-head cap into the deals relation populate too', async () => {
+  it('keeps the Deal relation populate compatible with Document Service validation', async () => {
     const harness = createHarness();
 
     await harness.controller.getDealsByEntity(harness.ctx as any);
@@ -482,8 +479,8 @@ describe('entity product Deal population', () => {
     const entityQuery = harness.entityFindMany.mock.calls[0]?.[0];
     expect(entityQuery.populate.deals).toMatchObject({
       fields: ['documentId'],
-      limit: 50,
     });
+    expect(entityQuery.populate.deals.limit).toBeUndefined();
   });
 
   it('appends primaryStore-only deals after the drag-ordered relation', async () => {

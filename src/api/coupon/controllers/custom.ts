@@ -346,10 +346,9 @@ async function sanitizeDocumentOutput(
 // comes from the newest-first member query. Returns null when the slug misses.
 //
 // NOTE: relies on Strapi ordering the populated relation by the link table's
-// order column (getJoinTableOrderBy in @strapi/database populate/apply) and on
-// a nested populate `limit` applying to that same ordered query — which it
-// does with a single parent row. Both are exercised by the tests below this
-// controller.
+// order column (getJoinTableOrderBy in @strapi/database populate/apply).
+// Strapi's Document Service rejects `limit` inside a relation populate, so the
+// ID-only relation is capped in JavaScript after it is fetched.
 async function listEntityOffers(
   strapi: Core.Strapi,
   ctx: any,
@@ -377,19 +376,6 @@ async function listEntityOffers(
     },
     limit: 1,
   });
-  // Push the curated-head cap into the relation populate itself. The db layer
-  // sorts a manyToMany populate by the link table's order column and applies
-  // `limit` to that one query — and with a single parent row (limit: 1 above)
-  // that is a per-entity cap — so this fetches exactly the first
-  // CURATED_HEAD_LIMIT visible members in drag order: the same ids the slice
-  // below kept, without hydrating a 1300+-member relation first. Injected
-  // AFTER sanitizeDocumentQuery because the content-API validator rejects
-  // `limit` as a non-attribute populate key, while the query engine
-  // (convert-query-params → db populate) supports it.
-  const relationPopulate = entityQuery?.populate?.[relationField];
-  if (relationPopulate && typeof relationPopulate === 'object') {
-    relationPopulate.limit = CURATED_HEAD_LIMIT;
-  }
   const entity = (await strapi.documents(apiId as any).findMany(entityQuery))[0];
   if (!entity) return null;
 
