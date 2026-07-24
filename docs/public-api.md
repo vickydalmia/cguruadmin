@@ -72,9 +72,9 @@ There are exactly **six** result groups: `stores`, `brands`, `categories`,
 > **`insights` is not a search group.** It is not a compatibility alias either:
 > `group=insights` is rejected as an invalid group, and no `insights` key is
 > emitted in `results`, `totals` or `hasMore`. The ISR gateway rejects any
-> upstream payload that still carries one, so this is a hard cross-repo
-> contract — see the rollback coupling in
-> [strapi-production-deployment.md](./strapi-production-deployment.md#search-cache-and-index-semantics).
+> upstream payload that still carries one, so this is a hard cross-repository
+> API contract. Coordinated release and rollback order are in the canonical
+> [deployment guide](https://github.com/vickydalmia/cguru-ui/blob/main/docs/deployment.md).
 
 ### Response envelope
 

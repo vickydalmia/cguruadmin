@@ -50,9 +50,8 @@ seeded new entries with the model name (`store`) as their slug.
 | [`src/index.ts`](../src/index.ts) | Server bootstrap: hides the panel-owned relations from the content-manager layout, plus the rest of the boot-time view config |
 | [`src/constants/homepage-sections.ts`](../src/constants/homepage-sections.ts), [`src/constants/deal-of-the-day-sections.ts`](../src/constants/deal-of-the-day-sections.ts), [`src/constants/homepage-images.ts`](../src/constants/homepage-images.ts) | Section labels and image size rules shared by the admin bundle and the server |
 
-The field replacements are the implementation of several QA fixes; see
-[`docs/qa-fixes-2026-07.md`](./qa-fixes-2026-07.md) for the operator-facing view
-of that batch.
+The field replacements are maintained product behavior, not release-specific
+patches. Their acceptance cases are included in §7.
 
 ---
 
@@ -286,47 +285,52 @@ server from booting.
 
 ### The rest of bootstrap
 
-The search-index reconciler plus layout hiding are part of the awaited bootstrap
-sequence. The full sequence, in order:
+The search/index integrity checks plus layout hiding are part of the awaited
+bootstrap sequence. The full sequence, in order:
 
 1. **`reconcileSearchIndexesAfterSchemaSync`** — on PostgreSQL, structurally
    checks and best-effort repairs all expected search indexes after schema sync.
    Healthy indexes are left untouched; DDL failures are logged and retried on
    the next boot without blocking Strapi.
-2. **`initializeSearchRuntime`** — reads the configured database dialect and
+2. **`reconcileUniqueCodeIntegrityAfterSchemaSync`** — verifies the
+   database-level unique-code constraints after schema synchronization.
+3. **`initializeSearchRuntime`** — reads the configured database dialect and
    pins this process to ranked SQL (PostgreSQL) or the full-set query-engine
    fallback. On PostgreSQL it separately resolves the Strapi table schema and
    inspects `pg_trgm` plus structural index health; diagnostics never change the
    selected mode. Fixed per process; changing it requires a restart.
-3. **`hideRelationsFromContentManager`** — above.
-4. **`ensurePublicReadPermissions`** — grants the public role read access to the
+4. **`hideRelationsFromContentManager`** — above.
+5. **`ensurePublicReadPermissions`** — grants the public role read access to the
    taxonomy collections and the four site-content single types.
-5. **`restrictSingleTypesToSuperAdmin`** — strips content-manager permissions for
+6. **`restrictSingleTypesToSuperAdmin`** — strips content-manager permissions for
    Footer and Global Settings from every non-super-admin role.
-6. **`ensureUploadSettings`** — turns on size optimization, responsive
+7. **`ensureUploadSettings`** — turns on size optimization, responsive
    dimensions, and auto-orientation in the Media Library settings.
-7. **`ensureComponentEntryTitles`** — pins the collapsed-row label field for each
+8. **`ensureComponentEntryTitles`** — pins the collapsed-row label field for each
    repeatable component.
-8. **`ensureComponentFieldDescriptions`** — writes the help text under each
+9. **`ensureComponentFieldDescriptions`** — writes the help text under each
    size-enforced homepage media field, derived from the same image rules the
    validator and the Validation problems panel use.
-9. **`ensureSingleTypeEntryTitles`** — pins single types' header label to `title`
+10. **`ensureFieldDescriptions`** — applies maintained help text to ordinary
+    content fields.
+11. **`ensureSingleTypeEntryTitles`** — pins single types' header label to `title`
    instead of the migrated `wp_<hash>` document id.
-10. **`ensureOfferListStatusColumn`** — appends `contentStatus` to the coupon and
-   deal list views so editors can see and filter expired offers.
-11. **`ensureSectionLabels`** — pins section labels, help text, and edit-form
-    order from the shared section constants. Called twice, once for the homepage
-    UID and once for Deal of the Day, which is what makes twelve awaits.
+12. **`ensureOfferListStatusColumn`** — appends `contentStatus` to the Coupon and
+   Deal list views so editors can see and filter expired offers.
+13. **`ensureSortableListColumns`** — pins list columns that support maintained
+    sorting behavior.
+14. **`ensureFullWidthEditFields`** — applies the maintained edit-form widths.
+15. **`ensureSectionLabels`** — pins section labels, help text, and edit-form
+    order from the shared section constants for Homepage and Deal of the Day.
 
 Everything here is **config-as-code**: these routines re-apply on every boot, so
 changing any of them through the admin UI will not stick across a restart. Edit
-the constant or the list in source instead. Bootstrap then logs an error (never
-throws) if production is running without `S3_UPLOAD_ENABLED=true`, and logs
-whether the rebuild queue is enabled.
+the constant or the list in source instead. Bootstrap then checks the production
+S3 setting and upload MIME allowlist before starting the ISR outbox dispatcher.
 
 `register` is not empty either — it installs the documents middleware that
 sanitizes richtext, runs the validators, invalidates offer-redeem caches, and
-computes rebuild scopes. `destroy` tears down the rebuild queue.
+computes durable ISR invalidation scopes. `destroy` stops the outbox dispatcher.
 
 ---
 
@@ -367,5 +371,3 @@ computes rebuild scopes. `destroy` tears down the rebuild queue.
   `node_modules/@strapi/content-manager/dist/admin/`.
 - `PanelComponent`, `PanelDescription`, and `EditViewContext` are exported from
   `@strapi/content-manager/strapi-admin`.
-- [`docs/qa-fixes-2026-07.md`](./qa-fixes-2026-07.md) — the QA batch that
-  produced the field replacements and the Enter-key suppressor.
