@@ -1,9 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { isRedirectNoteOnlyChange, preDeleteScope } from './scopes';
 
-function strapiWithFindOne(findOne: (args: any) => Promise<any>) {
+function strapiWithFindOne(
+  findOne: (args: any) => Promise<any>,
+  findMany: (uid: string, args: any) => Promise<any[]> = async () => [],
+) {
   return {
-    documents: () => ({ findOne }),
+    documents: (uid: string) => ({
+      findOne,
+      findMany: (args: any) => findMany(uid, args),
+    }),
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   } as any;
 }
@@ -11,6 +17,7 @@ function strapiWithFindOne(findOne: (args: any) => Promise<any>) {
 describe('preDeleteScope failure escalation', () => {
   it('returns the related-page scope when the pre-read succeeds', async () => {
     const strapi = strapiWithFindOne(async () => ({
+      id: 41,
       stores: [{ slug: 'amazon' }],
       brands: [],
       categories: [],
@@ -18,7 +25,11 @@ describe('preDeleteScope failure escalation', () => {
     }));
     await expect(
       preDeleteScope(strapi, 'api::coupon.coupon', 'doc1', 'update'),
-    ).resolves.toEqual({ slugs: ['amazon'], homepage: true });
+    ).resolves.toEqual({
+      slugs: ['coupon/41', 'amazon'],
+      homepage: true,
+      refreshScopes: ['routes'],
+    });
   });
 
   it('escalates to full when a DELETE pre-read fails (relations unknowable afterwards)', async () => {
@@ -27,27 +38,27 @@ describe('preDeleteScope failure escalation', () => {
     });
     await expect(
       preDeleteScope(strapi, 'api::deal.deal', 'doc1', 'delete'),
-    ).resolves.toEqual({ full: true });
+    ).resolves.toEqual({ full: true, refreshScopes: ['routes'] });
   });
 
-  it('does NOT escalate an UPDATE pre-read failure to full — computeScope still covers after-relations', async () => {
+  it('escalates an UPDATE pre-read failure because removed relations are unknowable', async () => {
     const strapi = strapiWithFindOne(async () => {
       throw new Error('db hiccup');
     });
     await expect(
       preDeleteScope(strapi, 'api::coupon.coupon', 'doc1', 'update'),
-    ).resolves.toBeNull();
+    ).resolves.toEqual({ full: true, refreshScopes: ['routes'] });
     expect(strapi.log.warn).toHaveBeenCalled();
   });
 
-  it('treats a vanished doc the same way: full for delete, null otherwise', async () => {
+  it('treats a vanished offer as uncertain for both delete and update', async () => {
     const strapi = strapiWithFindOne(async () => null);
     await expect(
       preDeleteScope(strapi, 'api::coupon.coupon', 'doc1', 'delete'),
-    ).resolves.toEqual({ full: true });
+    ).resolves.toEqual({ full: true, refreshScopes: ['routes'] });
     await expect(
       preDeleteScope(strapi, 'api::coupon.coupon', 'doc1', 'publish'),
-    ).resolves.toBeNull();
+    ).resolves.toEqual({ full: true, refreshScopes: ['routes'] });
   });
 
   it('ignores non-offer content types', async () => {
@@ -62,6 +73,7 @@ describe('preDeleteScope failure escalation', () => {
 
 describe('deal-of-the-day landing page scope', () => {
   const relationDoc = {
+    id: 42,
     stores: [{ slug: 'amazon' }],
     brands: [],
     categories: [],
@@ -92,14 +104,16 @@ describe('deal-of-the-day landing page scope', () => {
     await expect(
       computeScope(strapi, 'api::deal.deal', 'update', 'doc1'),
     ).resolves.toEqual({
-      slugs: ['amazon', 'deal-of-the-day'],
+      slugs: ['deal/42', 'amazon', 'deal-of-the-day'],
       homepage: true,
+      refreshScopes: ['routes'],
     });
   });
 
   it('covers curated-only Deals that have no entity relations', async () => {
     const { computeScope } = await import('./scopes');
     const strapi = strapiWithFindOne(async () => ({
+      id: 42,
       stores: [],
       brands: [],
       categories: [],
@@ -107,7 +121,11 @@ describe('deal-of-the-day landing page scope', () => {
     }));
     await expect(
       computeScope(strapi, 'api::deal.deal', 'update', 'doc1'),
-    ).resolves.toEqual({ slugs: ['deal-of-the-day'], homepage: true });
+    ).resolves.toEqual({
+      slugs: ['deal/42', 'deal-of-the-day'],
+      homepage: true,
+      refreshScopes: ['routes'],
+    });
   });
 
   it('never adds the landing slug to Coupon changes — coupons do not render there', async () => {
@@ -115,14 +133,138 @@ describe('deal-of-the-day landing page scope', () => {
     const strapi = strapiWithFindOne(async () => relationDoc);
     await expect(
       computeScope(strapi, 'api::coupon.coupon', 'update', 'doc1'),
-    ).resolves.toEqual({ slugs: ['amazon'], homepage: true });
+    ).resolves.toEqual({
+      slugs: ['coupon/42', 'amazon'],
+      homepage: true,
+      refreshScopes: ['routes'],
+    });
+  });
+
+  it('includes the new singular page when a Coupon is created', async () => {
+    const { computeScope } = await import('./scopes');
+    const strapi = strapiWithFindOne(async () => ({
+      id: 73,
+      stores: [],
+      brands: [],
+      categories: [],
+      banks: [],
+    }));
+    await expect(
+      computeScope(strapi, 'api::coupon.coupon', 'create', 'coupon-new'),
+    ).resolves.toEqual({
+      slugs: ['coupon/73'],
+      homepage: true,
+      refreshScopes: ['routes'],
+    });
+  });
+
+  it('refreshes every entity page that owns a Coupon through coupons or topPickCoupons', async () => {
+    const { computeScope } = await import('./scopes');
+    const findMany = vi.fn(async (uid: string, args: any) => {
+      expect(args.filters).toEqual({
+        $or: [
+          { coupons: { documentId: { $eq: 'coupon-1' } } },
+          { topPickCoupons: { documentId: { $eq: 'coupon-1' } } },
+        ],
+      });
+      if (uid === 'api::store.store') return [{ slug: 'amazon' }];
+      if (uid === 'api::category.category') {
+        return [{ slug: 'categories/electronics' }];
+      }
+      return [];
+    });
+    const strapi = strapiWithFindOne(
+      async () => ({
+        id: 77,
+        stores: [{ slug: 'amazon' }],
+        brands: [],
+        categories: [],
+        banks: [],
+      }),
+      findMany,
+    );
+
+    await expect(
+      computeScope(
+        strapi,
+        'api::coupon.coupon',
+        'update',
+        'coupon-1',
+      ),
+    ).resolves.toEqual({
+      slugs: ['coupon/77', 'amazon', 'electronics'],
+      homepage: true,
+      refreshScopes: ['routes'],
+    });
+    expect(findMany).toHaveBeenCalledTimes(4);
+  });
+
+  it('refreshes every entity page that owns a Deal through its deals relation', async () => {
+    const { computeScope } = await import('./scopes');
+    const findMany = vi.fn(async (uid: string, args: any) => {
+      expect(args.filters).toEqual({
+        deals: { documentId: { $eq: 'deal-1' } },
+      });
+      if (uid === 'api::brand.brand') return [{ slug: 'brands/samsung' }];
+      if (uid === 'api::bank.bank') return [{ slug: 'banks/hdfc' }];
+      return [];
+    });
+    const strapi = strapiWithFindOne(
+      async () => ({
+        id: 88,
+        stores: [],
+        brands: [],
+        categories: [],
+        banks: [],
+      }),
+      findMany,
+    );
+
+    await expect(
+      computeScope(strapi, 'api::deal.deal', 'update', 'deal-1'),
+    ).resolves.toEqual({
+      slugs: ['deal/88', 'samsung', 'hdfc', 'deal-of-the-day'],
+      homepage: true,
+      refreshScopes: ['routes'],
+    });
+    expect(findMany).toHaveBeenCalledTimes(4);
+  });
+
+  it('captures every entity-owned Coupon association before delete', async () => {
+    const strapi = strapiWithFindOne(
+      async () => ({
+        id: 91,
+        stores: [],
+        brands: [],
+        categories: [],
+        banks: [],
+      }),
+      async (uid) =>
+        uid === 'api::bank.bank' ? [{ slug: 'banks/hdfc' }] : [],
+    );
+    await expect(
+      preDeleteScope(
+        strapi,
+        'api::coupon.coupon',
+        'coupon-1',
+        'delete',
+      ),
+    ).resolves.toEqual({
+      slugs: ['coupon/91', 'hdfc'],
+      homepage: true,
+      refreshScopes: ['routes'],
+    });
   });
 
   it('carries the landing slug through the Deal pre-delete scope', async () => {
     const strapi = strapiWithFindOne(async () => relationDoc);
     await expect(
       preDeleteScope(strapi, 'api::deal.deal', 'doc1', 'update'),
-    ).resolves.toEqual({ slugs: ['amazon', 'deal-of-the-day'], homepage: true });
+    ).resolves.toEqual({
+      slugs: ['deal/42', 'amazon', 'deal-of-the-day'],
+      homepage: true,
+      refreshScopes: ['routes'],
+    });
   });
 });
 
@@ -179,6 +321,7 @@ describe('error page scope', () => {
       'doc1',
     );
     expect(scope).toEqual({
+      refreshScopes: ['error-page'],
       slugs: [
         'error-pages/400',
         'error-pages/403',

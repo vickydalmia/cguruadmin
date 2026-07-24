@@ -1,8 +1,8 @@
 # CouponzGuru CMS (Strapi 5)
 
 The backend for CouponzGuru: a Strapi 5 application that is simultaneously the
-editorial CMS, the public read API the website consumes, and the producer that
-triggers static/ISR rebuilds when content changes.
+editorial CMS, the public read API the website consumes, and the producer of
+durable persistent-ISR invalidation events.
 
 It does three jobs:
 
@@ -13,8 +13,9 @@ It does three jobs:
    redeem) consumed by the ISR gateway and the Astro frontend. Core Strapi
    `find`/`findOne` routes for offers stay **disabled**; see
    [docs/public-api.md](./docs/public-api.md).
-3. **Rebuild producer** — content changes enqueue rebuild/revalidate work for
-   the frontend (`src/static-deployment/`).
+3. **ISR producer** — content changes commit a transactional outbox event in
+   PostgreSQL; the dispatcher delivers it to the gateway for targeted
+   regeneration.
 
 Media lives in S3 behind a CDN, with responsive variants (and AVIF twins)
 generated at upload time from the shared knobs in

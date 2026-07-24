@@ -320,24 +320,22 @@ S3_MULTIPART_QUEUE_SIZE=4
 UPLOAD_CSP_SOURCES=https://media.couponzguru.com,https://bucket.s3.ap-south-1.amazonaws.com
 
 CORS_ORIGINS=
-REBUILD_ENABLED=true
-REBUILD_MODE=redis
 ISR_GATEWAY_URL=http://<ASTRO_PRIVATE_IP>:3010
-ISR_REVALIDATE_SECRET=change-me-same-as-gateway
+ISR_ADMIN_SECRET=change-me-same-as-gateway
+ISR_OUTBOX_POLL_MS=2000
+ISR_OUTBOX_BATCH_SIZE=25
+ISR_OUTBOX_REQUEST_TIMEOUT_MS=15000
+ISR_OUTBOX_LEASE_MS=60000
+ISR_OUTBOX_MAX_BACKOFF_MS=300000
+ISR_OUTBOX_ALERT_AFTER_ATTEMPTS=5
+ISR_OUTBOX_RETENTION_DAYS=30
 STRAPI_MEDIA_URL=https://media.couponzguru.com
-
-# Static fallback / DR snapshots only:
-# FRONTEND_DIR=/opt/cguru-ui
-# SITE_BUCKET=
-# CLOUDFRONT_DISTRIBUTION_ID=
-# PUBLIC_SITE_URL=https://beta.couponzguru.com
 ```
 
 Important:
 
 - `DATABASE_CLIENT` must be `postgres` in production.
 - `PUBLIC_URL` must be the final HTTPS URL exposed to the public.
-- `PUBLIC_SITE_URL` is not required for Redis ISR mode; use it only for static fallback/DR builds.
 - `CORS_ORIGINS` can stay empty for beta/production because public browser search/redeem calls go through the ISR gateway proxy.
 - `TRUST_PROXY=true` is required because Nginx sits in front of Strapi.
 - DigitalOcean Managed PostgreSQL uses port `25060` and requires SSL.
@@ -675,7 +673,7 @@ backslash are ordinary query characters rather than LIKE wildcards.
 
 Bootstrap checks the `pg_trgm` catalog entry and all 11 expected indexes once.
 Call the uncached diagnostic endpoint with
-`Authorization: Bearer $ISR_REVALIDATE_SECRET`; missing configuration, a
+`Authorization: Bearer $ISR_ADMIN_SECRET`; missing configuration, a
 missing header, or a mismatch is denied. Its payload returns `mode`,
 `pgTrgmAvailable`, `missingExpectedIndexes`, and
 `invalidExpectedIndexes: [{name, reason}]`. Health validation covers the
@@ -716,7 +714,7 @@ Verify after deploy:
 
 ```bash
 curl -fsS \
-  -H "Authorization: Bearer $ISR_REVALIDATE_SECRET" \
+  -H "Authorization: Bearer $ISR_ADMIN_SECRET" \
   https://cms.couponzguru.com/api/search/status
 # expect mode=postgres-sql, pgTrgmAvailable=true, and both index arrays empty
 ```

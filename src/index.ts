@@ -8,14 +8,28 @@ import {
   type SectionLabel,
 } from './constants/homepage-sections';
 import { purgeResponseCaches } from './middlewares/cache';
-import { invalidateOfferRedeemCache } from './offer-redeem/invalidate';
 import { initializeSearchRuntime } from './api/search/services/search';
-import { destroyRebuildQueue, enqueue, type ScopeRequest } from './static-deployment/queue';
+import {
+  createOutboxPayload,
+  mergeScope,
+  offerEntityTypeFromUid,
+} from './isr-outbox/payload';
+import { logIsrOutbox } from './isr-outbox/log';
+import {
+  startIsrOutbox,
+  stopIsrOutbox,
+  wakeIsrOutbox,
+} from './isr-outbox/runtime';
+import { runContentTransaction } from './isr-outbox/transaction';
+import type {
+  OfferInvalidation,
+  ScopeRequest,
+} from './isr-outbox/types';
 import {
   computeScope,
   isRedirectNoteOnlyChange,
   preDeleteScope,
-} from './static-deployment/scopes';
+} from './isr-outbox/scopes';
 import {
   appendListColumns,
   isSortableListColumn,
@@ -63,6 +77,16 @@ const HIDE_FROM_EDIT: Record<string, string[]> = {
   'api::bank.bank': ['topPickCoupons'],
   'api::category.category': ['topPickCoupons'],
 };
+
+const DOCUMENT_WRITE_ACTIONS = new Set([
+  'create',
+  'clone',
+  'update',
+  'delete',
+  'publish',
+  'unpublish',
+  'discardDraft',
+]);
 
 async function hideRelationsFromContentManager(strapi: Core.Strapi): Promise<void> {
   const service: any = strapi.plugin('content-manager').service('content-types');
@@ -836,6 +860,8 @@ export default {
     // deploy.sh curl both hit the built-in.
 
     strapi.documents.use(async (context: any, next: any) => {
+      if (!DOCUMENT_WRITE_ACTIONS.has(context.action)) return next();
+
       // "Clean as you touch": a human editing in the admin must save a FULLY
       // valid record — every rule enforced on the whole record, including
       // dirty untouched fields on WordPress-migrated rows. The status cron
@@ -1070,89 +1096,94 @@ export default {
           }
         }
 
-        const result = await next();
+        return await runContentTransaction(
+          strapi,
+          () => next(),
+          async (result) => {
+            if (
+              [
+                'api::homepage.homepage',
+                'api::deal-of-the-day-page.deal-of-the-day-page',
+              ].includes(context.uid) &&
+              ['create', 'update', 'publish'].includes(context.action)
+            ) {
+              try {
+                await fillHomepageOverrides(strapi);
+              } catch (err: any) {
+                strapi.log.warn(
+                  `[homepage] override auto-fill failed: ${err?.message ?? err}`,
+                );
+              }
+            }
 
-        if (
-          ['api::coupon.coupon', 'api::deal.deal'].includes(context.uid) &&
-          [
-            'create',
-            'clone',
-            'update',
-            'publish',
-            'unpublish',
-            'discardDraft',
-            'delete',
-          ].includes(context.action)
-        ) {
-          const offerDocumentId =
-            (result as any)?.documentId ?? context.params?.documentId;
-          void invalidateOfferRedeemCache(
-            strapi,
-            context.uid,
-            offerDocumentId,
-          ).catch((err: any) => {
-            strapi.log.warn(
-              `[offer-redeem] invalidation failed for ${context.uid}:${offerDocumentId}: ${err?.message ?? err}`
-            );
-          });
-        }
+            const documentId =
+              (result as any)?.documentId ?? context.params?.documentId;
+            const afterScope =
+              context.action === 'delete' && preScope
+                ? null
+                : await computeScope(
+                    strapi,
+                    context.uid,
+                    context.action,
+                    documentId,
+                  );
+            let scope =
+              context.action === 'delete'
+                ? preScope ?? afterScope
+                : mergeScope(preScope, afterScope);
 
-        if (
-          [
-            'api::homepage.homepage',
-            'api::deal-of-the-day-page.deal-of-the-day-page',
-          ].includes(context.uid) &&
-          ['create', 'update', 'publish'].includes(context.action)
-        ) {
-          try {
-            await fillHomepageOverrides(strapi);
-          } catch (err: any) {
-            strapi.log.warn(`[homepage] override auto-fill failed: ${err?.message ?? err}`);
-          }
-        }
+            if (
+              scope &&
+              redirectBefore &&
+              isRedirectNoteOnlyChange(redirectBefore, context.params?.data)
+            ) {
+              logIsrOutbox(
+                strapi,
+                'info',
+                'isr.outbox.redirect_note_only_skipped',
+                { uid: context.uid, action: context.action, documentId },
+              );
+              scope = null;
+            }
 
-        // Rebuild scope — never fails the save (deployment-runbook.md §3).
-        try {
-          const documentId =
-            (result as any)?.documentId ?? context.params?.documentId;
-          let scope =
-            context.action === 'delete' && preScope
-              ? preScope
-              : await computeScope(strapi, context.uid, context.action, documentId);
+            const offerInvalidations: OfferInvalidation[] = [];
+            const entityType = offerEntityTypeFromUid(context.uid);
+            if (
+              entityType &&
+              documentId &&
+              [
+                'create',
+                'clone',
+                'update',
+                'publish',
+                'unpublish',
+                'discardDraft',
+                'delete',
+              ].includes(context.action)
+            ) {
+              offerInvalidations.push({ entityType, documentId });
+            }
 
-          // Union before+after relation pages for offer updates (a store
-          // removed from a coupon must rebuild too).
-          if (scope && preScope && context.action !== 'delete') {
-            scope = {
-              full: Boolean(scope.full || preScope.full),
-              homepage: Boolean(scope.homepage || preScope.homepage),
-              sitemap: Boolean(scope.sitemap || preScope.sitemap),
-              slugs: [...new Set([...(scope.slugs ?? []), ...(preScope.slugs ?? [])])],
+            if (!scope && offerInvalidations.length === 0) return null;
+            return {
+              payload: createOutboxPayload(scope ?? {}, offerInvalidations),
+              reason: `${context.uid} ${context.action}`,
             };
-          }
-
-          if (
-            scope &&
-            redirectBefore &&
-            isRedirectNoteOnlyChange(redirectBefore, context.params?.data)
-          ) {
-            strapi.log.info(
-              '[rebuild] redirect note-only edit — nothing public changed, skipping rebuild'
-            );
-            scope = null;
-          }
-
-          if (scope) {
-            // Cached public aggregates and route metadata predate this edit;
-            // purge so revalidate renders never bake stale data into Redis.
+          },
+          (event) => {
+            if (!event) return;
+            // Only after the database commit: renderers must never observe
+            // invalidation before the content and its durable outbox event.
             purgeResponseCaches();
-            enqueue(strapi, scope, `${context.uid} ${context.action}`);
-          }
-        } catch (err: any) {
-          strapi.log.warn(`[rebuild] scope computation failed: ${err?.message ?? err}`);
-        }
-
-        return result;
+            logIsrOutbox(strapi, 'info', 'isr.outbox.enqueued', {
+              outboxId: event.id,
+              eventKey: event.eventKey,
+              uid: context.uid,
+              action: context.action,
+            });
+            wakeIsrOutbox();
+          },
+        );
       } finally {
         if (releaseWriteLock) await releaseWriteLock();
       }
@@ -1244,12 +1275,10 @@ export default {
       );
     }
 
-    strapi.log.info(
-      `[rebuild] ${process.env.REBUILD_ENABLED === 'true' ? 'ENABLED' : 'disabled (log-only)'} — scopes computed on every content change`
-    );
+    startIsrOutbox(strapi);
   },
 
-  destroy() {
-    destroyRebuildQueue();
+  async destroy() {
+    await stopIsrOutbox();
   },
 };

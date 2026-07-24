@@ -155,7 +155,7 @@ operator concerns — see [search-operations.md](./search-operations.md).
 ### `GET /api/search/status`
 
 Machine-only operational diagnostics — not part of the public surface. Requires
-`Authorization: Bearer $ISR_REVALIDATE_SECRET` (the `global::search-status-auth`
+`Authorization: Bearer $ISR_ADMIN_SECRET` (the `global::search-status-auth`
 policy, which fails closed when the secret is unset) and is deliberately
 uncached (`Cache-Control: private, no-store`). Returns
 `{ mode, pgTrgmAvailable, missingExpectedIndexes,
@@ -282,8 +282,8 @@ Coupon's Strapi `documentId` internally.
 `deal`.
 
 **This is a private gateway-only route despite `auth: false`.** It requires
-`Authorization: Bearer $ISR_REVALIDATE_SECRET`, compared with a constant-time
-digest comparison. When `ISR_REVALIDATE_SECRET` is unset it is open in
+`Authorization: Bearer $ISR_ADMIN_SECRET`, compared with a constant-time
+digest comparison. When `ISR_ADMIN_SECRET` is unset it is open in
 development and **closed in production** (every request 401s), so a production
 instance missing the secret fails shut. The `documentId` must match
 `^[a-zA-Z0-9_-]{1,160}$`; anything else is a 404, as is an unknown entity type
@@ -294,6 +294,14 @@ callers must not be able to resolve an offer and drain its unique-code pool.
 It returns `{ data }` with a narrow field set (title, code, affiliate link,
 expiry, schedule, content status, plus `couponType` and the pool name for
 coupons) and named relations only.
+
+## ISR offer route inventory
+
+`GET /api/isr-offer-routes` returns only the canonical numeric detail routes
+and optional update timestamps for currently visible Coupons and Deals. Astro
+uses this compact feed to include `/coupon/:id/` and `/deal/:id/` in the
+persistent ISR route inventory. The response contains no offer content,
+affiliate destination, code, or unique-pool data.
 
 ## Unique coupon codes
 

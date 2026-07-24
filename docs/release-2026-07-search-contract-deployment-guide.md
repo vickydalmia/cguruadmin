@@ -104,7 +104,7 @@ RATE_LIMIT_TRUSTED_IPS=<ASTRO_PRIVATE_VPC_IP>
 DATABASE_CLIENT=postgres
 TRUST_PROXY=true
 ISR_GATEWAY_URL=http://<ASTRO_PRIVATE_IP>:3010
-ISR_REVALIDATE_SECRET=<SAME_SECRET_AS_GATEWAY>
+ISR_ADMIN_SECRET=<SAME_SECRET_AS_GATEWAY>
 ```
 Then:
 ```bash
@@ -114,7 +114,7 @@ cd /opt/couponzguru
 Verify before moving to the gateway:
 ```bash
 curl -I http://127.0.0.1:1337/_health                          # expect 204
-curl -fsS -H "Authorization: Bearer $ISR_REVALIDATE_SECRET" \
+curl -fsS -H "Authorization: Bearer $ISR_ADMIN_SECRET" \
   http://127.0.0.1:1337/api/search/status
 # expect mode=postgres-sql, pgTrgmAvailable=true, empty missing/invalid arrays
 # manually hit the search endpoint once (preview + one grouped query) and confirm

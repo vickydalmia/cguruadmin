@@ -121,16 +121,16 @@ payload tells you *why* an index does not count.
 
 **Auth posture: machine-only.** The route is `auth: false` but carries the
 `global::search-status-auth` policy, which requires
-`Authorization: Bearer $ISR_REVALIDATE_SECRET` — the same deploy secret as ISR
+`Authorization: Bearer $ISR_ADMIN_SECRET` — the same admin secret as ISR
 revalidation — compared in constant time against the exact expected string. It
-**fails closed**: if `ISR_REVALIDATE_SECRET` is unset or empty the policy denies
+**fails closed**: if `ISR_ADMIN_SECRET` is unset or empty the policy denies
 every request and logs that the secret is not configured. A missing header, a
 wrong value, a lowercase `bearer`, or trailing content all fail. The route is
 deliberately returned with `Cache-Control: private, no-store`, so what you read
 is the live runtime status, not a shared or 30-second-old cached copy.
 
 ```bash
-curl -H "Authorization: Bearer $ISR_REVALIDATE_SECRET" \
+curl -H "Authorization: Bearer $ISR_ADMIN_SECRET" \
   http://127.0.0.1:1337/api/search/status
 ```
 
@@ -224,6 +224,6 @@ index arrays empty is the authoritative verification.
 | `status` lists `invalidExpectedIndexes` | the automatic replacement hit a bounded DDL failure | Read the boot log and restart after resolving the reported permission/lock problem |
 | `pgTrgmAvailable: false` | the extension is not installed, cannot be created by the application role, or the catalog could not be read | Enable `pg_trgm` through normal database provisioning or grant the application role the capability, then restart |
 | Missing indexes right after provisioning a new database | post-schema-sync reconciliation could not complete | Read the boot log; the next boot retries automatically |
-| `/api/search/status` returns 401/403 from your shell | the policy failed closed — secret unset, or the header is not an exact `Bearer <secret>` | Check `ISR_REVALIDATE_SECRET` on the container; note the endpoint is also nginx-blocked on the public CMS host |
+| `/api/search/status` returns 401/403 from your shell | the policy failed closed — secret unset, or the header is not an exact `Bearer <secret>` | Check `ISR_ADMIN_SECRET` on the container; note the endpoint is also nginx-blocked on the public CMS host |
 | Search results correct but latency high under load | indexes fine, caches cold | `/api/search` has a 30s in-process cache and the gateway layers its own — see [strapi-production-deployment.md](./strapi-production-deployment.md#search-cache-and-index-semantics) |
 | Search 500s after a deploy | ranked SQL failing post-bootstrap (never silently downgraded) | Read the `search: Postgres SQL failed` error log; schema drift on the offer/link tables is the usual cause |

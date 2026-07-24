@@ -1,12 +1,11 @@
 import type { Core } from '@strapi/strapi';
-import type { ScopeRequest } from './queue';
+import type { ScopeRequest } from './types';
 import {
   toRouteSlug,
   type IdentityKind,
 } from '../utils/route-normalization';
 
-// Maps a Strapi document change to the pages that must rebuild — the
-// "what rebuilds when" matrix in cguru-ui/docs/deployment-runbook.md §3.
+// Maps a Strapi document change to every rendered page that consumes it.
 
 const CHROME_UIDS = new Set(['api::menu.menu', 'api::footer.footer', 'api::global.global']);
 const OFFER_UIDS = new Set(['api::coupon.coupon', 'api::deal.deal']);
@@ -32,7 +31,7 @@ const CAREER_PAGE_SLUG = 'careers';
 // from the row (a redirect names a path that has no page and therefore no
 // slug in the scope vocabulary), and the change also moves the route manifest
 // the ISR gateway admits paths against. Redirect edits are rare, so paying for
-// a full sweep is the cheap side of the trade. Two refinements ride on top:
+// a full regeneration is the cheap side of the trade. Two refinements ride on top:
 // the gateway eagerly reloads its authored-redirect map when an event carries
 // the "redirects" scope (every all=true event does — see the gateway's
 // revalidationScopes), and note-only edits skip the sweep entirely via
@@ -90,6 +89,13 @@ const RELATION_KINDS: Array<[field: string, kind: IdentityKind]> = [
   ['banks', 'bank'],
 ];
 
+const ENTITY_TYPES: Array<[uid: string, kind: IdentityKind]> = [
+  ['api::store.store', 'store'],
+  ['api::brand.brand', 'brand'],
+  ['api::category.category', 'category'],
+  ['api::bank.bank', 'bank'],
+];
+
 export async function offerRelationSlugs(
   strapi: Core.Strapi,
   uid: 'api::coupon.coupon' | 'api::deal.deal',
@@ -107,7 +113,10 @@ export async function offerRelationSlugs(
   });
   if (!doc) return null;
 
-  const slugs = new Set<string>();
+  const numericId = Number(doc.id);
+  if (!Number.isSafeInteger(numericId) || numericId <= 0) return null;
+  const detailKind = uid === 'api::coupon.coupon' ? 'coupon' : 'deal';
+  const slugs = new Set<string>([`${detailKind}/${numericId}`]);
   for (const [field, kind] of RELATION_KINDS) {
     for (const related of doc[field] ?? []) {
       const slug = publicSlug(related?.slug, kind);
@@ -117,16 +126,41 @@ export async function offerRelationSlugs(
   const primary = publicSlug(doc.primaryStore?.slug, 'store');
   if (primary) slugs.add(primary);
 
+  // Query every entity-owned offer relation as well as the offer-owned
+  // relation arrays above. `coupons`/`deals` are mappedBy relations on the
+  // entities, while topPickCoupons is a separate one-way curated relation.
+  // Reading both directions makes the rendered dependency explicit and
+  // protects updates/deletes regardless of which side Strapi used to mutate
+  // the join.
+  const entityPages = await Promise.all(
+    ENTITY_TYPES.map(async ([entityUid, kind]) => {
+      const offerFilter =
+        uid === 'api::coupon.coupon'
+          ? {
+              $or: [
+                { coupons: { documentId: { $eq: documentId } } },
+                { topPickCoupons: { documentId: { $eq: documentId } } },
+              ],
+            }
+          : { deals: { documentId: { $eq: documentId } } };
+      const entities: any[] = await strapi.documents(entityUid as any).findMany({
+        filters: offerFilter as any,
+        fields: ['slug'] as any,
+      });
+      return entities
+        .map((entity) => publicSlug(entity?.slug, kind))
+        .filter((slug): slug is string => Boolean(slug));
+    }),
+  );
+  for (const slug of entityPages.flat()) slugs.add(slug);
+
   return [...slugs];
 }
 
 /**
  * Pre-fetch (BEFORE next()) for offer changes — for deletes the doc is gone
- * afterwards and its relations are unknowable, so a failed pre-read must
- * escalate to full. For updates the post-write computeScope still reads the
- * after-relations, so a failed pre-read only loses REMOVED-relation coverage
- * (reconciled by the nightly full) — escalating every transient read hiccup
- * during routine edits to a 5k-page full sweep is how revalidate storms start.
+ * afterwards and its relations are unknowable. Updates need the old relations
+ * too, so uncertainty must fail safe with a global invalidation.
  */
 export async function preDeleteScope(
   strapi: Core.Strapi,
@@ -135,11 +169,19 @@ export async function preDeleteScope(
   action: string,
 ): Promise<ScopeRequest | null> {
   if (!OFFER_UIDS.has(uid) || !documentId) return null;
-  const fallback = (): ScopeRequest | null =>
-    action === 'delete' ? { full: true } : null;
+  const fallback = (): ScopeRequest => ({
+    full: true,
+    refreshScopes: ['routes'],
+  });
   try {
     const slugs = await offerRelationSlugs(strapi, uid as any, documentId);
-    return slugs ? { slugs: withDealLandingSlug(uid, slugs), homepage: true } : fallback();
+    return slugs
+      ? {
+          slugs: withDealLandingSlug(uid, slugs),
+          homepage: true,
+          refreshScopes: ['routes'],
+        }
+      : fallback();
   } catch (err: any) {
     strapi.log.warn(
       `[rebuild] pre-change relation read failed for ${uid} ${documentId} (${action}): ${err?.message ?? err}`
@@ -182,26 +224,41 @@ export async function computeScope(
   // A job changes both the listing and one or more build routes. Creation,
   // deletion, or a slug edit also changes the route manifest/sitemap, so use
   // the existing full rebuild safety path for every editor operation.
-  if (uid === JOB_UID) return { full: true };
-  if (uid === REDIRECT_UID) return { full: true };
-  if (uid === ERROR_PAGE_UID) return { slugs: [...ERROR_DOCUMENT_SLUGS] };
-  if (CHROME_UIDS.has(uid)) return { full: true };
+  if (uid === JOB_UID) return { full: true, refreshScopes: ['routes'] };
+  if (uid === REDIRECT_UID) {
+    return { full: true, refreshScopes: ['routes', 'redirects'] };
+  }
+  if (uid === ERROR_PAGE_UID) {
+    return {
+      slugs: [...ERROR_DOCUMENT_SLUGS],
+      refreshScopes: ['error-page'],
+    };
+  }
+  if (CHROME_UIDS.has(uid)) {
+    return { full: true, refreshScopes: ['chrome'] };
+  }
 
   if (OFFER_UIDS.has(uid)) {
     // delete is handled via preDeleteScope; if we get here without one, be safe.
-    if (action === 'delete') return { full: true };
-    if (!documentId) return { full: true };
+    if (action === 'delete') {
+      return { full: true, refreshScopes: ['routes'] };
+    }
+    if (!documentId) return { full: true, refreshScopes: ['routes'] };
     const slugs = await offerRelationSlugs(strapi, uid as any, documentId);
-    if (slugs === null) return { full: true };
+    if (slugs === null) return { full: true, refreshScopes: ['routes'] };
     // An offer with no entity relations only shows via curation surfaces.
-    return { slugs: withDealLandingSlug(uid, slugs), homepage: true };
+    return {
+      slugs: withDealLandingSlug(uid, slugs),
+      homepage: true,
+      refreshScopes: ['routes'],
+    };
   }
 
   const kind = ENTITY_UIDS[uid];
   if (kind) {
-    // Routes list + sitemap change; S3 page deletion needs a full sync.
+    // Route membership and sitemap change on entity create/delete.
     if (action === 'create' || action === 'clone' || action === 'delete') {
-      return { full: true };
+      return { full: true, refreshScopes: ['routes'] };
     }
     if (!documentId) return { full: true };
     const doc: any = await strapi.documents(uid as any).findOne({

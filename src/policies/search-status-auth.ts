@@ -13,10 +13,10 @@ export default (
   _config: unknown,
   { strapi }: { strapi: any },
 ): boolean => {
-  const secret = process.env.ISR_REVALIDATE_SECRET?.trim();
+  const secret = process.env.ISR_ADMIN_SECRET?.trim();
   if (!secret) {
     strapi?.log?.error?.(
-      "[search] /api/search/status denied: ISR_REVALIDATE_SECRET is not configured",
+      "[search] /api/search/status denied: ISR_ADMIN_SECRET is not configured",
     );
     return false;
   }

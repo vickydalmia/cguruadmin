@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 function createHarness() {
-  vi.stubEnv('ISR_REVALIDATE_SECRET', REDEEM_TEST_SECRET);
+  vi.stubEnv('ISR_ADMIN_SECRET', REDEEM_TEST_SECRET);
 
   const couponFindMany = vi.fn().mockResolvedValue([]);
   const couponFindOne = vi.fn().mockResolvedValue(null);
@@ -75,6 +75,42 @@ function createHarness() {
     entityFindMany,
   };
 }
+
+describe('ISR offer route inventory', () => {
+  it('returns every currently visible Coupon and Deal singular route', async () => {
+    const harness = createHarness();
+    harness.couponFindMany.mockResolvedValue([
+      { id: 123, updatedAt: '2026-07-24T10:00:00.000Z' },
+      { id: 0, updatedAt: 'invalid-id-is-skipped' },
+    ]);
+    harness.dealFindMany.mockResolvedValue([
+      { id: 456, updatedAt: '2026-07-24T11:00:00.000Z' },
+    ]);
+
+    await harness.controller.getIsrOfferRoutes(harness.ctx);
+
+    expect(harness.ctx.send).toHaveBeenCalledWith({
+      data: [
+        {
+          path: '/coupon/123/',
+          updatedAt: '2026-07-24T10:00:00.000Z',
+        },
+        {
+          path: '/deal/456/',
+          updatedAt: '2026-07-24T11:00:00.000Z',
+        },
+      ],
+    });
+    expect(harness.couponFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fields: ['updatedAt'],
+        start: 0,
+        limit: 100,
+      }),
+    );
+    expect(harness.dealFindMany).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('public Coupon detail aggregate', () => {
   it('resolves a numeric Coupon id without exposing affiliate destinations', async () => {

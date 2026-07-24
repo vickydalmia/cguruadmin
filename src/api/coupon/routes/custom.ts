@@ -2,6 +2,17 @@ export default {
   routes: [
     {
       method: 'GET',
+      path: '/isr-offer-routes',
+      handler: 'custom.getIsrOfferRoutes',
+      config: {
+        auth: false,
+        middlewares: [
+          { name: 'global::rate-limit', config: { maxRequests: 60, windowMs: 60_000 } },
+        ],
+      },
+    },
+    {
+      method: 'GET',
       path: '/coupon-page/:id',
       handler: 'custom.getCouponPage',
       config: {

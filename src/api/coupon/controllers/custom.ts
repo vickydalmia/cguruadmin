@@ -48,6 +48,7 @@ const REDEEM_UIDS = {
   coupon: 'api::coupon.coupon',
   deal: 'api::deal.deal',
 } as const;
+const ISR_ROUTE_BATCH_SIZE = 100;
 
 function secureSecretMatch(actual: string, expected: string): boolean {
   const digest = (value: string) => createHash('sha256').update(value).digest();
@@ -55,10 +56,43 @@ function secureSecretMatch(actual: string, expected: string): boolean {
 }
 
 function isRedeemResolverAuthorized(ctx: any): boolean {
-  const secret = process.env.ISR_REVALIDATE_SECRET?.trim();
+  const secret = process.env.ISR_ADMIN_SECRET?.trim();
   if (!secret) return process.env.NODE_ENV !== 'production';
   const authorization = String(ctx.get('authorization') || '');
   return secureSecretMatch(authorization, `Bearer ${secret}`);
+}
+
+async function listIsrOfferRoutes(
+  strapi: Core.Strapi,
+  uid: 'api::coupon.coupon' | 'api::deal.deal',
+  kind: 'coupon' | 'deal',
+): Promise<Array<{ path: string; updatedAt?: string }>> {
+  const routes: Array<{ path: string; updatedAt?: string }> = [];
+  let start = 0;
+
+  while (true) {
+    const items: any[] = await strapi.documents(uid).findMany({
+      filters: visibilityFilters(),
+      fields: ['updatedAt'] as any,
+      sort: [{ id: 'asc' }] as any,
+      start,
+      limit: ISR_ROUTE_BATCH_SIZE,
+    } as any);
+    for (const item of items) {
+      const id = Number(item?.id);
+      if (!Number.isSafeInteger(id) || id <= 0) continue;
+      routes.push({
+        path: `/${kind}/${id}/`,
+        ...(typeof item.updatedAt === 'string'
+          ? { updatedAt: item.updatedAt }
+          : {}),
+      });
+    }
+    if (items.length < ISR_ROUTE_BATCH_SIZE) break;
+    start += items.length;
+  }
+
+  return routes;
 }
 
 // Ordering for the global offer/deal listings: newest first. Per-entity
@@ -414,6 +448,14 @@ async function listEntityOffers(
 }
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
+
+  async getIsrOfferRoutes(ctx) {
+    const [coupons, deals] = await Promise.all([
+      listIsrOfferRoutes(strapi, 'api::coupon.coupon', 'coupon'),
+      listIsrOfferRoutes(strapi, 'api::deal.deal', 'deal'),
+    ]);
+    return ctx.send({ data: [...coupons, ...deals] });
+  },
 
   async getCouponPage(ctx) {
     const rawId = String(ctx.params?.id ?? '').trim();
