@@ -164,6 +164,49 @@ postgresDescribe('unique-code integrity PostgreSQL integration', () => {
     ).rejects.toMatchObject({ code: '23505' });
   });
 
+  it('serializes concurrent equal pool/code links before checking uniqueness', async () => {
+    const [pool] = await knex('unique_coupon_pools')
+      .insert({})
+      .returning(['id']);
+    const codes = await knex('unique_codes')
+      .insert([{ code: 'RACE' }, { code: 'RACE' }])
+      .returning(['id']);
+    await knex.transaction((trx) => reconcileUniqueCodeIntegrity(trx));
+
+    const first = await knex.transaction();
+    const second = await knex.transaction();
+    try {
+      await first('unique_codes_pool_lnk').insert({
+        unique_code_id: codes[0].id,
+        unique_coupon_pool_id: pool.id,
+        unique_code_ord: 1,
+      });
+
+      const competingInsert = second('unique_codes_pool_lnk').insert({
+        unique_code_id: codes[1].id,
+        unique_coupon_pool_id: pool.id,
+        unique_code_ord: 1,
+      });
+      const earlyState = await Promise.race([
+        competingInsert.then(
+          () => 'accepted',
+          () => 'rejected',
+        ),
+        new Promise<'blocked'>((resolve) =>
+          setTimeout(() => resolve('blocked'), 100),
+        ),
+      ]);
+      expect(earlyState).toBe('blocked');
+
+      await first.commit();
+      await expect(competingInsert).rejects.toMatchObject({ code: '23505' });
+      await second.rollback();
+    } finally {
+      if (!first.isCompleted()) await first.rollback();
+      if (!second.isCompleted()) await second.rollback();
+    }
+  });
+
   it('imports, redeems, and counts through the existing Strapi relation', async () => {
     await knex('unique_coupon_pools').insert({
       document_id: 'pool-doc',

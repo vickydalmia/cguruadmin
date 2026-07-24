@@ -105,6 +105,16 @@ async function installPostgresGuards(knex) {
         RETURN NEW;
       END IF;
 
+      -- Serialize equal pool/code candidates across transactions. A trigger
+      -- query alone cannot see another transaction's uncommitted link.
+      PERFORM pg_advisory_xact_lock(
+        hashtextextended(
+          'couponzguru.unique-code:' ||
+          NEW."${POOL_LINK_POOL_COLUMN}"::text || ':' || candidate_code,
+          0
+        )
+      );
+
       IF EXISTS (
         SELECT 1
           FROM "${POOL_LINK_TABLE}" existing_link
@@ -131,10 +141,30 @@ async function installPostgresGuards(knex) {
     RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+    DECLARE
+      candidate_pool_id bigint;
     BEGIN
       IF NEW."code" IS NOT DISTINCT FROM OLD."code" THEN
         RETURN NEW;
       END IF;
+
+      SELECT own_link."${POOL_LINK_POOL_COLUMN}"
+        INTO candidate_pool_id
+        FROM "${POOL_LINK_TABLE}" own_link
+       WHERE own_link."${POOL_LINK_CODE_COLUMN}" = NEW."id"
+       LIMIT 1;
+
+      IF candidate_pool_id IS NULL THEN
+        RETURN NEW;
+      END IF;
+
+      PERFORM pg_advisory_xact_lock(
+        hashtextextended(
+          'couponzguru.unique-code:' ||
+          candidate_pool_id::text || ':' || NEW."code",
+          0
+        )
+      );
 
       IF EXISTS (
         SELECT 1
@@ -147,6 +177,7 @@ async function installPostgresGuards(knex) {
             ON existing_code."id" =
                existing_link."${POOL_LINK_CODE_COLUMN}"
          WHERE own_link."${POOL_LINK_CODE_COLUMN}" = NEW."id"
+           AND own_link."${POOL_LINK_POOL_COLUMN}" = candidate_pool_id
            AND existing_code."code" = NEW."code"
       ) THEN
         RAISE EXCEPTION 'duplicate unique coupon code in pool'
