@@ -260,13 +260,13 @@ export async function computeScope(
     if (action === 'create' || action === 'clone' || action === 'delete') {
       return { full: true, refreshScopes: ['routes'] };
     }
-    if (!documentId) return { full: true };
+    if (!documentId) return { full: true, refreshScopes: ['routes'] };
     const doc: any = await strapi.documents(uid as any).findOne({
       documentId,
       fields: ['slug'] as any,
     });
     const slug = publicSlug(doc?.slug, kind);
-    if (!slug) return { full: true };
+    if (!slug) return { full: true, refreshScopes: ['routes'] };
     // The deal landing page bakes store pill labels/logos and category tab
     // names/icons into its HTML — same reason entity edits carry homepage.
     const slugs =

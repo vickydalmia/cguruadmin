@@ -94,3 +94,42 @@ export function hasOutboxWork(payload: IsrOutboxPayload): boolean {
       payload.offerInvalidations?.length,
   );
 }
+
+export function boundOutboxPayload(
+  payload: IsrOutboxPayload,
+  maximumPaths: number,
+  maximumBytes: number,
+): IsrOutboxPayload {
+  const serializedBytes = (value: IsrOutboxPayload) =>
+    Buffer.byteLength(JSON.stringify(value), 'utf8');
+  if (
+    (payload.paths?.length ?? 0) <= maximumPaths &&
+    serializedBytes(payload) <= maximumBytes
+  ) {
+    return payload;
+  }
+  const full: IsrOutboxPayload = {
+    all: true,
+    ...(payload.scopes?.length ? { scopes: payload.scopes } : {}),
+    ...(payload.offerInvalidations?.length
+      ? { offerInvalidations: payload.offerInvalidations }
+      : {}),
+  };
+  if (serializedBytes(full) > maximumBytes) {
+    throw new Error(
+      `ISR outbox payload exceeds ${maximumBytes} bytes after full-invalidation fallback`,
+    );
+  }
+  return full;
+}
+
+export function outboxPayloadSummary(payload: IsrOutboxPayload) {
+  return {
+    all: payload.all === true,
+    pathCount: payload.paths?.length ?? 0,
+    pathSample: payload.paths?.slice(0, 100) ?? [],
+    pathsTruncated: (payload.paths?.length ?? 0) > 100,
+    scopes: payload.scopes ?? [],
+    offerInvalidationCount: payload.offerInvalidations?.length ?? 0,
+  };
+}

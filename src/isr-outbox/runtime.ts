@@ -31,6 +31,21 @@ export async function stopIsrOutbox(): Promise<void> {
   dispatcher = null;
 }
 
+export async function getIsrOutboxStatus() {
+  if (!dispatcher) {
+    return {
+      ok: false,
+      dispatcher: {
+        running: false,
+        stopped: true,
+        stalled: true,
+      },
+      outbox: null,
+    };
+  }
+  return dispatcher.status();
+}
+
 export async function enqueueStandaloneIsrEvent(
   strapi: Core.Strapi,
   input: IsrOutboxInsert,

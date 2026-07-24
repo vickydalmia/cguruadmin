@@ -341,6 +341,26 @@ describe('error page scope', () => {
 });
 
 describe('entity edits baked into the deal landing page', () => {
+  it('falls back to a route-aware full invalidation when identity is missing', async () => {
+    const { computeScope } = await import('./scopes');
+    await expect(
+      computeScope(
+        strapiWithFindOne(async () => null),
+        'api::store.store',
+        'update',
+        undefined,
+      ),
+    ).resolves.toEqual({ full: true, refreshScopes: ['routes'] });
+    await expect(
+      computeScope(
+        strapiWithFindOne(async () => null),
+        'api::store.store',
+        'update',
+        'missing',
+      ),
+    ).resolves.toEqual({ full: true, refreshScopes: ['routes'] });
+  });
+
   it('adds the landing slug for store and category updates', async () => {
     const { computeScope } = await import('./scopes');
     const strapi = strapiWithFindOne(async () => ({ slug: 'amazon' }));

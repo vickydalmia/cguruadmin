@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  boundOutboxPayload,
   createOutboxPayload,
   hasOutboxWork,
   mergeScope,
@@ -59,6 +60,45 @@ describe('createOutboxPayload', () => {
       ),
     ).toBe(true);
     expect(hasOutboxWork(createOutboxPayload({}))).toBe(false);
+  });
+});
+
+describe('boundOutboxPayload', () => {
+  it('promotes oversized path lists to one full invalidation', () => {
+    expect(
+      boundOutboxPayload(
+        {
+          paths: ['/one/', '/two/'],
+          scopes: ['routes'],
+          offerInvalidations: [
+            { entityType: 'coupon', documentId: 'coupon-1' },
+          ],
+        },
+        1,
+        10_000,
+      ),
+    ).toEqual({
+      all: true,
+      scopes: ['routes'],
+      offerInvalidations: [
+        { entityType: 'coupon', documentId: 'coupon-1' },
+      ],
+    });
+  });
+
+  it('rejects a payload that remains too large after fallback', () => {
+    expect(() =>
+      boundOutboxPayload(
+        {
+          paths: ['/one/'],
+          offerInvalidations: [
+            { entityType: 'deal', documentId: 'x'.repeat(2_000) },
+          ],
+        },
+        0,
+        1_024,
+      ),
+    ).toThrow(/exceeds 1024 bytes/);
   });
 });
 

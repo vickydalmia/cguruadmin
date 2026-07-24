@@ -48,7 +48,12 @@ const REDEEM_UIDS = {
   coupon: 'api::coupon.coupon',
   deal: 'api::deal.deal',
 } as const;
-const ISR_ROUTE_BATCH_SIZE = 100;
+// Route inventory is an internal deployment feed, not a public listing page.
+// Production has 10k+ Coupon/Deal documents, so the former 100-row batch size
+// required 100+ sequential Document Service queries and regularly exceeded the
+// frontend's request timeout. A larger bounded batch keeps memory predictable
+// while reducing inventory assembly to roughly a dozen queries.
+const ISR_ROUTE_BATCH_SIZE = 1_000;
 
 function secureSecretMatch(actual: string, expected: string): boolean {
   const digest = (value: string) => createHash('sha256').update(value).digest();
@@ -72,6 +77,7 @@ async function listIsrOfferRoutes(
 
   while (true) {
     const items: any[] = await strapi.documents(uid).findMany({
+      status: 'published',
       filters: visibilityFilters(),
       fields: ['updatedAt'] as any,
       sort: [{ id: 'asc' }] as any,

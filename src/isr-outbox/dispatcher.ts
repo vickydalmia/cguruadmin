@@ -1,7 +1,11 @@
 import type { Core } from '@strapi/strapi';
 import type { IsrOutboxConfig } from './config';
 import { logIsrOutbox } from './log';
-import { IsrOutboxStore } from './store';
+import { outboxPayloadSummary } from './payload';
+import {
+  IsrOutboxStore,
+  type IsrOutboxClaim,
+} from './store';
 import type { IsrOutboxEvent } from './types';
 
 const OUTBOX_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1_000;
@@ -37,12 +41,12 @@ export async function cleanupDeliveredEvents(
 }
 
 export interface OutboxDeliveryStore {
-  claim(): Promise<IsrOutboxEvent | null>;
-  markDelivered(event: IsrOutboxEvent): Promise<void>;
+  claim(): Promise<IsrOutboxClaim | null>;
+  markDelivered(event: IsrOutboxEvent): Promise<boolean>;
   scheduleRetry(
     event: IsrOutboxEvent,
     error: string,
-  ): Promise<{ attemptCount: number; delayMs: number }>;
+  ): Promise<{ owned: boolean; attemptCount: number; delayMs: number }>;
 }
 
 export async function deliverOutboxEvent(
@@ -79,6 +83,17 @@ export async function dispatchOne(
       | { state: 'empty' }
       | { state: 'delivered'; event: IsrOutboxEvent }
       | {
+          state: 'invalid';
+          id: string;
+          eventKey: string;
+          error: string;
+        }
+      | {
+          state: 'lease_lost';
+          phase: 'delivered' | 'retry';
+          event: IsrOutboxEvent;
+        }
+      | {
           state: 'retry';
           event: IsrOutboxEvent;
           error: Error;
@@ -92,14 +107,34 @@ export async function dispatchOne(
     onResult({ state: 'empty' });
     return false;
   }
+  if (event.state === 'invalid') {
+    onResult(event);
+    return true;
+  }
+  const claimed = event.event;
   try {
-    await deliver(event);
-    await store.markDelivered(event);
-    onResult({ state: 'delivered', event });
+    await deliver(claimed);
+    if (await store.markDelivered(claimed)) {
+      onResult({ state: 'delivered', event: claimed });
+    } else {
+      onResult({
+        state: 'lease_lost',
+        phase: 'delivered',
+        event: claimed,
+      });
+    }
   } catch (cause) {
     const error = cause instanceof Error ? cause : new Error(String(cause));
-    const retry = await store.scheduleRetry(event, error.message);
-    onResult({ state: 'retry', event, error, ...retry });
+    const retry = await store.scheduleRetry(claimed, error.message);
+    if (retry.owned) {
+      onResult({ state: 'retry', event: claimed, error, ...retry });
+    } else {
+      onResult({
+        state: 'lease_lost',
+        phase: 'retry',
+        event: claimed,
+      });
+    }
   }
   return true;
 }
@@ -110,6 +145,12 @@ export class IsrOutboxDispatcher {
   private stopped = false;
   private nextCleanupAt = 0;
   private readonly store: IsrOutboxStore;
+  private readonly startedAt = Date.now();
+  private lastCycleStartedAt = 0;
+  private lastCycleCompletedAt = 0;
+  private lastDeliveredAt = 0;
+  private lastErrorAt = 0;
+  private lastError: string | null = null;
 
   constructor(
     private readonly strapi: Core.Strapi,
@@ -149,12 +190,66 @@ export class IsrOutboxDispatcher {
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.timer = null;
-      this.running = this.drain().finally(() => {
+      this.running = this.runCycle().finally(() => {
         this.running = null;
         this.schedule(this.config.pollMs);
       });
     }, delayMs);
     this.timer.unref?.();
+  }
+
+  private async runCycle(): Promise<void> {
+    this.lastCycleStartedAt = Date.now();
+    try {
+      await this.drain();
+      this.lastError = null;
+    } catch (cause) {
+      const error =
+        cause instanceof Error ? cause : new Error(String(cause));
+      this.lastErrorAt = Date.now();
+      this.lastError = error.message;
+      logIsrOutbox(
+        this.strapi,
+        'error',
+        'isr.outbox.dispatcher_cycle_failed',
+        { error: error.message },
+      );
+    } finally {
+      this.lastCycleCompletedAt = Date.now();
+    }
+  }
+
+  async status() {
+    const outbox = await this.store.statusSummary();
+    const now = Date.now();
+    const staleAfterMs =
+      this.config.requestTimeoutMs + Math.max(30_000, this.config.pollMs * 3);
+    const cycleReference =
+      this.lastCycleCompletedAt ||
+      this.lastCycleStartedAt ||
+      this.startedAt;
+    const stalled = !this.stopped && now - cycleReference > staleAfterMs;
+    const invalid = outbox.counts.invalid ?? 0;
+    return {
+      ok:
+        !this.stopped &&
+        !stalled &&
+        invalid === 0 &&
+        outbox.expiredProcessing === 0 &&
+        this.lastError === null,
+      dispatcher: {
+        running: Boolean(this.running),
+        stopped: this.stopped,
+        startedAt: this.startedAt,
+        lastCycleStartedAt: this.lastCycleStartedAt || null,
+        lastCycleCompletedAt: this.lastCycleCompletedAt || null,
+        lastDeliveredAt: this.lastDeliveredAt || null,
+        lastErrorAt: this.lastErrorAt || null,
+        lastError: this.lastError,
+        stalled,
+      },
+      outbox,
+    };
   }
 
   private async drain(): Promise<void> {
@@ -186,11 +281,29 @@ export class IsrOutboxDispatcher {
         (event) => deliverOutboxEvent(event, this.config, this.fetchImpl),
         (result) => {
           if (result.state === 'delivered') {
+            this.lastDeliveredAt = Date.now();
             logIsrOutbox(this.strapi, 'info', 'isr.outbox.delivered', {
               outboxId: result.event.id,
               eventKey: result.event.eventKey,
               reason: result.event.reason,
+              payload: outboxPayloadSummary(result.event.payload),
               attemptCount: result.event.attemptCount,
+            });
+          }
+          if (result.state === 'invalid') {
+            logIsrOutbox(this.strapi, 'error', 'isr.outbox.invalid', {
+              outboxId: result.id,
+              eventKey: result.eventKey,
+              error: result.error,
+              alert: true,
+            });
+          }
+          if (result.state === 'lease_lost') {
+            logIsrOutbox(this.strapi, 'warn', 'isr.outbox.lease_lost', {
+              outboxId: result.event.id,
+              eventKey: result.event.eventKey,
+              reason: result.event.reason,
+              phase: result.phase,
             });
           }
           if (result.state === 'retry') {
@@ -202,6 +315,7 @@ export class IsrOutboxDispatcher {
               outboxId: result.event.id,
               eventKey: result.event.eventKey,
               reason: result.event.reason,
+              payload: outboxPayloadSummary(result.event.payload),
               attemptCount: result.attemptCount,
               retryInMs: result.delayMs,
               error: result.error.message,

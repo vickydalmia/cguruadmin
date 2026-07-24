@@ -4,12 +4,14 @@ import {
   deliveredRetentionCutoff,
   deliverOutboxEvent,
   dispatchOne,
+  IsrOutboxDispatcher,
 } from './dispatcher';
 import type { IsrOutboxEvent } from './types';
 
 const event: IsrOutboxEvent = {
   id: '42',
   eventKey: 'stable-key',
+  lockToken: 'lease-1',
   payload: { paths: ['/amazon/'] },
   reason: 'coupon update',
   attemptCount: 0,
@@ -20,6 +22,54 @@ it('computes the delivered-event retention cutoff in UTC milliseconds', () => {
   expect(deliveredRetentionCutoff(now, 30).toISOString()).toBe(
     '2026-06-24T12:00:00.000Z',
   );
+});
+
+it('contains a failed dispatcher cycle and exposes it in status', async () => {
+  const logged = vi.fn();
+  const dispatcher = new IsrOutboxDispatcher(
+    {
+      log: {
+        error: logged,
+        warn: vi.fn(),
+        info: vi.fn(),
+      },
+    } as any,
+    {
+      gatewayUrl: 'http://gateway.test',
+      adminSecret: 'test-secret',
+      pollMs: 2_000,
+      batchSize: 1,
+      requestTimeoutMs: 90_000,
+      leaseMs: 120_000,
+      maxBackoffMs: 300_000,
+      alertAfterAttempts: 5,
+      retentionDays: 30,
+      maxPaths: 5_000,
+      maxPayloadBytes: 900_000,
+    },
+  );
+  (dispatcher as any).store = {
+    deleteDeliveredBefore: vi.fn(async () => {
+      throw new Error('database unavailable');
+    }),
+    claim: vi.fn(async () => {
+      throw new Error('claim failed');
+    }),
+    statusSummary: vi.fn(async () => ({
+      counts: {},
+      oldestUndeliveredAt: null,
+      expiredProcessing: 0,
+    })),
+  };
+  await expect((dispatcher as any).runCycle()).resolves.toBeUndefined();
+  await expect(dispatcher.status()).resolves.toMatchObject({
+    ok: false,
+    dispatcher: {
+      lastError: 'claim failed',
+      stalled: false,
+    },
+  });
+  expect(logged).toHaveBeenCalled();
 });
 
 it('cleans delivered rows before the retention cutoff', async () => {
@@ -91,8 +141,8 @@ describe('deliverOutboxEvent', () => {
 describe('dispatchOne', () => {
   it('marks a successfully delivered event complete', async () => {
     const store = {
-      claim: vi.fn(async () => event),
-      markDelivered: vi.fn(async () => undefined),
+      claim: vi.fn(async () => ({ state: 'event' as const, event })),
+      markDelivered: vi.fn(async () => true),
       scheduleRetry: vi.fn(),
     };
     const results: any[] = [];
@@ -109,11 +159,11 @@ describe('dispatchOne', () => {
 
   it('schedules a retry without changing the event key', async () => {
     const store = {
-      claim: vi.fn(async () => event),
+      claim: vi.fn(async () => ({ state: 'event' as const, event })),
       markDelivered: vi.fn(),
       scheduleRetry: vi.fn(async (failedEvent: IsrOutboxEvent) => {
         expect(failedEvent.eventKey).toBe('stable-key');
-        return { attemptCount: 1, delayMs: 1_000 };
+        return { owned: true, attemptCount: 1, delayMs: 1_000 };
       }),
     };
     const results: any[] = [];
@@ -146,5 +196,43 @@ describe('dispatchOne', () => {
     await expect(
       dispatchOne(store, vi.fn(async () => undefined)),
     ).resolves.toBe(false);
+  });
+
+  it('does not overwrite a newer lease owner after delivery', async () => {
+    const store = {
+      claim: vi.fn(async () => ({ state: 'event' as const, event })),
+      markDelivered: vi.fn(async () => false),
+      scheduleRetry: vi.fn(),
+    };
+    const results: any[] = [];
+    await dispatchOne(store, vi.fn(async () => undefined), (result) =>
+      results.push(result),
+    );
+    expect(results).toEqual([
+      { state: 'lease_lost', phase: 'delivered', event },
+    ]);
+    expect(store.scheduleRetry).not.toHaveBeenCalled();
+  });
+
+  it('reports a quarantined payload and continues the drain', async () => {
+    const invalid = {
+      state: 'invalid' as const,
+      id: '43',
+      eventKey: 'broken',
+      error: 'payload must be an object',
+    };
+    const results: any[] = [];
+    await expect(
+      dispatchOne(
+        {
+          claim: vi.fn(async () => invalid),
+          markDelivered: vi.fn(),
+          scheduleRetry: vi.fn(),
+        },
+        vi.fn(),
+        (result) => results.push(result),
+      ),
+    ).resolves.toBe(true);
+    expect(results).toEqual([invalid]);
   });
 });

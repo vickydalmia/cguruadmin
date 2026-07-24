@@ -24,6 +24,7 @@ export interface IsrOutboxPayload {
 export interface IsrOutboxEvent {
   id: string;
   eventKey: string;
+  lockToken: string;
   payload: IsrOutboxPayload;
   reason: string;
   attemptCount: number;

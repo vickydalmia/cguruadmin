@@ -5,36 +5,117 @@ import type {
   IsrOutboxInsert,
   IsrOutboxPayload,
 } from './types';
+import { readIsrOutboxConfig } from './config';
+import { boundOutboxPayload, hasOutboxWork } from './payload';
 
 export const ISR_OUTBOX_TABLE = 'isr_outbox';
 
 type Transaction = any;
 
-function parsePayload(value: unknown): IsrOutboxPayload {
-  if (typeof value === 'string') return JSON.parse(value);
-  return value as IsrOutboxPayload;
+function stringArray(value: unknown, field: string): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (
+    !Array.isArray(value) ||
+    !value.every(
+      (entry) =>
+        typeof entry === 'string' &&
+        entry.length > 0 &&
+        entry.length <= 2_048,
+    )
+  ) {
+    throw new Error(`${field} must be an array of non-empty strings`);
+  }
+  return [...new Set(value)];
 }
 
-function toEvent(row: any): IsrOutboxEvent {
+export function parseIsrOutboxPayload(value: unknown): IsrOutboxPayload {
+  const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('payload must be an object');
+  }
+  const input = parsed as Record<string, unknown>;
+  if (input.all !== undefined && input.all !== true) {
+    throw new Error('payload.all must be true when present');
+  }
+  const paths = stringArray(input.paths, 'payload.paths');
+  const scopes = stringArray(input.scopes, 'payload.scopes');
+  let offerInvalidations: IsrOutboxPayload['offerInvalidations'];
+  if (input.offerInvalidations !== undefined) {
+    if (!Array.isArray(input.offerInvalidations)) {
+      throw new Error('payload.offerInvalidations must be an array');
+    }
+    offerInvalidations = input.offerInvalidations.map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        throw new Error('offer invalidation must be an object');
+      }
+      const offer = entry as Record<string, unknown>;
+      if (
+        !['coupon', 'deal'].includes(String(offer.entityType)) ||
+        typeof offer.documentId !== 'string' ||
+        !offer.documentId.trim()
+      ) {
+        throw new Error('offer invalidation is malformed');
+      }
+      return {
+        entityType: offer.entityType as 'coupon' | 'deal',
+        documentId: offer.documentId,
+      };
+    });
+  }
+  const payload: IsrOutboxPayload = {
+    ...(input.all === true ? { all: true as const } : {}),
+    ...(paths?.length ? { paths } : {}),
+    ...(scopes?.length ? { scopes } : {}),
+    ...(offerInvalidations?.length ? { offerInvalidations } : {}),
+  };
+  if (!hasOutboxWork(payload)) {
+    throw new Error('payload contains no invalidation work');
+  }
+  return payload;
+}
+
+function toEvent(row: any, lockToken: string): IsrOutboxEvent {
   return {
     id: String(row.id),
     eventKey: row.event_key,
-    payload: parsePayload(row.payload),
+    lockToken,
+    payload: parseIsrOutboxPayload(row.payload),
     reason: row.reason,
     attemptCount: Number(row.attempt_count),
   };
 }
 
+export type IsrOutboxClaim =
+  | { state: 'event'; event: IsrOutboxEvent }
+  | {
+      state: 'invalid';
+      id: string;
+      eventKey: string;
+      error: string;
+    };
+
+export interface IsrOutboxStatusSummary {
+  counts: Record<string, number>;
+  oldestUndeliveredAt: string | null;
+  expiredProcessing: number;
+}
+
 export async function insertIsrOutboxEvent(
   transaction: Transaction,
   input: IsrOutboxInsert,
-): Promise<{ id: string; eventKey: string }> {
+): Promise<{ id: string; eventKey: string; payload: IsrOutboxPayload }> {
   const eventKey = input.eventKey ?? randomUUID();
   const now = new Date();
+  const config = readIsrOutboxConfig();
+  const payload = boundOutboxPayload(
+    input.payload,
+    config.maxPaths,
+    config.maxPayloadBytes,
+  );
   const inserted = await transaction(ISR_OUTBOX_TABLE)
     .insert({
       event_key: eventKey,
-      payload: JSON.stringify(input.payload),
+      payload: JSON.stringify(payload),
       reason: input.reason.slice(0, 255),
       status: 'pending',
       attempt_count: 0,
@@ -46,6 +127,7 @@ export async function insertIsrOutboxEvent(
   return {
     id: String(row?.id ?? ''),
     eventKey: row?.event_key ?? eventKey,
+    payload,
   };
 }
 
@@ -56,7 +138,7 @@ export class IsrOutboxStore {
     private readonly maxBackoffMs: number,
   ) {}
 
-  async claim(): Promise<IsrOutboxEvent | null> {
+  async claim(): Promise<IsrOutboxClaim | null> {
     return this.strapi.db.transaction(async ({ trx }: any) => {
       const now = new Date();
       const expiredLease = new Date(now.getTime() - this.leaseMs);
@@ -80,43 +162,86 @@ export class IsrOutboxStore {
         .first();
 
       if (!row) return null;
+      let payload: IsrOutboxPayload;
+      try {
+        payload = parseIsrOutboxPayload(row.payload);
+      } catch (cause) {
+        const error =
+          cause instanceof Error ? cause.message : String(cause);
+        await trx(ISR_OUTBOX_TABLE)
+          .where({ id: row.id })
+          .update({
+            status: 'invalid',
+            invalid_at: now,
+            locked_at: null,
+            lock_token: null,
+            last_error: error.slice(0, 4_000),
+          });
+        return {
+          state: 'invalid' as const,
+          id: String(row.id),
+          eventKey: String(row.event_key ?? ''),
+          error,
+        };
+      }
+      const lockToken = randomUUID();
       await trx(ISR_OUTBOX_TABLE)
         .where({ id: row.id })
-        .update({ status: 'processing', locked_at: now });
-      return toEvent(row);
+        .update({
+          status: 'processing',
+          locked_at: now,
+          lock_token: lockToken,
+        });
+      return {
+        state: 'event' as const,
+        event: toEvent({ ...row, payload }, lockToken),
+      };
     });
   }
 
-  async markDelivered(event: IsrOutboxEvent): Promise<void> {
-    await this.strapi.db.connection(ISR_OUTBOX_TABLE)
-      .where({ id: event.id, event_key: event.eventKey })
+  async markDelivered(event: IsrOutboxEvent): Promise<boolean> {
+    const updated = await this.strapi.db.connection(ISR_OUTBOX_TABLE)
+      .where({
+        id: event.id,
+        event_key: event.eventKey,
+        status: 'processing',
+        lock_token: event.lockToken,
+      })
       .update({
         status: 'delivered',
         delivered_at: new Date(),
         locked_at: null,
+        lock_token: null,
         last_error: null,
       });
+    return Number(updated) === 1;
   }
 
   async scheduleRetry(
     event: IsrOutboxEvent,
     error: string,
-  ): Promise<{ attemptCount: number; delayMs: number }> {
+  ): Promise<{ owned: boolean; attemptCount: number; delayMs: number }> {
     const attemptCount = event.attemptCount + 1;
     const delayMs = Math.min(
       this.maxBackoffMs,
       1_000 * 2 ** Math.min(attemptCount - 1, 12),
     );
-    await this.strapi.db.connection(ISR_OUTBOX_TABLE)
-      .where({ id: event.id, event_key: event.eventKey })
+    const updated = await this.strapi.db.connection(ISR_OUTBOX_TABLE)
+      .where({
+        id: event.id,
+        event_key: event.eventKey,
+        status: 'processing',
+        lock_token: event.lockToken,
+      })
       .update({
         status: 'pending',
         attempt_count: attemptCount,
         next_attempt_at: new Date(Date.now() + delayMs),
         locked_at: null,
+        lock_token: null,
         last_error: error.slice(0, 4_000),
       });
-    return { attemptCount, delayMs };
+    return { owned: Number(updated) === 1, attemptCount, delayMs };
   }
 
   async deleteDeliveredBefore(cutoff: Date): Promise<number> {
@@ -124,5 +249,39 @@ export class IsrOutboxStore {
       .where({ status: 'delivered' })
       .where('delivered_at', '<', cutoff)
       .delete();
+  }
+
+  async statusSummary(): Promise<IsrOutboxStatusSummary> {
+    const connection = this.strapi.db.connection;
+    const expiredLease = new Date(Date.now() - this.leaseMs);
+    const [countRows, oldestRow, expiredRow] = await Promise.all([
+      connection(ISR_OUTBOX_TABLE)
+        .select('status')
+        .count({ count: '*' })
+        .groupBy('status'),
+      connection(ISR_OUTBOX_TABLE)
+        .whereIn('status', ['pending', 'processing'])
+        .min({ oldest: 'created_at' })
+        .first(),
+      connection(ISR_OUTBOX_TABLE)
+        .where({ status: 'processing' })
+        .where('locked_at', '<=', expiredLease)
+        .count({ count: '*' })
+        .first(),
+    ]);
+    const counts = Object.fromEntries(
+      (countRows as any[]).map((row) => [
+        String(row.status),
+        Number(row.count ?? 0),
+      ]),
+    );
+    const oldest = (oldestRow as any)?.oldest;
+    return {
+      counts,
+      oldestUndeliveredAt: oldest
+        ? new Date(oldest).toISOString()
+        : null,
+      expiredProcessing: Number((expiredRow as any)?.count ?? 0),
+    };
   }
 }

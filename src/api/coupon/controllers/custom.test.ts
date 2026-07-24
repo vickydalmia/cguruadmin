@@ -103,12 +103,46 @@ describe('ISR offer route inventory', () => {
     });
     expect(harness.couponFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        status: 'published',
         fields: ['updatedAt'],
         start: 0,
-        limit: 100,
+        limit: 1_000,
       }),
     );
     expect(harness.dealFindMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('paginates large inventories in bounded 1000-route batches', async () => {
+    const harness = createHarness();
+    const firstBatch = Array.from({ length: 1_000 }, (_, index) => ({
+      id: index + 1,
+      updatedAt: '2026-07-24T10:00:00.000Z',
+    }));
+    harness.couponFindMany
+      .mockResolvedValueOnce(firstBatch)
+      .mockResolvedValueOnce([
+        { id: 1_001, updatedAt: '2026-07-24T11:00:00.000Z' },
+      ]);
+
+    await harness.controller.getIsrOfferRoutes(harness.ctx);
+
+    expect(harness.couponFindMany).toHaveBeenCalledTimes(2);
+    expect(harness.couponFindMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        status: 'published',
+        start: 1_000,
+        limit: 1_000,
+      }),
+    );
+    expect(harness.ctx.send).toHaveBeenCalledWith({
+      data: expect.arrayContaining([
+        {
+          path: '/coupon/1001/',
+          updatedAt: '2026-07-24T11:00:00.000Z',
+        },
+      ]),
+    });
   });
 });
 

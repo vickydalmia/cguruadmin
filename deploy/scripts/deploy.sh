@@ -137,6 +137,18 @@ else
   err "Health endpoint returned ${HTTP_CODE} (expected 204)"
 fi
 
+ISR_SECRET=$(read_env ISR_ADMIN_SECRET)
+ISR_STATUS_CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -H "Authorization: Bearer ${ISR_SECRET}" \
+  "http://127.0.0.1:${APP_PORT}/api/isr/status" 2>/dev/null || echo "000")
+if [ "${ISR_STATUS_CODE}" = "200" ]; then
+  log "ISR outbox status is healthy"
+else
+  err "ISR outbox status returned ${ISR_STATUS_CODE} (expected 200)"
+  compose logs --tail=100 strapi
+  exit 1
+fi
+
 # ── Cleanup ──────────────────────────────────────────────────────────────────
 
 docker image prune -af --filter "until=168h" 2>/dev/null || true

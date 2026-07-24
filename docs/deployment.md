@@ -256,11 +256,13 @@ ISR_GATEWAY_URL=http://<FRONTEND_PRIVATE_IP>:3010
 ISR_ADMIN_SECRET=<SHARED_ISR_SECRET>
 ISR_OUTBOX_POLL_MS=2000
 ISR_OUTBOX_BATCH_SIZE=25
-ISR_OUTBOX_REQUEST_TIMEOUT_MS=15000
-ISR_OUTBOX_LEASE_MS=60000
+ISR_OUTBOX_REQUEST_TIMEOUT_MS=90000
+ISR_OUTBOX_LEASE_MS=120000
 ISR_OUTBOX_MAX_BACKOFF_MS=300000
 ISR_OUTBOX_ALERT_AFTER_ATTEMPTS=5
 ISR_OUTBOX_RETENTION_DAYS=30
+ISR_REVALIDATE_MAX_PATHS=5000
+ISR_OUTBOX_MAX_PAYLOAD_BYTES=900000
 ```
 
 Protect the file:
@@ -357,11 +359,13 @@ normal deployments.
 | `ISR_ADMIN_SECRET` | Required | Shared bearer secret for outbox delivery and protected ISR/search operations. It must exactly match Fastify. |
 | `ISR_OUTBOX_POLL_MS` | Optional | Time between outbox dispatcher polls. |
 | `ISR_OUTBOX_BATCH_SIZE` | Optional | Maximum rows leased in one dispatcher poll. |
-| `ISR_OUTBOX_REQUEST_TIMEOUT_MS` | Optional | HTTP timeout for one delivery attempt to Fastify. |
-| `ISR_OUTBOX_LEASE_MS` | Optional | Row lease duration before another dispatcher can reclaim an interrupted delivery. |
+| `ISR_OUTBOX_REQUEST_TIMEOUT_MS` | Optional | HTTP timeout for one delivery attempt to Fastify. Defaults to 90 seconds. |
+| `ISR_OUTBOX_LEASE_MS` | Optional | Row lease duration before another dispatcher can reclaim an interrupted delivery. It must exceed the request timeout by at least 30 seconds. |
 | `ISR_OUTBOX_MAX_BACKOFF_MS` | Optional | Maximum exponential retry delay. |
 | `ISR_OUTBOX_ALERT_AFTER_ATTEMPTS` | Optional | Attempt count at which failures become alert-level logs. |
 | `ISR_OUTBOX_RETENTION_DAYS` | Optional | Age after which successfully delivered rows may be cleaned up. |
+| `ISR_REVALIDATE_MAX_PATHS` | Optional | Maximum targeted paths in one durable event before it is promoted to a full invalidation. Must match the gateway; default `5000`. |
+| `ISR_OUTBOX_MAX_PAYLOAD_BYTES` | Optional | Maximum serialized durable payload size before path events are promoted to a full invalidation. Default `900000`. |
 
 ### PostgreSQL without `DATABASE_URL`
 
@@ -509,7 +513,8 @@ To investigate pending or failed delivery:
 
 ```sql
 select id, event_key, reason, status, attempt_count,
-       next_attempt_at, locked_at, last_error, created_at
+       next_attempt_at, locked_at, lock_token, invalid_at,
+       last_error, created_at
 from isr_outbox
 where status <> 'delivered'
 order by id;
@@ -538,6 +543,10 @@ With `ISR_ADMIN_SECRET` exported from the secret manager:
 curl -fsS \
   -H "Authorization: Bearer ${ISR_ADMIN_SECRET}" \
   http://127.0.0.1:1337/api/search/status
+
+curl -fsS \
+  -H "Authorization: Bearer ${ISR_ADMIN_SECRET}" \
+  http://127.0.0.1:1337/api/isr/status
 ```
 
 Once Fastify is deployed, perform one controlled Coupon or Deal update and
@@ -561,6 +570,9 @@ isr.outbox.enqueued
 isr.outbox.dispatcher_started
 isr.outbox.delivered
 isr.outbox.delivery_failed
+isr.outbox.lease_lost
+isr.outbox.invalid
+isr.outbox.dispatcher_cycle_failed
 isr.outbox.dispatcher_disabled
 isr.outbox.cleanup_completed
 isr.outbox.cleanup_failed
@@ -572,6 +584,8 @@ Alert on:
 - database migration failure;
 - PostgreSQL or S3 connectivity failure;
 - repeated `isr.outbox.delivery_failed`;
+- any `isr.outbox.invalid` quarantined row;
+- a stalled or failing dispatcher reported by `/api/isr/status`;
 - rows remaining undelivered beyond the normal retry window;
 - more than one active cron scheduler.
 

@@ -13,6 +13,7 @@ import {
   createOutboxPayload,
   mergeScope,
   offerEntityTypeFromUid,
+  outboxPayloadSummary,
 } from './isr-outbox/payload';
 import { logIsrOutbox } from './isr-outbox/log';
 import {
@@ -1178,6 +1179,8 @@ export default {
             logIsrOutbox(strapi, 'info', 'isr.outbox.enqueued', {
               outboxId: event.id,
               eventKey: event.eventKey,
+              reason: event.reason,
+              payload: outboxPayloadSummary(event.payload),
               uid: context.uid,
               action: context.action,
             });

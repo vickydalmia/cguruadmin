@@ -56,6 +56,8 @@ describe('runContentTransaction', () => {
     expect(afterCommit).toHaveBeenCalledWith({
       id: '1',
       eventKey: 'event-1',
+      reason: 'coupon update',
+      payload: { paths: ['/amazon/'] },
     });
   });
 
