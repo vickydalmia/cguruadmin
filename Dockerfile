@@ -43,7 +43,8 @@ WORKDIR /opt/app
 RUN addgroup -g 1001 -S strapi && adduser -u 1001 -S strapi -G strapi
 
 COPY --from=build --chown=strapi:strapi /opt/app ./
-RUN mkdir -p .tmp .cache .config && chown -R strapi:strapi /opt/app
+RUN mkdir -p .tmp .cache .config \
+  && chown strapi:strapi .tmp .cache .config
 
 USER strapi
 
