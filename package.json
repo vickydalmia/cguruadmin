@@ -22,6 +22,7 @@
     "upgrade:dry": "npx @strapi/upgrade latest --dry"
   },
   "dependencies": {
+    "@fal-ai/client": "^1.10.1",
     "@strapi/plugin-cloud": "5.50.0",
     "@strapi/plugin-users-permissions": "5.50.0",
     "@strapi/provider-email-amazon-ses": "5.50.0",
@@ -45,7 +46,8 @@
     "react-router-dom": "^6.0.0",
     "sanitize-html": "^2.17.6",
     "sharp": "^0.33.5",
-    "styled-components": "^6.0.0"
+    "styled-components": "^6.0.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@strapi/sdk-plugin": "5.4.0",

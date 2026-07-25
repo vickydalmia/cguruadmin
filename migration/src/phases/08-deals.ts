@@ -5,7 +5,7 @@ import {
   setPostMapping,
   getUserMapping,
 } from "../utils/id-maps.js";
-import { resolveMediaRef } from "../utils/media-resolver.js";
+import { resolveDealMediaRef } from "../utils/media-resolver.js";
 import {
   generateDocumentId,
   getEntityIdByDocumentId,
@@ -110,13 +110,18 @@ export async function runDeals(): Promise<void> {
 
   let inserted = 0;
   let failed = 0;
+  let dealImagesFinished = 0;
+  let dealImagesReady = 0;
+  let dealImagesMissing = 0;
+  let dealImagesFailed = 0;
   const limit = pLimit(20);
 
-  const tasks = posts.map((post) =>
+  const tasks = posts.map((post, postIndex) =>
     limit(async () => {
       const meta = metaByPost.get(post.ID) || {};
       const relations = termRelByPost.get(post.ID) || [];
       const primaryTermId = primaryTerms.get(post.ID);
+      let dealImageStatus: "ready" | "missing" | "failed" = "failed";
 
       try {
         const sourceKey = `deal:${post.ID}`;
@@ -146,11 +151,20 @@ export async function runDeals(): Promise<void> {
 
         const salePrice = parseDecimal(meta.deal_sale_price);
         const mrp = parseDecimal(meta.deal_mrp);
-        const dealImageId = await resolveMediaRef(meta.deal_image);
+        logger.info(
+          `[deal-image ${postIndex + 1}/${posts.length}] resolving WordPress ` +
+            `Deal ${post.ID} (${post.post_title})`,
+        );
+        const dealImageId = await resolveDealMediaRef(meta.deal_image);
         const fallbackImageId = dealImageId
           ? null
-          : await resolveMediaRef(meta.image);
+          : await resolveDealMediaRef(meta.image);
         const importedDealImageId = dealImageId ?? fallbackImageId ?? null;
+        dealImageStatus = importedDealImageId ? "ready" : "missing";
+        logger.info(
+          `[deal-image ${postIndex + 1}/${posts.length}] WordPress Deal ` +
+            `${post.ID} ${importedDealImageId ? `uses file_id=${importedDealImageId}` : "has no resolvable image"}`,
+        );
         const missingRequired = [
           !title.trim() ? "title" : null,
           !offerText?.trim() ? "offerText" : null,
@@ -313,12 +327,26 @@ export async function runDeals(): Promise<void> {
         logger.error(
           `Failed to insert deal ${post.ID} (${post.post_title}): ${err.message}`
         );
+      } finally {
+        dealImagesFinished += 1;
+        if (dealImageStatus === "ready") dealImagesReady += 1;
+        else if (dealImageStatus === "missing") dealImagesMissing += 1;
+        else dealImagesFailed += 1;
+        logger.info(
+          `[deal-image progress ${dealImagesFinished}/${posts.length}] ` +
+            `WordPress Deal ${post.ID}: ${dealImageStatus} ` +
+            `(ready=${dealImagesReady}, missing=${dealImagesMissing}, failed=${dealImagesFailed})`,
+        );
       }
     })
   );
 
   await Promise.all(tasks);
   logger.info(`Deals migration complete: ${inserted} inserted, ${failed} failed`);
+  logger.info(
+    `Deal image progress complete: ${dealImagesFinished}/${posts.length} checked, ` +
+      `${dealImagesReady} ready, ${dealImagesMissing} missing, ${dealImagesFailed} failed`,
+  );
   if (failed > 0) {
     throw new Error(
       `${failed} Deal(s) failed import; see the WordPress post IDs above`,

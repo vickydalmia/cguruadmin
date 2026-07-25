@@ -18,6 +18,7 @@ import { runCodes } from "./phases/06-codes.js";
 import { runUsers } from "./phases/06a-users.js";
 import { runCoupons } from "./phases/07-coupons.js";
 import { runDeals } from "./phases/08-deals.js";
+import { runDealImageBackgroundBackfill } from "./phases/08a-deal-image-backgrounds.js";
 import { runSeoBackfill } from "./phases/09-seo-backfill.js";
 import { runVerification } from "./phases/10-verify.js";
 import { runCopyUsedMedia } from "./phases/11-copy-used-media.js";
@@ -47,6 +48,13 @@ const phases: Phase[] = [
   { name: "06a-users", fn: runUsers },
   { name: "07-coupons", fn: runCoupons },
   { name: "08-deals", fn: runDeals },
+  // Re-runnable: current-version media metadata is the idempotency guard, and
+  // a failed provider/credit run must resume without restarting earlier phases.
+  {
+    name: "08a-deal-image-backgrounds",
+    fn: runDealImageBackgroundBackfill,
+    skipCheckpoint: true,
+  },
   { name: "09-seo-backfill", fn: runSeoBackfill },
   { name: "10-verify", fn: runVerification, skipCheckpoint: true },
   { name: "11-copy-used-media", fn: runCopyUsedMedia },

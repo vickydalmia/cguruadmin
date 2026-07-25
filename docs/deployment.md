@@ -241,6 +241,12 @@ S3_CHECKSUM_ALGORITHM=CRC64NVME
 S3_MULTIPART_PART_SIZE=10485760
 S3_MULTIPART_QUEUE_SIZE=4
 
+# Required for Product Deal image uploads.
+FAL_KEY=<FAL_API_KEY>
+FAL_BACKGROUND_REMOVAL_CONCURRENCY=2
+FAL_BACKGROUND_REMOVAL_TIMEOUT_MS=120000
+FAL_BACKGROUND_REMOVAL_MAX_ATTEMPTS=3
+
 # Media origins permitted by the Strapi admin Content Security Policy.
 UPLOAD_CSP_SOURCES=https://media.couponzguru.com,https://<BUCKET>.s3.ap-south-1.amazonaws.com
 
@@ -347,6 +353,10 @@ normal deployments.
 | `S3_CHECKSUM_ALGORITHM` | Optional | Checksum algorithm attached to S3 upload requests. |
 | `S3_MULTIPART_PART_SIZE` | Optional | Multipart upload part size in bytes. |
 | `S3_MULTIPART_QUEUE_SIZE` | Optional | Number of concurrently uploaded multipart sections. |
+| `FAL_KEY` | Required for Deal images | Server-only FAL credential used to remove Product Deal image backgrounds before AWS persistence. |
+| `FAL_BACKGROUND_REMOVAL_CONCURRENCY` | Optional | Maximum concurrent FAL removals per process. Defaults to `2`. |
+| `FAL_BACKGROUND_REMOVAL_TIMEOUT_MS` | Optional | Per-attempt timeout. Defaults to `120000`. |
+| `FAL_BACKGROUND_REMOVAL_MAX_ATTEMPTS` | Optional | Attempts for transient provider failures. Defaults to `3`; credit/auth errors are not retried. |
 | `UPLOAD_CSP_SOURCES` | Required for external media | Comma-separated media origins added to the Strapi admin `img-src` and `media-src` policy. |
 | `CORS_ORIGINS` | Optional | Browser origins permitted to call Strapi directly. Keep empty when all public browser requests use Fastify. |
 | `STRAPI_ADMIN_PUBLIC_SITE_URL` | Optional build-time | Public site origin compiled into Coupon/Deal admin link actions. Runtime-only changes do not rebuild the admin bundle. |

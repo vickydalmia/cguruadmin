@@ -1,5 +1,17 @@
-import { uploadMediaOnDemand } from "../phases/02-media-upload.js";
-import { resolveUploadsUrl } from "./content-media.js";
+import {
+  uploadFileFromDisk,
+  uploadMediaOnDemand,
+  type DiskUploadSource,
+} from "../phases/02-media-upload.js";
+import { getOrLoadMediaItem } from "../phases/01-media-inventory.js";
+import {
+  resolveUploadsDiskSource,
+  resolveUploadsUrl,
+} from "./content-media.js";
+import {
+  DEAL_IMAGE_PROCESSOR_VERSION,
+  prepareMigrationDealImage,
+} from "./deal-image-background.js";
 import { logger } from "./logger.js";
 
 /**
@@ -34,6 +46,76 @@ export async function resolveMediaRef(
 
   logger.debug(`Media ref URL could not be resolved: ${strVal.substring(0, 80)}`);
   return undefined;
+}
+
+async function dealImageSource(
+  value: string | number,
+): Promise<DiskUploadSource | undefined> {
+  const raw = String(value).trim();
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    const item = await getOrLoadMediaItem(numeric);
+    if (!item?.localPath) return undefined;
+    return {
+      localPath: item.localPath,
+      fileName: item.fileName,
+      mimeType: item.mimeType,
+      altText: item.altText,
+      caption: item.postTitle,
+    };
+  }
+  return resolveUploadsDiskSource(raw);
+}
+
+/**
+ * Deal-only resolver. It archives a lossless transparent PNG before the
+ * generic optimizer sees the bytes, ensuring an opaque WordPress original is
+ * never persisted to S3.
+ */
+export async function resolveDealMediaRef(
+  value: string | number | null | undefined,
+): Promise<number | undefined> {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return undefined;
+  }
+  const source = await dealImageSource(value);
+  if (!source) {
+    logger.debug(`Deal media ref could not be resolved: ${String(value).slice(0, 80)}`);
+    return undefined;
+  }
+
+  const prepared = await prepareMigrationDealImage(source);
+  const preparation =
+    prepared.reusedArchive
+      ? "archive-reused"
+      : prepared.skippedProvider
+        ? "already-transparent"
+        : "fal-background-removed";
+  logger.info(
+    `[deal-image] ${preparation}: ${source.fileName} ` +
+      `(source=${prepared.sourceHash.slice(0, 12)}, ` +
+      `${prepared.width}x${prepared.height}, archive=${prepared.pngPath})`,
+  );
+  const record = await uploadFileFromDisk({
+    localPath: prepared.pngPath,
+    fileName: `${source.fileName.replace(/\.[^.]+$/, "")}-transparent.png`,
+    mimeType: "image/png",
+    altText: source.altText,
+    caption: source.caption,
+    backgroundRemoval: {
+      sourceHash: prepared.sourceHash,
+      version: DEAL_IMAGE_PROCESSOR_VERSION,
+      removedAt: new Date().toISOString(),
+    },
+    throwOnFailure: true,
+  });
+  if (record) {
+    logger.info(
+      `[deal-image] optimized transparent media ready: ${source.fileName} ` +
+        `(file_id=${record.id}, url=${record.url})`,
+    );
+  }
+  return record?.id;
 }
 
 /**

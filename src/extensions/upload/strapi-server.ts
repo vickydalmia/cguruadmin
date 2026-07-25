@@ -6,6 +6,10 @@ import sharp from 'sharp';
 import { IMAGE_BREAKPOINTS, IMAGE_OPTIMIZATION as OPT } from '../../constants/image';
 import { slugify } from '../../constants/slugify';
 import { calculateImageBackgroundColour } from '../../utils/image-background-colour';
+import {
+  dealImageProcessingMetadata,
+  extendDealImageUploadPlugin,
+} from '../../utils/deal-image-upload';
 
 const bytesToKbytes = (bytes: number) => Math.round((bytes / 1000) * 100) / 100;
 
@@ -55,6 +59,32 @@ export default (plugin: any) => {
     maxLength: 7,
     regex: '^#[0-9A-F]{6}$',
   };
+  plugin.contentTypes.file.schema.attributes.backgroundRemovalSourceHash = {
+    type: 'string',
+    configurable: false,
+    private: true,
+    maxLength: 64,
+  };
+  plugin.contentTypes.file.schema.attributes.backgroundRemovalVersion = {
+    type: 'string',
+    configurable: false,
+    private: true,
+    maxLength: 80,
+  };
+  plugin.contentTypes.file.schema.attributes.backgroundRemovedAt = {
+    type: 'datetime',
+    configurable: false,
+    private: true,
+  };
+
+  const attachDealImageMetadata = (target: any, sourcePath?: string) => {
+    const metadata = dealImageProcessingMetadata(sourcePath);
+    if (!metadata) return target;
+    target.backgroundRemovalSourceHash = metadata.sourceHash;
+    target.backgroundRemovalVersion = metadata.version;
+    target.backgroundRemovedAt = metadata.processedAt;
+    return target;
+  };
 
   // enhanceAndValidateFile calls isImage before optimize and then the upload
   // service calls it again before persistence. Calculate on the first call
@@ -95,31 +125,40 @@ export default (plugin: any) => {
       (await strapi.plugin('upload').service('upload').getSettings()) ?? {};
 
     if (settings.sizeOptimization === false) {
-      return base.optimize(file);
+      return attachDealImageMetadata(
+        await base.optimize(file),
+        file.filepath,
+      );
     }
 
     if (!file.filepath) {
       // Stream-only input (no temp file) — fall back to stock behavior.
-      return base.optimize(file);
+      return attachDealImageMetadata(
+        await base.optimize(file),
+        file.filepath,
+      );
     }
 
     let meta: sharp.Metadata;
     try {
       meta = await sharp(file.filepath).metadata();
     } catch {
-      return base.optimize(file);
+      return attachDealImageMetadata(
+        await base.optimize(file),
+        file.filepath,
+      );
     }
 
     // sharp reports AVIF sources as "heif" (AVIF is HEIF-family).
     const rawFormat = meta.format as string | undefined;
     const format = rawFormat === 'heif' ? 'avif' : rawFormat;
-    if (!format) return file;
+    if (!format) return attachDealImageMetadata(file, file.filepath);
 
     const toWebp = (OPT.convertToWebp as readonly string[]).includes(format);
     const keepFormat = (OPT.recompress as readonly string[]).includes(format);
     if (!toWebp && !keepFormat) {
       // gif/svg/etc. — never re-encoded here.
-      return file;
+      return attachDealImageMetadata(file, file.filepath);
     }
 
     const outFormat = (toWebp ? 'webp' : format) as keyof sharp.FormatEnum;
@@ -145,7 +184,7 @@ export default (plugin: any) => {
     // Same-format re-encode that got bigger without needing a resize:
     // keep the original bytes (parity with stock optimize behavior).
     if (!toWebp && !needsResize && meta.size && info.size > meta.size) {
-      return file;
+      return attachDealImageMetadata(file, file.filepath);
     }
 
     const newFile = { ...file };
@@ -186,12 +225,12 @@ export default (plugin: any) => {
       }
     }
 
-    return Object.assign(newFile, {
+    return attachDealImageMetadata(Object.assign(newFile, {
       width: info.width,
       height: info.height,
       size: bytesToKbytes(info.size),
       sizeInBytes: info.size,
-    });
+    }), file.filepath);
   };
 
   // Stock variant hashes are `${sizeKey}_${file.hash}` — with a folder inside
@@ -366,5 +405,6 @@ export default (plugin: any) => {
     generateResponsiveFormats,
     isResizableImage,
   };
+  extendDealImageUploadPlugin(plugin);
   return plugin;
 };

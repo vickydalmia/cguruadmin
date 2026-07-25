@@ -82,6 +82,12 @@ S3_BASE_URL=                   # CloudFront / CDN URL (optional)
 S3_ROOT_PATH=uploads           # Key prefix in bucket
 S3_ENDPOINT=                   # Custom endpoint for Minio, etc.
 
+# Product Deal background removal (required for opaque Deal images)
+FAL_KEY=
+FAL_BACKGROUND_REMOVAL_CONCURRENCY=2
+FAL_BACKGROUND_REMOVAL_TIMEOUT_MS=120000
+FAL_BACKGROUND_REMOVAL_MAX_ATTEMPTS=3
+
 # Local WordPress uploads directory (relative or absolute)
 WP_UPLOADS_DIR=../wordpress/wp-content/uploads
 
@@ -431,6 +437,34 @@ For each image (uploaded on demand the first time content references it):
 8. **ID map** — store `WP attachment_id → Strapi file_id` for later linking
 
 If `S3_BUCKET` is empty, optimization is skipped entirely — files are registered as local provider records with `/uploads/{hash}_{name}{ext}` URLs and `formats` stays NULL.
+
+### Product Deal images (Phase 08 / 08a)
+
+Product Deal images bypass the generic opaque upload path. The migration reads
+the WordPress/current source and computes its content hash. It first checks for
+a valid PNG with that hash in the local transparent archive. A cache hit skips
+FAL and goes directly through WebP/AVIF optimization and S3 upload. On a cache
+miss it removes the background with FAL Bria RMBG 2.0 (already-transparent
+sources also skip the API), validates the returned PNG, and atomically archives
+that lossless master under
+`background-removed-deal-images/fal-bria-rmbg-2.0-v1/`. Only after reading the
+archive back does it generate WebP/AVIF files and upload those transparent
+outputs to S3.
+
+The archive is gitignored and deliberately survives `--clean`. Re-imports use
+the source-hash filename and make no repeated FAL call. Phase
+`08a-deal-image-backgrounds` is re-runnable and also converts Deal images that
+already existed in Strapi. When it replaces an opaque AWS file, it deletes the
+old object only if `files_related_mph` confirms that no content still references
+it.
+
+Credit, authentication, rate-limit, timeout, or invalid-output failures stop the
+affected phase without linking an opaque image. After fixing the provider issue,
+resume with:
+
+```bash
+npm run migrate:phase -- 08a-deal-image-backgrounds
+```
 
 ### Maintenance scripts
 

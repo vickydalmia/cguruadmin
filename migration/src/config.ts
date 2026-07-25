@@ -50,6 +50,16 @@ export const config = {
     rootPath: optional("S3_ROOT_PATH", "uploads"),
     endpoint: optional("S3_ENDPOINT"),
   },
+  fal: {
+    key: optional("FAL_KEY"),
+    concurrency:
+      parseInt(optional("FAL_BACKGROUND_REMOVAL_CONCURRENCY", "2")) || 2,
+    timeoutMs:
+      parseInt(optional("FAL_BACKGROUND_REMOVAL_TIMEOUT_MS", "120000")) ||
+      120000,
+    maxAttempts:
+      parseInt(optional("FAL_BACKGROUND_REMOVAL_MAX_ATTEMPTS", "3")) || 3,
+  },
   wpUploadsDir: path.resolve(
     __dirname,
     "..",

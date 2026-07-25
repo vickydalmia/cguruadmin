@@ -70,6 +70,7 @@ import {
   validateTextFieldsForWrite,
 } from './utils/text-field-validation';
 import { registerCuratedOfferRelationQueryFilter } from './utils/curated-offer-relations';
+import { ensureTransparentDealImageForWrite } from './utils/deal-image-upload';
 
 const HIDE_FROM_EDIT: Record<string, string[]> = {
   'api::deal.deal': ['stores', 'brands', 'categories', 'banks'],
@@ -967,6 +968,21 @@ export default {
         // is byte-identical to what is stored. Collapse is string-only —
         // collapsing a text/richtext field would destroy paragraph breaks.
         normaliseTextFields(context.uid, context.action, context.params?.data);
+      }
+
+      // Product Deal media is a transparent-only contract. The dedicated
+      // admin uploader normally finishes this work before the form changes,
+      // while this server-side guard covers direct API callers and legacy
+      // opaque media selected into a Deal. A provider/credit failure rejects
+      // only the attempted image change and returns an inline field error.
+      if (
+        context.uid === 'api::deal.deal' &&
+        ['create', 'update', 'clone'].includes(context.action)
+      ) {
+        await ensureTransparentDealImageForWrite(
+          strapi,
+          context.params?.data,
+        );
       }
 
       // A coupon owns exactly one of `code` / `uniqueCouponPool`. The admin

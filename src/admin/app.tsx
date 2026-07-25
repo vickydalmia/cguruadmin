@@ -39,6 +39,7 @@ import PublishingPanel from './components/PublishingPanel';
 import EntryLinkCell from './components/EntryLinkCell';
 import UniqueCodeImport from './components/UniqueCodeImport';
 import { isLinkableCellType } from './utils/entry-link';
+import { createDealAwareMediaInput } from './features/deal-image/components/deal-aware-media-input';
 import {
   pendingRequiredFields,
   type PendingField,
@@ -980,6 +981,16 @@ const linkifyFirstColumnHook = ({ displayedHeaders, layout }: ListViewHeaders) =
 
 export default {
   register(app: StrapiApp) {
+    // Strapi registers plugin fields before the application's register hook.
+    // Keep the stock media input for every field except Product Deal.dealImage,
+    // whose dedicated uploader guarantees transparent-only AWS persistence.
+    const standardMediaInput = (app as any).library?.fields?.media;
+    if (standardMediaInput) {
+      app.addFields({
+        type: 'media',
+        Component: createDealAwareMediaInput(standardMediaInput),
+      } as any);
+    }
     // Replace the built-in markdown editor for ALL `richtext` fields with the
     // TipTap WYSIWYG (the fields store HTML, rendered raw on the site). NOTE:
     // in Strapi 5 the registry key must be the raw attribute type 'richtext'

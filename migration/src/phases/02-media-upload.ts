@@ -169,6 +169,13 @@ export interface DiskUploadSource {
   mimeType: string;
   altText?: string | null;
   caption?: string | null;
+  backgroundRemoval?: {
+    sourceHash: string;
+    version: string;
+    removedAt: string;
+  };
+  /** Deal image failures abort the phase instead of becoming a missing field. */
+  throwOnFailure?: boolean;
 }
 
 // In-flight uploads keyed by resolved local path, so concurrent posts
@@ -245,11 +252,45 @@ async function doUploadFileFromDisk(
       }
     }
 
+    if (source.backgroundRemoval) {
+      const existing = await pgQuery<{ id: number }>(
+        `SELECT id
+         FROM files
+         WHERE background_removal_source_hash = $1
+           AND background_removal_version = $2
+         LIMIT 1`,
+        [
+          source.backgroundRemoval.sourceHash,
+          source.backgroundRemoval.version,
+        ],
+      );
+      if (existing[0]) {
+        uploadStats.skipped++;
+        existingHashes.set(hash, existing[0].id);
+        return getFileRecordById(existing[0].id);
+      }
+    }
+
     // The current files table is authoritative. A checkpoint's numeric file
     // ID can be stale after a dev DB reset, while the immutable source hash
     // still identifies the correct media record safely.
     if (existingHashes.has(hash)) {
       const existingId = existingHashes.get(hash)!;
+      if (source.backgroundRemoval) {
+        await pgQuery(
+          `UPDATE files
+           SET background_removal_source_hash = $2,
+               background_removal_version = $3,
+               background_removed_at = COALESCE(background_removed_at, $4)
+           WHERE id = $1`,
+          [
+            existingId,
+            source.backgroundRemoval.sourceHash,
+            source.backgroundRemoval.version,
+            source.backgroundRemoval.removedAt,
+          ],
+        );
+      }
       uploadStats.skipped++;
       return getFileRecordById(existingId);
     }
@@ -383,9 +424,12 @@ async function doUploadFileFromDisk(
       `INSERT INTO files (
         document_id, name, alternative_text, caption, width, height,
         formats, ext, mime, size, hash, url, provider, provider_metadata,
-        background_colour, folder_path, created_at, updated_at, published_at
+        background_colour, background_removal_source_hash,
+        background_removal_version, background_removed_at,
+        folder_path, created_at, updated_at, published_at
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW(), NOW()
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+        $16, $17, $18, $19, NOW(), NOW(), NOW()
       ) RETURNING id`,
       [
         documentId,
@@ -403,6 +447,9 @@ async function doUploadFileFromDisk(
         provider,
         providerMetadata,
         backgroundColour,
+        source.backgroundRemoval?.sourceHash ?? null,
+        source.backgroundRemoval?.version ?? null,
+        source.backgroundRemoval?.removedAt ?? null,
         "/",
       ]
     );
@@ -427,6 +474,7 @@ async function doUploadFileFromDisk(
   } catch (err: any) {
     logger.error(`Failed to upload media ${source.fileName}: ${err.message}`);
     uploadStats.failed++;
+    if (source.throwOnFailure) throw err;
     return undefined;
   }
 }

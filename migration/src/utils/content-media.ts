@@ -7,7 +7,9 @@ import {
   uploadFileFromDisk,
   uploadMediaRecordOnDemand,
   UploadedFileRecord,
+  type DiskUploadSource,
 } from "../phases/02-media-upload.js";
+import { getOrLoadMediaItem } from "../phases/01-media-inventory.js";
 import { logger } from "./logger.js";
 import { getAttr, rebuildImgTag, replaceImgTags } from "./img-rewrite.js";
 
@@ -141,6 +143,58 @@ export async function resolveUploadsUrl(
     resolvedByPath.set(rel, task);
   }
   return task;
+}
+
+/**
+ * Resolve a WordPress uploads URL to its original local bytes without
+ * uploading anything. Product Deal images use this path so the opaque source
+ * cannot reach S3 before background removal.
+ */
+export async function resolveUploadsDiskSource(
+  url: string,
+): Promise<DiskUploadSource | undefined> {
+  const rel = extractUploadsRelPath(url);
+  if (!rel) return undefined;
+  const index = await getAttachedFileIndex();
+  const candidates = candidateRelPaths(rel);
+
+  for (const candidate of candidates) {
+    const attachmentId = index.get(candidate);
+    if (!attachmentId) continue;
+    const item = await getOrLoadMediaItem(attachmentId);
+    if (item?.localPath) {
+      return {
+        localPath: item.localPath,
+        fileName: item.fileName,
+        mimeType: item.mimeType,
+        altText: item.altText,
+        caption: item.postTitle,
+      };
+    }
+  }
+
+  const uploadsRoot = path.resolve(config.wpUploadsDir);
+  for (const candidate of candidates.flatMap((value) => [
+    value,
+    `backup/${value}`,
+  ])) {
+    const localPath = path.resolve(uploadsRoot, candidate);
+    if (
+      localPath !== uploadsRoot &&
+      !localPath.startsWith(uploadsRoot + path.sep)
+    ) {
+      continue;
+    }
+    if (!fs.existsSync(localPath)) continue;
+    const mimeType = IMAGE_MIMES[path.extname(localPath).toLowerCase()];
+    if (!mimeType) continue;
+    return {
+      localPath,
+      fileName: path.basename(localPath),
+      mimeType,
+    };
+  }
+  return undefined;
 }
 
 async function resolveRelPath(

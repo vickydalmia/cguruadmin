@@ -1723,6 +1723,17 @@ export interface PluginUploadFile extends Struct.CollectionTypeSchema {
         maxLength: 7;
         minLength: 7;
       }>;
+    backgroundRemovalSourceHash: Schema.Attribute.String &
+      Schema.Attribute.Private &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 64;
+      }>;
+    backgroundRemovalVersion: Schema.Attribute.String &
+      Schema.Attribute.Private &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    backgroundRemovedAt: Schema.Attribute.DateTime & Schema.Attribute.Private;
     caption: Schema.Attribute.Text;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
