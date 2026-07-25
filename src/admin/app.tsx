@@ -3,6 +3,7 @@ import Logo from './extensions/logo-icon.svg';
 import type { StrapiApp } from '@strapi/strapi/admin';
 import { useFetchClient, useForm, useRBAC } from '@strapi/strapi/admin';
 import type { PanelComponent } from '@strapi/content-manager/strapi-admin';
+import { unstable_useContentManagerContext } from '@strapi/content-manager/strapi-admin';
 import * as React from 'react';
 import {
   Box,
@@ -32,9 +33,16 @@ import DateTimeInput from './components/DateTimeInput';
 import BooleanConfirmInput from './components/BooleanConfirmInput';
 import SlugInput from './components/SlugInput';
 import PublicOfferLinkAction from './components/PublicOfferLinkAction';
+import BumpToTopAction from './components/BumpToTopAction';
+import OfferStatusTabs from './components/OfferStatusTabs';
+import PublishingPanel from './components/PublishingPanel';
 import EntryLinkCell from './components/EntryLinkCell';
 import UniqueCodeImport from './components/UniqueCodeImport';
 import { isLinkableCellType } from './utils/entry-link';
+import {
+  pendingRequiredFields,
+  type PendingField,
+} from './utils/pending-required';
 
 type RelationConfig = {
   field: string;
@@ -485,19 +493,33 @@ function RelationSection({
       {selectedList.length > 0 ? (
         <Box paddingBottom={2} width="100%">
           <Flex direction="column" alignItems="stretch" gap={2} width="100%">
+            {/*
+              Styled to match the design-system `Tag` (primary100 fill,
+              primary200 border, bold `pi` label in primary600, 3/1 padding)
+              without using it: Tag is `inline` with a fixed 3.2rem height and
+              no wrapping, so a long name — "Airtel Payments Bank" — overflows
+              this narrow sidebar instead of wrapping. Keeping a full-width
+              block preserves `overflowWrap`, and centring the row lines the
+              remove button up with a single-line label.
+            */}
             {selectedList.map((c) => (
               <Box
                 key={c.documentId}
                 hasRadius
                 background="primary100"
-                padding={2}
+                borderColor="primary200"
+                paddingLeft={3}
+                paddingRight={1}
+                paddingTop={1}
+                paddingBottom={1}
                 width="100%"
               >
-                <Flex alignItems="flex-start" gap={2} width="100%">
+                <Flex alignItems="center" gap={2} width="100%">
                   <Box style={{ flex: 1, minWidth: 0 }}>
                     <Typography
-                      variant="omega"
-                      textColor="neutral800"
+                      variant="pi"
+                      fontWeight="bold"
+                      textColor="primary600"
                       style={{
                         display: 'block',
                         lineHeight: 1.35,
@@ -843,17 +865,59 @@ const VALIDATION_PANEL_UIDS = new Set<string>([
 const ValidationProblemsPanel: PanelComponent = ({ model }) => {
   // Hook order must not depend on the model — select first, bail after.
   const formErrors = useForm('ValidationProblemsPanel', (state) => state.errors);
+  const formValues = useForm('ValidationProblemsPanel', (state) => state.values);
+  const { contentType, components, isCreatingEntry } =
+    unstable_useContentManagerContext();
 
   if (!VALIDATION_PANEL_UIDS.has(model)) return null;
 
   const problems = flattenFormErrors(formErrors);
-  if (problems.length === 0) return null;
+  if (problems.length > 0) {
+    return {
+      title: `Validation problems (${problems.length})`,
+      content: <ValidationProblemsList problems={problems} model={model} />,
+    };
+  }
+
+  // Nothing has been submitted yet. Most rows here predate the required-field
+  // rules (every entity is missing websiteUrl, 205 are missing alt text), so
+  // list what is already missing the moment the record opens — otherwise the
+  // editor only finds out when their save bounces. Skipped while CREATING: an
+  // empty new form would open with every required field listed as a problem,
+  // which reads as broken rather than helpful.
+  if (isCreatingEntry) return null;
+
+  const pending = pendingRequiredFields(
+    contentType as any,
+    components as any,
+    formValues as Record<string, unknown>,
+  );
+  if (pending.length === 0) return null;
 
   return {
-    title: `Validation problems (${problems.length})`,
-    content: <ValidationProblemsList problems={problems} model={model} />,
+    title: `Needs attention (${pending.length})`,
+    content: <PendingRequiredList pending={pending} />,
   };
 };
+
+function PendingRequiredList({ pending }: { pending: PendingField[] }) {
+  return (
+    <Flex direction="column" alignItems="stretch" gap={3} width="100%">
+      <Typography variant="pi" textColor="neutral600">
+        This entry is missing {pending.length === 1 ? 'a field' : 'fields'} that
+        are now required. The save will be rejected until{' '}
+        {pending.length === 1 ? 'it is' : 'they are'} filled in.
+      </Typography>
+      {pending.map((field) => (
+        <Box key={field.path.join('.')}>
+          <Typography variant="pi" fontWeight="bold" textColor="warning600" tag="p">
+            {field.label}
+          </Typography>
+        </Box>
+      ))}
+    </Flex>
+  );
+}
 
 /**
  * Content-manager list rows are `<tr>`s with a JS click handler, so middle-click,
@@ -946,9 +1010,22 @@ export default {
     }
   },
   bootstrap(app: StrapiApp) {
-    const apis = (app.getPlugin('content-manager') as any).apis;
-    apis.addDocumentAction([PublicOfferLinkAction]);
+    const contentManager = app.getPlugin('content-manager') as any;
+    const apis = contentManager.apis;
+    apis.addDocumentAction([PublicOfferLinkAction, BumpToTopAction]);
+
+    // Published / Scheduled / Expired shortcuts in the Coupon and Product Deal
+    // list toolbars. `listView.actions` is the only list-view injection zone
+    // Strapi 5 exposes — see the component for why that shapes the UI.
+    contentManager.injectComponent('listView', 'actions', {
+      name: 'offer-status-tabs',
+      Component: OfferStatusTabs,
+    });
+    // Panel order = the order editors read them. Strapi's own "Entry" panel
+    // (Save, Publish) is always first; Publishing sits directly under it
+    // because scheduling is what an editor checks right before saving.
     apis.addEditViewSidePanel([
+      PublishingPanel,
       RelationMultiSelectPanel,
       EntityTopPickCouponPanel,
       UniqueCodeImportPanel,

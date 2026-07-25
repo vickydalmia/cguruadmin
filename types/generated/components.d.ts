@@ -1271,10 +1271,12 @@ export interface SharedSeo extends Struct.ComponentSchema {
   attributes: {
     canonicalUrl: Schema.Attribute.String;
     metaDescription: Schema.Attribute.Text &
+      Schema.Attribute.Required &
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 170;
       }>;
     metaTitle: Schema.Attribute.String &
+      Schema.Attribute.Required &
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 70;
       }>;

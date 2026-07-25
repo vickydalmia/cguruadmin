@@ -12,7 +12,13 @@ export default {
         "api::deal.deal",
       ] as const) {
         const docs = await strapi.documents(uid).findMany({
-          fields: ["documentId", "scheduledAt", "expiresAt", "contentStatus"],
+          fields: [
+            "documentId",
+            "scheduledAt",
+            "expiresAt",
+            "contentStatus",
+            "publishedOn",
+          ],
           filters: {
             $or: [
               {
@@ -37,13 +43,26 @@ export default {
             doc.scheduledAt &&
             nextStatus === "published" &&
             new Date(doc.scheduledAt) <= now;
+          // A scheduled offer going live NOW is new to the site now — stamp the
+          // sort key so it surfaces at the top of "newest first" listings on its
+          // go-live date, not its authoring date. Fill-only: an editor-set date
+          // (or a backfilled one) is never overwritten.
+          const shouldStampPublishedOn =
+            nextStatus === "published" && !doc.publishedOn;
 
-          if (doc.contentStatus !== nextStatus || shouldClearScheduledAt) {
+          if (
+            doc.contentStatus !== nextStatus ||
+            shouldClearScheduledAt ||
+            shouldStampPublishedOn
+          ) {
             await strapi.documents(uid).update({
               documentId: doc.documentId,
               data: {
                 contentStatus: nextStatus,
                 ...(shouldClearScheduledAt ? { scheduledAt: null } : {}),
+                ...(shouldStampPublishedOn
+                  ? { publishedOn: now.toISOString() }
+                  : {}),
               },
             });
             changed += 1;

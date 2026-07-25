@@ -229,11 +229,13 @@ describe('public Deal detail aggregate', () => {
           affiliateLink: 'https://merchant.invalid/private',
           salePrice: 55191,
           dealImage: { url: '/uploads/thinkbook.webp' },
-          primaryStore: {
-            documentId: 'store-lenovo',
-            name: 'Lenovo',
-            slug: 'lenovo-coupons',
-          },
+          stores: [
+            {
+              documentId: 'store-lenovo',
+              name: 'Lenovo',
+              slug: 'lenovo-coupons',
+            },
+          ],
         },
       ])
       .mockResolvedValueOnce([
@@ -485,21 +487,23 @@ describe('entity product Deal population', () => {
       fields: ['name', 'slug', 'logoAlt'],
       populate: { logo: true },
     };
-    expect(options.populate.primaryStore).toEqual(logoRef);
     expect(options.populate.stores).toEqual(logoRef);
     expect(options.populate.brands).toEqual(logoRef);
     expect(options.populate.banks).toEqual(logoRef);
     expect(options.populate.categories).toEqual({
-      fields: ['name', 'slug'],
+      fields: ['name', 'slug', 'iconAlt'],
       populate: { icon: true },
     });
-    expect(options.filters.$or).toEqual([
-      { stores: { documentId: 'store-amazon' } },
-      { primaryStore: { documentId: 'store-amazon' } },
-    ]);
+    // A deal's store membership is the `stores` taxonomy alone — the old
+    // `primaryStore` $or arm is gone with the field.
+    expect(options.filters.stores).toEqual({ documentId: 'store-amazon' });
+    expect(options.filters).not.toHaveProperty('$or');
     // With no curated entity.deals selection, related product Deals are the
     // newest published records first before the UI builds its Deal rail.
+    // `publishedOn` leads: it is the editor-controlled sort key, with Strapi's
+    // own `publishedAt` only breaking ties for rows the backfill missed.
     expect(options.sort).toEqual([
+      { publishedOn: 'desc' },
       { publishedAt: 'desc' },
       { updatedAt: 'desc' },
     ]);
@@ -517,7 +521,7 @@ describe('entity product Deal population', () => {
     expect(entityQuery.populate.deals.limit).toBeUndefined();
   });
 
-  it('appends primaryStore-only deals after the drag-ordered relation', async () => {
+  it('appends store-taxonomy deals missing from the drag-ordered relation', async () => {
     const harness = createHarness();
     // Store edit page: one deal is in the ordered `deals` relation...
     harness.entityFindMany.mockResolvedValue([
@@ -528,24 +532,22 @@ describe('entity product Deal population', () => {
         deals: [{ documentId: 'd-relation' }],
       },
     ]);
-    // ...and one deal belongs to the store only via primaryStore (not in the
-    // relation), so it must still be counted and appended after the ordered head.
+    // ...and one deal carries the store in its `stores` taxonomy without
+    // appearing in that ordered relation — the two can diverge — so it must
+    // still be counted and appended after the ordered head.
     harness.dealCount.mockResolvedValue(1);
     harness.dealFindMany
       .mockResolvedValueOnce([{ documentId: 'd-relation', title: 'Relation' }]) // ordered hydration
-      .mockResolvedValueOnce([{ documentId: 'd-primary', title: 'Primary' }]); // rest (newest-first)
+      .mockResolvedValueOnce([{ documentId: 'd-taxonomy', title: 'Taxonomy' }]); // rest (newest-first)
 
     const payload = await harness.controller.getDealsByEntity(harness.ctx as any);
 
-    // The rest query excludes the ordered ids and uses the store $or membership.
+    // The rest query excludes the ordered ids and uses the store membership.
     const restQuery = harness.dealFindMany.mock.calls[1]?.[0];
     expect(restQuery.filters.documentId.$notIn).toEqual(['d-relation']);
-    expect(restQuery.filters.$or).toEqual([
-      { stores: { documentId: 'store-amazon' } },
-      { primaryStore: { documentId: 'store-amazon' } },
-    ]);
-    // Ordered head first, then the primary-only deal; total counts both.
-    expect(payload.deals.map((d: any) => d.documentId)).toEqual(['d-relation', 'd-primary']);
+    expect(restQuery.filters.stores).toEqual({ documentId: 'store-amazon' });
+    // Ordered head first, then the taxonomy-only deal; total counts both.
+    expect(payload.deals.map((d: any) => d.documentId)).toEqual(['d-relation', 'd-taxonomy']);
     expect(payload.pagination.total).toBe(2);
   });
 });

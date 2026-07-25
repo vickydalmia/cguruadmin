@@ -518,66 +518,8 @@ export interface ApiBankBank extends Struct.CollectionTypeSchema {
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::bank.bank'> &
       Schema.Attribute.Private;
-    logo: Schema.Attribute.Media<'images'>;
-    logoAlt: Schema.Attribute.String;
-    name: Schema.Attribute.String & Schema.Attribute.Required;
-    publishedAt: Schema.Attribute.DateTime;
-    ratingAverage: Schema.Attribute.Decimal &
-      Schema.Attribute.SetMinMax<
-        {
-          max: 5;
-          min: 0;
-        },
-        number
-      >;
-    ratingCount: Schema.Attribute.Integer &
-      Schema.Attribute.SetMinMax<
-        {
-          min: 0;
-        },
-        number
-      > &
-      Schema.Attribute.DefaultTo<0>;
-    seo: Schema.Attribute.Component<'shared.seo', false>;
-    shortDescription: Schema.Attribute.Text;
-    slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
-    topPickCoupons: Schema.Attribute.Relation<
-      'manyToMany',
-      'api::coupon.coupon'
-    >;
-    updatedAt: Schema.Attribute.DateTime;
-    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    websiteUrl: Schema.Attribute.String;
-  };
-}
-
-export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
-  collectionName: 'brands';
-  info: {
-    description: "Brands (Nike, Samsung, Apple, Levi's)";
-    displayName: 'Brand';
-    pluralName: 'brands';
-    singularName: 'brand';
-  };
-  options: {
-    draftAndPublish: false;
-  };
-  attributes: {
-    coupons: Schema.Attribute.Relation<'manyToMany', 'api::coupon.coupon'>;
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    deals: Schema.Attribute.Relation<'manyToMany', 'api::deal.deal'>;
-    description: Schema.Attribute.RichText;
-    faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
-    faqs: Schema.Attribute.Component<'shared.faq-item', true>;
-    isVerified: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
-    locale: Schema.Attribute.String & Schema.Attribute.Private;
-    localizations: Schema.Attribute.Relation<'oneToMany', 'api::brand.brand'> &
-      Schema.Attribute.Private;
     logo: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
-    logoAlt: Schema.Attribute.String;
+    logoAlt: Schema.Attribute.String & Schema.Attribute.Required;
     name: Schema.Attribute.String & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
     ratingAverage: Schema.Attribute.Decimal &
@@ -606,7 +548,65 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    websiteUrl: Schema.Attribute.String;
+    websiteUrl: Schema.Attribute.String & Schema.Attribute.Required;
+  };
+}
+
+export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
+  collectionName: 'brands';
+  info: {
+    description: "Brands (Nike, Samsung, Apple, Levi's)";
+    displayName: 'Brand';
+    pluralName: 'brands';
+    singularName: 'brand';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    coupons: Schema.Attribute.Relation<'manyToMany', 'api::coupon.coupon'>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    deals: Schema.Attribute.Relation<'manyToMany', 'api::deal.deal'>;
+    description: Schema.Attribute.RichText;
+    faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    faqs: Schema.Attribute.Component<'shared.faq-item', true>;
+    isVerified: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<'oneToMany', 'api::brand.brand'> &
+      Schema.Attribute.Private;
+    logo: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
+    logoAlt: Schema.Attribute.String & Schema.Attribute.Required;
+    name: Schema.Attribute.String & Schema.Attribute.Required;
+    publishedAt: Schema.Attribute.DateTime;
+    ratingAverage: Schema.Attribute.Decimal &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 5;
+          min: 0;
+        },
+        number
+      >;
+    ratingCount: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 0;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<0>;
+    seo: Schema.Attribute.Component<'shared.seo', false>;
+    shortDescription: Schema.Attribute.Text & Schema.Attribute.Required;
+    slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
+    topPickCoupons: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::coupon.coupon'
+    >;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    websiteUrl: Schema.Attribute.String & Schema.Attribute.Required;
   };
 }
 
@@ -689,7 +689,8 @@ export interface ApiCategoryCategory extends Struct.CollectionTypeSchema {
     description: Schema.Attribute.RichText;
     faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     faqs: Schema.Attribute.Component<'shared.faq-item', true>;
-    icon: Schema.Attribute.Media<'images'>;
+    icon: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
+    iconAlt: Schema.Attribute.String & Schema.Attribute.Required;
     isVerified: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
@@ -716,7 +717,7 @@ export interface ApiCategoryCategory extends Struct.CollectionTypeSchema {
       > &
       Schema.Attribute.DefaultTo<0>;
     seo: Schema.Attribute.Component<'shared.seo', false>;
-    shortDescription: Schema.Attribute.Text;
+    shortDescription: Schema.Attribute.Text & Schema.Attribute.Required;
     slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
     topPickCoupons: Schema.Attribute.Relation<
       'manyToMany',
@@ -725,7 +726,7 @@ export interface ApiCategoryCategory extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    websiteUrl: Schema.Attribute.String;
+    websiteUrl: Schema.Attribute.String & Schema.Attribute.Required;
   };
 }
 
@@ -741,7 +742,7 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
-    affiliateLink: Schema.Attribute.Text;
+    affiliateLink: Schema.Attribute.Text & Schema.Attribute.Required;
     badge: Schema.Attribute.Enumeration<
       [
         'CG Exclusive',
@@ -765,6 +766,7 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
         maxLength: 64;
       }>;
     content: Schema.Attribute.RichText &
+      Schema.Attribute.Required &
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 50000;
       }>;
@@ -787,8 +789,9 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
       'api::coupon.coupon'
     > &
       Schema.Attribute.Private;
-    offerText: Schema.Attribute.String;
+    offerText: Schema.Attribute.String & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
+    publishedOn: Schema.Attribute.DateTime;
     scheduledAt: Schema.Attribute.DateTime;
     stores: Schema.Attribute.Relation<'manyToMany', 'api::store.store'>;
     title: Schema.Attribute.String &
@@ -853,7 +856,7 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
   collectionName: 'deals';
   info: {
     description: 'Product deals with pricing, images, and affiliate links';
-    displayName: 'Deal';
+    displayName: 'Product Deal';
     pluralName: 'deals';
     singularName: 'deal';
   };
@@ -861,7 +864,7 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
-    affiliateLink: Schema.Attribute.Text;
+    affiliateLink: Schema.Attribute.Text & Schema.Attribute.Required;
     badge: Schema.Attribute.Enumeration<
       [
         'CG Exclusive',
@@ -882,6 +885,7 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     >;
     code: Schema.Attribute.Text;
     content: Schema.Attribute.RichText &
+      Schema.Attribute.Required &
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 50000;
       }>;
@@ -900,16 +904,18 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'> &
       Schema.Attribute.Private;
     mrp: Schema.Attribute.Decimal &
+      Schema.Attribute.Required &
       Schema.Attribute.SetMinMax<
         {
           min: 0;
         },
         number
       >;
-    offerText: Schema.Attribute.String;
-    primaryStore: Schema.Attribute.Relation<'manyToOne', 'api::store.store'>;
+    offerText: Schema.Attribute.String & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
+    publishedOn: Schema.Attribute.DateTime;
     salePrice: Schema.Attribute.Decimal &
+      Schema.Attribute.Required &
       Schema.Attribute.SetMinMax<
         {
           min: 0;
@@ -1332,8 +1338,8 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::store.store'> &
       Schema.Attribute.Private;
-    logo: Schema.Attribute.Media<'images'>;
-    logoAlt: Schema.Attribute.String;
+    logo: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
+    logoAlt: Schema.Attribute.String & Schema.Attribute.Required;
     name: Schema.Attribute.String & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
     ratingAverage: Schema.Attribute.Decimal &
@@ -1353,7 +1359,7 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
       > &
       Schema.Attribute.DefaultTo<0>;
     seo: Schema.Attribute.Component<'shared.seo', false>;
-    shortDescription: Schema.Attribute.Text;
+    shortDescription: Schema.Attribute.Text & Schema.Attribute.Required;
     slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
     topPickCoupons: Schema.Attribute.Relation<
       'manyToMany',
@@ -1362,7 +1368,7 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    websiteUrl: Schema.Attribute.String;
+    websiteUrl: Schema.Attribute.String & Schema.Attribute.Required;
   };
 }
 

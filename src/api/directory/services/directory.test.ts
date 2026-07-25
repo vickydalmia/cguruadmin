@@ -143,14 +143,14 @@ describe('directory aggregate service', () => {
     }
     const couponCall = offerCalls.find(({ uid }) => uid === 'api::coupon.coupon');
     const dealCall = offerCalls.find(({ uid }) => uid === 'api::deal.deal');
-    expect(couponCall?.options.filters).not.toHaveProperty('primaryStore');
+    // With `primaryStore` removed, deals and coupons share one relation
+    // clause — neither needs an $or arm any more.
     expect(couponCall?.options.filters).not.toHaveProperty('$or');
-    expect(dealCall?.options.filters.$or).toContainEqual({
-      primaryStore: { documentId: { $notNull: true } },
-    });
+    expect(dealCall?.options.filters).not.toHaveProperty('$or');
+    expect(dealCall?.options.filters).not.toHaveProperty('primaryStore');
   });
 
-  it('deduplicates a Deal owner present in both stores and primaryStore', async () => {
+  it('deduplicates a Deal owner listed twice in the stores taxonomy', async () => {
     const { service } = createHarness({
       'api::store.store': stores.slice(0, 2),
       'api::coupon.coupon': [],
@@ -159,7 +159,6 @@ describe('directory aggregate service', () => {
           documentId: 'deal-shared-owner',
           publishedAt: '2026-07-12T00:00:00.000Z',
           stores: [stores[0], stores[0]],
-          primaryStore: stores[0],
         },
         {
           documentId: 'deal-shared-across-entities',

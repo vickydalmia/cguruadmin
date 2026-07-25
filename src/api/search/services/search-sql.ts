@@ -197,8 +197,6 @@ const OFFER_RELATIONS: Record<OfferKind, OfferRelation[]> = {
     { link: "deals_brands_lnk", ownerColumn: "deal_id", table: "brands", targetColumn: "brand_id" },
     { link: "deals_categories_lnk", ownerColumn: "deal_id", table: "categories", targetColumn: "category_id" },
     { link: "deals_banks_lnk", ownerColumn: "deal_id", table: "banks", targetColumn: "bank_id" },
-    // primaryStore is manyToOne but Strapi 5 still stores it in a link table.
-    { link: "deals_primary_store_lnk", ownerColumn: "deal_id", table: "stores", targetColumn: "store_id" },
   ],
 };
 

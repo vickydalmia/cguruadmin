@@ -108,9 +108,12 @@ describe('deal-of-the-day aggregate population', () => {
     expect(populate.telegramDeals.populate.deals.fields).not.toContain('code');
     expect(populate.telegramDeals.populate).not.toHaveProperty('viewAllCta');
 
+    // `iconAlt` rides along with the icon so the site can label it — the
+    // category counterpart of logoAlt on store/brand/bank.
     expect(populate.dealsByCategory.populate.tabs.populate.category.fields).toEqual([
       'name',
       'slug',
+      'iconAlt',
     ]);
     expect(populate.dealsByStore.populate.tabs.populate.store.fields).toEqual([
       'name',
@@ -127,7 +130,7 @@ describe('deal-of-the-day aggregate population', () => {
     const populate = harness.findFirst.mock.calls[0]?.[0].populate;
     const publishedRelation = {
       filters: { contentStatus: { $eq: 'published' } },
-      sort: ['publishedAt:desc'],
+      sort: ['publishedOn:desc', 'publishedAt:desc'],
     };
 
     for (const ref of [
@@ -255,7 +258,7 @@ describe('deal-of-the-day aggregate population', () => {
         contentStatus: { $eq: 'published' },
         salePrice: { $notNull: true, $gt: 0 },
       },
-      sort: ['publishedAt:desc'],
+      sort: ['publishedOn:desc', 'publishedAt:desc'],
       limit: 40,
     });
   });
@@ -372,11 +375,10 @@ describe('deal-of-the-day aggregate population', () => {
     const response = await harness.controller.dealOfTheDayFull(harness.ctx as any);
 
     expect(harness.findManyDeals).toHaveBeenCalledTimes(1);
+    // Store membership is the `stores` taxonomy alone since `primaryStore`
+    // was removed — no $or arm needed.
     expect(harness.findManyDeals.mock.calls[0]?.[0].filters).toMatchObject({
-      $or: [
-        { stores: { documentId: 'store-1' } },
-        { primaryStore: { documentId: 'store-1' } },
-      ],
+      stores: { documentId: 'store-1' },
     });
     expect(response.data.dealsByStore.tabs[0].deals).toHaveLength(10);
   });

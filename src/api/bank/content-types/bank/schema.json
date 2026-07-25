@@ -27,10 +27,12 @@
     },
     "shortDescription": {
       "type": "text",
+      "required": true,
       "searchable": false
     },
     "logo": {
       "type": "media",
+      "required": true,
       "multiple": false,
       "allowedTypes": [
         "images"
@@ -38,10 +40,12 @@
     },
     "logoAlt": {
       "type": "string",
+      "required": true,
       "searchable": false
     },
     "websiteUrl": {
       "type": "string",
+      "required": true,
       "regex": "^https?://[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?([.][a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+(:[0-9]{1,5})?([/?#]\\S*)?$",
       "searchable": false
     },

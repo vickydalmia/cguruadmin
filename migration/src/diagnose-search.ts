@@ -76,7 +76,6 @@ const LNK_TABLES: Array<{ table: string; ownerColumn: string }> = [
   { table: "deals_brands_lnk", ownerColumn: "deal_id" },
   { table: "deals_categories_lnk", ownerColumn: "deal_id" },
   { table: "deals_banks_lnk", ownerColumn: "deal_id" },
-  { table: "deals_primary_store_lnk", ownerColumn: "deal_id" },
 ];
 
 const GENERIC_SLUG_TERMS = new Set([

@@ -46,16 +46,20 @@ function searchService() {
         },
       },
     },
-    primaryStore: {
-      name: "Shoe Store",
-      slug: "shoe-store-coupons",
-      logoAlt: "Shoe Store logo",
-      logo: {
-        url: "https://cdn.example.com/shoe-store.webp",
-        width: 120,
-        height: 60,
+    // The owning store rides the `stores` taxonomy — `primaryStore` is gone,
+    // and the WP migration folds its value into this same relation.
+    stores: [
+      {
+        name: "Shoe Store",
+        slug: "shoe-store-coupons",
+        logoAlt: "Shoe Store logo",
+        logo: {
+          url: "https://cdn.example.com/shoe-store.webp",
+          width: 120,
+          height: 60,
+        },
       },
-    },
+    ],
   };
   const bank = {
     documentId: "bank-sbi",
@@ -114,7 +118,72 @@ function dealImageService(dealImage: Record<string, unknown>) {
   return createSearchService({ strapi: strapi as any });
 }
 
+function categoryAltService() {
+  const category = {
+    documentId: "category-travel",
+    name: "Travel",
+    slug: "travel-coupons",
+    iconAlt: "Suitcase and aeroplane",
+    icon: {
+      url: "https://cdn.example.com/travel.webp",
+      width: 64,
+      height: 64,
+    },
+  };
+  const coupon = {
+    documentId: "travel-coupon",
+    title: "Travel coupon",
+    couponType: "static",
+    affiliateLink: "https://track.example.com/travel",
+    categories: [category],
+  };
+  const strapi = {
+    documents(uid: string) {
+      return {
+        async findMany() {
+          if (uid === "api::category.category") return [category];
+          if (uid === "api::coupon.coupon") return [coupon];
+          return [];
+        },
+        async count() {
+          return uid === "api::category.category" ||
+            uid === "api::coupon.coupon"
+            ? 1
+            : 0;
+        },
+      };
+    },
+  };
+  configureSearchRuntime(strapi as any);
+  return createSearchService({ strapi: strapi as any });
+}
+
 describe("public search entity boundaries", () => {
+  it("preserves category iconAlt in entity and category-owned offer media", async () => {
+    const service = categoryAltService();
+    const categoryResponse = await service.search({
+      query: "travel",
+      mode: "group",
+      group: "categories",
+      page: 1,
+      pageSize: 20,
+    });
+    const couponResponse = await service.search({
+      query: "travel",
+      mode: "group",
+      group: "coupons",
+      page: 1,
+      pageSize: 20,
+    });
+
+    expect(categoryResponse.categories[0].media.alt).toBe(
+      "Suitcase and aeroplane",
+    );
+    expect(couponResponse.coupons[0].media.alt).toBe(
+      "Suitcase and aeroplane",
+    );
+  });
+
   it("omits unsupported insights keys and rejects the insights group", async () => {
     const { service } = searchService();
     const response = await service.search({
@@ -353,7 +422,7 @@ describe("public search entity boundaries", () => {
     );
   });
 
-  it("matches a product Deal through primaryStore name and slug", async () => {
+  it("matches a product Deal through its store taxonomy name and slug", async () => {
     const { calls, service } = searchService();
     await service.search({
       query: "shoe",
@@ -367,7 +436,8 @@ describe("public search entity boundaries", () => {
       (call) => call.uid === "api::deal.deal" && call.operation === "findMany",
     );
     expect(dealFind?.options.status).toBe("published");
-    expect(dealFind?.options.populate).toHaveProperty("primaryStore");
+    expect(dealFind?.options.populate).toHaveProperty("stores");
+    expect(dealFind?.options.populate).not.toHaveProperty("primaryStore");
     expect(JSON.stringify(dealFind?.options.filters)).toContain("salePrice");
     expect(JSON.stringify(dealFind?.options.filters)).not.toContain("$containsi");
   });
@@ -1356,7 +1426,7 @@ describe("fallback ranking alignment (query-engine mode)", () => {
         title: "Mega discount pack",
         salePrice: 10,
         // Relation-name EXACT match: tier 0 + 8 — still below any direct hit.
-        primaryStore: { name: "Boots", slug: "boots" },
+        stores: [{ name: "Boots", slug: "boots" }],
       },
       {
         documentId: "deal-title",

@@ -13,13 +13,33 @@ const COUPON = 'api::coupon.coupon';
 const DEAL = 'api::deal.deal';
 const STORE = 'api::store.store';
 const BRAND = 'api::brand.brand';
+const CATEGORY = 'api::category.category';
+const BANK = 'api::bank.bank';
 
 /** A payload that satisfies every requiredNonBlank coupon rule. */
 const validCoupon = () => ({
   title: 'Flat 40% off',
   content: '<p>Terms apply.</p>',
+  offerText: 'Flat 40% off',
   affiliateLink: 'https://example.com/go',
   stores: [{ documentId: 'store-1' }],
+});
+
+/**
+ * A payload that satisfies every requiredNonBlank store rule. Shared by the
+ * clone-merge cases so adding a store rule updates one fixture, not four
+ * near-identical inline objects.
+ */
+const validStore = () => ({
+  name: 'Amazon',
+  shortDescription: 'Shop Amazon offers.',
+  logo: { documentId: 'logo-1' },
+  logoAlt: 'Amazon logo',
+  websiteUrl: 'https://www.amazon.in',
+  seo: {
+    metaTitle: 'Amazon Coupons',
+    metaDescription: 'Latest Amazon coupons.',
+  },
 });
 
 const problemPaths = (fn: () => void): string[][] => {
@@ -40,9 +60,11 @@ describe('rule table integrity', () => {
     }
   });
 
-  it('covers all four content types', () => {
+  it('covers both offer types and all four taxonomy types', () => {
     const uids = new Set(TEXT_FIELD_RULES.map((r) => r.uid));
-    expect([...uids].sort()).toEqual([BRAND, COUPON, DEAL, STORE].sort());
+    expect([...uids].sort()).toEqual(
+      [BRAND, COUPON, DEAL, STORE, CATEGORY, BANK].sort()
+    );
   });
 
   it('does not touch uid/slug fields', () => {
@@ -212,6 +234,7 @@ describe('validateTextFields — grandfathering', () => {
       ['title'],
       ['content'],
       ['affiliateLink'],
+      ['offerText'],
       ['stores'],
     ]);
   });
@@ -222,9 +245,11 @@ describe('validateTextFields — grandfathering', () => {
     ).not.toThrow();
   });
 
+  // Category and bank used to be the example here; both now carry rules, so
+  // this needs a type the table genuinely does not cover.
   it('is a no-op for unrelated content types', () => {
     expect(() =>
-      validateTextFields('api::category.category', 'create', {})
+      validateTextFields('api::redirect.redirect', 'create', {})
     ).not.toThrow();
   });
 });
@@ -311,7 +336,7 @@ describe('validateTextFields — required fields', () => {
       throw new Error('expected to throw');
     } catch (err: any) {
       expect(err.name).toBe('ValidationError');
-      expect(err.details.errors.length).toBe(4);
+      expect(err.details.errors.length).toBe(5);
       for (const e of err.details.errors) {
         expect(Array.isArray(e.path)).toBe(true);
         expect(e.path.every((p: unknown) => typeof p === 'string')).toBe(true);
@@ -337,15 +362,7 @@ describe('validateTextFields — clone merge base', () => {
         STORE,
         'clone',
         {},
-        {
-          name: 'Amazon',
-          shortDescription: 'Shop Amazon offers.',
-          logo: { documentId: 'logo-1' },
-          seo: {
-            metaTitle: 'Amazon Coupons',
-            metaDescription: 'Latest Amazon coupons.',
-          },
-        },
+        validStore(),
       )
     ).not.toThrow();
   });
@@ -356,15 +373,7 @@ describe('validateTextFields — clone merge base', () => {
         STORE,
         'clone',
         { seo: { metaTitle: 'Amazon Offers' } },
-        {
-          name: 'Amazon',
-          shortDescription: 'Shop Amazon offers.',
-          logo: { documentId: 'logo-1' },
-          seo: {
-            metaTitle: 'Amazon Coupons',
-            metaDescription: 'Latest Amazon coupons.',
-          },
-        },
+        validStore(),
       )
     ).not.toThrow();
   });
@@ -375,15 +384,7 @@ describe('validateTextFields — clone merge base', () => {
         STORE,
         'clone',
         { seo: null },
-        {
-          name: 'Amazon',
-          shortDescription: 'Shop Amazon offers.',
-          logo: { documentId: 'logo-1' },
-          seo: {
-            metaTitle: 'Amazon Coupons',
-            metaDescription: 'Latest Amazon coupons.',
-          },
-        },
+        validStore(),
       )
     )).toEqual([
       ['seo', 'metaTitle'],
@@ -397,15 +398,7 @@ describe('validateTextFields — clone merge base', () => {
         STORE,
         'clone',
         { logo: { disconnect: [{ documentId: 'logo-1' }] } },
-        {
-          name: 'Amazon',
-          shortDescription: 'Shop Amazon offers.',
-          logo: { documentId: 'logo-1' },
-          seo: {
-            metaTitle: 'Amazon Coupons',
-            metaDescription: 'Latest Amazon coupons.',
-          },
-        },
+        validStore(),
       )
     )).toEqual([['logo']]);
   });
@@ -578,12 +571,7 @@ describe('validateTextFields — STRICT (clean as you touch)', () => {
         COUPON,
         'update',
         { title: 'New title' },
-        {
-          title: 'Old title',
-          content: '<p>x</p>',
-          affiliateLink: '',
-          stores: [{ documentId: 'store-1' }],
-        },
+        { ...validCoupon(), title: 'Old title', affiliateLink: '' },
         true,
       )
     )).toEqual([['affiliateLink']]);
@@ -613,9 +601,8 @@ describe('validateTextFields — STRICT (clean as you touch)', () => {
         'update',
         { title: 'New title' },
         {
+          ...validCoupon(),
           title: 'Old title',
-          content: '<p>x</p>',
-          affiliateLink: 'https://example.com/go',
           stores: [],
           banks: [],
           categories: [],
@@ -627,17 +614,13 @@ describe('validateTextFields — STRICT (clean as you touch)', () => {
   });
 
   it('STRICT blocks a dirty untouched media field', () => {
+    // Otherwise-complete stored row so the only dirty field is the media one.
     expect(problemPaths(() =>
       validateTextFields(
         STORE,
         'update',
         { name: 'Amazon India' },
-        {
-          name: 'Amazon',
-          shortDescription: 'Shop Amazon offers.',
-          logo: null,
-          seo: { metaTitle: 'Amazon Coupons', metaDescription: 'Latest offers.' },
-        },
+        { ...validStore(), logo: null },
         true,
       )
     )).toEqual([['logo']]);
@@ -650,10 +633,8 @@ describe('validateTextFields — STRICT (clean as you touch)', () => {
         'update',
         { title: 'New title' },
         {
+          ...validCoupon(),
           title: 'Old title',
-          content: '<p>x</p>',
-          affiliateLink: 'https://example.com/go',
-          stores: [{ documentId: 'store-1' }],
           banks: [],
           categories: [],
           brands: [],

@@ -266,10 +266,7 @@ async function fillDerivedSections(
 
           return backfillDeals(strapi, ctx, tab, {
             filters: {
-              $or: [
-                { stores: { documentId: tab.store.documentId } },
-                { primaryStore: { documentId: tab.store.documentId } },
-              ],
+              stores: { documentId: tab.store.documentId },
             },
             renderCount: TAB_RENDER_COUNT,
             capLimit: SECTION_CAPS.perStoreTab,
@@ -322,7 +319,7 @@ async function attachDealCounts(strapi: Core.Strapi, page: any) {
       if (!documentId) continue;
       jobs.push(
         countDeals(strapi, {
-          $or: [{ stores: { documentId } }, { primaryStore: { documentId } }],
+          stores: { documentId },
         }).then((count) => {
           tab.dealCount = count;
         }),

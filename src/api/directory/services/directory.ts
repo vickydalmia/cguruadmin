@@ -11,7 +11,7 @@ type EntityConfig = {
   uid: string;
   relationField: 'stores' | 'brands' | 'categories' | 'banks';
   mediaField: 'logo' | 'icon';
-  mediaAltField: 'logoAlt' | null;
+  mediaAltField: 'logoAlt' | 'iconAlt';
 };
 
 const ENTITY_CONFIG: Record<DirectoryKind, EntityConfig> = {
@@ -31,7 +31,7 @@ const ENTITY_CONFIG: Record<DirectoryKind, EntityConfig> = {
     uid: 'api::category.category',
     relationField: 'categories',
     mediaField: 'icon',
-    mediaAltField: null,
+    mediaAltField: 'iconAlt',
   },
   bank: {
     uid: 'api::bank.bank',
@@ -76,7 +76,12 @@ function offerKey(offer: any): string | null {
 }
 
 function publicationTime(offer: any): number {
-  const value = cleanText(offer?.publishedAt) ?? cleanText(offer?.updatedAt);
+  // Same precedence as the query sort above: editor-controlled `publishedOn`
+  // first, Strapi's `publishedAt` only as a fallback for unbackfilled rows.
+  const value =
+    cleanText(offer?.publishedOn) ??
+    cleanText(offer?.publishedAt) ??
+    cleanText(offer?.updatedAt);
   if (!value) return 0;
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -99,7 +104,7 @@ function mapDirectoryItems(
     if (!documentId || !name || !slug || byDocumentId.has(documentId)) continue;
     const media = publicMedia(document?.[config.mediaField], false);
     const mediaAlt =
-      (config.mediaAltField ? cleanText(document?.[config.mediaAltField]) : null) ??
+      cleanText(document?.[config.mediaAltField]) ??
       cleanText(media?.alternativeText) ??
       name;
     byDocumentId.set(documentId, {
@@ -145,7 +150,6 @@ function distinctOfferOwners(
   const relations = Array.isArray(offer?.[config.relationField])
     ? [...offer[config.relationField]]
     : [];
-  if (kind === 'store' && offer?.primaryStore) relations.push(offer.primaryStore);
 
   const owners = new Map<string, DirectoryItem>();
   for (const relation of relations) {
@@ -179,19 +183,15 @@ async function findAllDocuments(
 }
 
 function relationPresenceFilter(
-  kind: DirectoryKind,
+  _kind: DirectoryKind,
   config: EntityConfig,
-  entityType: 'coupon' | 'productDeal',
+  _entityType: 'coupon' | 'productDeal',
 ) {
-  const relation = {
-    [config.relationField]: { documentId: { $notNull: true } },
-  };
-  if (kind !== 'store' || entityType !== 'productDeal') return relation;
+  // Product deals used to need an extra $or arm for the `primaryStore`
+  // manyToOne. That field is gone — the store it named is carried by the
+  // `stores` taxonomy — so one relation clause now covers every kind.
   return {
-    $or: [
-      relation,
-      { primaryStore: { documentId: { $notNull: true } } },
-    ],
+    [config.relationField]: { documentId: { $notNull: true } },
   };
 }
 
@@ -204,18 +204,17 @@ function offerQuery(
   const populate: Record<string, any> = {
     [config.relationField]: entityRef,
   };
-  if (entityType === 'productDeal' && kind === 'store') {
-    populate.primaryStore = entityRef;
-  }
 
   return {
     filters: {
       ...relationPresenceFilter(kind, config, entityType),
       ...publishedOnlyFilters(),
     },
-    fields: ['publishedAt', 'updatedAt'],
+    fields: ['publishedOn', 'publishedAt', 'updatedAt'],
     populate,
     sort: [
+      // Editor-controlled sort key — see NEWEST_FIRST in src/utils/offer-visibility.ts.
+      { publishedOn: 'desc' },
       { publishedAt: 'desc' },
       { updatedAt: 'desc' },
       { documentId: 'asc' },
@@ -316,11 +315,7 @@ async function hydratePopular(
 ) {
   if (selected.length === 0) return [];
 
-  const fields = [
-    'name',
-    'slug',
-    ...(config.mediaAltField ? [config.mediaAltField] : []),
-  ];
+  const fields = ['name', 'slug', config.mediaAltField];
   const documents = (await strapi.documents(config.uid as any).findMany({
     filters: { documentId: { $in: selected.map((item) => item.documentId) } },
     fields,
@@ -337,7 +332,7 @@ async function hydratePopular(
     const hydrated = hydratedById.get(item.documentId);
     const media = publicMedia(hydrated?.[config.mediaField]);
     const mediaAlt =
-      (config.mediaAltField ? cleanText(hydrated?.[config.mediaAltField]) : null) ??
+      cleanText(hydrated?.[config.mediaAltField]) ??
       cleanText(media?.alternativeText) ??
       item.name;
     const counts = inventory.get(item.documentId)!;

@@ -207,11 +207,11 @@ Copies only the media files actually referenced by entities (via `files_related_
 
 ### Phase 12 — Offer Backfill
 
-Backfills the `deal.primaryStore` manyToOne relation from WordPress data:
-
-- The `deal.primaryStore` relation is resolved from the ACF `deal_store` postmeta key (a store term ID, plain or PHP-serialized). Links are written to the Strapi link table (detected at runtime via `information_schema`, expected name `deals_primary_store_lnk`) with delete-then-insert semantics so re-runs never leave stale rows.
-
-Only posts present in the persisted ID maps (i.e., actually migrated) are touched. If the link table doesn't exist yet (Strapi schema not migrated), the phase logs a warning and skips gracefully.
+Reconciles each Deal's complete ordered taxonomy relation set from WordPress.
+The ACF `deal_store` term is first in `stores`, followed by the Yoast primary
+term and the remaining WP terms in stable order. Every relation table is
+replaced transactionally per Deal, so changed/cleared ACF ownership and stale
+links converge to the same result as a clean import.
 
 ### Phase 13 — Site Content
 

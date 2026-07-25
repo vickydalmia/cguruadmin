@@ -44,8 +44,7 @@ source slugs return 404. The default result limit is 6; `?limit=` is clamped to
 The service first determines which categories should drive the result:
 
 - **Store:** categories from the Store's active Coupon records and dedicated
-  Product Deal records. A Product Deal may relate through `stores` or
-  `primaryStore`.
+  Product Deal records related through `stores`.
 - **Brand:** categories from active Coupons and Product Deals related to the
   Brand.
 - **Bank:** categories from active Coupons and Product Deals related to the
@@ -66,8 +65,9 @@ selected Category and ignore category hints.
 ## Store Selection
 
 For the chosen categories, the service samples up to 320 active Coupons and 320
-active Product Deals. It collects only their Store owners; a Product Deal's
-`primaryStore` also counts. The current Store is excluded on Store pages.
+active Product Deals. It collects only their ordered `stores` owners; the first
+Deal store is the canonical merchant. The current Store is excluded on Store
+pages.
 
 Each Store is ranked by:
 

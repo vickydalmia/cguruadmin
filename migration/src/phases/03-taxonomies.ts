@@ -8,9 +8,9 @@ import { deduplicateSlug } from "../utils/slug-dedup.js";
 import {
   generateDocumentId,
   getEntityIdByDocumentId,
-  insertComponent,
-  linkMedia,
-  linkContentMedia,
+  replaceComponents,
+  replaceMedia,
+  replaceContentMedia,
 } from "../utils/strapi-insert.js";
 import { clean, cleanHtml, cleanSlug } from "../utils/sanitize.js";
 import { parseDecimal, parseInteger } from "../utils/price.js";
@@ -236,13 +236,21 @@ async function insertTerm(
   // left pointing at the old WordPress uploads URL.
   const descriptionMedia = await rewriteContentMedia(cleanHtml(term.description));
 
+  // Alt text is REQUIRED on every entity now (categories carry `icon_alt`, the
+  // rest `logo_alt`), and WordPress only sometimes supplies `image_alt` — 205
+  // of the previously-migrated rows had none. Falling back to the entity's own
+  // name gives an accessible baseline that matches what the site already
+  // renders when the field is blank (see getMediaAlt / the directory service),
+  // instead of importing a row that fails validation on first edit.
+  const altColumn = isCategory ? "icon_alt" : "logo_alt";
+
   const columns = [
     "document_id",
     "name",
     "slug",
     "description",
     "short_description",
-    ...(isCategory ? [] : ["logo_alt"]),
+    altColumn,
     "rating_average",
     "rating_count",
     "is_verified",
@@ -253,13 +261,15 @@ async function insertTerm(
     "locale",
   ];
 
+  const entityName = clean(term.name) || term.name;
+
   const values = [
     documentId,
-    clean(term.name) || term.name,
+    entityName,
     slug,
     descriptionMedia.html,
     clean(term.short_desc),
-    ...(isCategory ? [] : [clean(term.image_alt)]),
+    clean(term.image_alt) || entityName,
     ratingAverage,
     ratingCount,
     table === "stores",
@@ -277,7 +287,14 @@ async function insertTerm(
       `INSERT INTO "${table}" (${columns.map((c) => `"${c}"`).join(", ")})
        VALUES (${placeholders.join(", ")})
        ON CONFLICT ("document_id") DO UPDATE SET
-         "description" = EXCLUDED."description"
+         "name" = EXCLUDED."name",
+         "slug" = EXCLUDED."slug",
+         "description" = EXCLUDED."description",
+         "short_description" = EXCLUDED."short_description",
+         "${altColumn}" = EXCLUDED."${altColumn}",
+         "rating_average" = EXCLUDED."rating_average",
+         "rating_count" = EXCLUDED."rating_count",
+         "faq_enabled" = EXCLUDED."faq_enabled"
        RETURNING id`,
       values
     );
@@ -299,12 +316,10 @@ async function insertTerm(
 
     // Link media (logo/icon)
     const fileId = await resolveMediaRef(term.image_ref);
-    if (fileId) {
-      const field = isCategory ? "icon" : "logo";
-      await linkMedia(fileId, entityId, strapiType, field);
-    }
+    const field = isCategory ? "icon" : "logo";
+    await replaceMedia(fileId ?? null, entityId, strapiType, field);
 
-    await linkContentMedia(
+    await replaceContentMedia(
       descriptionMedia.fileIds,
       entityId,
       strapiType,
@@ -313,50 +328,55 @@ async function insertTerm(
 
     // Insert FAQ components
     const termFaqMeta = faqMetaByTerm.get(term.term_id);
-    if (termFaqMeta && faqEnabled) {
-      const faqItems = parseFaqRepeater(termFaqMeta);
-      for (let i = 0; i < faqItems.length; i++) {
-        await insertComponent(
-          "components_shared_faq_items",
-          { question: faqItems[i].question, answer: faqItems[i].answer },
-          table,
-          entityId,
-          "faqs",
-          "shared.faq-item",
-          i + 1
-        );
-      }
-      if (faqItems.length > 0) {
-        logger.debug(
-          `  Inserted ${faqItems.length} FAQ items for ${term.name}`
-        );
-      }
+    const faqItems =
+      termFaqMeta && faqEnabled ? parseFaqRepeater(termFaqMeta) : [];
+    await replaceComponents(
+      "components_shared_faq_items",
+      faqItems.map((item) => ({
+        question: item.question,
+        answer: item.answer,
+      })),
+      table,
+      entityId,
+      "faqs",
+      "shared.faq-item"
+    );
+    if (faqItems.length > 0) {
+      logger.debug(
+        `  Reconciled ${faqItems.length} FAQ items for ${term.name}`
+      );
     }
 
-    // Insert SEO component
+    // Reconcile the imported SEO component exactly.
     const yoast = yoastByTerm.get(term.term_id);
-    if (yoast && (yoast.title || yoast.description)) {
-      const metaTitle = clean(resolveYoastVariables(yoast.title || null, term.name));
-      const metaDescription = clean(yoast.description || null);
-
-      if (metaTitle || metaDescription) {
-        await insertComponent(
-          "components_shared_seos",
-          {
-            meta_title: metaTitle || null,
-            meta_description: metaDescription,
-            canonical_url: null,
-          },
-          table,
-          entityId,
-          "seo",
-          "shared.seo"
-        );
-      }
-    }
+    const descriptionFallback =
+      clean(term.short_desc) ||
+      clean(term.description?.replace(/<[^>]*>/gu, " ")) ||
+      `${entityName} coupons, offers and deals.`;
+    const metaTitle = (
+      clean(resolveYoastVariables(yoast?.title || null, term.name)) ||
+      entityName
+    ).slice(0, 70);
+    const metaDescription = (
+      clean(yoast?.description || null) || descriptionFallback
+    ).slice(0, 170);
+    const seoRows = [{
+      meta_title: metaTitle,
+      meta_description: metaDescription,
+      canonical_url: null,
+    }];
+    await replaceComponents(
+      "components_shared_seos",
+      seoRows,
+      table,
+      entityId,
+      "seo",
+      "shared.seo"
+    );
   } catch (err: any) {
     logger.error(
       `Failed to insert term ${term.term_id} (${term.name}) into ${table}: ${err.message}`
     );
+    throw err;
   }
 }

@@ -1,9 +1,8 @@
 import { wpQuery } from "../db/wp-client.js";
-import { pgQuery } from "../db/pg-client.js";
+import { pgQuery, pgTransaction } from "../db/pg-client.js";
 import pLimit from "p-limit";
 import {
   setPostMapping,
-  ensureTermMapping,
   getPoolMappingByName,
   getUserMapping,
 } from "../utils/id-maps.js";
@@ -11,10 +10,10 @@ import { resolveMediaRef } from "../utils/media-resolver.js";
 import {
   generateDocumentId,
   getEntityIdByDocumentId,
-  insertLink,
-  linkMedia,
-  linkContentMedia,
+  replaceMedia,
+  replaceContentMedia,
 } from "../utils/strapi-insert.js";
+import { replaceOfferTaxonomyRelations } from "../utils/offer-relations.js";
 import { computeMigrationStatus } from "../utils/content-status.js";
 import { rewriteContentMedia } from "../utils/content-media.js";
 import { clean, cleanCode, cleanHtml } from "../utils/sanitize.js";
@@ -25,6 +24,7 @@ import {
   parseExpiryDate,
 } from "../utils/wp-dates.js";
 import { logger } from "../utils/logger.js";
+import { isAcfTrue } from "../utils/acf.js";
 
 interface WpPost {
   ID: number;
@@ -108,6 +108,18 @@ export async function runCoupons(): Promise<void> {
         // (falling back to content); editors can correct these in the admin.
         const offerText = extractOfferText(title, content);
         const { cashbackText, bankOfferText } = extractCashbackFields(title, content);
+        const affiliateLink = clean(meta.link);
+        const missingRequired = [
+          !title.trim() ? "title" : null,
+          !offerText?.trim() ? "offerText" : null,
+          !content?.trim() ? "content" : null,
+          !affiliateLink?.trim() ? "affiliateLink" : null,
+        ].filter(Boolean);
+        if (missingRequired.length > 0) {
+          logger.warn(
+            `Coupon ${post.ID} (${post.post_title}) has required field gap(s): ${missingRequired.join(", ")}. Importing it so the record can be corrected editorially.`,
+          );
+        }
         const createdAt =
           normalizeWpDate(post.post_date_gmt) ||
           normalizeWpLocalDate(post.post_date) ||
@@ -141,21 +153,41 @@ export async function runCoupons(): Promise<void> {
             ? mappedEditorId
             : authorId;
 
+        // `published_on` is the EDITOR-CONTROLLED "newest first" sort key
+        // (src/utils/offer-visibility.ts) and is seeded here from published_at.
+        // It MUST be written at insert time: Postgres orders NULLs FIRST in a
+        // DESC sort, so a row with no published_on outranks every row an editor
+        // has actually dated — "Bump to top" would push an offer to the BOTTOM.
+        // The bug hides while the column is uniformly NULL (everything ties and
+        // falls through to the published_at tiebreaker) and only surfaces on the
+        // first bump, so it must not be left to a backfill.
         const result = await pgQuery<{ id: number }>(
           `INSERT INTO "coupons" (
             "document_id", "title", "offer_text", "cashback_text", "bank_offer_text", "content",
             "code", "coupon_type", "badge",
             "affiliate_link", "expires_at", "scheduled_at", "content_status",
-            "published_at", "created_at", "updated_at", "locale",
+            "published_at", "published_on", "created_at", "updated_at", "locale",
             "created_by_id", "updated_by_id"
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
           )
           ON CONFLICT ("document_id") DO UPDATE SET
+            "title" = EXCLUDED."title",
             "offer_text" = EXCLUDED."offer_text",
             "cashback_text" = EXCLUDED."cashback_text",
             "bank_offer_text" = EXCLUDED."bank_offer_text",
-            "content" = EXCLUDED."content"
+            "content" = EXCLUDED."content",
+            "code" = EXCLUDED."code",
+            "coupon_type" = EXCLUDED."coupon_type",
+            "badge" = COALESCE(EXCLUDED."badge", "coupons"."badge"),
+            "affiliate_link" = EXCLUDED."affiliate_link",
+            "expires_at" = EXCLUDED."expires_at",
+            "scheduled_at" = EXCLUDED."scheduled_at",
+            "content_status" = EXCLUDED."content_status",
+            "published_at" = EXCLUDED."published_at",
+            "published_on" = COALESCE("coupons"."published_on", EXCLUDED."published_on"),
+            "updated_at" = EXCLUDED."updated_at",
+            "updated_by_id" = EXCLUDED."updated_by_id"
           RETURNING id`,
           [
             documentId,
@@ -166,11 +198,12 @@ export async function runCoupons(): Promise<void> {
             content,
             cleanCode(meta.code),
             isUnique ? "unique" : "static",
-            meta.popular_coupon === "1" ? "Recommended" : null,
-            clean(meta.link),
+            isAcfTrue(meta.popular_coupon) ? "Recommended" : null,
+            affiliateLink,
             expiresAt,
             contentStatus.scheduledAt,
             contentStatus.contentStatus,
+            contentStatus.publishedAt,
             contentStatus.publishedAt,
             createdAt,
             updatedAt,
@@ -194,36 +227,54 @@ export async function runCoupons(): Promise<void> {
         });
 
         // Wire taxonomy relations
-        await wireCouponRelations(entityId, relations, primaryTermId);
+        await replaceOfferTaxonomyRelations("coupons", entityId, {
+          termIds: relations,
+          primaryTermId,
+        });
 
-        // Link media (image) — on-demand upload
+        // Replace field media so a changed/cleared WP image cannot leave a
+        // stale active relation on an in-place re-import.
         const imageId = await resolveMediaRef(meta.image);
-        if (imageId) {
-          await linkMedia(imageId, entityId, "api::coupon.coupon", "image");
-        }
+        await replaceMedia(
+          imageId ?? null,
+          entityId,
+          "api::coupon.coupon",
+          "image",
+        );
 
-        await linkContentMedia(
+        await replaceContentMedia(
           contentMedia.fileIds,
           entityId,
           "api::coupon.coupon",
           "content"
         );
 
-        // Link uniqueCouponPool if unique type
-        if (isUnique && uniqueCouponPoolName) {
-          const poolRef = getPoolMappingByName(uniqueCouponPoolName);
+        // This relation is source-owned too: switching pools or changing a
+        // Coupon back to static must remove the previous link.
+        const poolRef =
+          isUnique && uniqueCouponPoolName
+            ? getPoolMappingByName(uniqueCouponPoolName)
+            : undefined;
+        await pgTransaction(async () => {
+          await pgQuery(
+            `DELETE FROM "coupons_unique_coupon_pool_lnk"
+             WHERE "coupon_id" = $1`,
+            [entityId],
+          );
           if (poolRef) {
-            await insertLink("coupons_unique_coupon_pool_lnk", {
-              coupon_id: entityId,
-              unique_coupon_pool_id: poolRef.id,
-              coupon_ord: 1,
-            });
-          } else {
-            logger.warn(
-              `Unique coupon pool not found for coupon ${post.ID} (${post.post_title}): ${uniqueCouponPoolName}`
+            await pgQuery(
+              `INSERT INTO "coupons_unique_coupon_pool_lnk"
+                 ("coupon_id", "unique_coupon_pool_id", "coupon_ord")
+               VALUES ($1, $2, 1)`,
+              [entityId, poolRef.id],
             );
           }
-        } else if (isUnique) {
+        });
+        if (isUnique && uniqueCouponPoolName && !poolRef) {
+          logger.warn(
+            `Unique coupon pool not found for coupon ${post.ID} (${post.post_title}): ${uniqueCouponPoolName}`
+          );
+        } else if (isUnique && !uniqueCouponPoolName) {
           logger.warn(
             `Unique coupon missing unique_coupon_name for coupon ${post.ID} (${post.post_title})`
           );
@@ -244,76 +295,11 @@ export async function runCoupons(): Promise<void> {
 
   await Promise.all(tasks);
   logger.info(`Coupons migration complete: ${inserted} inserted, ${failed} failed`);
-}
-
-async function wireCouponRelations(
-  entityId: number,
-  termIds: number[],
-  primaryTermId: number | undefined
-): Promise<void> {
-  const orderByType = new Map<string, number>();
-
-  if (primaryTermId) {
-    const ref = await ensureTermMapping(primaryTermId);
-    if (ref) {
-      const linkTable = getLinkTable("coupons", ref.table);
-      if (linkTable) {
-        const ord = (orderByType.get(ref.table) || 0) + 1;
-        orderByType.set(ref.table, ord);
-        await insertLink(linkTable.table, {
-          [linkTable.couponCol]: entityId,
-          [linkTable.termCol]: ref.id,
-          coupon_ord: ord,
-        });
-      }
-    }
+  if (failed > 0) {
+    throw new Error(
+      `${failed} Coupon(s) failed import; see the WordPress post IDs above`,
+    );
   }
-
-  for (const termId of termIds) {
-    if (termId === primaryTermId) continue;
-    const ref = await ensureTermMapping(termId);
-    if (!ref) continue;
-
-    const linkTable = getLinkTable("coupons", ref.table);
-    if (linkTable) {
-      const ord = (orderByType.get(ref.table) || 0) + 1;
-      orderByType.set(ref.table, ord);
-      await insertLink(linkTable.table, {
-        [linkTable.couponCol]: entityId,
-        [linkTable.termCol]: ref.id,
-        coupon_ord: ord,
-      });
-    }
-  }
-}
-
-function getLinkTable(
-  entityTable: string,
-  termTable: string
-): { table: string; couponCol: string; termCol: string } | null {
-  const map: Record<string, { table: string; couponCol: string; termCol: string }> = {
-    stores: {
-      table: `${entityTable}_stores_lnk`,
-      couponCol: `${entityTable.slice(0, -1)}_id`,
-      termCol: "store_id",
-    },
-    brands: {
-      table: `${entityTable}_brands_lnk`,
-      couponCol: `${entityTable.slice(0, -1)}_id`,
-      termCol: "brand_id",
-    },
-    categories: {
-      table: `${entityTable}_categories_lnk`,
-      couponCol: `${entityTable.slice(0, -1)}_id`,
-      termCol: "category_id",
-    },
-    banks: {
-      table: `${entityTable}_banks_lnk`,
-      couponCol: `${entityTable.slice(0, -1)}_id`,
-      termCol: "bank_id",
-    },
-  };
-  return map[termTable] || null;
 }
 
 // ── Bulk data fetchers ──────────────────────────────────────────────
@@ -349,6 +335,7 @@ async function getTermRelationsBulk(postIds: number[]): Promise<Map<number, numb
     FROM wp_term_relationships tr
     JOIN wp_term_taxonomy tt ON tr.term_taxonomy_id = tt.term_taxonomy_id AND tt.taxonomy = 'category'
     WHERE tr.object_id IN (${placeholders})
+    ORDER BY tr.object_id, tr.term_order, tt.term_id
   `, postIds);
 
   const map = new Map<number, number[]>();

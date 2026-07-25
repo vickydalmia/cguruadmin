@@ -479,6 +479,138 @@ describe('offer lifecycle — normalisation (row 66)', () => {
   });
 });
 
+describe('offer lifecycle — publishedOn (the editor-controlled sort key)', () => {
+  it('seeds publishedOn to now on a create that resolves to published', async () => {
+    const { strapi } = harness();
+    const data: Record<string, unknown> = { title: 'New offer' };
+
+    await validateOfferLifecycle(strapi, 'api::coupon.coupon', 'create', data, undefined, false, NOW);
+
+    expect(data.contentStatus).toBe('published');
+    expect(data.publishedOn).toBe(NOW.toISOString());
+  });
+
+  // A scheduled offer is new to the site on its GO-LIVE date, not its authoring
+  // date — the scheduler stamps it then (config/cron-tasks.ts).
+  it('leaves publishedOn unset on a create that resolves to scheduled', async () => {
+    const { strapi } = harness();
+    const data: Record<string, unknown> = { scheduledAt: FUTURE };
+
+    await validateOfferLifecycle(strapi, 'api::coupon.coupon', 'create', data, undefined, false, NOW);
+
+    expect(data.contentStatus).toBe('scheduled');
+    expect(data).not.toHaveProperty('publishedOn');
+  });
+
+  it('never overwrites a publishedOn the editor set', async () => {
+    const { strapi } = harness();
+    const data: Record<string, unknown> = { publishedOn: LATER_PAST };
+
+    await validateOfferLifecycle(strapi, 'api::deal.deal', 'create', data, undefined, false, NOW);
+
+    expect(data.publishedOn).toBe(LATER_PAST);
+  });
+
+  it('leaves a stored publishedOn alone on update', async () => {
+    const { strapi } = harness({
+      documentId: 'c1',
+      expiresAt: FUTURE,
+      publishedOn: LATER_PAST,
+    });
+    const data: Record<string, unknown> = { title: 'Renamed' };
+
+    await validateOfferLifecycle(strapi, 'api::coupon.coupon', 'update', data, 'c1', false, NOW);
+
+    expect(data).not.toHaveProperty('publishedOn');
+  });
+
+  it('rejects a future publishedOn with an inline field error', async () => {
+    const { strapi } = harness();
+
+    await expectRejection(
+      validateOfferLifecycle(
+        strapi,
+        'api::coupon.coupon',
+        'create',
+        { publishedOn: FUTURE },
+        undefined,
+        false,
+        NOW,
+      ),
+      'publishedOn',
+    );
+  });
+
+  // Same slack the past-date guards get: a date picked "now" and saved a moment
+  // later must not read as future-dated. A slightly fast CLIENT clock is the
+  // usual source, so the value is snapped to the server's now — otherwise two
+  // offers bumped seconds apart would order by whose machine ran fastest.
+  it('snaps a publishedOn inside the write-grace window to the server now', async () => {
+    const { strapi } = harness();
+    const data: Record<string, unknown> = {
+      publishedOn: new Date(NOW.getTime() + LIFECYCLE_WRITE_GRACE_MS - 1000).toISOString(),
+    };
+
+    await expect(
+      validateOfferLifecycle(strapi, 'api::coupon.coupon', 'create', data, undefined, false, NOW),
+    ).resolves.toBeUndefined();
+    expect(data.publishedOn).toBe(NOW.toISOString());
+  });
+
+  it('leaves a past publishedOn exactly as the editor set it', async () => {
+    const { strapi } = harness({ documentId: 'c1', expiresAt: FUTURE, publishedOn: PAST });
+    const data: Record<string, unknown> = { publishedOn: LATER_PAST };
+
+    await validateOfferLifecycle(strapi, 'api::coupon.coupon', 'update', data, 'c1', false, NOW);
+
+    expect(data.publishedOn).toBe(LATER_PAST);
+  });
+
+  // THE POINT OF THE FIELD: bumping reorders, it never revives.
+  it('does not republish an expired offer when publishedOn is bumped', async () => {
+    const { strapi } = harness({
+      documentId: 'c1',
+      scheduledAt: null,
+      expiresAt: LATER_PAST,
+      publishedOn: PAST,
+    });
+    const data: Record<string, unknown> = { publishedOn: NOW.toISOString() };
+
+    await validateOfferLifecycle(strapi, 'api::coupon.coupon', 'update', data, 'c1', false, NOW);
+
+    expect(data.contentStatus).toBe('expired');
+    expect(data.publishedOn).toBe(NOW.toISOString());
+  });
+
+  // The cron's partial payload carries no dates at all — it must not be read as
+  // "publishedOn cleared" (see THE PARTIAL-PAYLOAD TRAP).
+  it('leaves publishedOn untouched on the cron-shaped partial update', async () => {
+    const { strapi } = harness({
+      documentId: 'c1',
+      expiresAt: LATER_PAST,
+      publishedOn: LATER_PAST,
+    });
+    const data: Record<string, unknown> = { contentStatus: 'expired' };
+
+    await validateOfferLifecycle(strapi, 'api::coupon.coupon', 'update', data, 'c1', false, NOW);
+
+    expect(data.contentStatus).toBe('expired');
+    expect(data).not.toHaveProperty('publishedOn');
+  });
+
+  // Backfill-on-touch: a legacy row that never got a publishedOn gets one the
+  // next time anything writes it, so it cannot sink below every seeded row.
+  it('seeds publishedOn on an update to a published row that has none', async () => {
+    const { strapi } = harness({ documentId: 'c1', expiresAt: FUTURE, publishedOn: null });
+    const data: Record<string, unknown> = { title: 'Renamed' };
+
+    await validateOfferLifecycle(strapi, 'api::coupon.coupon', 'update', data, 'c1', false, NOW);
+
+    expect(data.contentStatus).toBe('published');
+    expect(data.publishedOn).toBe(NOW.toISOString());
+  });
+});
+
 describe('offer lifecycle — STRICT clean-as-you-touch', () => {
   it('blocks a human save on a dirty untouched past scheduledAt (strict)', async () => {
     // Editor touches only `title`; the stored scheduledAt is already in the

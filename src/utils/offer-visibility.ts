@@ -6,7 +6,12 @@ import type { Core } from '@strapi/strapi';
 // affiliate-link safety check) lands in every endpoint at once.
 
 export const PUBLISHED_OFFER_FILTER = { contentStatus: { $eq: 'published' } } as const;
-export const NEWEST_FIRST = ['publishedAt:desc'] as const;
+// `publishedOn` is the EDITOR-CONTROLLED sort key: re-dating an offer in the
+// admin (or hitting "Bump to top") resurfaces it here. Strapi's own
+// `publishedAt` — stamped once at creation, not editable under
+// `draftAndPublish: false` — stays only as a tiebreaker for any row the
+// backfill migration could not seed.
+export const NEWEST_FIRST = ['publishedOn:desc', 'publishedAt:desc'] as const;
 
 // Fallback queries fetch a buffer above what any section renders so the
 // actionability filter below can discard invalid records without starving
@@ -14,7 +19,10 @@ export const NEWEST_FIRST = ['publishedAt:desc'] as const;
 export const BACKFILL_QUERY_LIMIT = 40;
 
 export const STORE_FIELDS = ['name', 'slug', 'logoAlt'];
-export const CATEGORY_FIELDS = ['name', 'slug'];
+// `iconAlt` is category's counterpart to logoAlt on store/brand/bank — it is
+// required in the schema, so it must actually reach the site or editors are
+// filling a field nothing renders.
+export const CATEGORY_FIELDS = ['name', 'slug', 'iconAlt'];
 export const BRAND_FIELDS = ['name', 'slug', 'logoAlt'];
 
 export const DEAL_FIELDS = [
@@ -31,6 +39,7 @@ export const DEAL_FIELDS = [
   'affiliateLink',
   'expiresAt',
   'contentStatus',
+  'publishedOn',
 ];
 
 export const storeRef = { fields: STORE_FIELDS, populate: { logo: true } };
@@ -41,7 +50,6 @@ export const dealRef = {
   fields: DEAL_FIELDS,
   populate: {
     dealImage: true,
-    primaryStore: storeRef,
     stores: storeRef,
     brands: brandRef,
   },

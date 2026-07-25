@@ -35,7 +35,7 @@ lifecycle state.
 | **Category** | collection | A category entity page; carries `icon` rather than `logo` |
 | **Bank** | collection | A bank entity page (bank-offer pages) |
 | **Coupon** | collection | A code or no-code offer: `title`, `code`, `couponType` (`static` \| `unique`), affiliate link, badge/cashback text, and relations to store/brand/category/bank |
-| **Deal** | collection | A product deal: adds `salePrice`, `mrp`, `discount`, `dealImage` and a `primaryStore`. A Deal only counts as a product deal when it has a sale price |
+| **Deal** | collection | A product deal: adds `salePrice`, `mrp`, `discount` and `dealImage`. Its ordered `stores` relation carries ownership (`stores[0]`); a Deal only counts as a product deal when it has a sale price |
 | **Unique Coupon Pool** | collection | A named pool of single-use codes backing `couponType: unique` |
 | **Unique Code** | collection | One code in a pool, marked used on redemption |
 | **Homepage** | single | The curated home page as a deep component tree (hero, top offers, popular stores, explore tabs, bank offers, FAQ …) |

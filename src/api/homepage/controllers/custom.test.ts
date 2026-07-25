@@ -109,7 +109,7 @@ describe('homepage aggregate offer population', () => {
     const populate = options.populate;
     const publishedRelation = {
       filters: { contentStatus: { $eq: 'published' } },
-      sort: ['publishedAt:desc'],
+      sort: ['publishedOn:desc', 'publishedAt:desc'],
     };
 
     expect(populate.topDeals.populate.deals).toMatchObject(publishedRelation);
@@ -243,7 +243,7 @@ describe('homepage aggregate offer population', () => {
         contentStatus: { $eq: 'published' },
         salePrice: { $notNull: true, $gt: 0 },
       },
-      sort: ['publishedAt:desc'],
+      sort: ['publishedOn:desc', 'publishedAt:desc'],
       limit: 40,
     });
     expect(harness.findManyDeals.mock.calls[0]?.[0].fields).toContain('content');

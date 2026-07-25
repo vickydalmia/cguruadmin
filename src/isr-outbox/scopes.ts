@@ -108,7 +108,6 @@ export async function offerRelationSlugs(
       brands: { fields: ['slug'] },
       categories: { fields: ['slug'] },
       banks: { fields: ['slug'] },
-      ...(uid === 'api::deal.deal' ? { primaryStore: { fields: ['slug'] } } : {}),
     } as any,
   });
   if (!doc) return null;
@@ -123,9 +122,6 @@ export async function offerRelationSlugs(
       if (slug) slugs.add(slug);
     }
   }
-  const primary = publicSlug(doc.primaryStore?.slug, 'store');
-  if (primary) slugs.add(primary);
-
   // Query every entity-owned offer relation as well as the offer-owned
   // relation arrays above. `coupons`/`deals` are mappedBy relations on the
   // entities, while topPickCoupons is a separate one-way curated relation.

@@ -1,6 +1,6 @@
 import { createId } from "@paralleldrive/cuid2";
 import { createHash } from "crypto";
-import { pgQuery } from "../db/pg-client.js";
+import { pgQuery, pgTransaction } from "../db/pg-client.js";
 import { logger } from "./logger.js";
 
 export function generateDocumentId(sourceKey?: string): string {
@@ -144,6 +144,79 @@ export async function insertComponent(
 }
 
 /**
+ * Replace one repeatable/single component field with the exact imported rows.
+ * Existing component ids are updated in place; excess rows are unlinked and
+ * deleted so shortening an FAQ or clearing SEO converges on re-import.
+ */
+export async function replaceComponents(
+  componentTable: string,
+  rows: Array<Record<string, any>>,
+  entityTable: string,
+  entityId: number,
+  field: string,
+  componentType: string
+): Promise<void> {
+  const cmpTable = `${entityTable}_cmps`;
+
+  await pgTransaction(async () => {
+    const existing = await pgQuery<{ cmp_id: number; order: number }>(
+      `SELECT "cmp_id", "order"
+         FROM "${cmpTable}"
+        WHERE "entity_id" = $1
+          AND "field" = $2
+          AND "component_type" = $3
+        ORDER BY "order", "cmp_id"`,
+      [entityId, field, componentType]
+    );
+    const byOrder = new Map(existing.map((link) => [link.order, link.cmp_id]));
+
+    for (let index = 0; index < rows.length; index++) {
+      const order = index + 1;
+      const currentId = byOrder.get(order);
+      if (!currentId) {
+        await insertComponent(
+          componentTable,
+          rows[index],
+          entityTable,
+          entityId,
+          field,
+          componentType,
+          order
+        );
+        continue;
+      }
+
+      const columns = Object.keys(rows[index]);
+      if (columns.length === 0) continue;
+      await pgQuery(
+        `UPDATE "${componentTable}"
+            SET ${columns.map((column, i) => `"${column}" = $${i + 1}`).join(", ")}
+          WHERE "id" = $${columns.length + 1}`,
+        [...columns.map((column) => rows[index][column] ?? null), currentId]
+      );
+    }
+
+    const staleIds = existing
+      .filter((link) => link.order > rows.length)
+      .map((link) => link.cmp_id);
+    if (staleIds.length > 0) {
+      await pgQuery(
+        `DELETE FROM "${cmpTable}"
+          WHERE "entity_id" = $1
+            AND "field" = $2
+            AND "component_type" = $3
+            AND "cmp_id" = ANY($4::int[])`,
+        [entityId, field, componentType, staleIds]
+      );
+      await pgQuery(
+        `DELETE FROM "${componentTable}" WHERE "id" = ANY($1::int[])`,
+        [staleIds]
+      );
+    }
+  });
+}
+
+/**
  * Insert a relation link row.
  */
 export async function insertLink(
@@ -181,6 +254,28 @@ export async function linkMedia(
 }
 
 /**
+ * Replace one media field exactly. Unlike linkMedia this removes a previous
+ * WordPress image when the source changes or is cleared on an in-place import.
+ */
+export async function replaceMedia(
+  fileId: number | null,
+  relatedId: number,
+  relatedType: string,
+  field: string
+): Promise<void> {
+  await pgTransaction(async () => {
+    await pgQuery(
+      `DELETE FROM "files_related_mph"
+       WHERE "related_id" = $1 AND "related_type" = $2 AND "field" = $3`,
+      [relatedId, relatedType, field]
+    );
+    if (fileId) {
+      await linkMedia(fileId, relatedId, relatedType, field, 1);
+    }
+  });
+}
+
+/**
  * Register images referenced inside rewritten rich-text HTML as "used" media.
  * Phase 11 copies only files present in files_related_mph, so every
  * rewriteContentMedia call site must link its fileIds through here or the
@@ -195,4 +290,20 @@ export async function linkContentMedia(
   for (let i = 0; i < fileIds.length; i++) {
     await linkMedia(fileIds[i], relatedId, relatedType, field, i + 1);
   }
+}
+
+export async function replaceContentMedia(
+  fileIds: number[],
+  relatedId: number,
+  relatedType: string,
+  field: string
+): Promise<void> {
+  await pgTransaction(async () => {
+    await pgQuery(
+      `DELETE FROM "files_related_mph"
+       WHERE "related_id" = $1 AND "related_type" = $2 AND "field" = $3`,
+      [relatedId, relatedType, field]
+    );
+    await linkContentMedia(fileIds, relatedId, relatedType, field);
+  });
 }

@@ -24,6 +24,8 @@ const ENTITY_CONFIG: Record<
 };
 
 const OFFER_SORT = [
+  // Editor-controlled sort key — see NEWEST_FIRST in src/utils/offer-visibility.ts.
+  { publishedOn: 'desc' },
   { publishedAt: 'desc' },
   { updatedAt: 'desc' },
 ];
@@ -99,7 +101,6 @@ function isSameStore(candidate: any, current: any): boolean {
 
 function storeOwners(document: any): any[] {
   const owners = relationArray(document?.stores);
-  if (document?.primaryStore) owners.push(document.primaryStore);
 
   const seen = new Set<string>();
   return owners.filter((store) => {
@@ -146,10 +147,7 @@ function sourceDealFilter(
   if (entityType !== 'store') return sourceCouponFilter(entityType, source);
 
   return {
-    $or: [
-      { stores: { documentId: source.documentId } },
-      { primaryStore: { documentId: source.documentId } },
-    ],
+    stores: { documentId: source.documentId },
     ...publishedOnlyFilters(),
   };
 }
@@ -368,7 +366,6 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         fields: ['title'],
         populate: {
           stores: candidateStoreRef,
-          primaryStore: candidateStoreRef,
           categories: categoryRef,
         },
         sort: OFFER_SORT,

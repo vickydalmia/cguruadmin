@@ -1,26 +1,29 @@
-import { unserialize } from "php-serialize";
 import pLimit from "p-limit";
 import { wpQuery } from "../db/wp-client.js";
 import { pgQuery } from "../db/pg-client.js";
-import { getPostMapping, ensureTermMapping } from "../utils/id-maps.js";
-import { insertLink } from "../utils/strapi-insert.js";
+import { ensurePostMapping } from "../utils/id-maps.js";
+import { replaceOfferTaxonomyRelations } from "../utils/offer-relations.js";
 import { logger } from "../utils/logger.js";
-
-interface PrimaryStoreLinkTable {
-  table: string;
-  dealCol: string;
-  storeCol: string;
-}
+import { parseAcfTermId } from "../utils/acf.js";
 
 /**
- * Phase 12 — Backfill the deal.primaryStore manyToOne relation from WordPress
- * data: the ACF `deal_store` postmeta key (a store term ID, possibly
- * PHP-serialized).
+ * Phase 12 — Fold the WordPress ACF `deal_store` postmeta (a store term ID,
+ * possibly PHP-serialized) into the deal's STORES TAXONOMY.
  *
- * Safe to re-run: primaryStore links use delete-then-insert per deal.
+ * This used to populate a separate `deal.primaryStore` manyToOne relation.
+ * That field has been removed: it duplicated a store the taxonomy already
+ * carried, and every consumer had to query `$or: [{stores}, {primaryStore}]`
+ * to avoid missing deals. The frontend now resolves a Deal's owning entity as
+ * stores[0] → brands[0], so writing the ACF store first in `stores` preserves
+ * the same merchant without a duplicate relation.
+ *
+ * This phase intentionally rebuilds the complete four-taxonomy relation set,
+ * not just the ACF row. That makes it safe when ACF ownership changes or is
+ * cleared: stale links disappear and ACF store → Yoast primary → remaining WP
+ * term order converges to the same state as a clean phase-08 import.
  */
 export async function runOfferBackfill(): Promise<void> {
-  logger.info("=== Phase 12: Offer Backfill (primaryStore) ===");
+  logger.info("=== Phase 12: Offer Backfill (ACF deal_store → stores taxonomy) ===");
 
   // Guard against stale ID maps: if the Strapi tables are empty, the persisted
   // maps belong to a different database (e.g. after switching
@@ -35,191 +38,163 @@ export async function runOfferBackfill(): Promise<void> {
     );
   }
 
-  // Fetch the relevant meta for all migrated post types (same post scope as
-  // Phases 07/08: published/scheduled regular posts).
+  // Include every migrated Deal, including one whose deal_store was removed;
+  // otherwise an old ACF owner could never be deleted during a re-import.
   const rows = await wpQuery<{
     post_id: number;
-    meta_key: string;
-    meta_value: string;
+    deal_store: string | null;
   }>(`
-    SELECT pm.post_id, pm.meta_key, pm.meta_value
-    FROM wp_postmeta pm
-    JOIN wp_posts p ON p.ID = pm.post_id
+    SELECT p.ID AS post_id,
+           MAX(CASE WHEN store_meta.meta_key = 'deal_store'
+                    THEN store_meta.meta_value END) AS deal_store
+    FROM wp_posts p
+    JOIN wp_postmeta deal_meta
+      ON deal_meta.post_id = p.ID
+     AND deal_meta.meta_key = 'is_deal'
+     AND deal_meta.meta_value = 'yes'
+    LEFT JOIN wp_postmeta store_meta
+      ON store_meta.post_id = p.ID
+     AND store_meta.meta_key = 'deal_store'
     WHERE p.post_type = 'post'
       AND p.post_status IN ('publish', 'future')
-      AND pm.meta_key IN ('deal_store')
-    ORDER BY pm.post_id
+    GROUP BY p.ID
+    ORDER BY p.ID
   `);
 
-  const metaByPost = new Map<number, Record<string, string>>();
-  for (const row of rows) {
-    if (!metaByPost.has(row.post_id)) metaByPost.set(row.post_id, {});
-    metaByPost.get(row.post_id)![row.meta_key] = row.meta_value;
+  logger.info(`Found ${rows.length} migrated Deal post(s) to reconcile`);
+  const postIds = rows.map((row) => row.post_id);
+  const placeholders = postIds.map(() => "?").join(",");
+  const relationRows = postIds.length
+    ? await wpQuery<{ object_id: number; term_id: number }>(
+        `SELECT tr.object_id, tt.term_id
+           FROM wp_term_relationships tr
+           JOIN wp_term_taxonomy tt
+             ON tr.term_taxonomy_id = tt.term_taxonomy_id
+            AND tt.taxonomy = 'category'
+          WHERE tr.object_id IN (${placeholders})
+          ORDER BY tr.object_id, tr.term_order, tt.term_id`,
+        postIds,
+      )
+    : [];
+  const relationsByPost = new Map<number, number[]>();
+  for (const relation of relationRows) {
+    const ids = relationsByPost.get(relation.object_id) ?? [];
+    ids.push(relation.term_id);
+    relationsByPost.set(relation.object_id, ids);
   }
 
-  logger.info(`Found ${metaByPost.size} posts with deal_store meta`);
+  let primaryTerms = new Map<number, number>();
+  if (postIds.length > 0) {
+    try {
+      const primaryRows = await wpQuery<{ post_id: number; term_id: number }>(
+        `SELECT post_id, term_id
+           FROM wp_yoast_primary_term
+          WHERE post_id IN (${placeholders})
+            AND taxonomy = 'category'`,
+        postIds,
+      );
+      primaryTerms = new Map(
+        primaryRows.map((row) => [row.post_id, row.term_id]),
+      );
+    } catch {
+      logger.warn("wp_yoast_primary_term not available for offer backfill");
+    }
+  }
 
-  let linksWritten = 0;
+  let reconciled = 0;
   let skipped = 0;
-
-  // ── primaryStore backfill (deals only) ──────────────────────────────
-
-  const linkTable = await detectPrimaryStoreLinkTable();
-  if (!linkTable) {
-    logger.warn(
-      "deals primaryStore link table (expected deals_primary_store_lnk) not found — " +
-        "run the Strapi schema migration first, then re-run this phase. Skipping primaryStore backfill."
-    );
-  } else {
-    logger.info(
-      `Using link table ${linkTable.table} (${linkTable.dealCol}, ${linkTable.storeCol}) for deal.primaryStore`
-    );
-
-    // Resolve WP term IDs → Strapi store rows
-    const pairs: Array<{ dealId: number; storeId: number }> = [];
-
-    for (const [postId, meta] of metaByPost) {
-      if (!meta.deal_store) continue;
-
-      const ref = getPostMapping(postId);
-      if (!ref || ref.table !== "deals") {
-        skipped++;
-        continue; // not a migrated deal
-      }
-
-      const termId = parseAcfTermId(meta.deal_store);
-      if (!termId) {
-        skipped++;
-        continue;
-      }
-
-      const storeRef = await ensureTermMapping(termId);
-      if (!storeRef || storeRef.table !== "stores") {
-        skipped++;
-        continue; // unmapped term, or term maps to a non-store collection
-      }
-
-      pairs.push({ dealId: ref.id, storeId: storeRef.id });
-    }
-
-    if (pairs.length > 0) {
-      // Delete-then-insert for idempotency: primaryStore is manyToOne, so a
-      // deal must never end up with two link rows even if the value changed.
-      const dealIds = pairs.map((p) => p.dealId);
-      await pgQuery(
-        `DELETE FROM "${linkTable.table}" WHERE "${linkTable.dealCol}" = ANY($1::int[])`,
-        [dealIds]
-      );
-
-      const limit = pLimit(20);
-      await Promise.all(
-        pairs.map((pair) =>
-          limit(async () => {
-            try {
-              await insertLink(linkTable.table, {
-                [linkTable.dealCol]: pair.dealId,
-                [linkTable.storeCol]: pair.storeId,
-              });
-              linksWritten++;
-            } catch (err: any) {
-              skipped++;
-              logger.error(
-                `Failed to link primaryStore for deal ${pair.dealId}: ${err.message}`
-              );
-            }
-          })
-        )
-      );
-    }
-  }
+  const limit = pLimit(20);
+  await Promise.all(
+    rows.map((row) =>
+      limit(async () => {
+        try {
+          const ref = await ensurePostMapping(row.post_id, "deals");
+          if (!ref) {
+            skipped++;
+            return;
+          }
+          await replaceOfferTaxonomyRelations("deals", ref.id, {
+            termIds: relationsByPost.get(row.post_id) ?? [],
+            primaryTermId: primaryTerms.get(row.post_id),
+            acfStoreTermId: parseAcfTermId(row.deal_store),
+          });
+          reconciled++;
+        } catch (err: any) {
+          skipped++;
+          logger.error(
+            `Failed to reconcile Deal ${row.post_id}: ${err.message}`,
+          );
+        }
+      }),
+    ),
+  );
 
   logger.info(
-    `Offer backfill complete: ${linksWritten} primaryStore links written, ${skipped} skipped`
+    `Offer backfill complete: ${reconciled} Deal taxonomy set(s) reconciled, ` +
+      `${skipped} skipped`,
   );
+  if (skipped > 0) {
+    throw new Error(
+      `${skipped} Deal taxonomy set(s) failed reconciliation; see the WordPress post IDs above`,
+    );
+  }
+
+  await markLatestStoreCouponsRecommended();
 }
 
-// ── Schema detection ─────────────────────────────────────────────────
-
 /**
- * Finds the Strapi v5 link table for deal.primaryStore empirically. The
- * conventional name is `deals_primary_store_lnk`, but we verify against
- * information_schema (excluding the plural `deals_stores_lnk` used by the
- * stores manyToMany relation) so the phase fails gracefully when the Strapi
- * schema hasn't been migrated yet.
+ * Badge each store's newest live coupon as "Recommended".
+ *
+ * WHY: the site sorts an entity's coupon list with `byEntityCouponRecommendation`
+ * (cguru-ui), which floats recommended offers to the top — but WordPress only
+ * flags 8 posts as `popular_coupon`, so in practice every store page rendered a
+ * flat, unranked list. Promoting the newest coupon per store gives every store
+ * page a lead offer without an editor touching all 4,000+ of them.
+ *
+ * FILL-ONLY (`badge IS NULL`): never overwrites the `popular_coupon` badge from
+ * phase 07, and never clobbers an editorially-chosen badge such as
+ * "CG Exclusive" — this only fills the gap where there is no badge at all.
+ *
+ * Published coupons only: badging an expired offer would promote something the
+ * public API filters out, leaving the store page's lead slot empty.
+ *
+ * Deterministic + idempotent: DISTINCT ON resolves ties by published date then
+ * id, so a re-run picks the same coupon, finds it already badged, and updates
+ * nothing. One coupon shared by several stores is simply badged once.
  */
-async function detectPrimaryStoreLinkTable(): Promise<PrimaryStoreLinkTable | null> {
-  const tables = await pgQuery<{ table_name: string }>(
+async function markLatestStoreCouponsRecommended(): Promise<void> {
+  const linkTable = "coupons_stores_lnk";
+  const exists = await pgQuery<{ table_name: string }>(
     `SELECT table_name
      FROM information_schema.tables
-     WHERE table_schema = current_schema()
-       AND table_name LIKE 'deals\\_%store%\\_lnk' ESCAPE '\\'
-       AND table_name <> 'deals_stores_lnk'`
+     WHERE table_schema = current_schema() AND table_name = $1`,
+    [linkTable]
   );
-
-  const names = tables.map((t) => t.table_name);
-  const table = names.includes("deals_primary_store_lnk")
-    ? "deals_primary_store_lnk"
-    : names[0];
-  if (!table) return null;
-
-  const cols = await pgQuery<{ column_name: string }>(
-    `SELECT column_name
-     FROM information_schema.columns
-     WHERE table_schema = current_schema()
-       AND table_name = $1`,
-    [table]
-  );
-  const colNames = cols.map((c) => c.column_name);
-
-  const dealCol = colNames.includes("deal_id")
-    ? "deal_id"
-    : colNames.find((c) => c.startsWith("deal") && c.endsWith("_id"));
-  const storeCol = colNames.includes("store_id")
-    ? "store_id"
-    : colNames.find((c) => c !== dealCol && c.includes("store") && c.endsWith("_id"));
-
-  if (!dealCol || !storeCol) {
+  if (exists.length === 0) {
     logger.warn(
-      `Link table ${table} exists but expected columns not found (have: ${colNames.join(", ")})`
+      `${linkTable} not found — skipping the per-store "Recommended" badge pass.`
     );
-    return null;
+    return;
   }
 
-  return { table, dealCol, storeCol };
-}
+  const updated = await pgQuery<{ id: number }>(
+    `UPDATE "coupons" c
+        SET "badge" = 'Recommended'
+      WHERE c."badge" IS NULL
+        AND c."id" IN (
+          SELECT DISTINCT ON (l."store_id") l."coupon_id"
+            FROM "${linkTable}" l
+            JOIN "coupons" c2 ON c2."id" = l."coupon_id"
+           WHERE c2."content_status" = 'published'
+           ORDER BY l."store_id",
+                    c2."published_on" DESC NULLS LAST,
+                    c2."published_at" DESC NULLS LAST,
+                    c2."id" DESC
+        )
+      RETURNING c."id"`
+  );
 
-// ── Helpers ──────────────────────────────────────────────────────────
-
-/**
- * Parses an ACF term-reference meta value into a WP term ID. Depending on the
- * ACF field config the value is either a plain ID ("123") or a PHP-serialized
- * array (`a:1:{i:0;s:3:"123";}`).
- */
-function parseAcfTermId(raw: string | null | undefined): number | null {
-  if (!raw) return null;
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-
-  if (/^\d+$/.test(trimmed)) {
-    return parseInt(trimmed, 10);
-  }
-
-  // PHP-serialized value (array, string, or int)
-  if (/^[asiO]:/.test(trimmed)) {
-    try {
-      const parsed = unserialize(trimmed);
-      const first = Array.isArray(parsed)
-        ? parsed[0]
-        : parsed !== null && typeof parsed === "object"
-          ? Object.values(parsed)[0]
-          : parsed;
-      const id = parseInt(String(first), 10);
-      return isNaN(id) ? null : id;
-    } catch {
-      return null;
-    }
-  }
-
-  const fallback = parseInt(trimmed, 10);
-  return isNaN(fallback) ? null : fallback;
+  logger.info(
+    `Badged ${updated.length} coupon(s) as "Recommended" — the newest live coupon per store`
+  );
 }

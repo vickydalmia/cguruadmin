@@ -169,7 +169,7 @@ describe("search-sql builders", () => {
     expect(query.sql).not.toContain("similarity(");
   });
 
-  it("adds the sale-price rule and primaryStore link for product deals", () => {
+  it("adds the sale-price rule and every taxonomy link for product deals", () => {
     const query = offerRankedQuery(
       "deal",
       needles(["shoes"], ["shoes"]),
@@ -179,7 +179,8 @@ describe("search-sql builders", () => {
 
     expect(query.sql).toContain("FROM deals o");
     expect(query.sql).toContain("o.sale_price IS NOT NULL AND o.sale_price > 0");
-    expect(query.sql).toContain("deals_primary_store_lnk");
+    // `primaryStore` is gone — its store is carried by the stores taxonomy.
+    expect(query.sql).not.toContain("deals_primary_store_lnk");
     expect(query.sql).not.toContain("translate(o.code");
     for (const link of [
       "deals_stores_lnk",
@@ -204,7 +205,7 @@ describe("search-sql builders", () => {
     );
 
     // One [name-contains, slug-prefix] pair per link table, in declaration
-    // order: stores, brands, categories, banks, primaryStore.
+    // order: stores, brands, categories, banks.
     const relationWhere = ["%watch%", "watch%"];
     // Literal variant tiers 0-3 then the derived variant shifted +4, each in
     // exact/prefix/word-boundary/substring pattern order.
@@ -227,13 +228,11 @@ describe("search-sql builders", () => {
       ...relationWhere, // WHERE: brands link
       ...relationWhere, // WHERE: categories link
       ...relationWhere, // WHERE: banks link
-      ...relationWhere, // WHERE: primaryStore link
       ...nameTier, // ORDER BY: direct title tier
       ...nameTier, // ORDER BY: stores name tier
       ...nameTier, // ORDER BY: brands name tier
       ...nameTier, // ORDER BY: categories name tier
       ...nameTier, // ORDER BY: banks name tier
-      ...nameTier, // ORDER BY: primaryStore name tier
       12, // LIMIT
       24, // OFFSET
     ]);

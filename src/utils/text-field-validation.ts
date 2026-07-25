@@ -65,8 +65,11 @@ import {
  *              and maps empty to null, and collapsing HTML would be a visible
  *              content regression. Listed only so it can be required.
  * `media`    — presence check only.
+ * `number`   — presence check only (decimal/integer attributes). Never
+ *              normalised: there is no whitespace to trim, and 0 is a real
+ *              value, so only null/undefined/"" count as missing.
  */
-export type TextFieldKind = 'string' | 'text' | 'richtext' | 'media';
+export type TextFieldKind = 'string' | 'text' | 'richtext' | 'media' | 'number';
 
 export type TextFieldRule = {
   uid: string;
@@ -88,12 +91,16 @@ export const COUPON_UID = 'api::coupon.coupon';
 export const DEAL_UID = 'api::deal.deal';
 export const STORE_UID = 'api::store.store';
 export const BRAND_UID = 'api::brand.brand';
+export const CATEGORY_UID = 'api::category.category';
+export const BANK_UID = 'api::bank.bank';
 
 export const TEXT_FIELD_UIDS = [
   COUPON_UID,
   DEAL_UID,
   STORE_UID,
   BRAND_UID,
+  CATEGORY_UID,
+  BANK_UID,
 ] as const;
 
 /**
@@ -108,10 +115,20 @@ export const TEXT_FIELD_UIDS = [
  * regex-validates them; rewriting a slug here would change public URLs.
  *
  * NOTE ON BRAND: brand's SEO requiredness is already owned by
- * checkBrandRequired in entity-field-validation.ts and is NOT duplicated here.
+ * checkBrandRequired in entity-field-validation.ts and is NOT duplicated here —
+ * listing it in both places would report the same blank field twice. Store,
+ * category and bank have no such counterpart, so their SEO rules live here.
  * Brand `logo` keeps its schema-level `required: true` (media + notNil/notNull
  * is sufficient for a relation-like attribute). Brand `shortDescription` IS
  * listed, because its schema `required: true` does not catch "".
+ *
+ * NOTE ON WEBSITE URL: `websiteUrl` is `requiredNonBlank` on all four taxonomy
+ * types, and was empty on EVERY row when that was turned on (4,347 stores, 956
+ * brands, 128 categories, 25 banks). Nothing was bulk-migrated: the
+ * clean-as-you-touch rule (strict === human write, see write-origin.ts) means
+ * each entity needs a URL the first time an editor saves it, and background
+ * writes stay grandfathered. Expect that first save to fail until the URL is
+ * filled in — that is the intended behaviour, not a regression.
  */
 export const TEXT_FIELD_RULES: readonly TextFieldRule[] = [
   // --- Coupon -------------------------------------------------------------
@@ -120,7 +137,9 @@ export const TEXT_FIELD_RULES: readonly TextFieldRule[] = [
   { uid: COUPON_UID, field: 'content', label: 'Content', kind: 'richtext', requiredNonBlank: true },
   // Row 70 — a coupon with no outbound link is dead weight on the site.
   { uid: COUPON_UID, field: 'affiliateLink', label: 'Affiliate link', kind: 'text', requiredNonBlank: true },
-  { uid: COUPON_UID, field: 'offerText', label: 'Offer text', kind: 'string', collapse: true },
+  // offerText is the headline on every coupon card — blank leaves the card
+  // with nothing to say.
+  { uid: COUPON_UID, field: 'offerText', label: 'Offer text', kind: 'string', requiredNonBlank: true, collapse: true },
   { uid: COUPON_UID, field: 'cashbackText', label: 'Cashback text', kind: 'string', collapse: true },
   { uid: COUPON_UID, field: 'bankOfferText', label: 'Bank offer text', kind: 'string', collapse: true },
   { uid: COUPON_UID, field: 'code', label: 'Code', kind: 'string' },
@@ -129,7 +148,14 @@ export const TEXT_FIELD_RULES: readonly TextFieldRule[] = [
   { uid: DEAL_UID, field: 'title', label: 'Title', kind: 'string', requiredNonBlank: true, collapse: true },
   // Row 82 — same reasoning as the coupon link.
   { uid: DEAL_UID, field: 'affiliateLink', label: 'Affiliate link', kind: 'text', requiredNonBlank: true },
-  { uid: DEAL_UID, field: 'offerText', label: 'Offer text', kind: 'string', collapse: true },
+  { uid: DEAL_UID, field: 'content', label: 'Content', kind: 'richtext', requiredNonBlank: true },
+  { uid: DEAL_UID, field: 'offerText', label: 'Offer text', kind: 'string', requiredNonBlank: true, collapse: true },
+  // A product deal card renders a price and a strike-through MRP; without both
+  // there is no discount to show and isActionableProductDeal drops the card.
+  // `dealImage` is NOT listed: it already carries schema `required: true`
+  // (same reasoning as brand.logo in the note above).
+  { uid: DEAL_UID, field: 'salePrice', label: 'Sale price', kind: 'number', requiredNonBlank: true },
+  { uid: DEAL_UID, field: 'mrp', label: 'MRP', kind: 'number', requiredNonBlank: true },
   { uid: DEAL_UID, field: 'cashbackText', label: 'Cashback text', kind: 'string', collapse: true },
   { uid: DEAL_UID, field: 'bankOfferText', label: 'Bank offer text', kind: 'string', collapse: true },
   { uid: DEAL_UID, field: 'discount', label: 'Discount', kind: 'string', collapse: true },
@@ -143,14 +169,36 @@ export const TEXT_FIELD_RULES: readonly TextFieldRule[] = [
   { uid: STORE_UID, field: 'logo', label: 'Logo', kind: 'media', requiredNonBlank: true },
   { uid: STORE_UID, field: 'metaTitle', label: 'SEO title', kind: 'string', container: 'seo', requiredNonBlank: true, collapse: true },
   { uid: STORE_UID, field: 'metaDescription', label: 'SEO description', kind: 'text', container: 'seo', requiredNonBlank: true },
-  { uid: STORE_UID, field: 'logoAlt', label: 'Logo alt text', kind: 'string', collapse: true },
-  { uid: STORE_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string' },
+  // Alt text is the accessible name for the logo — a missing one ships an
+  // unlabelled image to every store card and page header.
+  { uid: STORE_UID, field: 'logoAlt', label: 'Logo alt text', kind: 'string', requiredNonBlank: true, collapse: true },
+  { uid: STORE_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string', requiredNonBlank: true },
 
   // --- Brand --------------------------------------------------------------
   { uid: BRAND_UID, field: 'name', label: 'Name', kind: 'string', requiredNonBlank: true, collapse: true },
   { uid: BRAND_UID, field: 'shortDescription', label: 'Short description', kind: 'text', requiredNonBlank: true },
-  { uid: BRAND_UID, field: 'logoAlt', label: 'Logo alt text', kind: 'string', collapse: true },
-  { uid: BRAND_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string' },
+  { uid: BRAND_UID, field: 'logoAlt', label: 'Logo alt text', kind: 'string', requiredNonBlank: true, collapse: true },
+  { uid: BRAND_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string', requiredNonBlank: true },
+
+  // --- Category -----------------------------------------------------------
+  // Category's media field is `icon`, not `logo`, and `iconAlt` was added
+  // alongside these rules — categories previously had no alt text at all.
+  { uid: CATEGORY_UID, field: 'name', label: 'Name', kind: 'string', requiredNonBlank: true, collapse: true },
+  { uid: CATEGORY_UID, field: 'shortDescription', label: 'Short description', kind: 'text', requiredNonBlank: true },
+  { uid: CATEGORY_UID, field: 'icon', label: 'Icon', kind: 'media', requiredNonBlank: true },
+  { uid: CATEGORY_UID, field: 'iconAlt', label: 'Icon alt text', kind: 'string', requiredNonBlank: true, collapse: true },
+  { uid: CATEGORY_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string', requiredNonBlank: true },
+  { uid: CATEGORY_UID, field: 'metaTitle', label: 'SEO title', kind: 'string', container: 'seo', requiredNonBlank: true, collapse: true },
+  { uid: CATEGORY_UID, field: 'metaDescription', label: 'SEO description', kind: 'text', container: 'seo', requiredNonBlank: true },
+
+  // --- Bank ---------------------------------------------------------------
+  { uid: BANK_UID, field: 'name', label: 'Name', kind: 'string', requiredNonBlank: true, collapse: true },
+  { uid: BANK_UID, field: 'shortDescription', label: 'Short description', kind: 'text', requiredNonBlank: true },
+  { uid: BANK_UID, field: 'logo', label: 'Logo', kind: 'media', requiredNonBlank: true },
+  { uid: BANK_UID, field: 'logoAlt', label: 'Logo alt text', kind: 'string', requiredNonBlank: true, collapse: true },
+  { uid: BANK_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string', requiredNonBlank: true },
+  { uid: BANK_UID, field: 'metaTitle', label: 'SEO title', kind: 'string', container: 'seo', requiredNonBlank: true, collapse: true },
+  { uid: BANK_UID, field: 'metaDescription', label: 'SEO description', kind: 'text', container: 'seo', requiredNonBlank: true },
 ];
 
 /**
@@ -201,7 +249,9 @@ const collectionLabel = (uid: string): string => {
  */
 export function textFieldHint(rule: TextFieldRule): string {
   const qualifier = rule.container ? ` for ${collectionLabel(rule.uid)}` : '';
-  if (rule.kind === 'media') {
+  // Neither carries text, so the trim/collapse sentences below would be
+  // meaningless — required-ness is the only thing worth saying.
+  if (rule.kind === 'media' || rule.kind === 'number') {
     return rule.requiredNonBlank ? `Required${qualifier}.` : '';
   }
   const parts: string[] = [];
@@ -413,7 +463,7 @@ export function normaliseTextFields(uid: string, action: string, data: any): voi
   if (!data || typeof data !== 'object') return;
 
   for (const rule of RULES_BY_UID[uid] ?? []) {
-    if (rule.kind === 'richtext' || rule.kind === 'media') continue;
+    if (rule.kind === 'richtext' || rule.kind === 'media' || rule.kind === 'number') continue;
 
     const target = ruleTarget(data, rule);
     if (!target || !hasOwn(target, rule.field)) continue;

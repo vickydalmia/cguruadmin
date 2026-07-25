@@ -4,7 +4,7 @@
   "info": {
     "singularName": "deal",
     "pluralName": "deals",
-    "displayName": "Deal",
+    "displayName": "Product Deal",
     "description": "Product deals with pricing, images, and affiliate links"
   },
   "options": {
@@ -18,10 +18,12 @@
       "maxLength": 200
     },
     "offerText": {
-      "type": "string"
+      "type": "string",
+      "required": true
     },
     "content": {
       "type": "richtext",
+      "required": true,
       "maxLength": 50000
     },
     "code": {
@@ -37,10 +39,12 @@
     },
     "salePrice": {
       "type": "decimal",
+      "required": true,
       "min": 0
     },
     "mrp": {
       "type": "decimal",
+      "required": true,
       "min": 0
     },
     "discount": {
@@ -63,19 +67,18 @@
     "bankOfferText": {
       "type": "string"
     },
-    "primaryStore": {
-      "type": "relation",
-      "relation": "manyToOne",
-      "target": "api::store.store"
-    },
     "affiliateLink": {
       "type": "text",
+      "required": true,
       "regex": "^https?://[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?([.][a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+(:[0-9]{1,5})?([/?#]\\S*)?$"
     },
     "expiresAt": {
       "type": "datetime"
     },
     "scheduledAt": {
+      "type": "datetime"
+    },
+    "publishedOn": {
       "type": "datetime"
     },
     "contentStatus": {

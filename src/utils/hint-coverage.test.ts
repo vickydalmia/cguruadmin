@@ -115,6 +115,7 @@ describe('index.ts merged hint map', () => {
         [uid, 'bankOfferText'],
         [uid, 'scheduledAt'],
         [uid, 'expiresAt'],
+        [uid, 'publishedOn'],
       ]),
       ['api::coupon.coupon', 'code'],
       ['api::coupon.coupon', 'uniqueCouponPool'],

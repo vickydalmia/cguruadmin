@@ -4,7 +4,8 @@ import { computeContentStatus, type ContentStatus } from './content-status';
 
 /**
  * Offer lifecycle rules for coupon + deal (scheduledAt / expiresAt /
- * contentStatus). Run from the documents middleware on create + update.
+ * publishedOn / contentStatus). Run from the documents middleware on create +
+ * update.
  *
  * STATE MACHINE — with S = scheduledAt, E = expiresAt, C = contentStatus,
  * N = now, C is DERIVED and never editor-chosen:
@@ -19,11 +20,21 @@ import { computeContentStatus, type ContentStatus } from './content-status';
  * and it makes the (published, past S) pair unrepresentable, so no separate
  * guard for it is needed (nor wanted: it would fight the cron).
  *
+ * PUBLISHED-ON (P) is the editor-controlled sort key behind every "newest
+ * first" listing (src/utils/offer-visibility.ts). It is deliberately NOT part
+ * of the state machine: re-dating an offer resurfaces it, it never revives an
+ * expired one. P is seeded to N the moment the offer first becomes live —
+ * here on a create that resolves to `published`, or by the scheduler when a
+ * `scheduled` offer goes live — so a scheduled offer surfaces as new on its
+ * go-live date rather than its authoring date.
+ *
  * ENTRY GUARDS (rejected with an inline field error) — all change-detected,
  * i.e. they only fire when the incoming payload actually WRITES the field:
  *   1. S in the past
  *   2. E in the past
  *   3. S >= E when both are set
+ *   4. P in the future (it would pin the offer to the top of every listing
+ *      until that date passed)
  *
  * GRANDFATHERING (strict === false): this lands on a populated production DB
  * with no pre-flight cleanup. A legacy row that already violates a guard stays
@@ -125,7 +136,7 @@ export async function validateOfferLifecycle(
   if (!isFreshCreate && documentId) {
     const found: unknown = await strapi.documents(uid).findOne({
       documentId,
-      fields: ['documentId', 'scheduledAt', 'expiresAt'],
+      fields: ['documentId', 'scheduledAt', 'expiresAt', 'publishedOn'],
     });
     if (!found || typeof found !== 'object') return;
     stored = found as Record<string, unknown>;
@@ -133,19 +144,26 @@ export async function validateOfferLifecycle(
 
   const storedScheduledAt = stored ? stored.scheduledAt : undefined;
   const storedExpiresAt = stored ? stored.expiresAt : undefined;
+  const storedPublishedOn = stored ? stored.publishedOn : undefined;
 
   const scheduledSent = hasField(payload, 'scheduledAt');
   const expiresSent = hasField(payload, 'expiresAt');
+  const publishedOnSent = hasField(payload, 'publishedOn');
 
   // Payload merged over the stored row — the only safe input to the state
   // machine, and to the guards.
   const mergedScheduledAt = scheduledSent ? payload.scheduledAt : storedScheduledAt;
   const mergedExpiresAt = expiresSent ? payload.expiresAt : storedExpiresAt;
+  const mergedPublishedOn = publishedOnSent ? payload.publishedOn : storedPublishedOn;
 
   const scheduledMs = toTime(mergedScheduledAt);
   const expiresMs = toTime(mergedExpiresAt);
+  const publishedOnMs = toTime(mergedPublishedOn);
   const nowMs = now.getTime();
   const floorMs = nowMs - LIFECYCLE_WRITE_GRACE_MS;
+  // Mirror of floorMs for the future-facing guard: a date picked "now" and
+  // saved a moment later must not read as future-dated.
+  const ceilingMs = nowMs + LIFECYCLE_WRITE_GRACE_MS;
 
   // Change detection. The admin edit view posts the WHOLE form back, so field
   // presence alone means nothing — a legacy row would trip its own stored
@@ -163,6 +181,10 @@ export async function validateOfferLifecycle(
     strict || isFreshCreate
       ? true
       : expiresSent && toTime(payload.expiresAt) !== toTime(storedExpiresAt);
+  const publishedOnChanged =
+    strict || isFreshCreate
+      ? true
+      : publishedOnSent && toTime(payload.publishedOn) !== toTime(storedPublishedOn);
 
   const problems: Problem[] = [];
 
@@ -181,6 +203,16 @@ export async function validateOfferLifecycle(
       message:
         `Expires at must be in the future — ${iso(expiresMs)} has already passed. ` +
         'Pick a later date, or clear the field to keep this offer live.',
+    });
+  }
+
+  if (publishedOnChanged && publishedOnMs !== null && publishedOnMs > ceilingMs) {
+    problems.push({
+      path: ['publishedOn'],
+      message:
+        `Published date must not be in the future — ${iso(publishedOnMs)} has not ` +
+        'arrived yet. Use Scheduled at to hold an offer back; Published date only ' +
+        'controls where it sits in "newest first" listings.',
     });
   }
 
@@ -228,5 +260,27 @@ export async function validateOfferLifecycle(
   // Normalisation — identical to the scheduler's shouldClearScheduledAt.
   if (status === 'published' && scheduledMs !== null && scheduledMs <= nowMs) {
     payload.scheduledAt = null;
+  }
+
+  // Seed the sort key the first time an offer is live. A create that resolves
+  // to `published` is live right now; a `scheduled` one is not, so it is left
+  // null for the scheduler to stamp at go-live (config/cron-tasks.ts). Never
+  // overwrites an existing value — that is the editor's to control.
+  if (status === 'published' && publishedOnMs === null) {
+    payload.publishedOn = new Date(nowMs).toISOString();
+  } else if (
+    publishedOnSent &&
+    publishedOnMs !== null &&
+    publishedOnMs > nowMs &&
+    publishedOnMs <= ceilingMs
+  ) {
+    // "Now" per the CLIENT is not "now" per the server. The "Bump to top"
+    // action and the datetime picker both send a browser-generated instant, so
+    // a slightly fast client clock would otherwise store a future sort key —
+    // and two offers bumped seconds apart would order by whose machine was
+    // further ahead, not by who clicked last. Anything inside the grace window
+    // means "now", so store the server's now; beyond it the guard above has
+    // already rejected the value.
+    payload.publishedOn = new Date(nowMs).toISOString();
   }
 }

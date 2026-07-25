@@ -79,6 +79,18 @@ const HIDE_FROM_EDIT: Record<string, string[]> = {
   'api::category.category': ['topPickCoupons'],
 };
 
+// The offer lifecycle fields are edited ONLY in the Publishing side panel
+// (src/admin/components/PublishingPanel.tsx), which presents them as a derived
+// status badge plus "goes live" / "ends" choices. Leaving them in the main form
+// too would give an editor two controls for one value — including a
+// contentStatus dropdown that looks editable but is overwritten on every save.
+// Unlike HIDE_FROM_EDIT these stay in the LIST layout: they are exactly the
+// columns editors sort and filter offers by.
+const HIDE_FROM_EDIT_FORM_ONLY: Record<string, string[]> = {
+  'api::coupon.coupon': ['contentStatus', 'publishedOn', 'scheduledAt', 'expiresAt'],
+  'api::deal.deal': ['contentStatus', 'publishedOn', 'scheduledAt', 'expiresAt'],
+};
+
 const DOCUMENT_WRITE_ACTIONS = new Set([
   'create',
   'clone',
@@ -89,11 +101,23 @@ const DOCUMENT_WRITE_ACTIONS = new Set([
   'discardDraft',
 ]);
 
-async function hideRelationsFromContentManager(strapi: Core.Strapi): Promise<void> {
+/**
+ * Drop fields from the content-manager EDIT layout, and — unless
+ * `keepListColumns` — from the list layout too.
+ *
+ * Two callers with deliberately different scopes: relations moved into side
+ * panels are gone from both views, while the offer lifecycle fields move into
+ * the Publishing panel but stay as list columns editors sort and filter by.
+ */
+async function hideFieldsFromContentManager(
+  strapi: Core.Strapi,
+  table: Record<string, string[]>,
+  { keepListColumns = false }: { keepListColumns?: boolean } = {},
+): Promise<void> {
   const service: any = strapi.plugin('content-manager').service('content-types');
   if (!service) return;
 
-  for (const [uid, fieldsToHide] of Object.entries(HIDE_FROM_EDIT)) {
+  for (const [uid, fieldsToHide] of Object.entries(table)) {
     try {
       const contentType = strapi.contentType(uid as any);
       if (!contentType) continue;
@@ -107,7 +131,9 @@ async function hideRelationsFromContentManager(strapi: Core.Strapi): Promise<voi
       const nextEdit = prevEdit
         .map((row: any[]) => row.filter((cell) => !hidden.has(cell.name)))
         .filter((row: any[]) => row.length > 0);
-      const nextList = prevList.filter((name: string) => !hidden.has(name));
+      const nextList = keepListColumns
+        ? prevList
+        : prevList.filter((name: string) => !hidden.has(name));
 
       const changed =
         JSON.stringify(nextEdit) !== JSON.stringify(prevEdit) ||
@@ -121,13 +147,20 @@ async function hideRelationsFromContentManager(strapi: Core.Strapi): Promise<voi
         layouts: { ...config.layouts, edit: nextEdit, list: nextList },
         options: config.options,
       });
-      strapi.log.info(`[content-manager] hid relations from ${uid} layout`);
+      strapi.log.info(`[content-manager] hid fields from ${uid} layout`);
     } catch (err: any) {
       strapi.log.warn(
         `[content-manager] failed to rewrite layout for ${uid}: ${err?.message ?? err}`
       );
     }
   }
+}
+
+async function hideRelationsFromContentManager(strapi: Core.Strapi): Promise<void> {
+  await hideFieldsFromContentManager(strapi, HIDE_FROM_EDIT);
+  await hideFieldsFromContentManager(strapi, HIDE_FROM_EDIT_FORM_ONLY, {
+    keepListColumns: true,
+  });
 }
 
 // All site content is public; make sure the public role can read it so the
@@ -382,6 +415,17 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
         'Optional. Must be in the future and after Scheduled at; leave empty to ' +
         'keep the offer live. Status is set automatically from these dates.',
     },
+    // Mirrors offer-lifecycle-validation.ts: no future dates, seeded at go-live,
+    // and deliberately NOT part of the published/scheduled/expired state machine.
+    {
+      uid,
+      field: 'publishedOn',
+      hint:
+        'Drives "newest first" ordering on the site. Set automatically when the ' +
+        'offer goes live — move it forward (or use "Bump to top") to resurface ' +
+        'this offer above older ones. Cannot be in the future, and never changes ' +
+        'the status: re-dating an expired offer leaves it expired.',
+    },
   ]),
   // Mirrors coupon-type-consistency.ts: code and uniqueCouponPool are mutually
   // exclusive, keyed off couponType.
@@ -483,15 +527,33 @@ export const CONTENT_TYPE_FIELD_HINTS: Record<string, Record<string, string>> = 
   }
 }
 
+// Editor-facing LABELS for top-level attributes whose auto-derived name reads
+// badly. Content-manager titlecases the attribute name, so `publishedOn`
+// surfaces as "Published On" — nearly indistinguishable from Strapi's own
+// internal `publishedAt`, which is exactly the confusion this field exists to
+// remove. Applied to BOTH the edit and list metadata: `publishedOn` is a
+// sortable list column, so the table header needs the same name the Publishing
+// panel uses or the two views disagree about what the field is called.
+const CONTENT_TYPE_FIELD_LABELS: Record<string, Record<string, string>> = {
+  'api::coupon.coupon': { publishedOn: 'Published date' },
+  'api::deal.deal': { publishedOn: 'Published date' },
+};
+
 // Content-type counterpart of ensureComponentFieldDescriptions: pins the
-// merged hints into metadatas[attr].edit.description for top-level attributes.
-// Same DB config store + config-as-code + idempotent-boot approach — second
-// restart compares equal and logs nothing.
+// merged hints into metadatas[attr].edit.description (and the labels above into
+// metadatas[attr].edit.label) for top-level attributes. Same DB config store +
+// config-as-code + idempotent-boot approach — second restart compares equal and
+// logs nothing.
 async function ensureFieldDescriptions(strapi: Core.Strapi): Promise<void> {
   const service: any = strapi.plugin('content-manager').service('content-types');
   if (!service) return;
 
-  for (const [uid, fields] of Object.entries(CONTENT_TYPE_FIELD_HINTS)) {
+  const uids = new Set([
+    ...Object.keys(CONTENT_TYPE_FIELD_HINTS),
+    ...Object.keys(CONTENT_TYPE_FIELD_LABELS),
+  ]);
+
+  for (const uid of uids) {
     try {
       const contentType = strapi.contentType(uid as any);
       if (!contentType) continue;
@@ -500,14 +562,39 @@ async function ensureFieldDescriptions(strapi: Core.Strapi): Promise<void> {
       const metadatas = { ...(config.metadatas ?? {}) };
       let changed = false;
 
-      for (const [field, description] of Object.entries(fields)) {
+      const fields = CONTENT_TYPE_FIELD_HINTS[uid] ?? {};
+      const labels = CONTENT_TYPE_FIELD_LABELS[uid] ?? {};
+
+      for (const field of new Set([...Object.keys(fields), ...Object.keys(labels)])) {
         if (!contentType.attributes?.[field]) {
           strapi.log.warn(`[content-manager] ${uid} has no field "${field}" — description skipped`);
           continue;
         }
+        const description = fields[field];
+        const label = labels[field];
         const prev = metadatas[field] ?? {};
-        if (prev.edit?.description === description) continue;
-        metadatas[field] = { ...prev, edit: { ...(prev.edit ?? {}), description } };
+        const descriptionSettled =
+          description === undefined || prev.edit?.description === description;
+        const labelSettled =
+          label === undefined ||
+          (prev.edit?.label === label && prev.list?.label === label);
+        if (descriptionSettled && labelSettled) continue;
+
+        metadatas[field] = {
+          ...prev,
+          edit: {
+            ...(prev.edit ?? {}),
+            ...(description === undefined ? {} : { description }),
+            ...(label === undefined ? {} : { label }),
+          },
+          // The list header reads metadatas[field].list.label, a separate key
+          // from the edit one — set both or the table column keeps the
+          // auto-derived "Published On".
+          list: {
+            ...(prev.list ?? {}),
+            ...(label === undefined ? {} : { label }),
+          },
+        };
         changed = true;
       }
 
@@ -788,8 +875,8 @@ async function ensureFullWidthEditFields(strapi: Core.Strapi): Promise<void> {
 // skips slug (sorts the same as name), the long descriptions and the logo
 // (media is never sortable).
 const LIST_SORT_COLUMNS: Record<string, string[]> = {
-  'api::coupon.coupon': ['scheduledAt', 'expiresAt'],
-  'api::deal.deal': ['scheduledAt', 'expiresAt'],
+  'api::coupon.coupon': ['publishedOn', 'scheduledAt', 'expiresAt'],
+  'api::deal.deal': ['publishedOn', 'scheduledAt', 'expiresAt'],
   'api::bank.bank': ['name', 'isVerified', 'ratingAverage', 'ratingCount'],
 };
 
@@ -1202,6 +1289,19 @@ export default {
     // Resolve from the application root rather than this compiled module's
     // directory: production runs dist/src/index.js while Strapi migrations
     // remain under <app>/database.
+    const contentContractPath = join(
+      (strapi as any).dirs.app.root,
+      'database',
+      'content-contract-reconciliation.js'
+    );
+    const { reconcileContentContractAfterSchemaSync } = require(
+      contentContractPath
+    );
+    await reconcileContentContractAfterSchemaSync(
+      (strapi as any).db.connection,
+      strapi.log
+    );
+
     const searchIndexMigrationPath = join(
       (strapi as any).dirs.app.root,
       'database',

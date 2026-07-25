@@ -3,17 +3,16 @@ import { pgQuery } from "../db/pg-client.js";
 import pLimit from "p-limit";
 import {
   setPostMapping,
-  ensureTermMapping,
   getUserMapping,
 } from "../utils/id-maps.js";
 import { resolveMediaRef } from "../utils/media-resolver.js";
 import {
   generateDocumentId,
   getEntityIdByDocumentId,
-  insertLink,
-  linkMedia,
-  linkContentMedia,
+  replaceMedia,
+  replaceContentMedia,
 } from "../utils/strapi-insert.js";
+import { replaceOfferTaxonomyRelations } from "../utils/offer-relations.js";
 import { computeMigrationStatus } from "../utils/content-status.js";
 import { rewriteContentMedia } from "../utils/content-media.js";
 import { clean, cleanCode } from "../utils/sanitize.js";
@@ -25,6 +24,7 @@ import {
   parseExpiryDate,
 } from "../utils/wp-dates.js";
 import { logger } from "../utils/logger.js";
+import { isAcfTrue, parseAcfTermId } from "../utils/acf.js";
 import { parseDecimal } from "../utils/price.js";
 
 export async function runDeals(): Promise<void> {
@@ -101,6 +101,7 @@ export async function runDeals(): Promise<void> {
         // (falling back to content); editors can correct these in the admin.
         const offerText = extractOfferText(title, content);
         const { cashbackText, bankOfferText } = extractCashbackFields(title, content);
+        const affiliateLink = clean(meta.link);
         const createdAt =
           normalizeWpDate(post.post_date_gmt) ||
           normalizeWpLocalDate(post.post_date) ||
@@ -112,6 +113,25 @@ export async function runDeals(): Promise<void> {
 
         const salePrice = parseDecimal(meta.deal_sale_price);
         const mrp = parseDecimal(meta.deal_mrp);
+        const dealImageId = await resolveMediaRef(meta.deal_image);
+        const fallbackImageId = dealImageId
+          ? null
+          : await resolveMediaRef(meta.image);
+        const importedDealImageId = dealImageId ?? fallbackImageId ?? null;
+        const missingRequired = [
+          !title.trim() ? "title" : null,
+          !offerText?.trim() ? "offerText" : null,
+          !content?.trim() ? "content" : null,
+          !affiliateLink?.trim() ? "affiliateLink" : null,
+          salePrice === null ? "salePrice" : null,
+          mrp === null ? "mrp" : null,
+          importedDealImageId === null ? "dealImage" : null,
+        ].filter(Boolean);
+        if (missingRequired.length > 0) {
+          logger.warn(
+            `Deal ${post.ID} (${post.post_title}) has required field gap(s): ${missingRequired.join(", ")}. Importing it so the record can be corrected editorially.`,
+          );
+        }
 
         const expiryRaw = getExpiryRaw(meta);
         const expiresAt = parseExpiryDate(expiryRaw);
@@ -137,24 +157,43 @@ export async function runDeals(): Promise<void> {
             ? mappedEditorId
             : authorId;
 
+        // `published_on` is the EDITOR-CONTROLLED "newest first" sort key
+        // (src/utils/offer-visibility.ts) and is seeded here from published_at.
+        // It MUST be written at insert time: Postgres orders NULLs FIRST in a
+        // DESC sort, so a row with no published_on outranks every row an editor
+        // has actually dated — "Bump to top" would push an offer to the BOTTOM.
+        // The bug hides while the column is uniformly NULL (everything ties and
+        // falls through to the published_at tiebreaker) and only surfaces on the
+        // first bump, so it must not be left to a backfill.
         const result = await pgQuery<{ id: number }>(
           `INSERT INTO "deals" (
             "document_id", "title", "offer_text", "cashback_text", "bank_offer_text", "content", "code",
             "sale_price", "mrp", "discount",
             "badge", "affiliate_link", "expires_at", "scheduled_at", "content_status",
-            "published_at", "created_at", "updated_at", "locale",
+            "published_at", "published_on", "created_at", "updated_at", "locale",
             "created_by_id", "updated_by_id"
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
           )
           ON CONFLICT ("document_id") DO UPDATE SET
+            "title" = EXCLUDED."title",
             "offer_text" = EXCLUDED."offer_text",
             "cashback_text" = EXCLUDED."cashback_text",
             "bank_offer_text" = EXCLUDED."bank_offer_text",
+            "code" = EXCLUDED."code",
             "sale_price" = EXCLUDED."sale_price",
             "mrp" = EXCLUDED."mrp",
             "discount" = EXCLUDED."discount",
-            "content" = EXCLUDED."content"
+            "content" = EXCLUDED."content",
+            "badge" = COALESCE(EXCLUDED."badge", "deals"."badge"),
+            "affiliate_link" = EXCLUDED."affiliate_link",
+            "expires_at" = EXCLUDED."expires_at",
+            "scheduled_at" = EXCLUDED."scheduled_at",
+            "content_status" = EXCLUDED."content_status",
+            "published_at" = EXCLUDED."published_at",
+            "published_on" = COALESCE("deals"."published_on", EXCLUDED."published_on"),
+            "updated_at" = EXCLUDED."updated_at",
+            "updated_by_id" = EXCLUDED."updated_by_id"
           RETURNING id`,
           [
             documentId,
@@ -167,11 +206,12 @@ export async function runDeals(): Promise<void> {
             salePrice,
             mrp,
             clean(meta.deal_discount),
-            meta.popular_coupon === "1" ? "Recommended" : null,
-            clean(meta.link),
+            isAcfTrue(meta.popular_coupon) ? "Recommended" : null,
+            affiliateLink,
             expiresAt,
             contentStatus.scheduledAt,
             contentStatus.contentStatus,
+            contentStatus.publishedAt,
             contentStatus.publishedAt,
             createdAt,
             updatedAt,
@@ -194,60 +234,31 @@ export async function runDeals(): Promise<void> {
           table: "deals",
         });
 
-        // Wire taxonomy relations
-        const orderByType = new Map<string, number>();
-        const linkedIdsByTable = new Map<string, Set<number>>();
+        // The ACF `deal_store` is linked FIRST so it lands at deal_ord 1 and
+        // becomes `stores[0]`. This used to be a dedicated `deal.primaryStore`
+        // relation; with that field removed, the site resolves a deal's owning
+        // store as `stores[0]` (see primaryEntity() in cguru-ui), so the
+        // ordering IS the primary-store signal. Linked last — as it was — the
+        // ACF store ended up at the tail and a different store won the card
+        // badge. `parseAcfTermId` replaces a bare parseInt that returned NaN
+        // for every PHP-serialized value and dropped those stores silently.
+        const dealStoreTermId = parseAcfTermId(meta.deal_store);
+        await replaceOfferTaxonomyRelations("deals", entityId, {
+          termIds: relations,
+          primaryTermId,
+          acfStoreTermId: dealStoreTermId,
+        });
 
-        const linkTerm = async (termId: number): Promise<void> => {
-          const ref = await ensureTermMapping(termId);
-          if (!ref) return;
-          const linkInfo = getDealLinkTable(ref.table);
-          if (!linkInfo) return;
-          let linked = linkedIdsByTable.get(linkInfo.table);
-          if (!linked) {
-            linked = new Set();
-            linkedIdsByTable.set(linkInfo.table, linked);
-          }
-          if (linked.has(ref.id)) return;
-          linked.add(ref.id);
-          const ord = (orderByType.get(ref.table) || 0) + 1;
-          orderByType.set(ref.table, ord);
-          await insertLink(linkInfo.table, {
-            [linkInfo.dealCol]: entityId,
-            [linkInfo.termCol]: ref.id,
-            deal_ord: ord,
-          });
-        };
+        // Replace dealImage exactly so a source change or clear cannot leave a
+        // stale product image active after an in-place re-import.
+        await replaceMedia(
+          importedDealImageId,
+          entityId,
+          "api::deal.deal",
+          "dealImage",
+        );
 
-        if (primaryTermId) {
-          await linkTerm(primaryTermId);
-        }
-
-        for (const termId of relations) {
-          if (termId === primaryTermId) continue;
-          await linkTerm(termId);
-        }
-
-        // Merge deal_store meta into stores relation (dedup against taxonomy-linked stores)
-        if (meta.deal_store) {
-          const storeTermId = parseInt(meta.deal_store, 10);
-          if (!isNaN(storeTermId)) {
-            await linkTerm(storeTermId);
-          }
-        }
-
-        // Link dealImage — on-demand upload
-        const dealImageId = await resolveMediaRef(meta.deal_image);
-        if (dealImageId) {
-          await linkMedia(dealImageId, entityId, "api::deal.deal", "dealImage");
-        } else {
-          const imageId = await resolveMediaRef(meta.image);
-          if (imageId) {
-            await linkMedia(imageId, entityId, "api::deal.deal", "dealImage");
-          }
-        }
-
-        await linkContentMedia(
+        await replaceContentMedia(
           contentMedia.fileIds,
           entityId,
           "api::deal.deal",
@@ -269,6 +280,11 @@ export async function runDeals(): Promise<void> {
 
   await Promise.all(tasks);
   logger.info(`Deals migration complete: ${inserted} inserted, ${failed} failed`);
+  if (failed > 0) {
+    throw new Error(
+      `${failed} Deal(s) failed import; see the WordPress post IDs above`,
+    );
+  }
 }
 
 // ── Bulk data fetchers ──────────────────────────────────────────────
@@ -306,6 +322,7 @@ async function getTermRelsBulk(
     FROM wp_term_relationships tr
     JOIN wp_term_taxonomy tt ON tr.term_taxonomy_id = tt.term_taxonomy_id AND tt.taxonomy = 'category'
     WHERE tr.object_id IN (${placeholders})
+    ORDER BY tr.object_id, tr.term_order, tt.term_id
   `, postIds);
 
   const map = new Map<number, number[]>();
@@ -345,16 +362,4 @@ function getExpiryRaw(meta: Record<string, string>): string | undefined {
   }
 
   return meta["_expiration-date"] || meta["expiration-date"];
-}
-
-function getDealLinkTable(
-  termTable: string
-): { table: string; dealCol: string; termCol: string } | null {
-  const map: Record<string, { table: string; dealCol: string; termCol: string }> = {
-    stores: { table: "deals_stores_lnk", dealCol: "deal_id", termCol: "store_id" },
-    brands: { table: "deals_brands_lnk", dealCol: "deal_id", termCol: "brand_id" },
-    categories: { table: "deals_categories_lnk", dealCol: "deal_id", termCol: "category_id" },
-    banks: { table: "deals_banks_lnk", dealCol: "deal_id", termCol: "bank_id" },
-  };
-  return map[termTable] || null;
 }

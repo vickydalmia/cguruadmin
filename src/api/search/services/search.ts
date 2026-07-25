@@ -109,7 +109,9 @@ const ENTITIES: readonly EntityConfig[] = [
 
 const relationRef = (mediaField: "logo" | "icon" = "logo") => ({
   fields:
-    mediaField === "logo" ? ["name", "slug", "logoAlt"] : ["name", "slug"],
+    mediaField === "logo"
+      ? ["name", "slug", "logoAlt"]
+      : ["name", "slug", "iconAlt"],
   populate: { [mediaField]: true },
 });
 const relations = Object.fromEntries(
@@ -118,7 +120,6 @@ const relations = Object.fromEntries(
 const couponPopulate = { ...relations, image: true };
 const dealPopulate = {
   ...relations,
-  primaryStore: relationRef("logo"),
   dealImage: true,
 };
 
@@ -127,8 +128,21 @@ const dealPopulate = {
 const entityFields = (config: EntityConfig) => [
   "name",
   "slug",
-  ...(config.mediaField === "logo" ? ["logoAlt"] : []),
+  config.mediaField === "logo" ? "logoAlt" : "iconAlt",
 ];
+
+function mediaAlt(
+  document: any,
+  mediaField: "logo" | "icon",
+  fallback: string | null,
+): string | null {
+  return (
+    cleanText(
+      mediaField === "icon" ? document?.iconAlt : document?.logoAlt,
+      300,
+    ) ?? fallback
+  );
+}
 const COUPON_FIELDS = ["title", "code", "couponType", "affiliateLink"];
 const DEAL_FIELDS = [
   "title",
@@ -300,17 +314,15 @@ function mapMedia(media: any, fallbackAlt: string) {
 function relatedEntities(document: any): any[] {
   return [
     ...(Array.isArray(document?.stores) ? document.stores : []),
-    ...(document?.primaryStore ? [document.primaryStore] : []),
     ...(Array.isArray(document?.brands) ? document.brands : []),
     ...(Array.isArray(document?.categories) ? document.categories : []),
     ...(Array.isArray(document?.banks) ? document.banks : []),
   ];
 }
 
-function offerOwner(document: any, source: "coupon" | "deal") {
-  if (source === "deal" && document?.primaryStore) {
-    return document.primaryStore;
-  }
+// Deals no longer carry a `primaryStore`, so both offer kinds resolve their
+// owner the same way: the first related taxonomy entity.
+function offerOwner(document: any, _source: "coupon" | "deal") {
   return relatedEntities(document)[0] ?? null;
 }
 
@@ -450,7 +462,10 @@ function mapEntity(document: any, config: EntityConfig) {
     type: config.kind,
     subtitle: null,
     storeName: config.kind === "store" ? name : null,
-    media: mapMedia(document?.[config.mediaField], document?.logoAlt ?? name),
+    media: mapMedia(
+      document?.[config.mediaField],
+      mediaAlt(document, config.mediaField, name),
+    ),
     price: null,
     originalPrice: null,
     discount: null,
@@ -466,6 +481,8 @@ function mapOffer(document: any, type: "coupon" | "deal") {
   const fallbackLink = safeEntityHref(owner?.slug) ?? "/stores/";
   const sourceMedia = type === "deal" ? document?.dealImage : document?.image;
   const ownerMedia = owner?.logo ?? owner?.icon ?? null;
+  const ownerMediaField = owner?.icon ? "icon" : "logo";
+  const ownerAlt = mediaAlt(owner, ownerMediaField, ownerName);
 
   return {
     id: type + ":" + String(document?.documentId ?? document?.id ?? name),
@@ -480,7 +497,7 @@ function mapOffer(document: any, type: "coupon" | "deal") {
     // visual. Coupon cards continue to prefer the owning store logo.
     media: mapMedia(
       type === "coupon" ? (ownerMedia ?? sourceMedia) : sourceMedia,
-      type === "coupon" ? (ownerName ?? name) : name,
+      type === "coupon" ? (ownerAlt ?? ownerName ?? name) : name,
     ),
     price:
       type === "deal" && document?.salePrice != null
@@ -495,7 +512,7 @@ function mapOffer(document: any, type: "coupon" | "deal") {
       type === "deal" && ownerName
         ? {
             name: ownerName,
-            logo: mapMedia(ownerMedia, owner?.logoAlt ?? ownerName),
+            logo: mapMedia(ownerMedia, ownerAlt),
           }
         : null,
   };

@@ -85,6 +85,37 @@ export function getPostMapping(wpPostId: number): StrapiEntityRef | undefined {
   return postIdMap.get(wpPostId);
 }
 
+/**
+ * Resolve a deterministic WP post mapping from the active target DB. Saved
+ * checkpoints may be missing (standalone phase run) or belong to a reset DB,
+ * so callers that repair existing rows must verify the current database.
+ */
+export async function ensurePostMapping(
+  wpPostId: number,
+  table: "coupons" | "deals",
+): Promise<StrapiEntityRef | undefined> {
+  const cached = postIdMap.get(wpPostId);
+  if (cached?.table === table) return cached;
+
+  const singular = table === "coupons" ? "coupon" : "deal";
+  const documentId = generateDocumentId(`${singular}:${wpPostId}`);
+  const result = await getPgPool().query<{ id: number }>(
+    `SELECT id FROM "${table}" WHERE "document_id" = $1 LIMIT 1`,
+    [documentId],
+  );
+  const id = result.rows[0]?.id;
+  if (!id) return undefined;
+
+  const ref: StrapiEntityRef = {
+    id,
+    documentId,
+    type: `api::${singular}.${singular}`,
+    table,
+  };
+  postIdMap.set(wpPostId, ref);
+  return ref;
+}
+
 export function setMediaMapping(wpAttachmentId: number, strapiFileId: number): void {
   mediaIdMap.set(wpAttachmentId, strapiFileId);
 }

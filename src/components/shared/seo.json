@@ -7,10 +7,12 @@
   "attributes": {
     "metaTitle": {
       "type": "string",
+      "required": true,
       "maxLength": 70
     },
     "metaDescription": {
       "type": "text",
+      "required": true,
       "maxLength": 170
     },
     "canonicalUrl": {
@@ -29,7 +31,9 @@
     "ogImage": {
       "type": "media",
       "multiple": false,
-      "allowedTypes": ["images"]
+      "allowedTypes": [
+        "images"
+      ]
     },
     "ogImageAlt": {
       "type": "string"

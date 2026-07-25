@@ -105,6 +105,8 @@ async function listIsrOfferRoutes(
 // listings (store/category/brand/bank) instead follow the admin-curated
 // relation order — see getCouponsByEntity/getDealsByEntity.
 const DEFAULT_OFFER_SORT = [
+  // Editor-controlled sort key — see NEWEST_FIRST in src/utils/offer-visibility.ts.
+  { publishedOn: 'desc' },
   { publishedAt: 'desc' },
   { updatedAt: 'desc' },
 ];
@@ -128,6 +130,7 @@ const COUPON_PUBLIC_FIELDS = [
   'createdAt',
   'updatedAt',
   'publishedAt',
+  'publishedOn',
 ];
 const DEAL_PUBLIC_FIELDS = [
   'title',
@@ -147,6 +150,7 @@ const DEAL_PUBLIC_FIELDS = [
   'createdAt',
   'updatedAt',
   'publishedAt',
+  'publishedOn',
 ];
 const COUPON_PAGE_FIELDS = COUPON_PUBLIC_FIELDS.filter(
   (field) => field !== 'affiliateLink',
@@ -177,12 +181,14 @@ function isRenderableCouponPageDeal(deal: any): boolean {
   );
 }
 
-// Related-entity refs expose only name/slug (+ logo/icon media, +logoAlt for
-// alt text). Nothing else about a store/bank/brand/category leaks into a listing.
+// Related-entity refs expose only name/slug plus the entity's media and its
+// alt text (`logoAlt`, or `iconAlt` for categories — every media field has an
+// editor-supplied alt now). Nothing else about a store/bank/brand/category
+// leaks into a listing.
 const storeRef = { fields: ['name', 'slug', 'logoAlt'], populate: { logo: true } };
 const bankRef = { fields: ['name', 'slug', 'logoAlt'], populate: { logo: true } };
 const brandRef = { fields: ['name', 'slug', 'logoAlt'], populate: { logo: true } };
-const categoryRef = { fields: ['name', 'slug'], populate: { icon: true } };
+const categoryRef = { fields: ['name', 'slug', 'iconAlt'], populate: { icon: true } };
 // Coupon populate for public listings. `uniqueCouponPool` is populated with the
 // pool NAME only — its `codes` relation is never referenced, so redeemable
 // unique codes can never be harvested through this endpoint.
@@ -197,7 +203,6 @@ const COUPON_PUBLIC_POPULATE = {
 
 const DEAL_PUBLIC_POPULATE = {
   dealImage: true,
-  primaryStore: storeRef,
   stores: storeRef,
   banks: bankRef,
   categories: categoryRef,
@@ -221,10 +226,9 @@ function couponPagePrimaryEntity(coupon: any) {
   return null;
 }
 
+// Deals once named an explicit `primaryStore`; with that field removed the
+// owning entity is resolved from the taxonomy exactly like a coupon's.
 function dealPagePrimaryEntity(deal: any) {
-  if (deal?.primaryStore?.documentId && deal.primaryStore.slug) {
-    return { kind: 'store', ...deal.primaryStore };
-  }
   return couponPagePrimaryEntity(deal);
 }
 
@@ -291,15 +295,6 @@ function entityOfferFilters(
   documentId: string,
   entity: 'coupon' | 'deal',
 ) {
-  if (entityType === 'store' && entity === 'deal') {
-    return {
-      $or: [
-        { stores: { documentId } },
-        { primaryStore: { documentId } },
-      ],
-      ...visibilityFilters(),
-    };
-  }
   const relationField = PLURAL_FIELD[entityType] || entityType;
   return {
     [relationField]: { documentId },
@@ -343,10 +338,10 @@ async function sanitizeDocumentOutput(
 // counted, still reachable — see CURATED_HEAD_LIMIT for why).
 //
 // The "rest" matters because the drag-ordered relation is not always the full
-// membership: a Store's `deals` manyToMany omits deals linked only via
-// `primaryStore`. `entityOfferFilters` (the $or over stores/primaryStore for
-// Store deals) is the true membership, so members not in the ordered relation
-// are appended and counted — never silently dropped or under-paginated.
+// membership — an entity's offer relation can lag the offer-side taxonomy.
+// `entityOfferFilters` is the true membership, so members not in the ordered
+// relation are appended and counted — never silently dropped or
+// under-paginated.
 //
 // This also subsumes the "empty relation" case: with no drag order, every offer
 // comes from the newest-first member query. Returns null when the slug misses.
@@ -671,7 +666,6 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
           banks: namedRelation,
         }
       : {
-          primaryStore: namedRelation,
           stores: namedRelation,
           brands: namedRelation,
           banks: namedRelation,

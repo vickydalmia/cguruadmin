@@ -126,7 +126,7 @@ Three mechanisms cooperate:
 | [`09-seo-backfill.ts`](../migration/src/phases/09-seo-backfill.ts) | Fill SEO components from `wp_yoast_indexable` |
 | [`10-verify.ts`](../migration/src/phases/10-verify.ts) | Count + integrity + spot checks |
 | [`11-copy-used-media.ts`](../migration/src/phases/11-copy-used-media.ts) | Copy locally-provisioned files into Strapi's `public/uploads` |
-| [`12-offer-backfill.ts`](../migration/src/phases/12-offer-backfill.ts) | `deal.primaryStore` relation backfill from `deal_store` meta |
+| [`12-offer-backfill.ts`](../migration/src/phases/12-offer-backfill.ts) | Exact ordered Deal taxonomy reconciliation, with ACF `deal_store` first |
 | [`13-site-content.ts`](../migration/src/phases/13-site-content.ts) | Seed the global / homepage / menu / footer single types |
 | [`13a-homepage-offer-sections.ts`](../migration/src/phases/13a-homepage-offer-sections.ts) | Coupon-backed homepage section backfill for pre-existing homepages |
 | [`14-media-optimize.ts`](../migration/src/phases/14-media-optimize.ts) | Optimize + AVIF-twin backfill for already-migrated media |
@@ -598,12 +598,11 @@ have vanished as failures.
 
 These run against already-migrated rows rather than fresh WordPress data.
 
-- **12 — Offer backfill.** Fills the `deal.primaryStore` relation from the ACF
-  `deal_store` meta (a store term id, plain or PHP-serialized). The link table is
-  discovered at runtime through `information_schema` and written with
-  delete-then-insert semantics, so re-runs never leave stale rows. Only posts
-  present in the persisted id maps are touched; a missing link table logs a
-  warning and skips.
+- **12 — Offer backfill.** Rebuilds each Deal's four taxonomy link sets from
+  current WordPress data. The ACF `deal_store` term is ordered first in
+  `stores`, then the Yoast primary term and remaining source terms. Replacement
+  is transactional per Deal, so re-runs remove stale owners and converge with a
+  clean import.
 - **13 — Site content.** Seeds the four frontend single types — global, homepage,
   menu, footer (all publish-only). Sections are built from migrated entities and
   ACF option keys, with per-section counts from

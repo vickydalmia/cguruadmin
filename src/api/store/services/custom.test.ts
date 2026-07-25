@@ -140,7 +140,7 @@ describe('store custom service relatedStores', () => {
     expect(harness.findManyByUid['api::deal.deal']).not.toHaveBeenCalled();
   });
 
-  it('derives fallback categories from Coupons related through stores and Deals related through stores or primaryStore', async () => {
+  it('derives fallback categories from Coupons and Deals related through stores', async () => {
     const harness = createHarness();
     const couponFindMany = harness.findManyByUid['api::coupon.coupon'];
     const dealFindMany = harness.findManyByUid['api::deal.deal'];
@@ -156,9 +156,10 @@ describe('store custom service relatedStores', () => {
       harness.service.relatedStores('store', 'current-store'),
     ).resolves.toMatchObject({ stores: [] });
 
-    // publishedOnlyFilters(): status check plus a $and-wrapped expiry window
-    // (wrapped so it never clobbers a caller's own top-level $or — the deal
-    // filter below is exactly that case).
+    // publishedOnlyFilters(): status check plus a $and-wrapped expiry window.
+    // The wrapper exists so it can never clobber a caller's own top-level $or;
+    // no offer filter needs one now that `primaryStore` is gone, but the shape
+    // is unchanged and other call sites still rely on it.
     const publishedShape = {
       contentStatus: { $eq: 'published' },
       $and: [
@@ -172,10 +173,7 @@ describe('store custom service relatedStores', () => {
       ...publishedShape,
     });
     expect(dealFindMany.mock.calls[0]?.[0].filters).toEqual({
-      $or: [
-        { stores: { documentId: 'store-current' } },
-        { primaryStore: { documentId: 'store-current' } },
-      ],
+      stores: { documentId: 'store-current' },
       ...publishedShape,
     });
     expect(couponFindMany.mock.calls[1]?.[0].filters).toEqual({
@@ -289,15 +287,14 @@ describe('store custom service relatedStores', () => {
     ]);
   });
 
-  it('counts dedicated Deal stores and primaryStore while deduplicating the same owner inside one Deal', async () => {
+  it('deduplicates the same owner listed twice inside one Deal', async () => {
     const harness = createHarness();
     const storesOwner = store('store-2', 'Stores Owner', 'stores-owner');
     const primaryOwner = store('store-3', 'Primary Owner', 'primary-owner');
     givenCurrentStore(harness);
     givenRelatedOffers(harness, [], [
       {
-        stores: [storesOwner, primaryOwner],
-        primaryStore: primaryOwner,
+        stores: [storesOwner, primaryOwner, primaryOwner],
         categories: [category('cat-a')],
       },
     ]);
@@ -459,7 +456,6 @@ describe('store custom service relatedStores', () => {
       harness.findManyByUid['api::deal.deal'].mock.calls[0]?.[0].populate,
     ).toEqual({
       stores: { fields: ['name', 'slug'] },
-      primaryStore: { fields: ['name', 'slug'] },
       categories: { fields: ['name', 'slug'] },
     });
     expect(
@@ -485,8 +481,7 @@ describe('store custom service relatedStores', () => {
       ],
       [
         {
-          primaryStore: currentStore,
-          stores: [related],
+          stores: [currentStore, related],
           categories: [category('cat-a')],
         },
       ],

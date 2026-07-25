@@ -18,10 +18,12 @@
       "maxLength": 200
     },
     "offerText": {
-      "type": "string"
+      "type": "string",
+      "required": true
     },
     "content": {
       "type": "richtext",
+      "required": true,
       "maxLength": 50000
     },
     "code": {
@@ -89,12 +91,16 @@
     },
     "affiliateLink": {
       "type": "text",
+      "required": true,
       "regex": "^https?://[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?([.][a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+(:[0-9]{1,5})?([/?#]\\S*)?$"
     },
     "expiresAt": {
       "type": "datetime"
     },
     "scheduledAt": {
+      "type": "datetime"
+    },
+    "publishedOn": {
       "type": "datetime"
     },
     "contentStatus": {
