@@ -16,6 +16,7 @@ import {
 import { clean } from "../utils/sanitize.js";
 import { normalizeWpLocalDate } from "../utils/wp-dates.js";
 import { logger } from "../utils/logger.js";
+import { registerMigratedEntity } from "../utils/migration-registry.js";
 
 export async function runUsers(): Promise<void> {
   logger.info("=== Phase 6a: Users Migration ===");
@@ -59,19 +60,39 @@ export async function runUsers(): Promise<void> {
   let failed = 0;
   const limit = pLimit(10);
 
-  const tasks = users.map((user) =>
+  // Admin emails are canonical lowercase in Strapi. Group before launching
+  // parallel work so duplicate WordPress emails cannot race each other on the
+  // unique admin_users.email index. Every source author id is still mapped.
+  const usersByEmail = new Map<string, typeof users>();
+  for (const user of users) {
+    const email = clean(user.user_email)?.toLowerCase();
+    if (!email) {
+      skippedNoEmail++;
+      logger.warn(
+        `Skipping user ${user.ID} (${user.user_login}) — missing email`
+      );
+      continue;
+    }
+    const grouped = usersByEmail.get(email) ?? [];
+    grouped.push(user);
+    usersByEmail.set(email, grouped);
+  }
+  const duplicateEmailCount =
+    users.length - skippedNoEmail - usersByEmail.size;
+  if (duplicateEmailCount > 0) {
+    logger.info(
+      `Collapsed ${duplicateEmailCount} duplicate WP user email(s)`,
+    );
+  }
+
+  const tasks = [...usersByEmail.entries()].map(([email, groupedUsers]) =>
     limit(async () => {
-      const email = clean(user.user_email);
-      if (!email) {
-        skippedNoEmail++;
-        logger.warn(
-          `Skipping user ${user.ID} (${user.user_login}) — missing email`
-        );
-        return;
-      }
+      // wp_users was read in ascending ID order, making this identity stable.
+      const user = groupedUsers[0];
 
       try {
-        const documentId = generateDocumentId(`user:${user.ID}`);
+        const sourceKey = `user:${user.ID}`;
+        const documentId = generateDocumentId(sourceKey);
         const { firstname, lastname } = resolveUserName(
           user,
           email
@@ -87,6 +108,7 @@ export async function runUsers(): Promise<void> {
 
         const existingUser = existing[0];
         let adminUserId: number | undefined = existingUser?.id;
+        let migratedDocumentId: string | null = null;
 
         if (!adminUserId) {
           const result = await pgQuery<{ id: number }>(
@@ -118,29 +140,47 @@ export async function runUsers(): Promise<void> {
             ]
           );
           adminUserId = result[0]?.id;
+          migratedDocumentId = documentId;
         } else if (
           existingUser.document_id === documentId ||
           existingUser.document_id?.startsWith("wp_")
         ) {
           await pgQuery(
             `UPDATE "admin_users"
-             SET "firstname" = $1,
-                 "lastname" = $2,
-                 "username" = COALESCE(NULLIF("username", ''), $3),
+             SET "document_id" = $1,
+                 "firstname" = $2,
+                 "lastname" = $3,
+                 "username" = COALESCE(NULLIF("username", ''), $4),
                  "updated_at" = NOW()
-             WHERE "id" = $4`,
-            [firstname, lastname, clean(user.user_login) || email, adminUserId]
+             WHERE "id" = $5`,
+            [
+              documentId,
+              firstname,
+              lastname,
+              clean(user.user_login) || email,
+              adminUserId,
+            ]
           );
+          migratedDocumentId = documentId;
         }
         if (!adminUserId) {
           logger.warn(
             `Could not resolve admin_user id for WP user ${user.ID} (${email})`
           );
-          failed++;
+          failed += groupedUsers.length;
           return;
         }
 
-        setUserMapping(user.ID, adminUserId);
+        for (const groupedUser of groupedUsers) {
+          setUserMapping(groupedUser.ID, adminUserId);
+        }
+        if (migratedDocumentId) {
+          await registerMigratedEntity({
+            documentId: migratedDocumentId,
+            sourceKey,
+            targetTable: "admin_users",
+          });
+        }
 
         const existingLink = await pgQuery<{ id: number }>(
           `SELECT id FROM "admin_users_roles_lnk" WHERE user_id = $1 AND role_id = $2 LIMIT 1`,
@@ -153,11 +193,12 @@ export async function runUsers(): Promise<void> {
           );
         }
 
-        inserted++;
+        inserted += groupedUsers.length;
       } catch (err: any) {
-        failed++;
+        failed += groupedUsers.length;
         logger.error(
-          `Failed to insert user ${user.ID} (${user.user_email}): ${err.message}`
+          `Failed to resolve ${groupedUsers.length} WP user(s) for ` +
+            `${user.ID} (${email}): ${err.message}`
         );
       }
     })

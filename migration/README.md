@@ -120,7 +120,7 @@ npm run migrate -- --clean --phase 05-pools
 > map files** (`clearAllMaps()` in [`src/utils/id-maps.ts`](./src/utils/id-maps.ts)
 > unlinks every `*Map.json`), `TRUNCATE ... RESTART IDENTITY CASCADE`s every
 > migrated table — entities, link tables, component tables, **and the
-> homepage/menu/footer/global singles** — deletes the `wp_`-prefixed
+> homepage/menu/footer/global singles** — deletes registry-owned
 > `admin_users` rows created by phase 06a, and empties the entire S3 prefix.
 > The exact destroy list is enumerated in
 > [FRESH-MIGRATION.md § What `--clean` destroys](./FRESH-MIGRATION.md#what---clean-destroys).
@@ -129,6 +129,19 @@ npm run migrate -- --clean --phase 05-pools
 > did), but the `--clean` branch calls `clearAllMaps()` immediately afterwards,
 > so the net effect is that no relationship data survives. To re-run one phase
 > against existing data, use `--phase <name>` **without** `--clean`.
+
+If Phase 06 is interrupted, keep the Phase 05 checkpoint and ID-map files and
+restart only the code phase:
+
+```bash
+yarn migrate:phase 06-codes
+```
+
+Phase 06 uses WordPress ID keyset pagination and transactional, idempotent
+upserts. Existing codes and correct pool links become no-ops, redeemed codes
+stay redeemed, and the phase checkpoint is written only after the complete
+code inventory succeeds. After it finishes, `yarn migrate` resumes the later
+phases normally.
 
 Logs are written to:
 - **Console** — colorized, timestamped
@@ -167,11 +180,29 @@ Migrates `wp_uc_codes` into `unique_codes` in batches (default 5,000). Links eac
 
 ### Phase 06a — Users
 
-Migrates `wp_users` into Strapi `admin_users`, giving every migrated author an account so the admin's "Created by" / "Updated by" columns are meaningful. Each account gets a deterministic `wp_`-prefixed `document_id` (which is also what `--clean` keys its admin-user cleanup on, so the real super admin survives), a random unusable password plus a reset token — nobody can log in until they use the password-reset flow — and the `strapi-editor` role. The phase **fails fast** if that role does not exist (boot Strapi once so its default roles are created). Users without an email are skipped. Every mapping is recorded in `userIdMap`; the phase then backfills `created_by_id`/`updated_by_id` on already-migrated rows, using the WP post author for coupons/deals and, for taxonomy rows (which WP does not track an editor for), the author of the term's most recently modified post.
+Migrates `wp_users` into Strapi `admin_users`, giving every migrated author an
+account so the admin's "Created by" / "Updated by" columns are meaningful. Each
+account gets a deterministic prefixless 24-character `document_id` and an
+ownership entry in `migration_source_entities` (which lets `--clean` remove
+only migrated accounts, so the real super admin survives), a random unusable
+password plus a reset token — nobody can log in until they use the
+password-reset flow — and the `strapi-editor` role. The phase **fails fast** if
+that role does not exist (boot Strapi once so its default roles are created).
+Users without an email are skipped. Every mapping is recorded in `userIdMap`;
+the phase then backfills `created_by_id`/`updated_by_id` on already-migrated
+rows, using the WP post author for coupons/deals and, for taxonomy rows (which
+WP does not track an editor for), the author of the term's most recently
+modified post.
 
 ### Phase 07 — Coupons
 
-Migrates published WordPress posts (where `is_deal` is not `'yes'`) into the `coupons` table. For each coupon:
+Migrates WordPress posts where `is_deal` is not `'yes'` into the `coupons`
+table. `publish` and `future` rows are included normally. `draft`/`trash` rows
+are included only when a valid source expiry has already elapsed, in which case
+they are retained as `expired`; ordinary withdrawn rows are excluded. On
+re-import, migration-owned Coupon rows no longer in that source inventory are
+removed, so deletion, withdrawal, and Coupon → Product Deal changes converge.
+For each coupon:
 
 - Strips WordPress shortcodes from content
 - Resolves `coupon_type` ("static" or "unique") from ACF meta
@@ -191,7 +222,13 @@ Rich-text HTML (`coupons.content`, `deals.content`, taxonomy `description`) can 
 
 ### Phase 08 — Deals
 
-Migrates deal posts (`is_deal='yes'`) into the `deals` table. Same relationship wiring as coupons, plus deal-specific fields: `mrp`, `sale_price`, `discount`, and `dealImage`. The `deal_store` meta is merged into the `stores` relation (deduplicated against taxonomy-linked stores).
+Migrates deal posts (`is_deal='yes'`) into the `deals` table using the same
+published/future and expired-draft/trash lifecycle rule as Coupons. Re-import
+removes migration-owned Deal rows that were withdrawn, deleted, or changed back
+to Coupons. Relationship wiring is the same as Coupons, plus deal-specific
+fields: `mrp`, `sale_price`, `discount`, and `dealImage`. The `deal_store` meta
+is merged into the `stores` relation (deduplicated against taxonomy-linked
+stores).
 
 ### Phase 09 — SEO Backfill
 
@@ -199,7 +236,11 @@ Scans all six entity tables for rows missing an SEO component. Attempts to fill 
 
 ### Phase 10 — Verification
 
-Compares record counts between source and destination, checks relationship integrity, validates slug uniqueness, reports SEO coverage percentages, and runs sample spot checks. Never checkpointed — always runs. Failures are logged but non-fatal.
+Compares record counts between source and destination using the same offer
+lifecycle inclusion rule as phases 07/08, checks relationship integrity,
+validates slug uniqueness, reports SEO coverage percentages, and runs sample
+spot checks. Never checkpointed — always runs. Failures are logged but
+non-fatal.
 
 ### Phase 11 — Copy Used Media
 
@@ -310,7 +351,9 @@ WordPress stores all taxonomy terms in `wp_terms` with `taxonomy='category'`. Th
 
 ### Posts: Coupons vs Deals (Phases 07–08)
 
-All WordPress posts with `post_type='post'` and `post_status='publish'` are split:
+WordPress posts with `post_type='post'` are first filtered by lifecycle:
+`publish`/`future` are included, and `draft`/`trash` are included only when a
+valid expiry has already elapsed. They are then split:
 
 - **Deal** — `is_deal` postmeta = `'yes'` → `deals` table
 - **Coupon** — everything else → `coupons` table

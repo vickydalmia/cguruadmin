@@ -5,7 +5,9 @@ import uniqueCouponService from '../plugins/unique-coupon/server/src/services/un
 
 const {
   CODE_GUARD_TRIGGER,
+  CODE_LOOKUP_INDEX,
   LINK_GUARD_TRIGGER,
+  POOL_LINK_LOOKUP_INDEX,
   reconcileUniqueCodeIntegrity,
 } = require('../../database/unique-code-integrity.js');
 
@@ -121,6 +123,12 @@ postgresDescribe('unique-code integrity PostgreSQL integration', () => {
       .pluck('tgname');
     expect(new Set(triggers)).toEqual(
       new Set([LINK_GUARD_TRIGGER, CODE_GUARD_TRIGGER]),
+    );
+    const indexes = await knex('pg_indexes')
+      .whereIn('indexname', [CODE_LOOKUP_INDEX, POOL_LINK_LOOKUP_INDEX])
+      .pluck('indexname');
+    expect(new Set(indexes)).toEqual(
+      new Set([CODE_LOOKUP_INDEX, POOL_LINK_LOOKUP_INDEX]),
     );
   });
 

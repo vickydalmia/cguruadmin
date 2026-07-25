@@ -1,6 +1,14 @@
 import { wpQuery } from "../db/wp-client.js";
 import { pgQuery } from "../db/pg-client.js";
+import { shouldImportMigrationOffer } from "../utils/content-status.js";
 import { logger } from "../utils/logger.js";
+import { parseExpiryDate } from "../utils/wp-dates.js";
+import {
+  getWpOfferExpiryRaw,
+  type WpOfferExpiryMeta,
+} from "../utils/wp-offer-expiry.js";
+import { ensureMigrationRegistry } from "../utils/migration-registry.js";
+import { getAllPoolMappings } from "../utils/id-maps.js";
 
 interface CountCheck {
   entity: string;
@@ -9,8 +17,75 @@ interface CountCheck {
   match: boolean;
 }
 
+async function countImportableWpOffers(
+  kind: "coupon" | "deal",
+  now: Date,
+): Promise<number> {
+  const dealPredicate =
+    kind === "deal"
+      ? `EXISTS (
+           SELECT 1 FROM wp_postmeta
+           WHERE post_id = p.ID
+             AND meta_key = 'is_deal'
+             AND meta_value = 'yes'
+         )`
+      : `NOT EXISTS (
+           SELECT 1 FROM wp_postmeta
+           WHERE post_id = p.ID
+             AND meta_key = 'is_deal'
+             AND meta_value = 'yes'
+         )`;
+  const posts = await wpQuery<{ ID: number; post_status: string }>(`
+    SELECT p.ID, p.post_status
+    FROM wp_posts p
+    WHERE p.post_type = 'post'
+      AND p.post_status IN ('publish', 'future', 'draft', 'trash')
+      AND ${dealPredicate}
+  `);
+
+  const metaByPost = new Map<number, WpOfferExpiryMeta>();
+  const batchSize = 5_000;
+  for (let start = 0; start < posts.length; start += batchSize) {
+    const ids = posts.slice(start, start + batchSize).map((post) => post.ID);
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = await wpQuery<{
+      post_id: number;
+      meta_key: string;
+      meta_value: string;
+    }>(
+      `SELECT post_id, meta_key, meta_value
+       FROM wp_postmeta
+       WHERE post_id IN (${placeholders})
+         AND meta_key IN (
+           '_action_manager_date',
+           '_expiration-date',
+           '_expiration-date-status',
+           'expiration-date'
+         )`,
+      ids,
+    );
+    for (const row of rows) {
+      const meta = metaByPost.get(row.post_id) ?? {};
+      meta[row.meta_key] = row.meta_value;
+      metaByPost.set(row.post_id, meta);
+    }
+  }
+
+  return posts.filter((post) => {
+    const expiresAt = parseExpiryDate(
+      getWpOfferExpiryRaw(metaByPost.get(post.ID) ?? {}),
+    );
+    return shouldImportMigrationOffer({
+      postStatus: post.post_status,
+      expiresAt,
+      now,
+    });
+  }).length;
+}
+
 export async function runVerification(): Promise<void> {
   logger.info("=== Phase 10: Verification ===");
+  await ensureMigrationRegistry();
 
   const checks: CountCheck[] = [];
 
@@ -45,25 +120,33 @@ export async function runVerification(): Promise<void> {
   const [pgBanks] = await pgQuery<{ c: number }>(`SELECT COUNT(*) AS c FROM banks`);
   checks.push({ entity: "Banks", wpCount: wpBanks.c, pgCount: pgBanks.c, match: wpBanks.c == pgBanks.c });
 
-  // Coupons (non-deals, include future/scheduled)
-  const [wpCoupons] = await wpQuery<{ c: number }>(`
-    SELECT COUNT(*) AS c FROM wp_posts p
-    WHERE p.post_type = 'post' AND p.post_status IN ('publish', 'future')
-    AND p.ID NOT IN (
-      SELECT post_id FROM wp_postmeta WHERE meta_key = 'is_deal' AND meta_value = 'yes'
-    )
-  `);
-  const [pgCoupons] = await pgQuery<{ c: number }>(`SELECT COUNT(*) AS c FROM coupons`);
-  checks.push({ entity: "Coupons", wpCount: wpCoupons.c, pgCount: pgCoupons.c, match: wpCoupons.c == pgCoupons.c });
+  const verificationNow = new Date();
 
-  // Deals
-  const [wpDeals] = await wpQuery<{ c: number }>(`
-    SELECT COUNT(*) AS c FROM wp_posts p
-    JOIN wp_postmeta pm ON p.ID = pm.post_id AND pm.meta_key = 'is_deal' AND pm.meta_value = 'yes'
-    WHERE p.post_type = 'post' AND p.post_status IN ('publish', 'future')
-  `);
+  // Coupons (published/future plus draft/trash withdrawn by elapsed expiry)
+  const wpCouponCount = await countImportableWpOffers(
+    "coupon",
+    verificationNow,
+  );
+  const [pgCoupons] = await pgQuery<{ c: number }>(`SELECT COUNT(*) AS c FROM coupons`);
+  checks.push({
+    entity: "Coupons",
+    wpCount: wpCouponCount,
+    pgCount: pgCoupons.c,
+    match: wpCouponCount == pgCoupons.c,
+  });
+
+  // Product Deals use exactly the same lifecycle inclusion rule.
+  const wpDealCount = await countImportableWpOffers(
+    "deal",
+    verificationNow,
+  );
   const [pgDeals] = await pgQuery<{ c: number }>(`SELECT COUNT(*) AS c FROM deals`);
-  checks.push({ entity: "Deals", wpCount: wpDeals.c, pgCount: pgDeals.c, match: wpDeals.c == pgDeals.c });
+  checks.push({
+    entity: "Deals",
+    wpCount: wpDealCount,
+    pgCount: pgDeals.c,
+    match: wpDealCount == pgDeals.c,
+  });
 
   // Unique Coupon Pools
   try {
@@ -76,26 +159,63 @@ export async function runVerification(): Promise<void> {
 
   // Unique Codes
   try {
-    const [wpCodes] = await wpQuery<{ c: number }>(`SELECT COUNT(*) AS c FROM wp_uc_codes`);
+    // Phase 6 collapses equal codes only when Phase 5 resolved their
+    // WordPress pool into this Strapi database. An unmapped pool intentionally
+    // leaves every source code independent.
+    const mappedWpPoolIds = [...getAllPoolMappings().keys()];
+    const mappedPoolPredicate =
+      mappedWpPoolIds.length > 0
+        ? `code.coupon_id IN (${mappedWpPoolIds.map(() => "?").join(",")})`
+        : "FALSE";
+    const [wpCodes] = await wpQuery<{ c: number }>(`
+      SELECT COUNT(*) AS c
+      FROM (
+        SELECT
+          CASE
+            WHEN ${mappedPoolPredicate} THEN CONCAT('pool:', code.coupon_id)
+            ELSE CONCAT('unlinked:', code.id)
+          END AS owner_key,
+          BINARY CASE
+            WHEN CHAR_LENGTH(TRIM(code.code)) > 0 THEN TRIM(code.code)
+            ELSE code.code
+          END AS normalized_code
+        FROM wp_uc_codes code
+        GROUP BY owner_key, normalized_code
+      ) effective_codes
+    `, mappedWpPoolIds);
     const [pgCodes] = await pgQuery<{ c: number }>(`SELECT COUNT(*) AS c FROM unique_codes`);
-    checks.push({ entity: "Codes", wpCount: wpCodes.c, pgCount: pgCodes.c, match: wpCodes.c == pgCodes.c });
+    checks.push({
+      entity: "Codes (effective unique inventory)",
+      wpCount: wpCodes.c,
+      pgCount: pgCodes.c,
+      match: wpCodes.c == pgCodes.c,
+    });
   } catch {
     logger.warn("Skipping code count check (table not found)");
   }
 
-  // Users (migrated admin users — authors of published/future posts)
-  const [wpAuthors] = await wpQuery<{ c: number }>(`
-    SELECT COUNT(DISTINCT post_author) AS c FROM wp_posts
-    WHERE post_type = 'post' AND post_status IN ('publish', 'future')
+  // Phase 6a resolves users by trimmed email. Count the same effective source
+  // inventory, then count matching admin rows regardless of registry
+  // ownership: a hand-created Strapi user with the same email is a valid,
+  // deliberate match and must not become migration-owned.
+  const wpUserEmails = await wpQuery<{ email: string }>(`
+    SELECT LOWER(TRIM(user_email)) AS email
+    FROM wp_users
+    WHERE user_email IS NOT NULL
+      AND TRIM(user_email) <> ''
+    GROUP BY LOWER(TRIM(user_email))
   `);
   const [pgUsers] = await pgQuery<{ c: number }>(
-    `SELECT COUNT(*) AS c FROM admin_users WHERE document_id LIKE 'wp\\_%' ESCAPE '\\'`
+    `SELECT COUNT(DISTINCT LOWER(email)) AS c
+     FROM admin_users
+     WHERE LOWER(email) = ANY($1::text[])`,
+    [wpUserEmails.map((user) => user.email)],
   );
   checks.push({
     entity: "Users",
-    wpCount: wpAuthors.c,
+    wpCount: wpUserEmails.length,
     pgCount: pgUsers.c,
-    match: wpAuthors.c == pgUsers.c,
+    match: wpUserEmails.length == pgUsers.c,
   });
 
   // Print count results
@@ -113,24 +233,39 @@ export async function runVerification(): Promise<void> {
   const [unEditored] = await pgQuery<{ c: number }>(`
     SELECT COUNT(*) AS c
     FROM admin_users u
-    LEFT JOIN admin_users_roles_lnk l ON l.user_id = u.id
-    LEFT JOIN admin_roles r ON r.id = l.role_id
-    WHERE u.document_id LIKE 'wp\\_%' ESCAPE '\\'
-      AND (r.code IS NULL OR r.code <> 'strapi-editor')
+    JOIN migration_source_entities registry
+      ON registry.document_id = u.document_id
+     AND registry.target_table = 'admin_users'
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM admin_users_roles_lnk l
+      JOIN admin_roles r ON r.id = l.role_id
+      WHERE l.user_id = u.id AND r.code = 'strapi-editor'
+    )
   `);
   logger.info(
     `  Migrated users missing Editor role: ${unEditored.c} ${unEditored.c > 0 ? "(⚠ review)" : "✓"}`
   );
 
   const [couponsNoCreator] = await pgQuery<{ c: number }>(
-    `SELECT COUNT(*) AS c FROM coupons WHERE document_id LIKE 'wp\\_%' ESCAPE '\\' AND created_by_id IS NULL`
+    `SELECT COUNT(*) AS c
+     FROM coupons offer
+     JOIN migration_source_entities registry
+       ON registry.document_id = offer.document_id
+      AND registry.target_table = 'coupons'
+     WHERE offer.created_by_id IS NULL`
   );
   logger.info(
     `  Coupons with NULL created_by: ${couponsNoCreator.c} (non-zero OK if author was skipped)`
   );
 
   const [dealsNoCreator] = await pgQuery<{ c: number }>(
-    `SELECT COUNT(*) AS c FROM deals WHERE document_id LIKE 'wp\\_%' ESCAPE '\\' AND created_by_id IS NULL`
+    `SELECT COUNT(*) AS c
+     FROM deals offer
+     JOIN migration_source_entities registry
+       ON registry.document_id = offer.document_id
+      AND registry.target_table = 'deals'
+     WHERE offer.created_by_id IS NULL`
   );
   logger.info(
     `  Deals with NULL created_by: ${dealsNoCreator.c} (non-zero OK if author was skipped)`

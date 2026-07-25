@@ -69,6 +69,7 @@ import {
   textFieldHints,
   validateTextFieldsForWrite,
 } from './utils/text-field-validation';
+import { registerCuratedOfferRelationQueryFilter } from './utils/curated-offer-relations';
 
 const HIDE_FROM_EDIT: Record<string, string[]> = {
   'api::deal.deal': ['stores', 'brands', 'categories', 'banks'],
@@ -615,7 +616,7 @@ async function ensureFieldDescriptions(strapi: Core.Strapi): Promise<void> {
 }
 
 // Single types' edit-view headers show their mainField — pin it to the
-// `title` attribute ("Homepage"/"Menu"/"Footer") instead of wp_<hash> ids.
+// `title` attribute ("Homepage"/"Menu"/"Footer") instead of opaque IDs.
 const SINGLE_TYPE_ENTRY_TITLES = [
   'api::homepage.homepage',
   'api::deal-of-the-day-page.deal-of-the-day-page',
@@ -1281,6 +1282,12 @@ export default {
   },
 
   async bootstrap({ strapi }: { strapi: Core.Strapi }) {
+    // Content Manager's relation picker queries the immediate component UID,
+    // not the Homepage / Deal of the Day single type. A request-scoped Query
+    // Engine lifecycle filter keeps only live Coupons/Deals in those pickers
+    // while leaving the normal offer collection views fully manageable.
+    registerCuratedOfferRelationQueryFilter(strapi);
+
     // User migrations run before Strapi's schema sync, so fresh databases do
     // not have the search tables when those migrations first execute. Retry
     // the same structural reconciliation here on every boot, after schema

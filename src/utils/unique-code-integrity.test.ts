@@ -2,9 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 const {
   CODE_GUARD_TRIGGER,
+  CODE_LOOKUP_INDEX,
   LINK_GUARD_TRIGGER,
   POOL_CODE_GUARD,
+  POOL_LINK_LOOKUP_INDEX,
   POOL_LINK_TABLE,
+  POSTGRES_LOOKUP_INDEXES,
   chooseDuplicateKeeper,
   reconcileUniqueCodeIntegrity,
 } = require('../../database/unique-code-integrity.js');
@@ -57,11 +60,13 @@ describe('unique-code integrity migration', () => {
 });
 
 type HarnessOptions = {
+  existingIndexes?: string[];
   guardsExist?: boolean;
   missingLinkTable?: boolean;
 };
 
 function createPostgresHarness({
+  existingIndexes = [],
   guardsExist = false,
   missingLinkTable = false,
 }: HarnessOptions = {}) {
@@ -101,6 +106,11 @@ function createPostgresHarness({
         rows: [{ count: guardsExist ? 2 : 0 }],
       });
     }
+    if (sql.includes('FROM pg_indexes')) {
+      return Promise.resolve({
+        rows: existingIndexes.map((indexname) => ({ indexname })),
+      });
+    }
     return Promise.resolve({ rows: [] });
   };
 
@@ -126,7 +136,7 @@ describe('reconcileUniqueCodeIntegrity Strapi relation schema', () => {
   });
 
   it('skips the duplicate scan when both PostgreSQL guards already exist', async () => {
-    const { knex, tableQueries } = createPostgresHarness({
+    const { knex, tableQueries, rawStatements } = createPostgresHarness({
       guardsExist: true,
     });
 
@@ -136,6 +146,26 @@ describe('reconcileUniqueCodeIntegrity Strapi relation schema', () => {
       guardCreated: false,
     });
     expect(tableQueries).toEqual([]);
+    expect(rawStatements.join('\n')).toContain(CODE_LOOKUP_INDEX);
+    expect(rawStatements.join('\n')).toContain(POOL_LINK_LOOKUP_INDEX);
+  });
+
+  it('does not issue index DDL when both lookup indexes already exist', async () => {
+    const { knex, rawStatements } = createPostgresHarness({
+      existingIndexes: POSTGRES_LOOKUP_INDEXES.map(
+        (index: { name: string }) => index.name,
+      ),
+      guardsExist: true,
+    });
+
+    await expect(reconcileUniqueCodeIntegrity(knex, logger())).resolves.toEqual({
+      attempted: true,
+      removed: 0,
+      guardCreated: false,
+    });
+    expect(
+      rawStatements.filter((sql) => sql.startsWith('CREATE INDEX')),
+    ).toEqual([]);
   });
 
   it('deduplicates through the Strapi link table and installs both guards', async () => {
@@ -154,6 +184,8 @@ describe('reconcileUniqueCodeIntegrity Strapi relation schema', () => {
     expect(rawStatements.join('\n')).toContain(POOL_CODE_GUARD);
     expect(rawStatements.join('\n')).toContain(LINK_GUARD_TRIGGER);
     expect(rawStatements.join('\n')).toContain(CODE_GUARD_TRIGGER);
+    expect(rawStatements.join('\n')).toContain(CODE_LOOKUP_INDEX);
+    expect(rawStatements.join('\n')).toContain(POOL_LINK_LOOKUP_INDEX);
     expect(rawStatements.join('\n')).not.toContain(
       'ON "unique_codes" ("pool_id", "code")',
     );

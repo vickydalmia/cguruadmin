@@ -5,8 +5,7 @@ import { logger } from "./logger.js";
 
 export function generateDocumentId(sourceKey?: string): string {
   if (sourceKey) {
-    const hash = createHash("sha256").update(sourceKey).digest("hex").slice(0, 24);
-    return `wp_${hash}`;
+    return createHash("sha256").update(sourceKey).digest("hex").slice(0, 24);
   }
   return createId();
 }

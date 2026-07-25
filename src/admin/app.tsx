@@ -339,7 +339,16 @@ function RelationSection({
             `filters[${config.scopeRelationField}][documentId][$eq]`,
             documentId,
           );
+          // An offer can pass its exact expiresAt up to five minutes before
+          // the scheduler changes contentStatus. Match the public visibility
+          // rule so that already-dead Coupons never appear in entity Top Pick
+          // dropdowns during that window.
           params.set('filters[contentStatus][$eq]', 'published');
+          params.set('filters[$or][0][expiresAt][$null]', 'true');
+          params.set(
+            'filters[$or][1][expiresAt][$gt]',
+            new Date().toISOString(),
+          );
         }
         const res = await get(
           `/content-manager/collection-types/${config.target}?${params.toString()}`
@@ -482,7 +491,7 @@ function RelationSection({
       {scopeEntityLabel && documentId ? (
         <Box paddingBottom={3} width="100%">
           <Typography variant="pi" textColor="neutral600">
-            Only published Coupons related to this {scopeEntityLabel} are
+            Only live Coupons related to this {scopeEntityLabel} are
             listed. Select {config.minSelections ?? 1}–{config.maxSelections}
             {' '}Coupons. The first two live selections are shown; the next two
             are expiry buffers. Clear all selections to use the latest two.

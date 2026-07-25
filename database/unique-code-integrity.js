@@ -6,13 +6,39 @@ const POOL_LINK_TABLE = "unique_codes_pool_lnk";
 const POOL_LINK_CODE_COLUMN = "unique_code_id";
 const POOL_LINK_POOL_COLUMN = "unique_coupon_pool_id";
 const POOL_CODE_GUARD = "unique_codes_pool_code_unique";
+const CODE_LOOKUP_INDEX = "unique_codes_code_btree_idx";
+const POOL_LINK_LOOKUP_INDEX = "unique_codes_pool_code_lookup_idx";
 const LINK_GUARD_TRIGGER = "unique_codes_pool_code_link_guard_v1";
 const CODE_GUARD_TRIGGER = "unique_codes_pool_code_value_guard_v1";
 const LINK_GUARD_FUNCTION = "cguru_unique_code_link_guard_v1";
 const CODE_GUARD_FUNCTION = "cguru_unique_code_value_guard_v1";
 const RECONCILE_LOCK = "couponzguru.unique-code-integrity.v2";
 
+const POSTGRES_LOOKUP_INDEXES = Object.freeze([
+  Object.freeze({
+    name: CODE_LOOKUP_INDEX,
+    table: UNIQUE_CODES_TABLE,
+    columns: Object.freeze(["code", "id"]),
+  }),
+  Object.freeze({
+    name: POOL_LINK_LOOKUP_INDEX,
+    table: POOL_LINK_TABLE,
+    columns: Object.freeze([
+      POOL_LINK_POOL_COLUMN,
+      POOL_LINK_CODE_COLUMN,
+    ]),
+  }),
+]);
+
 const POSTGRES_CLIENTS = new Set(["pg", "postgres", "postgresql"]);
+
+function postgresLookupIndexSql(index) {
+  const columns = index.columns.map((column) => `"${column}"`).join(", ");
+  return (
+    `CREATE INDEX IF NOT EXISTS "${index.name}" ` +
+    `ON "${index.table}" (${columns})`
+  );
+}
 
 function databaseClient(knex) {
   return String(knex?.client?.config?.client || "").toLowerCase();
@@ -75,6 +101,27 @@ async function postgresGuardsExist(knex) {
     [LINK_GUARD_TRIGGER, CODE_GUARD_TRIGGER],
   );
   return Number(result?.rows?.[0]?.count ?? 0) === 2;
+}
+
+async function ensurePostgresLookupIndexes(knex) {
+  if (!isPostgres(knex)) return false;
+  const names = POSTGRES_LOOKUP_INDEXES.map((index) => index.name);
+  const result = await knex.raw(
+    `SELECT indexname
+       FROM pg_indexes
+      WHERE schemaname = current_schema()
+        AND indexname IN (?, ?)`,
+    names,
+  );
+  const existing = new Set(
+    (result?.rows ?? []).map((row) => row.indexname),
+  );
+
+  for (const index of POSTGRES_LOOKUP_INDEXES) {
+    if (existing.has(index.name)) continue;
+    await knex.raw(postgresLookupIndexSql(index));
+  }
+  return true;
 }
 
 /**
@@ -317,6 +364,7 @@ async function reconcileUniqueCodeIntegrity(knex, logger = console) {
   }
 
   await acquireReconcileLock(knex);
+  await ensurePostgresLookupIndexes(knex);
 
   if (await postgresGuardsExist(knex)) {
     return { attempted: true, removed: 0, guardCreated: false };
@@ -342,12 +390,17 @@ async function reconcileUniqueCodeIntegrityAfterSchemaSync(
 }
 
 module.exports = {
+  CODE_LOOKUP_INDEX,
   CODE_GUARD_TRIGGER,
   LINK_GUARD_TRIGGER,
   POOL_CODE_GUARD,
+  POOL_LINK_LOOKUP_INDEX,
   POOL_LINK_TABLE,
+  POSTGRES_LOOKUP_INDEXES,
   chooseDuplicateKeeper,
+  ensurePostgresLookupIndexes,
   installPostgresGuards,
+  postgresLookupIndexSql,
   postgresGuardsExist,
   reconcileUniqueCodeIntegrity,
   reconcileUniqueCodeIntegrityAfterSchemaSync,

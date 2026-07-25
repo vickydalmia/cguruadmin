@@ -26,6 +26,10 @@ import { runSiteContent } from "./phases/13-site-content.js";
 import { runHomepageOfferBackfill } from "./phases/13a-homepage-offer-sections.js";
 import { runMediaOptimize } from "./phases/14-media-optimize.js";
 import { runMediaFormatsBackfill } from "./phases/15-media-formats-backfill.js";
+import {
+  ensureMigrationRegistry,
+  migrationRegistryRows,
+} from "./utils/migration-registry.js";
 
 interface Phase {
   name: string;
@@ -71,6 +75,15 @@ async function main(): Promise<void> {
     // Truncate all migrated data tables (order matters for foreign keys)
     logger.info("Truncating migrated data from Strapi tables...");
     const pool = getPgPool();
+    let migratedAdminDocumentIds: string[] = [];
+    try {
+      await ensureMigrationRegistry();
+      migratedAdminDocumentIds = (
+        await migrationRegistryRows("admin_users")
+      ).map((row) => row.document_id);
+    } catch (err: any) {
+      logger.warn(`Could not read migration ownership registry: ${err.message}`);
+    }
     const tablesToTruncate = [
       // Link/join tables first
       "coupons_stores_lnk", "coupons_brands_lnk", "coupons_categories_lnk", "coupons_banks_lnk",
@@ -104,6 +117,7 @@ async function main(): Promise<void> {
       "coupons", "deals",
       "unique_codes", "unique_coupon_pools",
       "stores", "brands", "categories", "banks",
+      "migration_source_entities",
       // Single types (re-seeded by phase 13)
       "homepages", "menus", "footers", "globals",
       // Media (only migration-created records)
@@ -156,15 +170,23 @@ async function main(): Promise<void> {
     }
     logger.info("Tables truncated");
 
-    // Remove only migration-created admin users (wp_<hash> document_id prefix)
-    // so the super admin account survives --clean.
+    // Remove only registry-owned admin users so the super admin survives.
+    // The prefix clause removes IDs left by pre-registry development imports.
     try {
       await pool.query(
         `DELETE FROM "admin_users_roles_lnk"
-         WHERE user_id IN (SELECT id FROM "admin_users" WHERE document_id LIKE 'wp\\_%' ESCAPE '\\')`
+         WHERE user_id IN (
+           SELECT id FROM "admin_users"
+           WHERE document_id = ANY($1::text[])
+              OR document_id LIKE 'wp\\_%' ESCAPE '\\'
+         )`,
+        [migratedAdminDocumentIds],
       );
       const del = await pool.query(
-        `DELETE FROM "admin_users" WHERE document_id LIKE 'wp\\_%' ESCAPE '\\'`
+        `DELETE FROM "admin_users"
+         WHERE document_id = ANY($1::text[])
+            OR document_id LIKE 'wp\\_%' ESCAPE '\\'`,
+        [migratedAdminDocumentIds],
       );
       logger.info(`Removed ${del.rowCount ?? 0} migrated admin_users`);
     } catch (err: any) {

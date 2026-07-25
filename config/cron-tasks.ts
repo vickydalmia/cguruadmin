@@ -1,5 +1,6 @@
 import { computeContentStatus } from '../src/utils/content-status';
 import { enqueueStandaloneIsrEvent } from '../src/isr-outbox/runtime';
+import { removeInactiveCuratedOfferRelations } from '../src/utils/curated-offer-relations';
 
 export default {
   scheduler: {
@@ -69,10 +70,52 @@ export default {
           }
         }
       }
+
       if (changed > 0) {
         strapi.log.info({
           event: 'content.expiry_status_updated',
           changed,
+        });
+      }
+
+      // Also heals legacy/manual selections: scheduled, expired, and
+      // published-but-past-expiry offers are physically disconnected from
+      // Homepage / Deal of the Day curation and every entity's Top Pick
+      // Coupons. Taxonomy relations on the Coupon/Deal remain untouched. This
+      // runs even when no status changed in this tick, so a previous transient
+      // failure is retried automatically on the next five-minute pass.
+      let cleanup;
+      try {
+        cleanup = await removeInactiveCuratedOfferRelations(strapi, now);
+      } catch (err: any) {
+        strapi.log.error({
+          event: 'content.curated_offer_relations_cleanup_failed',
+          error: err?.message ?? String(err),
+        });
+        return;
+      }
+
+      if (cleanup.removedSelections > 0) {
+        try {
+          await enqueueStandaloneIsrEvent(strapi, {
+            reason: 'inactive curated offer relations cleaned',
+            payload: cleanup.requiresFullRevalidation
+              ? { all: true, scopes: ['routes'] }
+              : { paths: cleanup.affectedPaths },
+          });
+        } catch (err: any) {
+          strapi.log.error({
+            event: 'content.curated_offer_relations_revalidation_failed',
+            removedSelections: cleanup.removedSelections,
+            error: err?.message ?? String(err),
+          });
+        }
+
+        strapi.log.info({
+          event: 'content.curated_offer_relations_cleaned',
+          removedSelections: cleanup.removedSelections,
+          affectedPaths: cleanup.affectedPaths,
+          fullRevalidation: cleanup.requiresFullRevalidation,
         });
       }
     },

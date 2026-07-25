@@ -132,6 +132,10 @@ export function getPoolMapping(wpPoolId: number): StrapiEntityRef | undefined {
   return poolIdMap.get(wpPoolId);
 }
 
+export function getAllPoolMappings(): ReadonlyMap<number, StrapiEntityRef> {
+  return poolIdMap;
+}
+
 export function setPoolNameMapping(poolName: string, ref: StrapiEntityRef): void {
   const rawKey = normalizePoolName(poolName, false);
   const normalizedKey = normalizePoolName(poolName, true);

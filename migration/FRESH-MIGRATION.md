@@ -76,7 +76,7 @@ where it stopped. To re-run one phase against existing data, use
 | 2 | **All six ID map files** | `termIdMap` / `postIdMap` / `mediaIdMap` / `poolIdMap` / `poolNameMap` / `userIdMap` `.json` are unlinked from disk (`clearAllMaps()`). Relationship data from earlier phases is **not** retained |
 | 3 | Every migrated table | `TRUNCATE … RESTART IDENTITY CASCADE` over the explicit list in [`src/index.ts`](./src/index.ts) — coupons, deals, stores, brands, categories, banks, unique pools/codes, `files`, all link tables, all `components_*` tables — **plus** every `*_cmps` / `*_lnk` table auto-discovered from `information_schema` under the owned-prefix allowlist |
 | 4 | **The four singles** | `homepages`, `menus`, `footers`, `globals` and their component join tables are in that truncate list. A "fresh" run therefore wipes the curated homepage, menu, footer and global settings, and phase 13 reseeds them from WordPress |
-| 5 | Migration-created admin users | `admin_users` rows whose `document_id` starts with `wp_` (phase 06a's accounts) and their role links. Accounts created by hand in the admin — including the super admin — survive |
+| 5 | Migration-created admin users | `admin_users` rows owned by `migration_source_entities` (phase 06a's accounts) and their role links. Accounts created by hand in the admin — including the super admin — survive |
 | 6 | **The whole S3 prefix** | `clearS3Bucket()` deletes every object under `S3_ROOT_PATH/` in `S3_BUCKET`. It refuses to run when `S3_ROOT_PATH` is empty (that would empty the entire bucket) and is skipped when S3 is not configured |
 
 > Only the admin-user step and the S3 prefix guard are scoped. Nothing else is

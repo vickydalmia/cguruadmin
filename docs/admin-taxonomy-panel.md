@@ -313,8 +313,8 @@ bootstrap sequence. The full sequence, in order:
    validator and the Validation problems panel use.
 10. **`ensureFieldDescriptions`** — applies maintained help text to ordinary
     content fields.
-11. **`ensureSingleTypeEntryTitles`** — pins single types' header label to `title`
-   instead of the migrated `wp_<hash>` document id.
+11. **`ensureSingleTypeEntryTitles`** — pins single types' header label to
+    `title` instead of the opaque migrated document ID.
 12. **`ensureOfferListStatusColumn`** — appends `contentStatus` to the Coupon and
    Deal list views so editors can see and filter expired offers.
 13. **`ensureSortableListColumns`** — pins list columns that support maintained

@@ -210,10 +210,11 @@ It performs four steps, in order:
    a `_cmps` table) do not produce warnings. Each truncate uses
    `RESTART IDENTITY CASCADE`.
 
-3. **Remove migrated admin users.** Only rows whose `document_id` carries the
-   `wp_` prefix are deleted, along with their role links. The `ESCAPE` clause on
-   the `LIKE` makes the underscore literal rather than a wildcard. A super admin
-   created through Strapi's console has no `wp_` prefix and survives.
+3. **Remove migrated admin users.** Only rows owned by the internal
+   `migration_source_entities` registry are deleted, along with their role
+   links. A transitional cleanup clause also removes development rows created
+   by the retired prefixed-ID format. A super admin created through Strapi's
+   console has no registry ownership and survives.
 
 4. **Empty the S3 prefix.** Every object under the configured S3 root path is
    listed and deleted. This refuses to run when the root path is empty, so a
@@ -315,10 +316,10 @@ is often cased differently from the pool's canonical name.
 ### `strapi-insert.ts` — every insert goes through here
 
 `generateDocumentId` is the idempotency keystone. Given a source key it returns
-`wp_` followed by a truncated SHA-256 of that key, so the same WordPress row
-always produces the same `document_id` across runs and machines. Without a source
-key it returns a random CUID — used only for `files`, where dedup is by content
-hash rather than document id.
+a prefixless 24-character truncated SHA-256 of that key, so the same WordPress
+row always produces the same `document_id` across runs and machines. Without a
+source key it returns a random CUID — used only for `files`, where dedup is by
+content hash rather than document id.
 
 Source-key conventions per phase:
 
@@ -332,8 +333,11 @@ Source-key conventions per phase:
 | 08 | `deal:{wpPostId}` | `deal:3299` |
 | 02 | (random CUID) | — |
 
-Everything except media carries the `wp_` prefix. That prefix is how `--clean`
-and the verification queries tell migrated rows from hand-created ones.
+Migration ownership is recorded separately in
+`migration_source_entities(document_id, source_key, target_table)`. This keeps
+public/API document IDs prefixless while allowing `--clean`, verification, and
+offer re-import reconciliation to distinguish migrated rows from hand-created
+ones.
 
 The other exports:
 
@@ -507,12 +511,14 @@ that ignore the connection-level setting. Names resolve in priority order: the
 first/last name user meta, then the display name (but only when it is not an
 email address), then the nicename, login, or a synthesized fallback.
 
-The upsert is by **email**: no match inserts a new admin user with a random
-password and a reset token; a match on a `wp_`-prefixed row updates the names
-while preserving any non-empty username; a match on a non-`wp_` row is left
-completely alone — that is a hand-created Strapi user who happens to share the
-address, and only the role link and id-map entry are wired. A single skip for a
-missing email is tolerated, but a run where every insert failed is a hard error.
+The upsert is by **email**: no match inserts a new registry-owned admin user with
+a random password and a reset token; a match on the same deterministic
+document ID updates names while preserving any non-empty username; a match on
+another document ID is left completely alone — that is a hand-created Strapi
+user who happens to share the address, and only the role link and id-map entry
+are wired. The retired prefixed development format is normalized to the current
+prefixless ID when encountered. A single skip for a missing email is tolerated,
+but a run where every insert failed is a hard error.
 
 The creator backfill then resolves each post's and term's author through the
 user id map and applies the updates in chunks via a bulk join-update against a
@@ -528,6 +534,10 @@ primary terms in parallel before processing posts concurrently.
 
 Shared behavior:
 
+- **Source lifecycle** includes `publish` and `future` posts. A `draft` or
+  `trash` post is included only when its valid source expiry has already
+  elapsed, because WordPress expiry plugins commonly withdraw old offers by
+  changing their post status. Other withdrawn posts are not imported.
 - **Dates** prefer the GMT column, fall back to the local column, then to now.
 - **Expiry** is read in precedence order: the Action Manager plugin's meta wins;
   otherwise the expiration-date status must indicate a live expiration; last
@@ -553,6 +563,10 @@ Shared behavior:
   text fields and content — and for deals, the price columns — rather than doing
   nothing. Re-running a content phase therefore *improves* existing rows when the
   extraction logic changes, while leaving editor-owned fields untouched. See §9.
+- **Inventory reconciliation** removes only registry-owned rows that are no
+  longer in the expected source partition. This makes re-import converge when a
+  source post is deleted/withdrawn or changes between Coupon and Product Deal,
+  while preserving hand-created Strapi offers.
 
 Deal-specific: prices go through [`price.ts`](../migration/src/utils/price.ts),
 which handles display-formatted Indian prices that a naive parse would silently
@@ -583,7 +597,7 @@ It compares WordPress and Postgres counts per entity, checks that migrated users
 carry the Editor role and that migrated content has a creator, looks for coupons
 and deals with no taxonomy at all, checks slug uniqueness per taxonomy table,
 reports SEO component coverage as a percentage, and prints a few random rows as
-a spot check. Migrated-only counts are scoped by the `wp_` document-id prefix.
+a spot check. Migrated-only checks are scoped by the ownership registry.
 §10 explains how to read the output.
 
 ### 11 — Copy used media

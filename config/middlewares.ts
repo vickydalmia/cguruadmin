@@ -32,6 +32,7 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Middlewar
   },
   'strapi::poweredBy',
   'strapi::query',
+  'global::live-offer-relations',
   'strapi::body',
   'strapi::session',
   'strapi::favicon',

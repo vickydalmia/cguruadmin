@@ -14,7 +14,10 @@ import {
   replaceContentMedia,
 } from "../utils/strapi-insert.js";
 import { replaceOfferTaxonomyRelations } from "../utils/offer-relations.js";
-import { computeMigrationStatus } from "../utils/content-status.js";
+import {
+  computeMigrationStatus,
+  shouldImportMigrationOffer,
+} from "../utils/content-status.js";
 import { rewriteContentMedia } from "../utils/content-media.js";
 import { clean, cleanCode, cleanHtml } from "../utils/sanitize.js";
 import { extractOfferText, extractCashbackFields } from "../utils/offer-extract.js";
@@ -25,6 +28,9 @@ import {
 } from "../utils/wp-dates.js";
 import { logger } from "../utils/logger.js";
 import { isAcfTrue } from "../utils/acf.js";
+import { reconcileMigratedOfferInventory } from "../utils/offer-inventory.js";
+import { getWpOfferExpiryRaw } from "../utils/wp-offer-expiry.js";
+import { registerMigratedEntity } from "../utils/migration-registry.js";
 
 interface WpPost {
   ID: number;
@@ -46,7 +52,7 @@ interface PostMeta {
 export async function runCoupons(): Promise<void> {
   logger.info("=== Phase 7: Coupons Migration ===");
 
-  const posts = await wpQuery<WpPost>(`
+  const sourcePosts = await wpQuery<WpPost>(`
     SELECT p.ID, p.post_title, p.post_name, p.post_content,
            CASE WHEN CAST(p.post_date AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_date AS CHAR) END AS post_date,
            CASE WHEN CAST(p.post_date_gmt AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_date_gmt AS CHAR) END AS post_date_gmt,
@@ -55,15 +61,38 @@ export async function runCoupons(): Promise<void> {
            p.post_status, p.post_author
     FROM wp_posts p
     WHERE p.post_type = 'post'
-      AND p.post_status IN ('publish', 'future')
-      AND p.ID NOT IN (
-        SELECT post_id FROM wp_postmeta
-        WHERE meta_key = 'is_deal' AND meta_value = 'yes'
+      AND p.post_status IN ('publish', 'future', 'draft', 'trash')
+      AND NOT EXISTS (
+        SELECT 1 FROM wp_postmeta
+        WHERE post_id = p.ID
+          AND meta_key = 'is_deal'
+          AND meta_value = 'yes'
       )
     ORDER BY p.ID
   `);
 
-  logger.info(`Found ${posts.length} coupon posts`);
+  const sourcePostIds = sourcePosts.map((post) => post.ID);
+  const allMeta = await getPostMetaBulk(sourcePostIds);
+  const migrationNow = new Date();
+  const posts = sourcePosts.filter((post) => {
+    const expiresAt = parseExpiryDate(
+      getWpOfferExpiryRaw(allMeta.get(post.ID) || {}),
+    );
+    return shouldImportMigrationOffer({
+      postStatus: post.post_status,
+      expiresAt,
+      now: migrationNow,
+    });
+  });
+  const expectedDocumentIds = new Set(
+    posts.map((post) => generateDocumentId(`coupon:${post.ID}`)),
+  );
+  await reconcileMigratedOfferInventory("coupons", expectedDocumentIds);
+
+  logger.info(
+    `Found ${posts.length} importable coupon posts ` +
+      `(${sourcePosts.length - posts.length} ordinary withdrawn posts excluded)`,
+  );
   if (posts.length === 0) return;
 
   // Saved migration maps can outlive a dev database reset. Never trust a
@@ -76,9 +105,9 @@ export async function runCoupons(): Promise<void> {
 
   const postIds = posts.map((p) => p.ID);
 
-  // Bulk-fetch all data upfront
-  const [allMeta, allRelations, primaryTerms] = await Promise.all([
-    getPostMetaBulk(postIds),
+  // Bulk-fetch relation data for importable posts only. Metadata was fetched
+  // above because expiry determines whether a withdrawn draft/trash belongs.
+  const [allRelations, primaryTerms] = await Promise.all([
     getTermRelationsBulk(postIds),
     getPrimaryTerms(postIds),
   ]);
@@ -94,7 +123,8 @@ export async function runCoupons(): Promise<void> {
       const primaryTermId = primaryTerms.get(post.ID);
 
       try {
-        const documentId = generateDocumentId(`coupon:${post.ID}`);
+        const sourceKey = `coupon:${post.ID}`;
+        const documentId = generateDocumentId(sourceKey);
         const isUnique = meta.unique_coupon === "1" || meta.unique_coupon === "true";
         const uniqueCouponPoolName = clean(meta.unique_coupon_name);
         // Upload + rewrite images embedded in the post body so no content
@@ -129,13 +159,14 @@ export async function runCoupons(): Promise<void> {
           normalizeWpLocalDate(post.post_modified) ||
           createdAt;
 
-        const expiryRaw = getExpiryRaw(meta);
+        const expiryRaw = getWpOfferExpiryRaw(meta);
         const expiresAt = parseExpiryDate(expiryRaw);
 
         const contentStatus = computeMigrationStatus({
           postDate: createdAt,
           postStatus: post.post_status,
           expiresAt,
+          now: migrationNow,
         });
 
         const mappedAuthorId = getUserMapping(post.post_author);
@@ -225,6 +256,11 @@ export async function runCoupons(): Promise<void> {
           type: "api::coupon.coupon",
           table: "coupons",
         });
+        await registerMigratedEntity({
+          documentId,
+          sourceKey,
+          targetTable: "coupons",
+        });
 
         // Wire taxonomy relations
         await replaceOfferTaxonomyRelations("coupons", entityId, {
@@ -305,24 +341,31 @@ export async function runCoupons(): Promise<void> {
 // ── Bulk data fetchers ──────────────────────────────────────────────
 
 async function getPostMetaBulk(postIds: number[]): Promise<Map<number, PostMeta>> {
-  if (postIds.length === 0) return new Map();
-  const placeholders = postIds.map(() => "?").join(",");
-  const rows = await wpQuery<{ post_id: number; meta_key: string; meta_value: string }>(`
-    SELECT post_id, meta_key, meta_value
-    FROM wp_postmeta
-    WHERE post_id IN (${placeholders})
-    AND meta_key IN (
-      'code', 'link', 'popular_coupon', 'image',
-      'is_deal', 'unique_coupon', 'unique_coupon_name',
-      '_action_manager_date', '_expiration-date', '_expiration-date-status', 'expiration-date',
-      '_edit_last'
-    )
-  `, postIds);
-
   const map = new Map<number, PostMeta>();
-  for (const row of rows) {
-    if (!map.has(row.post_id)) map.set(row.post_id, {});
-    map.get(row.post_id)![row.meta_key] = row.meta_value;
+  const batchSize = 5_000;
+  for (let start = 0; start < postIds.length; start += batchSize) {
+    const ids = postIds.slice(start, start + batchSize);
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = await wpQuery<{
+      post_id: number;
+      meta_key: string;
+      meta_value: string;
+    }>(
+      `SELECT post_id, meta_key, meta_value
+       FROM wp_postmeta
+       WHERE post_id IN (${placeholders})
+       AND meta_key IN (
+         'code', 'link', 'popular_coupon', 'image',
+         'is_deal', 'unique_coupon', 'unique_coupon_name',
+         '_action_manager_date', '_expiration-date', '_expiration-date-status', 'expiration-date',
+         '_edit_last'
+       )`,
+      ids,
+    );
+    for (const row of rows) {
+      if (!map.has(row.post_id)) map.set(row.post_id, {});
+      map.get(row.post_id)![row.meta_key] = row.meta_value;
+    }
   }
   return map;
 }
@@ -364,18 +407,6 @@ async function getPrimaryTerms(postIds: number[]): Promise<Map<number, number>> 
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
-
-function getExpiryRaw(meta: PostMeta): string | undefined {
-  if (meta["_action_manager_date"]) {
-    return meta["_action_manager_date"];
-  }
-
-  if (meta["_expiration-date-status"] && meta["_expiration-date-status"] !== "saved") {
-    return undefined;
-  }
-
-  return meta["_expiration-date"] || meta["expiration-date"];
-}
 
 function stripShortcodes(content: string): string {
   if (!content) return content;

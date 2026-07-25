@@ -13,7 +13,10 @@ import {
   replaceContentMedia,
 } from "../utils/strapi-insert.js";
 import { replaceOfferTaxonomyRelations } from "../utils/offer-relations.js";
-import { computeMigrationStatus } from "../utils/content-status.js";
+import {
+  computeMigrationStatus,
+  shouldImportMigrationOffer,
+} from "../utils/content-status.js";
 import { rewriteContentMedia } from "../utils/content-media.js";
 import { clean, cleanCode } from "../utils/sanitize.js";
 import { cleanDealContent } from "../utils/deal-content.js";
@@ -26,11 +29,14 @@ import {
 import { logger } from "../utils/logger.js";
 import { isAcfTrue, parseAcfTermId } from "../utils/acf.js";
 import { parseDecimal } from "../utils/price.js";
+import { reconcileMigratedOfferInventory } from "../utils/offer-inventory.js";
+import { getWpOfferExpiryRaw } from "../utils/wp-offer-expiry.js";
+import { registerMigratedEntity } from "../utils/migration-registry.js";
 
 export async function runDeals(): Promise<void> {
   logger.info("=== Phase 8: Deals Migration ===");
 
-  const posts = await wpQuery<{
+  const sourcePosts = await wpQuery<{
     ID: number;
     post_title: string;
     post_name: string;
@@ -49,13 +55,39 @@ export async function runDeals(): Promise<void> {
            CASE WHEN CAST(p.post_modified_gmt AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_modified_gmt AS CHAR) END AS post_modified_gmt,
            p.post_status, p.post_author
     FROM wp_posts p
-    JOIN wp_postmeta pm ON p.ID = pm.post_id AND pm.meta_key = 'is_deal' AND pm.meta_value = 'yes'
     WHERE p.post_type = 'post'
-      AND p.post_status IN ('publish', 'future')
+      AND p.post_status IN ('publish', 'future', 'draft', 'trash')
+      AND EXISTS (
+        SELECT 1 FROM wp_postmeta
+        WHERE post_id = p.ID
+          AND meta_key = 'is_deal'
+          AND meta_value = 'yes'
+      )
     ORDER BY p.ID
   `);
 
-  logger.info(`Found ${posts.length} deal posts`);
+  const sourcePostIds = sourcePosts.map((post) => post.ID);
+  const metaByPost = await getMetaBulk(sourcePostIds);
+  const migrationNow = new Date();
+  const posts = sourcePosts.filter((post) => {
+    const expiresAt = parseExpiryDate(
+      getWpOfferExpiryRaw(metaByPost.get(post.ID) || {}),
+    );
+    return shouldImportMigrationOffer({
+      postStatus: post.post_status,
+      expiresAt,
+      now: migrationNow,
+    });
+  });
+  const expectedDocumentIds = new Set(
+    posts.map((post) => generateDocumentId(`deal:${post.ID}`)),
+  );
+  await reconcileMigratedOfferInventory("deals", expectedDocumentIds);
+
+  logger.info(
+    `Found ${posts.length} importable deal posts ` +
+      `(${sourcePosts.length - posts.length} ordinary withdrawn posts excluded)`,
+  );
   if (posts.length === 0) return;
 
   // Saved migration maps can outlive a dev database reset. Never trust a
@@ -69,9 +101,9 @@ export async function runDeals(): Promise<void> {
   const postIds = posts.map((p) => p.ID);
   const placeholders = postIds.map(() => "?").join(",");
 
-  // Bulk-fetch all data upfront in parallel
-  const [metaByPost, termRelByPost, primaryTerms] = await Promise.all([
-    getMetaBulk(postIds, placeholders),
+  // Bulk-fetch relation data for importable posts only. Metadata was fetched
+  // above because expiry determines whether a withdrawn draft/trash belongs.
+  const [termRelByPost, primaryTerms] = await Promise.all([
     getTermRelsBulk(postIds, placeholders),
     getPrimaryTerms(postIds, placeholders),
   ]);
@@ -87,7 +119,8 @@ export async function runDeals(): Promise<void> {
       const primaryTermId = primaryTerms.get(post.ID);
 
       try {
-        const documentId = generateDocumentId(`deal:${post.ID}`);
+        const sourceKey = `deal:${post.ID}`;
+        const documentId = generateDocumentId(sourceKey);
         // Upload + rewrite images embedded in the post body so no content
         // image is left pointing at the old WordPress uploads URL.
         const contentMedia = await rewriteContentMedia(
@@ -133,13 +166,14 @@ export async function runDeals(): Promise<void> {
           );
         }
 
-        const expiryRaw = getExpiryRaw(meta);
+        const expiryRaw = getWpOfferExpiryRaw(meta);
         const expiresAt = parseExpiryDate(expiryRaw);
 
         const contentStatus = computeMigrationStatus({
           postDate: createdAt,
           postStatus: post.post_status,
           expiresAt,
+          now: migrationNow,
         });
 
         const mappedAuthorId = getUserMapping(post.post_author);
@@ -233,6 +267,11 @@ export async function runDeals(): Promise<void> {
           type: "api::deal.deal",
           table: "deals",
         });
+        await registerMigratedEntity({
+          documentId,
+          sourceKey,
+          targetTable: "deals",
+        });
 
         // The ACF `deal_store` is linked FIRST so it lands at deal_ord 1 and
         // becomes `stores[0]`. This used to be a dedicated `deal.primaryStore`
@@ -291,24 +330,32 @@ export async function runDeals(): Promise<void> {
 
 async function getMetaBulk(
   postIds: number[],
-  placeholders: string
 ): Promise<Map<number, Record<string, string>>> {
-  const rows = await wpQuery<{ post_id: number; meta_key: string; meta_value: string }>(`
-    SELECT post_id, meta_key, meta_value
-    FROM wp_postmeta
-    WHERE post_id IN (${placeholders})
-    AND meta_key IN (
-      'code', 'link', 'popular_coupon', 'image',
-      'deal_mrp', 'deal_sale_price', 'deal_discount', 'deal_image', 'deal_store',
-      '_action_manager_date', '_expiration-date', '_expiration-date-status', 'expiration-date',
-      '_edit_last'
-    )
-  `, postIds);
-
   const map = new Map<number, Record<string, string>>();
-  for (const row of rows) {
-    if (!map.has(row.post_id)) map.set(row.post_id, {});
-    map.get(row.post_id)![row.meta_key] = row.meta_value;
+  const batchSize = 5_000;
+  for (let start = 0; start < postIds.length; start += batchSize) {
+    const ids = postIds.slice(start, start + batchSize);
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = await wpQuery<{
+      post_id: number;
+      meta_key: string;
+      meta_value: string;
+    }>(
+      `SELECT post_id, meta_key, meta_value
+       FROM wp_postmeta
+       WHERE post_id IN (${placeholders})
+       AND meta_key IN (
+         'code', 'link', 'popular_coupon', 'image',
+         'deal_mrp', 'deal_sale_price', 'deal_discount', 'deal_image', 'deal_store',
+         '_action_manager_date', '_expiration-date', '_expiration-date-status', 'expiration-date',
+         '_edit_last'
+       )`,
+      ids,
+    );
+    for (const row of rows) {
+      if (!map.has(row.post_id)) map.set(row.post_id, {});
+      map.get(row.post_id)![row.meta_key] = row.meta_value;
+    }
   }
   return map;
 }
@@ -351,15 +398,3 @@ async function getPrimaryTerms(
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
-
-function getExpiryRaw(meta: Record<string, string>): string | undefined {
-  if (meta["_action_manager_date"]) {
-    return meta["_action_manager_date"];
-  }
-
-  if (meta["_expiration-date-status"] && meta["_expiration-date-status"] !== "saved") {
-    return undefined;
-  }
-
-  return meta["_expiration-date"] || meta["expiration-date"];
-}
