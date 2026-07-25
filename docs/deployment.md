@@ -589,6 +589,11 @@ Alert on:
 - rows remaining undelivered beyond the normal retry window;
 - more than one active cron scheduler.
 
+`/api/isr/status` exposes `dispatcher.lastProgressAt`, which advances after each
+delivered, retried, lease-lost, or quarantined event. Stall detection uses that
+per-event heartbeat, so a healthy sequential batch is not marked stalled merely
+because the complete drain takes longer than one request timeout.
+
 ## Rollback
 
 Rollback uses the last known compatible immutable image:

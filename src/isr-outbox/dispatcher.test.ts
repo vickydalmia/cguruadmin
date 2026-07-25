@@ -72,6 +72,60 @@ it('contains a failed dispatcher cycle and exposes it in status', async () => {
   expect(logged).toHaveBeenCalled();
 });
 
+it('uses per-event progress to keep a long active drain healthy', async () => {
+  const dispatcher = new IsrOutboxDispatcher(
+    {
+      log: {
+        error: vi.fn(),
+        warn: vi.fn(),
+        info: vi.fn(),
+      },
+    } as any,
+    {
+      gatewayUrl: 'http://gateway.test',
+      adminSecret: 'test-secret',
+      pollMs: 2_000,
+      batchSize: 2,
+      requestTimeoutMs: 90_000,
+      leaseMs: 120_000,
+      maxBackoffMs: 300_000,
+      alertAfterAttempts: 5,
+      retentionDays: 30,
+      maxPaths: 5_000,
+      maxPayloadBytes: 900_000,
+    },
+    vi.fn(async () => new Response('{}', { status: 202 })) as any,
+  );
+  let claimCount = 0;
+  (dispatcher as any).nextCleanupAt = Number.POSITIVE_INFINITY;
+  (dispatcher as any).store = {
+    claim: vi.fn(async () =>
+      claimCount++ === 0 ? { state: 'event' as const, event } : null,
+    ),
+    markDelivered: vi.fn(async () => true),
+    scheduleRetry: vi.fn(),
+    statusSummary: vi.fn(async () => ({
+      counts: {},
+      oldestUndeliveredAt: null,
+      expiredProcessing: 0,
+    })),
+  };
+  (dispatcher as any).startedAt = Date.now() - 240_000;
+  (dispatcher as any).lastCycleStartedAt = Date.now() - 180_000;
+  (dispatcher as any).lastCycleCompletedAt = Date.now() - 200_000;
+  (dispatcher as any).lastProgressAt = 0;
+
+  await (dispatcher as any).drain();
+
+  await expect(dispatcher.status()).resolves.toMatchObject({
+    ok: true,
+    dispatcher: {
+      stalled: false,
+      lastProgressAt: expect.any(Number),
+    },
+  });
+});
+
 it('cleans delivered rows before the retention cutoff', async () => {
   const deleteDeliveredBefore = vi.fn(async () => 17);
   const now = Date.parse('2026-07-24T12:00:00.000Z');

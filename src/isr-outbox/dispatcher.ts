@@ -148,6 +148,7 @@ export class IsrOutboxDispatcher {
   private readonly startedAt = Date.now();
   private lastCycleStartedAt = 0;
   private lastCycleCompletedAt = 0;
+  private lastProgressAt = 0;
   private lastDeliveredAt = 0;
   private lastErrorAt = 0;
   private lastError: string | null = null;
@@ -224,10 +225,12 @@ export class IsrOutboxDispatcher {
     const now = Date.now();
     const staleAfterMs =
       this.config.requestTimeoutMs + Math.max(30_000, this.config.pollMs * 3);
-    const cycleReference =
-      this.lastCycleCompletedAt ||
-      this.lastCycleStartedAt ||
-      this.startedAt;
+    const cycleReference = Math.max(
+      this.lastProgressAt,
+      this.lastCycleCompletedAt,
+      this.lastCycleStartedAt,
+      this.startedAt,
+    );
     const stalled = !this.stopped && now - cycleReference > staleAfterMs;
     const invalid = outbox.counts.invalid ?? 0;
     return {
@@ -243,6 +246,7 @@ export class IsrOutboxDispatcher {
         startedAt: this.startedAt,
         lastCycleStartedAt: this.lastCycleStartedAt || null,
         lastCycleCompletedAt: this.lastCycleCompletedAt || null,
+        lastProgressAt: this.lastProgressAt || null,
         lastDeliveredAt: this.lastDeliveredAt || null,
         lastErrorAt: this.lastErrorAt || null,
         lastError: this.lastError,
@@ -324,6 +328,7 @@ export class IsrOutboxDispatcher {
           }
         },
       );
+      if (found) this.lastProgressAt = Date.now();
       if (!found) break;
     }
   }
