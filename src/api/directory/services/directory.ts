@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { normaliseImageBackgroundColour } from '../../../constants/image-background';
 import { publishedOnlyFilters } from '../../../utils/content-status';
 
 export const DIRECTORY_KINDS = ['store', 'brand', 'category', 'bank'] as const;
@@ -279,6 +280,7 @@ function publicMedia(media: any, includeFormats = true) {
 
   return {
     url,
+    backgroundColour: normaliseImageBackgroundColour(media?.backgroundColour),
     alternativeText: cleanText(media?.alternativeText),
     width: numberOrNull(media?.width),
     height: numberOrNull(media?.height),
@@ -370,6 +372,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
               'height',
               'mime',
               'ext',
+              'backgroundColour',
             ],
           },
         },

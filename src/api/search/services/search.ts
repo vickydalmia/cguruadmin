@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import type { Core } from "@strapi/strapi";
+import { normaliseImageBackgroundColour } from "../../../constants/image-background";
 import { publishedOnlyFilters } from "../../../utils/content-status";
 import {
   asciiFold,
@@ -303,6 +304,7 @@ function mapMedia(media: any, fallbackAlt: string) {
 
   return {
     src,
+    backgroundColour: normaliseImageBackgroundColour(media?.backgroundColour),
     srcset: srcset || null,
     avifSrcset: avifSrcset || null,
     width: Number(media?.width) > 0 ? Number(media.width) : null,

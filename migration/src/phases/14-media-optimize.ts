@@ -637,6 +637,7 @@ export function buildLocalHashMap(): Map<string, string> {
 
   let hashed = 0;
   let cached = 0;
+  let scanned = 0;
   const nextCache: Record<string, HashCacheEntry> = {};
 
   const walk = (dir: string): void => {
@@ -670,6 +671,13 @@ export function buildLocalHashMap(): Map<string, string> {
         }
         nextCache[fullPath] = { mtime: stat.mtimeMs, size: stat.size, hash };
         if (!map.has(hash)) map.set(hash, fullPath);
+        scanned++;
+        if (scanned % 5_000 === 0) {
+          logger.info(
+            `  Local media lookup progress: ${scanned} files scanned ` +
+              `(${hashed} hashed, ${cached} cached)`,
+          );
+        }
       } catch {
         // unreadable file — skip
       }

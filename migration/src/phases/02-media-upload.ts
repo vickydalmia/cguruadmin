@@ -19,6 +19,12 @@ import {
   slugifyFileName,
 } from "../utils/image-optimizer.js";
 
+// The application owns the algorithm; the migration imports it dynamically
+// because cguruadmin is CommonJS while this package runs as ESM under tsx.
+const { calculateImageBackgroundColour } = await import(
+  "../../../src/utils/image-background-colour.js"
+);
+
 /** MIME types that go through optimizeOriginal (resize/webp/recompress). */
 const OPTIMIZABLE_MIMES = new Set([
   "image/jpeg",
@@ -228,6 +234,16 @@ async function doUploadFileFromDisk(
     // One read serves both the hash and the upload body.
     const sourceBytes = fs.readFileSync(filePath);
     const hash = hashBuffer(sourceBytes);
+    let backgroundColour: string | null = null;
+    if (source.mimeType.startsWith("image/")) {
+      try {
+        backgroundColour = await calculateImageBackgroundColour(sourceBytes);
+      } catch (error: any) {
+        logger.warn(
+          `Could not calculate background colour for ${source.fileName}: ${error.message}`
+        );
+      }
+    }
 
     // The current files table is authoritative. A checkpoint's numeric file
     // ID can be stale after a dev DB reset, while the immutable source hash
@@ -367,9 +383,9 @@ async function doUploadFileFromDisk(
       `INSERT INTO files (
         document_id, name, alternative_text, caption, width, height,
         formats, ext, mime, size, hash, url, provider, provider_metadata,
-        folder_path, created_at, updated_at, published_at
+        background_colour, folder_path, created_at, updated_at, published_at
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW(), NOW()
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW(), NOW()
       ) RETURNING id`,
       [
         documentId,
@@ -386,6 +402,7 @@ async function doUploadFileFromDisk(
         fileUrl,
         provider,
         providerMetadata,
+        backgroundColour,
         "/",
       ]
     );

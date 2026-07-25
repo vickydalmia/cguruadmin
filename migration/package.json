@@ -13,6 +13,7 @@
     "fix:cache-headers": "tsx src/fix-cache-headers.ts",
     "fix:content-srcsets": "tsx src/fix-content-srcsets.ts",
     "backfill:offer-fields": "tsx src/backfill-offer-fields.ts",
+    "backfill:media-background-colours": "tsx src/backfill-media-background-colours.ts",
     "cleanup:legacy-fields": "tsx src/drop-legacy-fields.ts",
     "diagnose:search": "tsx src/diagnose-search.ts",
     "check:types": "tsc --noEmit",

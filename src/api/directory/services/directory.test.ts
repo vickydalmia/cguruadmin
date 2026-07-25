@@ -40,6 +40,7 @@ const stores = [
     logoAlt: 'Alpha logo',
     logo: {
       url: '/uploads/alpha.webp',
+      backgroundColour: '#e8edf4',
       alternativeText: 'Alpha mark',
       width: 160,
       height: 80,
@@ -95,7 +96,10 @@ describe('directory aggregate service', () => {
         name: 'Alpha',
         couponCount: 2,
         productDealCount: 0,
-        media: expect.objectContaining({ url: '/uploads/alpha.webp' }),
+        media: expect.objectContaining({
+          url: '/uploads/alpha.webp',
+          backgroundColour: '#E8EDF4',
+        }),
         mediaAlt: 'Alpha logo',
       }),
       expect.objectContaining({
@@ -124,7 +128,10 @@ describe('directory aggregate service', () => {
         couponCount: 2,
         productDealCount: 0,
         mediaAlt: 'Alpha logo',
-        media: expect.objectContaining({ url: '/uploads/alpha.webp' }),
+        media: expect.objectContaining({
+          url: '/uploads/alpha.webp',
+          backgroundColour: '#E8EDF4',
+        }),
       }),
     ]);
     expect(
@@ -148,6 +155,10 @@ describe('directory aggregate service', () => {
     expect(couponCall?.options.filters).not.toHaveProperty('$or');
     expect(dealCall?.options.filters).not.toHaveProperty('$or');
     expect(dealCall?.options.filters).not.toHaveProperty('primaryStore');
+    const entityCall = calls.find(({ uid }) => uid === 'api::store.store');
+    expect(
+      entityCall?.options.populate.logo.fields,
+    ).toContain('backgroundColour');
   });
 
   it('deduplicates a Deal owner listed twice in the stores taxonomy', async () => {

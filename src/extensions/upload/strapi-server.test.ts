@@ -48,15 +48,25 @@ afterAll(() => {
 
 function buildService(baseOverrides: Record<string, any> = {}) {
   const base = {
+    isImage: vi.fn(async () => true),
     optimize: vi.fn(),
     generateThumbnail: vi.fn(async () => null),
     generateResponsiveFormats: vi.fn(async () => []),
     isResizableImage: vi.fn(async () => true),
     ...baseOverrides,
   };
-  const plugin: any = { services: { 'image-manipulation': base } };
+  const plugin: any = {
+    services: { 'image-manipulation': base },
+    contentTypes: {
+      file: {
+        schema: {
+          attributes: {},
+        },
+      },
+    },
+  };
   applyExtension(plugin);
-  return { service: plugin.services['image-manipulation'], base };
+  return { service: plugin.services['image-manipulation'], base, plugin };
 }
 
 function webpMaster() {
@@ -129,5 +139,64 @@ describe('AVIF twin generation', () => {
     const file = { ...webpMaster(), mime: 'image/gif', ext: '.gif' };
     const formats = await service.generateResponsiveFormats(file);
     expect(formats).toEqual([]);
+  });
+});
+
+describe('background colour extraction', () => {
+  it('adds the server-managed field to upload.file', () => {
+    const { plugin } = buildService();
+
+    expect(plugin.contentTypes.file.schema.attributes.backgroundColour).toEqual({
+      type: 'string',
+      configurable: false,
+      minLength: 7,
+      maxLength: 7,
+      regex: '^#[0-9A-F]{6}$',
+    });
+  });
+
+  it('calculates the background once and keeps it through repeated image checks', async () => {
+    const imagePath = path.join(tmpDir, 'background-colour.png');
+    await sharp({
+      create: {
+        width: 20,
+        height: 20,
+        channels: 3,
+        background: { r: 232, g: 237, b: 244 },
+      },
+    })
+      .png()
+      .toFile(imagePath);
+    const { service, base } = buildService();
+    const file = { name: 'entity.png', filepath: imagePath };
+
+    await service.isImage(file);
+    await service.isImage(file);
+
+    expect(file.backgroundColour).toBe('#E8EDF4');
+    expect(base.isImage).toHaveBeenCalledTimes(2);
+  });
+
+  it('stores null without blocking uploads when extraction fails', async () => {
+    logged.length = 0;
+    const { service } = buildService();
+    const file = {
+      name: 'broken.png',
+      filepath: path.join(tmpDir, 'missing-background-source'),
+    };
+
+    await expect(service.isImage(file)).resolves.toBe(true);
+    expect(file.backgroundColour).toBeNull();
+    expect(logged.some((entry) => entry.level === 'warn')).toBe(true);
+  });
+
+  it('sets null for non-image replacements', async () => {
+    const { service } = buildService({
+      isImage: vi.fn(async () => false),
+    });
+    const file = { name: 'document.pdf', filepath: sourcePath };
+
+    await expect(service.isImage(file)).resolves.toBe(false);
+    expect(file.backgroundColour).toBeNull();
   });
 });

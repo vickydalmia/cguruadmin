@@ -5,6 +5,7 @@ import path from 'path';
 import sharp from 'sharp';
 import { IMAGE_BREAKPOINTS, IMAGE_OPTIMIZATION as OPT } from '../../constants/image';
 import { slugify } from '../../constants/slugify';
+import { calculateImageBackgroundColour } from '../../utils/image-background-colour';
 
 const bytesToKbytes = (bytes: number) => Math.round((bytes / 1000) * 100) / 100;
 
@@ -43,6 +44,43 @@ const isSvg = (file: any): boolean =>
 
 export default (plugin: any) => {
   const base = plugin.services['image-manipulation'];
+
+  // Extend upload.file itself so the calculated value is persisted and
+  // exposed wherever media is populated. The upload controllers only permit
+  // their standard metadata fields, so this remains server-managed.
+  plugin.contentTypes.file.schema.attributes.backgroundColour = {
+    type: 'string',
+    configurable: false,
+    minLength: 7,
+    maxLength: 7,
+    regex: '^#[0-9A-F]{6}$',
+  };
+
+  // enhanceAndValidateFile calls isImage before optimize and then the upload
+  // service calls it again before persistence. Calculate on the first call
+  // from the original temporary file; the own-property guard makes the
+  // second call free and also preserves a deliberate null on failure.
+  const isImage = async (file: any) => {
+    const result = await base.isImage(file);
+    if (Object.prototype.hasOwnProperty.call(file, 'backgroundColour')) {
+      return result;
+    }
+
+    if (!result || !file.filepath) {
+      file.backgroundColour = null;
+      return result;
+    }
+
+    try {
+      file.backgroundColour = await calculateImageBackgroundColour(file.filepath);
+    } catch (error) {
+      file.backgroundColour = null;
+      strapi.log.warn(
+        `[upload] Background colour calculation failed for ${file.name ?? 'image'}: ${error}`,
+      );
+    }
+    return result;
+  };
 
   const optimize = async (file: any) => {
     // Reject SVG uploads: an SVG can carry inline <script>, so serving one
@@ -322,6 +360,7 @@ export default (plugin: any) => {
 
   plugin.services['image-manipulation'] = {
     ...base,
+    isImage,
     optimize,
     generateThumbnail,
     generateResponsiveFormats,

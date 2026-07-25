@@ -55,6 +55,7 @@ function searchService() {
         logoAlt: "Shoe Store logo",
         logo: {
           url: "https://cdn.example.com/shoe-store.webp",
+          backgroundColour: "#e8edf4",
           width: 120,
           height: 60,
         },
@@ -291,6 +292,7 @@ describe("public search entity boundaries", () => {
     // Media without formats (the owner logo) stays null on both fields.
     expect(response.deals[0].owner.logo.srcset).toBeNull();
     expect(response.deals[0].owner.logo.avifSrcset).toBeNull();
+    expect(response.deals[0].owner.logo.backgroundColour).toBe("#E8EDF4");
   });
 
   it("suppresses avifSrcset when the twin ladder stops short of the fallback max", async () => {
