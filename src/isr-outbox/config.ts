@@ -28,6 +28,27 @@ function integerEnv(
   return value;
 }
 
+export interface IsrOutboxPayloadBounds {
+  maxPaths: number;
+  maxPayloadBytes: number;
+}
+
+// Bounds for the payload written inside the content transaction. Deliberately
+// independent of delivery configuration: a CMS save must never fail because
+// the gateway URL or admin secret is wrong, and the content write path runs in
+// environments (builds, tests) that carry no delivery credentials at all.
+export function readOutboxPayloadBounds(): IsrOutboxPayloadBounds {
+  return {
+    maxPaths: integerEnv('ISR_REVALIDATE_MAX_PATHS', 5_000, 1, 100_000),
+    maxPayloadBytes: integerEnv(
+      'ISR_OUTBOX_MAX_PAYLOAD_BYTES',
+      900_000,
+      1_024,
+      10_000_000,
+    ),
+  };
+}
+
 export function readIsrOutboxConfig(): IsrOutboxConfig {
   const rawGatewayUrl =
     process.env.ISR_GATEWAY_URL?.trim().replace(/\/+$/, '') ?? '';
@@ -46,11 +67,6 @@ export function readIsrOutboxConfig(): IsrOutboxConfig {
     gatewayUrl = `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`;
   }
   const adminSecret = process.env.ISR_ADMIN_SECRET?.trim() ?? '';
-  if (process.env.NODE_ENV === 'production' && adminSecret.length < 16) {
-    throw new Error(
-      'ISR_ADMIN_SECRET must be at least 16 characters in production',
-    );
-  }
   const requestTimeoutMs = integerEnv(
     'ISR_OUTBOX_REQUEST_TIMEOUT_MS',
     90_000,
@@ -88,12 +104,6 @@ export function readIsrOutboxConfig(): IsrOutboxConfig {
       1_000,
     ),
     retentionDays: integerEnv('ISR_OUTBOX_RETENTION_DAYS', 30, 1, 365),
-    maxPaths: integerEnv('ISR_REVALIDATE_MAX_PATHS', 5_000, 1, 100_000),
-    maxPayloadBytes: integerEnv(
-      'ISR_OUTBOX_MAX_PAYLOAD_BYTES',
-      900_000,
-      1_024,
-      10_000_000,
-    ),
+    ...readOutboxPayloadBounds(),
   };
 }

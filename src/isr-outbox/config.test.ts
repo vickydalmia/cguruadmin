@@ -1,11 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { readIsrOutboxConfig } from './config';
+import { readIsrOutboxConfig, readOutboxPayloadBounds } from './config';
 
 describe('ISR outbox configuration', () => {
   afterEach(() => vi.unstubAllEnvs());
 
   it('uses a request timeout with a safe lease margin', () => {
-    vi.stubEnv('NODE_ENV', 'test');
     vi.stubEnv('ISR_OUTBOX_REQUEST_TIMEOUT_MS', '');
     vi.stubEnv('ISR_OUTBOX_LEASE_MS', '');
     const config = readIsrOutboxConfig();
@@ -16,19 +15,27 @@ describe('ISR outbox configuration', () => {
   });
 
   it('rejects a lease that can expire during delivery', () => {
-    vi.stubEnv('NODE_ENV', 'test');
     vi.stubEnv('ISR_OUTBOX_REQUEST_TIMEOUT_MS', '60000');
     vi.stubEnv('ISR_OUTBOX_LEASE_MS', '89999');
     expect(() => readIsrOutboxConfig()).toThrow(/at least 30000ms/);
   });
 
-  it('validates the gateway URL and production secret', () => {
-    vi.stubEnv('NODE_ENV', 'production');
+  it('validates the gateway URL', () => {
     vi.stubEnv('ISR_GATEWAY_URL', 'redis://gateway');
-    vi.stubEnv('ISR_ADMIN_SECRET', 'short');
     expect(() => readIsrOutboxConfig()).toThrow(/HTTP\(S\)/);
+  });
 
-    vi.stubEnv('ISR_GATEWAY_URL', 'http://gateway:3010');
-    expect(() => readIsrOutboxConfig()).toThrow(/at least 16/);
+  // The production Docker image builds with NODE_ENV=production and runs the
+  // test suite before `yarn build`, without any delivery credentials. Reading
+  // configuration must never depend on the deploy environment being present.
+  it('reads payload bounds under NODE_ENV=production without credentials', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('ISR_GATEWAY_URL', '');
+    vi.stubEnv('ISR_ADMIN_SECRET', '');
+    expect(readOutboxPayloadBounds()).toEqual({
+      maxPaths: 5_000,
+      maxPayloadBytes: 900_000,
+    });
+    expect(() => readIsrOutboxConfig()).not.toThrow();
   });
 });

@@ -7,6 +7,8 @@ import type { IsrOutboxInsert } from './types';
 
 let dispatcher: IsrOutboxDispatcher | null = null;
 
+export const MINIMUM_PRODUCTION_ADMIN_SECRET_LENGTH = 16;
+
 export function startIsrOutbox(strapi: Core.Strapi): void {
   const config = readIsrOutboxConfig();
   if (!config.gatewayUrl || !config.adminSecret) {
@@ -17,6 +19,17 @@ export function startIsrOutbox(strapi: Core.Strapi): void {
       reason: message,
     });
     return;
+  }
+  // Secret strength is a boot precondition, not a property of parsing the
+  // environment. Keeping it here means a production image can still run its
+  // test suite and build without being handed delivery credentials.
+  if (
+    process.env.NODE_ENV === 'production' &&
+    config.adminSecret.length < MINIMUM_PRODUCTION_ADMIN_SECRET_LENGTH
+  ) {
+    throw new Error(
+      `ISR_ADMIN_SECRET must be at least ${MINIMUM_PRODUCTION_ADMIN_SECRET_LENGTH} characters in production`,
+    );
   }
   dispatcher = new IsrOutboxDispatcher(strapi, config);
   dispatcher.start();

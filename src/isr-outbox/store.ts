@@ -5,7 +5,7 @@ import type {
   IsrOutboxInsert,
   IsrOutboxPayload,
 } from './types';
-import { readIsrOutboxConfig } from './config';
+import { readOutboxPayloadBounds } from './config';
 import { boundOutboxPayload, hasOutboxWork } from './payload';
 
 export const ISR_OUTBOX_TABLE = 'isr_outbox';
@@ -106,11 +106,11 @@ export async function insertIsrOutboxEvent(
 ): Promise<{ id: string; eventKey: string; payload: IsrOutboxPayload }> {
   const eventKey = input.eventKey ?? randomUUID();
   const now = new Date();
-  const config = readIsrOutboxConfig();
+  const bounds = readOutboxPayloadBounds();
   const payload = boundOutboxPayload(
     input.payload,
-    config.maxPaths,
-    config.maxPayloadBytes,
+    bounds.maxPaths,
+    bounds.maxPayloadBytes,
   );
   const inserted = await transaction(ISR_OUTBOX_TABLE)
     .insert({
