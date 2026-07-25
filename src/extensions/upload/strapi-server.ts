@@ -178,6 +178,18 @@ export default (plugin: any) => {
   // formats persistence untouched, and remove()/replace() iterate all formats
   // keys, so twins are cleaned up automatically (verified in 5.39 dist).
   const generateResponsiveFormats = async (file: any) => {
+    // CAPTURE THE SOURCE PATHS FIRST — do not move this below the await.
+    // uploadImage starts provider.upload(master) WITHOUT awaiting it, and
+    // provider.upload deletes file.filepath the moment it completes
+    // (@strapi/upload services/provider.js). The base call below is hundreds
+    // of milliseconds of sharp work, which is long enough for the S3 upload to
+    // win that race and strip filepath — which silently disabled every AVIF
+    // twin. Stock resizeFileTo never noticed because it falls back to
+    // file.getStream() when filepath is gone; our encoder reads from a path.
+    const sourceFilepath: string | undefined = file.__sourceFilepath;
+    const masterFilepath: string | undefined = file.filepath;
+    delete file.__sourceFilepath;
+
     const rawFormats = (await base.generateResponsiveFormats(file)) ?? [];
     // Move each variant's size prefix inside the image folder (no-op for
     // flat hashes, e.g. gif pass-throughs or pre-folder legacy replaces).
@@ -187,15 +199,24 @@ export default (plugin: any) => {
         : entry
     );
 
-    if (!OPT.generateAvifTwins || file.mime !== 'image/webp' || !file.filepath) {
+    if (!OPT.generateAvifTwins || file.mime !== 'image/webp') {
       return baseFormats;
     }
 
-    const srcPath =
-      file.__sourceFilepath && fs.existsSync(file.__sourceFilepath)
-        ? file.__sourceFilepath
-        : file.filepath;
-    delete file.__sourceFilepath;
+    // Prefer the pre-webp original (single-generation encode); fall back to the
+    // optimized master. Both temp files outlive the property deletion — only
+    // the reference is removed, the bytes stay until the tmp dir is cleaned.
+    const srcPath = [sourceFilepath, masterFilepath].find(
+      (candidate): candidate is string => Boolean(candidate) && fs.existsSync(candidate as string)
+    );
+    if (!srcPath) {
+      // Loud on purpose: this is the failure mode that hid the race for weeks.
+      strapi.log.error(
+        `[upload] AVIF twins skipped for ${file.hash}: no readable source file ` +
+          `(source=${sourceFilepath ?? 'unset'} master=${masterFilepath ?? 'unset'})`
+      );
+      return baseFormats;
+    }
 
     try {
       const breakpoints: Record<string, number> = strapi.config.get(
@@ -277,8 +298,10 @@ export default (plugin: any) => {
       return [...baseFormats, ...keptTwins];
     } catch (err) {
       // An AVIF encoder failure must never fail the upload — webp formats
-      // alone are a fine outcome; the frontend degrades automatically.
-      strapi.log.warn(`[upload] AVIF twin generation failed: ${err}`);
+      // alone are a fine outcome; the frontend degrades automatically. Logged
+      // at ERROR, not warn: half the image pipeline silently going missing is
+      // not a debug-level event, and a warn here hid exactly that.
+      strapi.log.error(`[upload] AVIF twin generation failed: ${err}`);
       return baseFormats;
     }
   };
