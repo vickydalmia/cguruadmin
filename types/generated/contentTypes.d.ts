@@ -1281,6 +1281,7 @@ export interface ApiRedirectRedirect extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Private;
     note: Schema.Attribute.Text &
+      Schema.Attribute.Private &
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 500;
       }>;
