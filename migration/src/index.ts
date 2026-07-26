@@ -23,6 +23,8 @@ import { runSeoBackfill } from "./phases/09-seo-backfill.js";
 import { runVerification } from "./phases/10-verify.js";
 import { runCopyUsedMedia } from "./phases/11-copy-used-media.js";
 import { runOfferBackfill } from "./phases/12-offer-backfill.js";
+import { runEntityUpdatedAtBackfill } from "./backfill-entity-updated-at.js";
+import { runOfferPublishedOnBackfill } from "./phases/12b-offer-published-on.js";
 import { runSiteContent } from "./phases/13-site-content.js";
 import { runHomepageOfferBackfill } from "./phases/13a-homepage-offer-sections.js";
 import { runMediaOptimize } from "./phases/14-media-optimize.js";
@@ -32,6 +34,7 @@ import {
   migrationRegistryRows,
 } from "./utils/migration-registry.js";
 import {
+  allowsPartialDeals,
   shouldCheckpointPhase,
   type PhaseOutcome,
 } from "./utils/phase-outcome.js";
@@ -63,6 +66,14 @@ const phases: Phase[] = [
   { name: "10-verify", fn: runVerification, skipCheckpoint: true },
   { name: "11-copy-used-media", fn: runCopyUsedMedia },
   { name: "12-offer-backfill", fn: runOfferBackfill },
+  {
+    name: "12a-entity-updated-at",
+    fn: async () => {
+      await runEntityUpdatedAtBackfill(true);
+      return { checkpoint: !allowsPartialDeals() };
+    },
+  },
+  { name: "12b-offer-published-on", fn: runOfferPublishedOnBackfill },
   { name: "13-site-content", fn: runSiteContent },
   { name: "13a-homepage-offer-sections", fn: runHomepageOfferBackfill },
   { name: "14-media-optimize", fn: runMediaOptimize },

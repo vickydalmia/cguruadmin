@@ -14,6 +14,20 @@ export function offerEntityTypeFromUid(uid: string): OfferEntityType | null {
   return OFFER_UIDS[uid] ?? null;
 }
 
+/**
+ * The submitted sitemap endpoint on the frontend.
+ *
+ * Only the INDEX is named here. The index is sharded into /sitemap/<group>-<n>.xml
+ * files whose count and names depend on live entity membership, which the CMS
+ * has no way to know — so the ISR gateway expands this one path into itself plus
+ * every live shard it holds in its route registry. Keeping the shard maths on
+ * that side means a change to the sharding policy never has to be mirrored here.
+ *
+ * Must stay in sync with SITEMAP_INDEX_PATH in
+ * cguru-ui/src/features/routing/services/sitemap-shards.ts.
+ */
+const SITEMAP_INDEX_PATH = '/sitemap_index.xml';
+
 function normalizePath(slug: string): string {
   const clean = slug.trim().replace(/^\/+|\/+$/g, '');
   return clean ? `/${clean}/` : '/';
@@ -66,7 +80,7 @@ export function createOutboxPayload(
 
   const paths = new Set<string>();
   if (scope.homepage) paths.add('/');
-  if (scope.sitemap) paths.add('/sitemap.xml');
+  if (scope.sitemap) paths.add(SITEMAP_INDEX_PATH);
   for (const slug of scope.slugs ?? []) paths.add(normalizePath(slug));
 
   return {

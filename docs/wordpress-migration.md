@@ -117,7 +117,7 @@ Three mechanisms cooperate:
 | [`00-preflight.ts`](../migration/src/phases/00-preflight.ts) | Connection probes, schema sanity checks, unique indexes |
 | [`01-media-inventory.ts`](../migration/src/phases/01-media-inventory.ts) | WP attachment scan + plugin-dir blacklist |
 | [`02-media-upload.ts`](../migration/src/phases/02-media-upload.ts) | On-demand S3/local upload, optimization, hash dedup |
-| [`03-taxonomies.ts`](../migration/src/phases/03-taxonomies.ts) | Stores / brands / categories / banks + FAQ + SEO |
+| [`03-taxonomies.ts`](../migration/src/phases/03-taxonomies.ts) | Stores / brands / categories / banks + FAQ + SEO. Seeds `created_at`/`updated_at` from the date range of the posts filed under each term — WP terms carry no dates of their own, and stamping import wall-clock reset every sitemap `<lastmod>` on each run |
 | [`05-pools.ts`](../migration/src/phases/05-pools.ts) | `wp_uc_coupons` → `unique_coupon_pools` |
 | [`06-codes.ts`](../migration/src/phases/06-codes.ts) | `wp_uc_codes` → `unique_codes` + pool links |
 | [`06a-users.ts`](../migration/src/phases/06a-users.ts) | WP authors → `admin_users` + creator backfill |
@@ -127,6 +127,7 @@ Three mechanisms cooperate:
 | [`10-verify.ts`](../migration/src/phases/10-verify.ts) | Count + integrity + spot checks |
 | [`11-copy-used-media.ts`](../migration/src/phases/11-copy-used-media.ts) | Copy locally-provisioned files into Strapi's `public/uploads` |
 | [`12-offer-backfill.ts`](../migration/src/phases/12-offer-backfill.ts) | Exact ordered Deal taxonomy reconciliation, with ACF `deal_store` first |
+| [`12a-entity-updated-at`](../migration/src/backfill-entity-updated-at.ts) | Re-derive store/brand/category/bank `created_at`/`updated_at` from the offers now linked to them. Runs after 12 so the relations are final; entities with no offers keep their phase-03 value |
 | [`13-site-content.ts`](../migration/src/phases/13-site-content.ts) | Seed the global / homepage / menu / footer single types |
 | [`13a-homepage-offer-sections.ts`](../migration/src/phases/13a-homepage-offer-sections.ts) | Coupon-backed homepage section backfill for pre-existing homepages |
 | [`14-media-optimize.ts`](../migration/src/phases/14-media-optimize.ts) | Optimize + AVIF-twin backfill for already-migrated media |
@@ -138,6 +139,7 @@ dry-run by default and requires `--apply --yes-i-mean-<target>` to write; see
 
 | Path | npm script | Role |
 |---|---|---|
+| [`src/backfill-entity-updated-at.ts`](../migration/src/backfill-entity-updated-at.ts) | `backfill:entity-updated-at` | Repair store/brand/category/bank timestamps on an already-migrated database, without a full `migrate:fresh`. Also runs inside the phase loop as 12a |
 | [`src/backfill-offer-fields.ts`](../migration/src/backfill-offer-fields.ts) | `backfill:offer-fields` | Fill `badge` and the extracted offer/cashback/bank texts; `--reextract` re-derives existing values |
 | [`src/drop-legacy-fields.ts`](../migration/src/drop-legacy-fields.ts) | `cleanup:legacy-fields` | Drop superseded columns/tables and their leftover rows |
 | [`src/fix-cache-headers.ts`](../migration/src/fix-cache-headers.ts) | `fix:cache-headers` | Rewrite `Cache-Control` metadata on existing S3 objects |

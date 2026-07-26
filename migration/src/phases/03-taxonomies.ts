@@ -17,6 +17,7 @@ import {
   replaceContentMedia,
 } from "../utils/strapi-insert.js";
 import { clean, cleanHtml, cleanSlug } from "../utils/sanitize.js";
+import { normalizeWpDate } from "../utils/wp-dates.js";
 import { parseDecimal, parseInteger } from "../utils/price.js";
 import { rewriteContentMedia } from "../utils/content-media.js";
 import { logger } from "../utils/logger.js";
@@ -36,6 +37,12 @@ interface WpTerm {
   faq_enabled: string | null;
   rating_avg: string | null;
   rating_count: string | null;
+}
+
+/** Honest content dates for a term, derived from the posts filed under it. */
+interface TermDates {
+  firstPublished: string | null;
+  lastModified: string | null;
 }
 
 const TYPE_TO_TABLE: Record<string, string> = {
@@ -220,6 +227,45 @@ export async function runTaxonomies(): Promise<void> {
     }
   }
 
+  // Real content dates for the entity rows.
+  //
+  // WordPress terms carry NO date columns at all (wp_terms / wp_term_taxonomy),
+  // so there is nothing to import directly — which is why this phase used to
+  // stamp created_at/updated_at/published_at with `new Date()`. That made every
+  // store/brand/category/bank claim it had changed on the day of the import,
+  // and since those rows own ~99% of the public URLs, the entire sitemap's
+  // <lastmod> reset to "today" on every migrate:fresh. An inaccurate lastmod is
+  // strictly worse than none: Google stops trusting the field site-wide.
+  //
+  // The term's own posts DO have honest dates, and they are the term page's
+  // content, so their range is the truthful answer.
+  const termDates = await wpQuery<{
+    term_id: number;
+    first_published: string | null;
+    last_modified: string | null;
+  }>(`
+    SELECT tt.term_id,
+           MIN(CASE WHEN CAST(p.post_date_gmt AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_date_gmt AS CHAR) END) AS first_published,
+           MAX(CASE WHEN CAST(p.post_modified_gmt AS CHAR) = '0000-00-00 00:00:00' THEN NULL ELSE CAST(p.post_modified_gmt AS CHAR) END) AS last_modified
+    FROM wp_term_relationships tr
+    JOIN wp_term_taxonomy tt ON tt.term_taxonomy_id = tr.term_taxonomy_id AND tt.taxonomy = 'category'
+    JOIN wp_posts p ON p.ID = tr.object_id
+    WHERE p.post_type = 'post'
+      AND p.post_status = 'publish'
+    GROUP BY tt.term_id
+  `);
+
+  const termDatesByTermId = new Map<number, TermDates>();
+  for (const row of termDates) {
+    termDatesByTermId.set(row.term_id, {
+      firstPublished: normalizeWpDate(row.first_published),
+      lastModified: normalizeWpDate(row.last_modified),
+    });
+  }
+  logger.info(
+    `Resolved WordPress content dates for ${termDatesByTermId.size}/${terms.length} terms`,
+  );
+
   const counts: Record<string, number> = {
     Store: 0,
     Brand: 0,
@@ -245,7 +291,8 @@ export async function runTaxonomies(): Promise<void> {
         "api::store.store",
         faqMetaByTerm,
         yoastByTerm,
-        buildFullSlug
+        buildFullSlug,
+        termDatesByTermId.get(term.term_id)
       );
       const completed = termIndex + 1;
       if (completed % 100 === 0 || completed === termsToProcess.length) {
@@ -257,7 +304,15 @@ export async function runTaxonomies(): Promise<void> {
     }
 
     counts[chooseType]++;
-    await insertTerm(term, table, strapiType, faqMetaByTerm, yoastByTerm, buildFullSlug);
+    await insertTerm(
+      term,
+      table,
+      strapiType,
+      faqMetaByTerm,
+      yoastByTerm,
+      buildFullSlug,
+      termDatesByTermId.get(term.term_id)
+    );
     const completed = termIndex + 1;
     if (completed % 100 === 0 || completed === termsToProcess.length) {
       logger.info(
@@ -278,7 +333,8 @@ async function insertTerm(
   strapiType: string,
   faqMetaByTerm: Map<number, Array<{ meta_key: string; meta_value: string }>>,
   yoastByTerm: Map<number, { title?: string; description?: string }>,
-  buildFullSlug: (termId: number) => string
+  buildFullSlug: (termId: number) => string,
+  termDates?: TermDates
 ): Promise<void> {
   const documentId = generateDocumentId(`term:${table}:${term.term_id}`);
   const slug = deduplicateSlug(buildFullSlug(term.term_id), table);
@@ -320,6 +376,13 @@ async function insertTerm(
 
   const entityName = clean(term.name) || term.name;
 
+  // Import wall-clock is the LAST resort, used only for a term with no
+  // published posts at all. Anything else would republish the whole catalogue's
+  // <lastmod> as "today" on every run — see the termDates query above.
+  const importedAt = new Date().toISOString();
+  const createdAt = termDates?.firstPublished ?? importedAt;
+  const updatedAt = termDates?.lastModified ?? createdAt;
+
   const values = [
     documentId,
     entityName,
@@ -331,9 +394,9 @@ async function insertTerm(
     ratingCount,
     table === "stores",
     faqEnabled,
-    new Date().toISOString(),
-    new Date().toISOString(),
-    new Date().toISOString(),
+    createdAt, // published_at
+    createdAt, // created_at
+    updatedAt, // updated_at
     null,
   ];
 

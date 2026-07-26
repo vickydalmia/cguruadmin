@@ -19,6 +19,7 @@ import { buildLocalHashMap } from "./14-media-optimize.js";
 import { replaceMedia } from "../utils/strapi-insert.js";
 import { logger } from "../utils/logger.js";
 import { resolveBackfillRemovalTimestamp } from "../utils/deal-image-backfill-state.js";
+import { allowsPartialDeals } from "../utils/phase-outcome.js";
 
 interface DealImageRow {
   deal_id: number;
@@ -403,9 +404,15 @@ export async function runDealImageBackgroundBackfill(): Promise<void> {
       `${deleted} unreferenced opaque file(s) deleted, ${retained} retained`,
   );
   if (failures.length > 0) {
-    throw new Error(
+    const message =
       `${failures.length} Deal image(s) failed background removal; ` +
-        `rerun --phase 08a-deal-image-backgrounds after resolving the API error`,
-    );
+      `rerun --phase 08a-deal-image-backgrounds after resolving the API error`;
+    if (allowsPartialDeals()) {
+      logger.warn(
+        `${message}. Continuing because --allow-partial-deals was provided`,
+      );
+      return;
+    }
+    throw new Error(message);
   }
 }

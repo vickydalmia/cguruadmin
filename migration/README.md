@@ -222,7 +222,11 @@ Logs are written to:
 
 ## Migration Phases
 
-The migration runs sequential phases (00–15, including the user phase 06a and the compatibility phase 13a) in the order declared in [`src/index.ts`](./src/index.ts). Each phase checkpoints on completion so the process can resume after interruption — except `00-preflight`, `10-verify` and `15-media-formats-backfill`, which are marked `skipCheckpoint` and therefore always run.
+The migration runs sequential phases (00–15, including phases 06a, 12a, 12b,
+and 13a) in the order declared in [`src/index.ts`](./src/index.ts). Each phase
+checkpoints on completion so the process can resume after interruption —
+except `00-preflight`, `10-verify` and `15-media-formats-backfill`, which are
+marked `skipCheckpoint` and therefore always run.
 
 ### Phase 00 — Preflight
 
@@ -323,6 +327,32 @@ The ACF `deal_store` term is first in `stores`, followed by the Yoast primary
 term and the remaining WP terms in stable order. Every relation table is
 replaced transactionally per Deal, so changed/cleared ACF ownership and stale
 links converge to the same result as a clean import.
+
+### Phase 12a — Entity Timestamp Backfill
+
+After Coupon and Deal taxonomy relations are final, derives honest entity-page
+timestamps from the offers filed under each Store, Brand, Category, and Bank:
+`created_at` becomes the earliest related offer creation date and `updated_at`
+becomes the latest related offer modification date. Only currently rendered
+offers (`content_status = published` and not expired) participate; scheduled
+and expired offers cannot move a page's sitemap `lastmod`. Entities without
+visible related offers are left unchanged.
+
+This is intentionally a pre-launch operation: WordPress is still the sole
+source of truth, so it replaces the import-generated Strapi system timestamps.
+Do not rerun it after editors begin changing entities in Strapi. In
+`--allow-partial-deals` mode phase 12a is deliberately not checkpointed, so a
+later successful Deal retry can converge the derived entity timestamps during
+the migration.
+
+### Phase 12b — Offer Relevance Timestamp Backfill
+
+Sets `published_on`, the editor-controlled relevance/"bump to top" timestamp,
+from the migrated WordPress `post_modified_gmt` date. It repairs only
+migration-owned Coupons and Deals whose `published_on` is still null or equal
+to their original `published_at`; a value that already differs is preserved as
+a post-migration editorial bump. New phase 07/08 inserts seed the same field
+from the WordPress modification date directly.
 
 ### Phase 13 — Site Content
 

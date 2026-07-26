@@ -112,7 +112,8 @@ const RESERVED_ROUTE_SEGMENTS = new Map<string, string>([
   ['redeem-unavailable', 'the redeem fallback page'],
   ['robots.txt', 'the robots.txt route'],
   ['search', 'the search page'],
-  ['sitemap.xml', 'the sitemap route'],
+  ['sitemap', 'the sitemap shard namespace'],
+  ['sitemap_index.xml', 'the sitemap index route'],
   ['stores', 'the store listing page'],
 ]);
 

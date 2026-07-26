@@ -89,12 +89,13 @@ where it stopped. To re-run one phase against existing data, use
 |---|---|
 | `00-preflight` | Validates both DBs and required tables — fails fast, writes nothing |
 | `01-media-inventory` → `02-media-upload` | Catalogs WP media and uploads to S3 |
-| `03-taxonomies` | Stores, brands, categories, banks |
+| `03-taxonomies` | Stores, brands, categories, banks. Timestamps come from the date range of each term's posts, not from import wall-clock — see [§ Entity timestamps](#entity-timestamps-and-sitemap-lastmod) |
 | `05-pools` → `06-codes` → `06a-users` | Unique-coupon pools/codes, authors |
 | `07-coupons` → `08-deals` | The offers themselves (content sanitized through the shared `cleanHtml` allowlist on the way in) |
 | `09-seo-backfill` | Yoast SEO fields |
 | `10-verify` | Count/spot-check verification report |
 | `11-copy-used-media` → `12-offer-backfill` | Media wiring and offer relation backfill |
+| `12a-entity-updated-at` | Re-derive entity `created_at`/`updated_at` from the offers now linked to them |
 | `13-site-content` | Global, **homepage**, menu, footer singles |
 | `13a-homepage-offer-sections` | Backfill for **pre-existing** homepages only — on a fresh run phase 13 already seeds everything and this is a no-op |
 | `14-media-optimize` | Image optimization backfill |
@@ -110,6 +111,32 @@ renders 4 fewer per section (the +4 buffer absorbs offers that expire or get
 deleted mid-cycle; hero and popular stores carry no buffer). A parity test
 (`yarn test`) pins these to the component schema `max` values, since raw SQL
 bypasses Strapi validation.
+
+### Entity timestamps and sitemap `lastmod`
+
+Stores, brands, categories and banks own ~99% of the site's public URLs, and
+their Strapi `updated_at` is what the sitemap emits as `<lastmod>`. WordPress
+terms carry **no date columns at all**, so this phase used to stamp all three
+timestamp columns with `new Date()` — meaning every `migrate:fresh` republished
+the entire catalogue as "changed today". Google only uses `lastmod` while it is
+verifiably accurate and drops the signal site-wide when it is not, so an
+import-stamped value is worse than none.
+
+Two phases now derive honest values from data that *does* carry real dates:
+
+| Phase | Source |
+|---|---|
+| `03-taxonomies` | `MIN(post_date_gmt)` / `MAX(post_modified_gmt)` over the published posts filed under the term, via `wp_term_relationships` |
+| `12a-entity-updated-at` | `MIN(created_at)` / `MAX(updated_at)` over the coupons and deals actually linked to the entity in Strapi |
+
+12a runs last and wins where an entity has offers. That ordering is deliberate:
+the sitemap describes the Strapi catalogue, not the WordPress state it came
+from, and 12a sees the offers that were really migrated. Entities with no
+offers keep their phase-03 value; entities with neither fall back to import
+time, and the sitemap omits `<lastmod>` rather than inventing one.
+
+To repair an already-migrated database without a full re-run, use
+`yarn backfill:entity-updated-at` — the same derivation, standalone.
 
 ## 4. Verify
 
@@ -150,6 +177,7 @@ target and exits non-zero.
 | `yarn fix:cache-headers` | Stamp immutable `Cache-Control` on already-uploaded S3 objects |
 | `yarn fix:content-srcsets` | Rebuild rich-text `<img>` srcsets from the current `files.formats` |
 | `yarn backfill:offer-fields` | Fill `badge` / `offerText` / `cashbackText` / `bankOfferText` on offers migrated before those fields existed |
+| `yarn backfill:entity-updated-at` | Repair store/brand/category/bank timestamps on an already-migrated database — the same derivation phase 12a runs, for when a full `migrate:fresh` is not wanted |
 | `yarn cleanup:legacy-fields` | Drop the columns, component rows and tables left orphaned by removed features |
 
 ### Reseed only the homepage

@@ -15,9 +15,31 @@ describe('createOutboxPayload', () => {
         slugs: ['amazon', '/amazon/', ' categories/deals '],
       }),
     ).toEqual({
-      paths: ['/', '/sitemap.xml', '/amazon/', '/categories/deals/'],
+      paths: ['/', '/sitemap_index.xml', '/amazon/', '/categories/deals/'],
       scopes: ['routes'],
     });
+  });
+
+  it('names the sitemap index, never the retired /sitemap.xml', () => {
+    // /sitemap.xml was replaced by the index + shards. Emitting the old path
+    // made every sitemap invalidation a silent no-op against a 404.
+    const payload = createOutboxPayload({ sitemap: true });
+
+    expect(payload.paths).toEqual(['/sitemap_index.xml']);
+    expect(payload.paths).not.toContain('/sitemap.xml');
+  });
+
+  it('leaves offer edits out of sitemap invalidation', () => {
+    // An offer edit only moves its entity pages' lastmod. Per
+    // docs/seo/sitemap-best-practices.md section 13 those are coalesced rather
+    // than invalidated per edit; the shards ride ISR_PAGE_MAX_AGE_SECONDS.
+    const payload = createOutboxPayload({
+      slugs: ['amazon-coupons'],
+      homepage: true,
+      refreshScopes: ['routes'],
+    });
+
+    expect(payload.paths).toEqual(['/', '/amazon-coupons/']);
   });
 
   it('marks global invalidation with route and redirect refresh scopes', () => {

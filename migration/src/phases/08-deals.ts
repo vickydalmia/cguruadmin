@@ -210,8 +210,10 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
             ? mappedEditorId
             : authorId;
 
-        // `published_on` is the EDITOR-CONTROLLED "newest first" sort key
-        // (src/utils/offer-visibility.ts) and is seeded here from published_at.
+        // `published_on` is the EDITOR-CONTROLLED relevance/"newest first"
+        // sort key (src/utils/offer-visibility.ts). WordPress uses an edit to
+        // make an offer relevant again, so seed it from post_modified via
+        // updatedAt rather than from the original publication date.
         // It MUST be written at insert time: Postgres orders NULLs FIRST in a
         // DESC sort, so a row with no published_on outranks every row an editor
         // has actually dated — "Bump to top" would push an offer to the BOTTOM.
@@ -265,7 +267,7 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
             contentStatus.scheduledAt,
             contentStatus.contentStatus,
             contentStatus.publishedAt,
-            contentStatus.publishedAt,
+            contentStatus.publishedAt ? updatedAt : null,
             createdAt,
             updatedAt,
             null,

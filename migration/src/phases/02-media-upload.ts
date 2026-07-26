@@ -608,29 +608,29 @@ async function doUploadFileFromDisk(
     const result = repairExistingId
       ? await pgQuery<{ id: number }>(
           `UPDATE files
-              SET name = $2,
-                  alternative_text = $3,
-                  caption = $4,
-                  width = $5,
-                  height = $6,
-                  formats = $7,
-                  ext = $8,
-                  mime = $9,
-                  size = $10,
-                  hash = $11,
-                  url = $12,
-                  provider = $13,
-                  provider_metadata = $14,
-                  background_colour = $15,
-                  background_removal_source_hash = $16,
-                  background_removal_version = $17,
-                  background_removed_at = $18,
-                  folder_path = $19,
+              SET name = $1,
+                  alternative_text = $2,
+                  caption = $3,
+                  width = $4,
+                  height = $5,
+                  formats = $6,
+                  ext = $7,
+                  mime = $8,
+                  size = $9,
+                  hash = $10,
+                  url = $11,
+                  provider = $12,
+                  provider_metadata = $13,
+                  background_colour = $14,
+                  background_removal_source_hash = $15,
+                  background_removal_version = $16,
+                  background_removed_at = $17,
+                  folder_path = $18,
                   updated_at = NOW(),
                   published_at = COALESCE(published_at, NOW())
-            WHERE id = $20
+            WHERE id = $19
             RETURNING id`,
-          [...fileValues, repairExistingId]
+          [...fileValues.slice(1), repairExistingId]
         )
       : await pgQuery<{ id: number }>(
           `INSERT INTO files (

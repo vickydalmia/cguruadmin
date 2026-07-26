@@ -20,6 +20,7 @@ ceiling on staleness, not a fixed delay.
 | `GET /api/deal-of-the-day-full` | anonymous | 60 / 60s | 60s, keyed by path |
 | `GET /api/site-chrome` | anonymous | — | 300s |
 | `GET /api/public-route-metadata` | anonymous | 60 / 60s | 60s, keyed by path |
+| `GET /api/sitemap-entities` | anonymous | 60 / 60s | 60s, keyed by path |
 | `GET /api/redirects` | anonymous (core `find`, public role) | 60 / 60s | 60s |
 | `GET /api/offers`, `GET /api/deals` | anonymous | 60 / 60s | 60s |
 | `GET /api/coupon-page/:id` | anonymous | 60 / 60s | 60s |
@@ -207,6 +208,26 @@ hydrated with media. Only published, unexpired offers are counted.
   every active job's `/careers/:slug/` route. The ISR gateway consumes it to
   drive sitemap/revalidation and to honour per-route `noIndex`. Rate-limited
   60/60s and cached 60s keyed by path (the query string is ignored).
+- `GET /api/sitemap-entities` — `{ data }`, one row per store / brand /
+  category / bank: `{ kind, documentId, id, slug, updatedAt, offersUpdatedAt?,
+  imageUrl? }`. Decoration for the frontend's sharded sitemap, and nothing
+  else — route *membership* still comes from the collections themselves via
+  `get-flat-routes.ts`, so a failure here degrades the sitemap's `lastmod`
+  precision without dropping any URL.
+  - `offersUpdatedAt` is `MAX(updated_at)` over the entity's **visible**
+    coupons and deals (published, not past `expiresAt`), computed as one
+    grouped join per `coupons_*_lnk` / `deals_*_lnk` table. An entity page's
+    content *is* its offers, so the entity row's own `updatedAt` alone
+    under-reports badly.
+  - Deliberately **not** an OR-of-EXISTS: that shape inflated planner costs on
+    this database badly enough to trip JIT compilation (see
+    [search-operations.md](./search-operations.md)).
+  - Written with the knex query builder rather than raw SQL so it also runs on
+    the sqlite dev database. A missing link table warns and degrades to "no
+    aggregate" rather than failing the whole feed.
+  - `keyByPath` matters here: the endpoint takes no query parameters, so
+    without it a `?nonce=` flood would mint a distinct cache key per request
+    and force a full-catalogue scan each time.
 - `GET /api/redirects` — the Strapi **core `find`** route for the Redirect
   collection, granted to the public role, with the `find` action overridden in
   [`src/api/redirect/controllers/redirect.ts`](../src/api/redirect/controllers/redirect.ts).

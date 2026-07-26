@@ -78,8 +78,8 @@ const KIND_BY_UID: Record<IdentityUid, IdentityKind> = {
  *   api/, 404.astro, 500.astro, about-us.astro, banks.astro, brands.astro,
  *   careers.astro + careers/[slug].astro, categories.astro, coupon/[id].astro,
  *   deal/[id].astro, error-pages/[code].astro + error-pages/template.astro,
- *   redeem-unavailable.astro, robots.txt.ts, search.astro, sitemap.xml.ts,
- *   stores.astro
+ *   redeem-unavailable.astro, robots.txt.ts, search.astro,
+ *   sitemap_index.xml.ts + sitemap/[shard].xml.ts, stores.astro
  * (index.astro is the root and [...slug].astro is the entity catch-all itself,
  * so neither reserves a segment.)
  */
@@ -98,7 +98,8 @@ const RESERVED_ROUTE_SEGMENTS = new Map<string, string>([
   ['redeem-unavailable', 'the redeem fallback page (src/pages/redeem-unavailable.astro)'],
   ['robots.txt', 'the robots.txt route (src/pages/robots.txt.ts)'],
   ['search', 'the search page (src/pages/search.astro)'],
-  ['sitemap.xml', 'the sitemap route (src/pages/sitemap.xml.ts)'],
+  ['sitemap', 'the sitemap shard namespace (src/pages/sitemap/[shard].xml.ts)'],
+  ['sitemap_index.xml', 'the sitemap index route (src/pages/sitemap_index.xml.ts)'],
   ['stores', 'the store listing page (src/pages/stores.astro)'],
 ]);
 
