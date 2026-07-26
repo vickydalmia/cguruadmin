@@ -28,6 +28,7 @@ describe('preDeleteScope failure escalation', () => {
     ).resolves.toEqual({
       slugs: ['coupon/41', 'amazon'],
       homepage: true,
+      sitemap: true,
       refreshScopes: ['routes'],
     });
   });
@@ -106,6 +107,7 @@ describe('deal-of-the-day landing page scope', () => {
     ).resolves.toEqual({
       slugs: ['deal/42', 'amazon', 'deal-of-the-day'],
       homepage: true,
+      sitemap: true,
       refreshScopes: ['routes'],
     });
   });
@@ -124,6 +126,7 @@ describe('deal-of-the-day landing page scope', () => {
     ).resolves.toEqual({
       slugs: ['deal/42', 'deal-of-the-day'],
       homepage: true,
+      sitemap: true,
       refreshScopes: ['routes'],
     });
   });
@@ -136,6 +139,7 @@ describe('deal-of-the-day landing page scope', () => {
     ).resolves.toEqual({
       slugs: ['coupon/42', 'amazon'],
       homepage: true,
+      sitemap: true,
       refreshScopes: ['routes'],
     });
   });
@@ -154,6 +158,7 @@ describe('deal-of-the-day landing page scope', () => {
     ).resolves.toEqual({
       slugs: ['coupon/73'],
       homepage: true,
+      sitemap: true,
       refreshScopes: ['routes'],
     });
   });
@@ -194,6 +199,7 @@ describe('deal-of-the-day landing page scope', () => {
     ).resolves.toEqual({
       slugs: ['coupon/77', 'amazon', 'electronics'],
       homepage: true,
+      sitemap: true,
       refreshScopes: ['routes'],
     });
     expect(findMany).toHaveBeenCalledTimes(4);
@@ -225,6 +231,7 @@ describe('deal-of-the-day landing page scope', () => {
     ).resolves.toEqual({
       slugs: ['deal/88', 'samsung', 'hdfc', 'deal-of-the-day'],
       homepage: true,
+      sitemap: true,
       refreshScopes: ['routes'],
     });
     expect(findMany).toHaveBeenCalledTimes(4);
@@ -252,6 +259,7 @@ describe('deal-of-the-day landing page scope', () => {
     ).resolves.toEqual({
       slugs: ['coupon/91', 'hdfc'],
       homepage: true,
+      sitemap: true,
       refreshScopes: ['routes'],
     });
   });
@@ -263,6 +271,7 @@ describe('deal-of-the-day landing page scope', () => {
     ).resolves.toEqual({
       slugs: ['deal/42', 'amazon', 'deal-of-the-day'],
       homepage: true,
+      sitemap: true,
       refreshScopes: ['routes'],
     });
   });

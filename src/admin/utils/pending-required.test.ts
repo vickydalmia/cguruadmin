@@ -8,7 +8,7 @@ const storeSchema = {
     shortDescription: { type: 'text', required: true },
     logo: { type: 'media', required: true },
     logoAlt: { type: 'string', required: true },
-    websiteUrl: { type: 'string', required: true },
+    websiteUrl: { type: 'string' },
     ratingAverage: { type: 'decimal' },
     seo: { type: 'component', component: 'shared.seo', repeatable: false },
     faqs: { type: 'component', component: 'shared.faq-item', repeatable: true },
@@ -58,15 +58,13 @@ describe('pendingRequiredFields', () => {
       ['shortDescription'],
       ['logo'],
       ['logoAlt'],
-      ['websiteUrl'],
       ['seo', 'metaTitle'],
       ['seo', 'metaDescription'],
     ]);
   });
 
-  // The exact legacy shape in this database: everything filled except the URL.
-  it('reports the one missing field on an otherwise-clean row', () => {
-    expect(paths({ ...completeStore, websiteUrl: null })).toEqual([['websiteUrl']]);
+  it('does not report an optional website URL', () => {
+    expect(paths({ ...completeStore, websiteUrl: null })).toEqual([]);
   });
 
   it('treats whitespace-only text as missing', () => {

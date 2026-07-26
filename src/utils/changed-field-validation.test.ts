@@ -39,7 +39,7 @@ describe('validateChangedFields', () => {
       documentId: 'store-1',
       name: '<Legacy>',
       slug: 'Stores/Amazon',
-      shortDescription: 'x'.repeat(321),
+      shortDescription: 'x'.repeat(159),
       websiteUrl: 'amazon',
       seo: {
         metaTitle: 'x'.repeat(71),
@@ -89,6 +89,57 @@ describe('validateChangedFields', () => {
         'store-1',
       ),
     ).resolves.toBeUndefined();
+  });
+
+  it.each([
+    'api::store.store',
+    'api::brand.brand',
+    'api::category.category',
+    'api::bank.bank',
+  ])('requires a 160-character short description for %s', async (uid) => {
+    const { strapi } = harness();
+
+    await expect(
+      validateChangedFields(strapi, uid, 'create', {
+        shortDescription: 'x'.repeat(159),
+      }),
+    ).rejects.toMatchObject({
+      details: {
+        errors: [
+          expect.objectContaining({ path: ['shortDescription'] }),
+        ],
+      },
+    });
+
+    await expect(
+      validateChangedFields(strapi, uid, 'create', {
+        shortDescription: 'x'.repeat(160),
+      }),
+    ).resolves.toBeUndefined();
+
+    await expect(
+      validateChangedFields(strapi, uid, 'create', {
+        shortDescription: 'x'.repeat(500),
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('allows an entity website URL to be omitted but validates one when supplied', async () => {
+    const { strapi } = harness();
+
+    for (const websiteUrl of [undefined, null, '']) {
+      await expect(
+        validateChangedFields(strapi, 'api::store.store', 'create', {
+          websiteUrl,
+        }),
+      ).resolves.toBeUndefined();
+    }
+
+    await expect(
+      validateChangedFields(strapi, 'api::store.store', 'create', {
+        websiteUrl: 'amazon',
+      }),
+    ).rejects.toThrow(/Website URL/);
   });
 
   it('compares decimal representations semantically', async () => {
@@ -248,6 +299,50 @@ describe('validateChangedFields', () => {
 });
 
 describe('validateChangedFields — STRICT (clean as you touch)', () => {
+  it('STRICT blocks an unrelated human edit when shortDescription is under 160 characters', async () => {
+    const { strapi } = harness({
+      documentId: 'store-1',
+      name: 'Amazon',
+      shortDescription: 'x'.repeat(159),
+    });
+
+    await expect(
+      validateChangedFields(
+        strapi,
+        'api::store.store',
+        'update',
+        { name: 'Amazon India' },
+        'store-1',
+        true,
+      ),
+    ).rejects.toMatchObject({
+      details: {
+        errors: [
+          expect.objectContaining({ path: ['shortDescription'] }),
+        ],
+      },
+    });
+  });
+
+  it('NON-strict background writes grandfather an untouched short description', async () => {
+    const { strapi } = harness({
+      documentId: 'store-1',
+      name: 'Amazon',
+      shortDescription: 'x'.repeat(159),
+    });
+
+    await expect(
+      validateChangedFields(
+        strapi,
+        'api::store.store',
+        'update',
+        { name: 'Amazon India' },
+        'store-1',
+        false,
+      ),
+    ).resolves.toBeUndefined();
+  });
+
   it('STRICT blocks a dirty untouched field on a human update', async () => {
     const { strapi } = harness({
       documentId: 'store-1',

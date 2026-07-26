@@ -5,9 +5,9 @@
  *
  * WHY THIS EXISTS: `required: true` gets the admin to draw an asterisk and to
  * block a submit, but it says nothing until a submit happens. Most legacy rows
- * here predate the required rules (every entity is missing `websiteUrl`, 205
- * are missing alt text), so an editor opening one has no idea anything is
- * wrong until their save bounces. This turns that into an up-front checklist.
+ * here predate newer required rules (for example, 205 entities are missing alt
+ * text), so an editor opening one has no idea anything is wrong until their
+ * save bounces. This turns that into an up-front checklist.
  *
  * Derived from the SAME schema that draws the asterisk (the content-manager's
  * contentType attributes), never a hardcoded list — a field that gains or

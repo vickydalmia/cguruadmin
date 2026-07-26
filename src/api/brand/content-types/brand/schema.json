@@ -45,7 +45,6 @@
     },
     "websiteUrl": {
       "type": "string",
-      "required": true,
       "regex": "^https?://[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?([.][a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+(:[0-9]{1,5})?([/?#]\\S*)?$",
       "searchable": false
     },

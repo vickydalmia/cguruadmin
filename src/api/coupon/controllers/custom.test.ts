@@ -73,6 +73,7 @@ function createHarness() {
     dealFindOne,
     dealCount,
     entityFindMany,
+    sanitizeQuery,
   };
 }
 
@@ -347,8 +348,67 @@ describe('entity Coupon population', () => {
     expect(entityPopulate.faqs).toBe(true);
     expect(entityPopulate.seo).toEqual({ populate: { ogImage: true } });
     expect(entityPopulate.coupons.fields).toEqual(['documentId']);
-    expect(entityPopulate.topPickCoupons).toMatchObject({
-      fields: expect.arrayContaining(['title', 'couponType', 'affiliateLink']),
+    expect(entityPopulate.topPickCoupons).toEqual({
+      fields: ['documentId'],
+      filters: expect.any(Object),
+    });
+  });
+
+  it('hydrates visible Top Pick Coupons in entity selection order', async () => {
+    const harness = createHarness();
+    // Simulate an authenticated server token whose core Coupon.find scope
+    // makes Strapi remove the nested relation from an entity query. The custom
+    // public endpoint must restore its reviewed ID-only projection.
+    harness.sanitizeQuery.mockImplementation(async (query: any) => {
+      if (!query.populate?.topPickCoupons) return query;
+      const populate = { ...query.populate };
+      delete populate.topPickCoupons;
+      return { ...query, populate };
+    });
+    harness.entityFindMany.mockResolvedValue([
+      {
+        documentId: 'store-amazon',
+        name: 'Amazon',
+        slug: 'amazon-coupons',
+        topPickCoupons: [
+          { documentId: 'coupon-second' },
+          { documentId: 'coupon-first' },
+        ],
+        coupons: [],
+      },
+    ]);
+    harness.couponFindMany.mockResolvedValueOnce([
+      {
+        documentId: 'coupon-first',
+        title: 'First',
+        couponType: 'static',
+        code: 'FIRST',
+      },
+      {
+        documentId: 'coupon-second',
+        title: 'Second',
+        couponType: 'static',
+        code: 'SECOND',
+      },
+    ]);
+
+    const payload = await harness.controller.getCouponsByEntity(
+      harness.ctx as any,
+    );
+
+    expect(payload.store.topPickCoupons.map((coupon: any) => coupon.documentId))
+      .toEqual(['coupon-second', 'coupon-first']);
+    const topPickQuery = harness.couponFindMany.mock.calls[0]?.[0];
+    expect(topPickQuery).toMatchObject({
+      fields: expect.arrayContaining([
+        'title',
+        'couponType',
+        'affiliateLink',
+        'publishedOn',
+      ]),
+      filters: {
+        documentId: { $in: ['coupon-second', 'coupon-first'] },
+      },
       populate: {
         image: true,
         stores: expect.any(Object),
@@ -357,7 +417,39 @@ describe('entity Coupon population', () => {
         brands: expect.any(Object),
         uniqueCouponPool: { fields: ['name'] },
       },
+      limit: 2,
     });
+  });
+
+  it('returns the same hydrated Top Picks from the Deal entity endpoint', async () => {
+    const harness = createHarness();
+    harness.entityFindMany.mockResolvedValue([
+      {
+        documentId: 'store-amazon',
+        name: 'Amazon',
+        slug: 'amazon-coupons',
+        topPickCoupons: [{ documentId: 'coupon-featured' }],
+        deals: [],
+      },
+    ]);
+    harness.couponFindMany.mockResolvedValue([
+      {
+        documentId: 'coupon-featured',
+        title: 'Featured',
+        affiliateLink: 'https://partner.example.com/featured',
+      },
+    ]);
+
+    const payload = await harness.controller.getDealsByEntity(
+      harness.ctx as any,
+    );
+
+    expect(payload.store.topPickCoupons).toEqual([
+      expect.objectContaining({
+        documentId: 'coupon-featured',
+        title: 'Featured',
+      }),
+    ]);
   });
 
   it('returns coupons in the entity relation (drag) order, hydrated by id', async () => {

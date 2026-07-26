@@ -29,17 +29,23 @@ describe('createOutboxPayload', () => {
     expect(payload.paths).not.toContain('/sitemap.xml');
   });
 
-  it('leaves offer edits out of sitemap invalidation', () => {
-    // An offer edit only moves its entity pages' lastmod. Per
-    // docs/seo/sitemap-best-practices.md section 13 those are coalesced rather
-    // than invalidated per edit; the shards ride ISR_PAGE_MAX_AGE_SECONDS.
+  it('invalidates sitemap metadata when an offer changes', () => {
+    // Adding an old offer to an entity changes that entity page now, even when
+    // the offer's publishedOn date is months old. The sitemap index path lets
+    // the gateway expand the invalidation to every live shard.
     const payload = createOutboxPayload({
       slugs: ['amazon-coupons'],
       homepage: true,
+      sitemap: true,
       refreshScopes: ['routes'],
     });
 
-    expect(payload.paths).toEqual(['/', '/amazon-coupons/']);
+    expect(payload.paths).toEqual([
+      '/',
+      '/sitemap_index.xml',
+      '/amazon-coupons/',
+    ]);
+    expect(payload.scopes).toEqual(['routes']);
   });
 
   it('marks global invalidation with route and redirect refresh scopes', () => {

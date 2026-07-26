@@ -70,6 +70,9 @@ const optionalString = (
 const maxLength = (max: number) =>
   optionalString((value) => value.length <= max);
 
+const minLength = (min: number) =>
+  optionalString((value) => value.length >= min);
+
 const topRule = (
   uid: string,
   field: string,
@@ -110,12 +113,14 @@ const TOP_LEVEL_RULES: Rule[] = [
     'Slug may contain lowercase letters, numbers and hyphens only.',
     'Lowercase letters, numbers and hyphens only.',
   ),
-  topRule(
-    'api::store.store',
-    'shortDescription',
-    maxLength(320),
-    'Short description must be at most 320 characters.',
-    'Up to 320 characters.',
+  ...ENTITY_UIDS.map((uid) =>
+    topRule(
+      uid,
+      'shortDescription',
+      minLength(160),
+      'Short description must be at least 160 characters.',
+      'At least 160 characters.',
+    ),
   ),
   ...ENTITY_UIDS.map((uid) =>
     topRule(

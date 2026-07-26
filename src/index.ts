@@ -71,6 +71,10 @@ import {
 } from './utils/text-field-validation';
 import { registerCuratedOfferRelationQueryFilter } from './utils/curated-offer-relations';
 import { ensureTransparentDealImageForWrite } from './utils/deal-image-upload';
+import {
+  changesEntityOfferMembership,
+  touchEntityPageUpdatedAt,
+} from './utils/entity-page-timestamp';
 
 const HIDE_FROM_EDIT: Record<string, string[]> = {
   'api::deal.deal': ['stores', 'brands', 'categories', 'banks'],
@@ -1205,6 +1209,18 @@ export default {
           strapi,
           () => next(),
           async (result) => {
+            if (
+              context.action === 'update' &&
+              changesEntityOfferMembership(context.uid, context.params?.data)
+            ) {
+              await touchEntityPageUpdatedAt(
+                strapi,
+                context.uid,
+                result,
+                context.params?.documentId,
+              );
+            }
+
             if (
               [
                 'api::homepage.homepage',

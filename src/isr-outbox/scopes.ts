@@ -175,6 +175,7 @@ export async function preDeleteScope(
       ? {
           slugs: withDealLandingSlug(uid, slugs),
           homepage: true,
+          sitemap: true,
           refreshScopes: ['routes'],
         }
       : fallback();
@@ -246,6 +247,7 @@ export async function computeScope(
     return {
       slugs: withDealLandingSlug(uid, slugs),
       homepage: true,
+      sitemap: true,
       refreshScopes: ['routes'],
     };
   }

@@ -889,10 +889,10 @@ const ValidationProblemsPanel: PanelComponent = ({ model }) => {
     };
   }
 
-  // Nothing has been submitted yet. Most rows here predate the required-field
-  // rules (every entity is missing websiteUrl, 205 are missing alt text), so
-  // list what is already missing the moment the record opens — otherwise the
-  // editor only finds out when their save bounces. Skipped while CREATING: an
+  // Nothing has been submitted yet. Many rows here predate newer required-field
+  // rules (205 entities are missing alt text), so list what is already missing
+  // the moment the record opens — otherwise the editor only finds out when
+  // their save bounces. Skipped while CREATING: an
   // empty new form would open with every required field listed as a problem,
   // which reads as broken rather than helpful.
   if (isCreatingEntry) return null;

@@ -280,13 +280,14 @@ const entityPopulate = (entityType: string) => ({
   [entityType === 'category' ? 'icon' : 'logo']: true,
   faqs: true,
   seo: { populate: { ogImage: true } },
-  // Each entity may curate up to four Coupon-schema Top Picks. The write-time
-  // validator enforces the cap; visibility filtering removes stale selections
-  // before the frontend decides whether the two-Coupon fallback is needed.
+  // Read only the ordered IDs here. The selected Coupons are hydrated through
+  // the custom endpoint's explicit public projection after the base entity is
+  // sanitized; otherwise an API token without core Coupon.find permission can
+  // silently strip this nested relation while leaving scalar entity edits
+  // visible.
   topPickCoupons: {
-    fields: COUPON_PUBLIC_FIELDS,
+    fields: ['documentId'],
     filters: visibilityFilters(),
-    populate: COUPON_PUBLIC_POPULATE,
   },
 });
 
@@ -327,6 +328,67 @@ async function sanitizeDocumentOutput(
   return (await strapi.contentAPI.sanitize.output(data, schema, {
     auth: ctx.state.auth,
   })) as any;
+}
+
+async function sanitizePublicDocumentQuery(
+  strapi: Core.Strapi,
+  uid: string,
+  query: Record<string, any>,
+) {
+  const schema = contentType(strapi, uid);
+  await strapi.contentAPI.validate.query(query, schema, { auth: undefined });
+  return await strapi.contentAPI.sanitize.query(query, schema, {
+    auth: undefined,
+  });
+}
+
+async function sanitizePublicDocumentOutput(
+  strapi: Core.Strapi,
+  uid: string,
+  data: any,
+) {
+  const schema = contentType(strapi, uid);
+  return (await strapi.contentAPI.sanitize.output(data, schema, {
+    auth: undefined,
+  })) as any;
+}
+
+async function hydrateEntityTopPickCoupons(
+  strapi: Core.Strapi,
+  orderedIds: readonly string[],
+): Promise<any[]> {
+  if (orderedIds.length === 0) return [];
+
+  const query = await sanitizePublicDocumentQuery(
+    strapi,
+    'api::coupon.coupon',
+    {
+      fields: COUPON_PUBLIC_FIELDS,
+      filters: {
+        documentId: { $in: orderedIds },
+        ...visibilityFilters(),
+      },
+      populate: COUPON_PUBLIC_POPULATE,
+      limit: orderedIds.length,
+    },
+  );
+  const fetched = await strapi
+    .documents('api::coupon.coupon')
+    .findMany(query);
+  const byId = new Map(
+    fetched.map((coupon: any) => [coupon.documentId, coupon]),
+  );
+  const ordered = orderedIds
+    .map((documentId) => byId.get(documentId))
+    .filter(Boolean);
+
+  return arrayizeOfferText(
+    await sanitizePublicDocumentOutput(
+      strapi,
+      'api::coupon.coupon',
+      ordered,
+    ),
+  );
 }
 
 // Return an entity's offers with the admin-curated relation (drag) order first
@@ -377,16 +439,45 @@ async function listEntityOffers(
     },
     limit: 1,
   });
+  // `topPickCoupons` is part of this custom public endpoint's reviewed output
+  // contract. Re-apply its safe ID-only populate after auth-aware query
+  // sanitization so an optional server API token cannot change the response
+  // shape by removing the relation.
+  const sanitizedPopulate =
+    entityQuery.populate &&
+    typeof entityQuery.populate === 'object' &&
+    !Array.isArray(entityQuery.populate)
+      ? (entityQuery.populate as Record<string, any>)
+      : {};
+  entityQuery.populate = {
+    ...sanitizedPopulate,
+    topPickCoupons: {
+      fields: ['documentId'],
+      filters: visibilityFilters(),
+    },
+  };
   const entity = (await strapi.documents(apiId as any).findMany(entityQuery))[0];
   if (!entity) return null;
 
+  const topPickIds: string[] = (
+    Array.isArray(entity.topPickCoupons) ? entity.topPickCoupons : []
+  )
+    .map((coupon: any) => coupon?.documentId)
+    .filter(Boolean)
+    .slice(0, 4);
   const orderedIds: string[] = (Array.isArray(entity[relationField]) ? entity[relationField] : [])
     .map((offer: any) => offer?.documentId)
     .filter(Boolean)
     .slice(0, CURATED_HEAD_LIMIT);
-  // Strip the (potentially large) id-only relation before sanitizing for output.
+  // Strip ID-only relations before sanitizing for output. Top Picks are
+  // attached from their separately sanitized public Coupon projection.
   delete entity[relationField];
+  delete entity.topPickCoupons;
   const sanitizedEntity = await sanitizeDocumentOutput(strapi, ctx, apiId, entity);
+  sanitizedEntity.topPickCoupons = await hydrateEntityTopPickCoupons(
+    strapi,
+    topPickIds,
+  );
 
   // True membership (superset of the ordered relation for Store deals). The
   // "rest" is everything that belongs to the entity but is NOT in the drag

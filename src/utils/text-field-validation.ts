@@ -122,13 +122,10 @@ export const TEXT_FIELD_UIDS = [
  * is sufficient for a relation-like attribute). Brand `shortDescription` IS
  * listed, because its schema `required: true` does not catch "".
  *
- * NOTE ON WEBSITE URL: `websiteUrl` is `requiredNonBlank` on all four taxonomy
- * types, and was empty on EVERY row when that was turned on (4,347 stores, 956
- * brands, 128 categories, 25 banks). Nothing was bulk-migrated: the
- * clean-as-you-touch rule (strict === human write, see write-origin.ts) means
- * each entity needs a URL the first time an editor saves it, and background
- * writes stay grandfathered. Expect that first save to fail until the URL is
- * filled in — that is the intended behaviour, not a regression.
+ * NOTE ON WEBSITE URL: `websiteUrl` is optional on all four taxonomy types.
+ * Keep it in this table so pasted values are trimmed consistently; the URL
+ * shape validator in changed-field-validation.ts still rejects malformed
+ * non-empty values.
  */
 export const TEXT_FIELD_RULES: readonly TextFieldRule[] = [
   // --- Coupon -------------------------------------------------------------
@@ -172,13 +169,13 @@ export const TEXT_FIELD_RULES: readonly TextFieldRule[] = [
   // Alt text is the accessible name for the logo — a missing one ships an
   // unlabelled image to every store card and page header.
   { uid: STORE_UID, field: 'logoAlt', label: 'Logo alt text', kind: 'string', requiredNonBlank: true, collapse: true },
-  { uid: STORE_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string', requiredNonBlank: true },
+  { uid: STORE_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string' },
 
   // --- Brand --------------------------------------------------------------
   { uid: BRAND_UID, field: 'name', label: 'Name', kind: 'string', requiredNonBlank: true, collapse: true },
   { uid: BRAND_UID, field: 'shortDescription', label: 'Short description', kind: 'text', requiredNonBlank: true },
   { uid: BRAND_UID, field: 'logoAlt', label: 'Logo alt text', kind: 'string', requiredNonBlank: true, collapse: true },
-  { uid: BRAND_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string', requiredNonBlank: true },
+  { uid: BRAND_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string' },
 
   // --- Category -----------------------------------------------------------
   // Category's media field is `icon`, not `logo`, and `iconAlt` was added
@@ -187,7 +184,7 @@ export const TEXT_FIELD_RULES: readonly TextFieldRule[] = [
   { uid: CATEGORY_UID, field: 'shortDescription', label: 'Short description', kind: 'text', requiredNonBlank: true },
   { uid: CATEGORY_UID, field: 'icon', label: 'Icon', kind: 'media', requiredNonBlank: true },
   { uid: CATEGORY_UID, field: 'iconAlt', label: 'Icon alt text', kind: 'string', requiredNonBlank: true, collapse: true },
-  { uid: CATEGORY_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string', requiredNonBlank: true },
+  { uid: CATEGORY_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string' },
   { uid: CATEGORY_UID, field: 'metaTitle', label: 'SEO title', kind: 'string', container: 'seo', requiredNonBlank: true, collapse: true },
   { uid: CATEGORY_UID, field: 'metaDescription', label: 'SEO description', kind: 'text', container: 'seo', requiredNonBlank: true },
 
@@ -196,7 +193,7 @@ export const TEXT_FIELD_RULES: readonly TextFieldRule[] = [
   { uid: BANK_UID, field: 'shortDescription', label: 'Short description', kind: 'text', requiredNonBlank: true },
   { uid: BANK_UID, field: 'logo', label: 'Logo', kind: 'media', requiredNonBlank: true },
   { uid: BANK_UID, field: 'logoAlt', label: 'Logo alt text', kind: 'string', requiredNonBlank: true, collapse: true },
-  { uid: BANK_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string', requiredNonBlank: true },
+  { uid: BANK_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string' },
   { uid: BANK_UID, field: 'metaTitle', label: 'SEO title', kind: 'string', container: 'seo', requiredNonBlank: true, collapse: true },
   { uid: BANK_UID, field: 'metaDescription', label: 'SEO description', kind: 'text', container: 'seo', requiredNonBlank: true },
 ];

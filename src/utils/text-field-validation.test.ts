@@ -296,6 +296,15 @@ describe('validateTextFields — required fields', () => {
     )).toEqual([['shortDescription']]);
   });
 
+  it.each([STORE, BRAND, CATEGORY, BANK])(
+    'allows %s to omit its optional website URL',
+    (uid) => {
+      expect(() =>
+        validateTextFields(uid, 'update', { websiteUrl: '   ' })
+      ).not.toThrow();
+    },
+  );
+
   it('does not duplicate brand SEO (owned by entity-field-validation)', () => {
     expect(() =>
       validateTextFields(BRAND, 'update', { seo: {} })
