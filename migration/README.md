@@ -129,6 +129,14 @@ npm run migrate -- --phase 03-taxonomies --resume-from-term 4234
 # Continue phases 08a–15 when individual Deals fail. Phases 08 and 12 remain
 # uncheckpointed when affected so those Deals are retried on the next run.
 npm run migrate -- --allow-partial-deals
+
+# After a partial Phase 08 run, continue from Phase 12 without rerunning
+# Phase 08 or making another background-removal API attempt.
+npm run migrate -- --phase 12-offer-backfill --allow-partial-deals
+npm run migrate -- --phase 13-site-content
+npm run migrate -- --phase 13a-homepage-offer-sections
+npm run migrate -- --phase 14-media-optimize
+npm run migrate -- --phase 15-media-formats-backfill
 ```
 
 `--allow-partial-deals` is an explicit recovery mode. Strict fail-fast
@@ -163,6 +171,34 @@ migration normally to retry them.
 > with `--resume-from-term <term_id>`. The named term is processed again
 > because its entity row may have been inserted before media or components
 > failed. This flag is rejected with `--clean`.
+
+### S3 scan versus deletion logs
+
+These messages are read-only availability checks. They do **not** delete AWS
+objects:
+
+```text
+S3 media delta: indexing existing objects under uploads/...
+S3 media delta progress: page=1, indexed=1000, more=yes
+S3 media delta: indexed 9590 existing object(s) under uploads/
+Deal image availability progress: 100/748 checked
+```
+
+AWS deletion is limited to explicit cleanup paths and uses clearly different
+messages:
+
+- `--clean` alone logs `Preserved media records and S3 objects...` and does
+  not delete media.
+- `--clean --delete-media` logs `--delete-media specified...`,
+  `Clearing S3 bucket ...`, and finally
+  `S3 cleanup complete: N objects deleted`. It refuses to clear an empty
+  `S3_ROOT_PATH`, preventing a whole-bucket deletion.
+- Phase 08a deletes an old opaque Deal image only after its transparent
+  replacement is linked and the old file has no remaining references. Its
+  progress is logged as `[deal-image cleanup ...] deleted=N, retained=N`.
+- Phase 14 may delete a superseded JPEG/PNG master after the replacement WebP
+  and database update succeed. Its summary reports `deleted old objects=N`.
+  Pass `--keep-originals` to disable those Phase 14 deletions.
 
 If Phase 06 is interrupted, keep the Phase 05 checkpoint and ID-map files and
 restart only the code phase:
