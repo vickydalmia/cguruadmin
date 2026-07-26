@@ -125,7 +125,17 @@ npm run migrate -- --clean --phase 05-pools
 
 # Resume an interrupted taxonomy phase at the failed term (inclusive)
 npm run migrate -- --phase 03-taxonomies --resume-from-term 4234
+
+# Continue phases 08a–15 when individual Deals fail. Phases 08 and 12 remain
+# uncheckpointed when affected so those Deals are retried on the next run.
+npm run migrate -- --allow-partial-deals
 ```
+
+`--allow-partial-deals` is an explicit recovery mode. Strict fail-fast
+behavior remains the default. The failed WordPress post IDs stay visible in
+the error log, later phases continue, and affected Deal-dependent phases
+deliberately receive no checkpoint. After fixing the reported Deals, run the
+migration normally to retry them.
 
 > ⚠️ **`--clean` is destructive — it is a full reset, not a checkpoint reset.**
 > Before any phase runs it deletes the checkpoint files, deletes **all six ID

@@ -190,26 +190,44 @@ export async function runDealImageBackgroundBackfill(): Promise<void> {
      JOIN files f ON f.id = relation.file_id
      ORDER BY d.id`,
   );
+  logger.info(
+    `Deal image backfill: loaded ${rows.length} relation(s); ` +
+      `checking processor version and S3 availability`,
+  );
   const availabilityLimit = pLimit(Math.max(1, config.mediaConcurrency));
+  let availabilityChecked = 0;
   const candidateResults = await Promise.all(
     rows.map((row) =>
       availabilityLimit(async () => {
-        if (row.background_removal_version !== DEAL_IMAGE_PROCESSOR_VERSION) {
-          return { row, repairMissingS3: false };
+        try {
+          if (row.background_removal_version !== DEAL_IMAGE_PROCESSOR_VERSION) {
+            return { row, repairMissingS3: false };
+          }
+          const available = await isStoredFileAvailable({
+            id: row.file_id,
+            name: row.name,
+            hash: row.hash,
+            ext: row.ext,
+            url: row.url,
+            formats: parseJson(row.formats),
+            width: row.width,
+            height: row.height,
+            provider: row.provider,
+            providerMetadata: row.provider_metadata,
+          });
+          return available ? null : { row, repairMissingS3: true };
+        } finally {
+          availabilityChecked += 1;
+          if (
+            availabilityChecked % 100 === 0 ||
+            availabilityChecked === rows.length
+          ) {
+            logger.info(
+              `Deal image availability progress: ` +
+                `${availabilityChecked}/${rows.length} checked`,
+            );
+          }
         }
-        const available = await isStoredFileAvailable({
-          id: row.file_id,
-          name: row.name,
-          hash: row.hash,
-          ext: row.ext,
-          url: row.url,
-          formats: parseJson(row.formats),
-          width: row.width,
-          height: row.height,
-          provider: row.provider,
-          providerMetadata: row.provider_metadata,
-        });
-        return available ? null : { row, repairMissingS3: true };
       }),
     ),
   );

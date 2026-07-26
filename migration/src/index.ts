@@ -31,10 +31,14 @@ import {
   ensureMigrationRegistry,
   migrationRegistryRows,
 } from "./utils/migration-registry.js";
+import {
+  shouldCheckpointPhase,
+  type PhaseOutcome,
+} from "./utils/phase-outcome.js";
 
 interface Phase {
   name: string;
-  fn: () => Promise<void>;
+  fn: () => Promise<void | PhaseOutcome>;
   skipCheckpoint?: boolean;
 }
 
@@ -247,13 +251,19 @@ async function main(): Promise<void> {
       }
 
       const phaseStart = Date.now();
-      await phase.fn();
+      const outcome = await phase.fn();
       const phaseDuration = ((Date.now() - phaseStart) / 1000).toFixed(1);
       logger.info(`${phase.name} completed in ${phaseDuration}s`);
 
       // Save checkpoint and maps after each phase
-      if (!phase.skipCheckpoint) {
+      if (!phase.skipCheckpoint && shouldCheckpointPhase(outcome)) {
         markPhaseComplete(phase.name);
+        saveMaps();
+      } else if (!phase.skipCheckpoint) {
+        logger.warn(
+          `${phase.name} continued without a checkpoint; its partial failures ` +
+            `will be retried on the next migration run`,
+        );
         saveMaps();
       }
     }

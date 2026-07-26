@@ -32,9 +32,14 @@ import { parseDecimal } from "../utils/price.js";
 import { reconcileMigratedOfferInventory } from "../utils/offer-inventory.js";
 import { getWpOfferExpiryRaw } from "../utils/wp-offer-expiry.js";
 import { registerMigratedEntity } from "../utils/migration-registry.js";
+import {
+  allowsPartialDeals,
+  type PhaseOutcome,
+} from "../utils/phase-outcome.js";
 
-export async function runDeals(): Promise<void> {
+export async function runDeals(): Promise<void | PhaseOutcome> {
   logger.info("=== Phase 8: Deals Migration ===");
+  const allowPartial = allowsPartialDeals();
 
   const sourcePosts = await wpQuery<{
     ID: number;
@@ -348,6 +353,14 @@ export async function runDeals(): Promise<void> {
       `${dealImagesReady} ready, ${dealImagesMissing} missing, ${dealImagesFailed} failed`,
   );
   if (failed > 0) {
+    if (allowPartial) {
+      logger.warn(
+        `Continuing after ${failed} Deal import failure(s) because ` +
+          `--allow-partial-deals was provided. Phase 08 will not be ` +
+          `checkpointed, so these Deals are retried on the next run.`,
+      );
+      return { checkpoint: false };
+    }
     throw new Error(
       `${failed} Deal(s) failed import; see the WordPress post IDs above`,
     );

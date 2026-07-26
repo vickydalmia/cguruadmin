@@ -196,6 +196,11 @@ async function getS3KeyIndex(): Promise<Set<string>> {
       ? `${config.s3.rootPath.replace(/^\/+|\/+$/g, "")}/`
       : "";
     let continuationToken: string | undefined;
+    let page = 0;
+    logger.info(
+      `S3 media delta: indexing existing objects under ` +
+        `${prefix || "(bucket root)"}...`,
+    );
     do {
       const response = await getS3Client().send(
         new ListObjectsV2Command({
@@ -204,10 +209,15 @@ async function getS3KeyIndex(): Promise<Set<string>> {
           ContinuationToken: continuationToken,
         })
       );
+      page += 1;
       for (const object of response.Contents ?? []) {
         if (object.Key) keys.add(object.Key);
       }
       continuationToken = response.NextContinuationToken;
+      logger.info(
+        `S3 media delta progress: page=${page}, indexed=${keys.size}, ` +
+          `more=${continuationToken ? "yes" : "no"}`,
+      );
     } while (continuationToken);
     logger.info(
       `S3 media delta: indexed ${keys.size} existing object(s) under ` +

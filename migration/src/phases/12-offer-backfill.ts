@@ -5,6 +5,10 @@ import { ensurePostMapping } from "../utils/id-maps.js";
 import { replaceOfferTaxonomyRelations } from "../utils/offer-relations.js";
 import { logger } from "../utils/logger.js";
 import { parseAcfTermId } from "../utils/acf.js";
+import {
+  allowsPartialDeals,
+  type PhaseOutcome,
+} from "../utils/phase-outcome.js";
 
 /**
  * Phase 12 — Fold the WordPress ACF `deal_store` postmeta (a store term ID,
@@ -22,8 +26,9 @@ import { parseAcfTermId } from "../utils/acf.js";
  * cleared: stale links disappear and ACF store → Yoast primary → remaining WP
  * term order converges to the same state as a clean phase-08 import.
  */
-export async function runOfferBackfill(): Promise<void> {
+export async function runOfferBackfill(): Promise<void | PhaseOutcome> {
   logger.info("=== Phase 12: Offer Backfill (ACF deal_store → stores taxonomy) ===");
+  const allowPartial = allowsPartialDeals();
 
   // Guard against stale ID maps: if the Strapi tables are empty, the persisted
   // maps belong to a different database (e.g. after switching
@@ -133,13 +138,22 @@ export async function runOfferBackfill(): Promise<void> {
     `Offer backfill complete: ${reconciled} Deal taxonomy set(s) reconciled, ` +
       `${skipped} skipped`,
   );
-  if (skipped > 0) {
+  if (skipped > 0 && !allowPartial) {
     throw new Error(
       `${skipped} Deal taxonomy set(s) failed reconciliation; see the WordPress post IDs above`,
     );
   }
 
   await markLatestStoreCouponsRecommended();
+
+  if (skipped > 0) {
+    logger.warn(
+      `Continuing after ${skipped} Deal taxonomy reconciliation failure(s) because ` +
+        `--allow-partial-deals was provided. Phase 12 will not be checkpointed, ` +
+        `so these Deals are retried on the next run.`,
+    );
+    return { checkpoint: false };
+  }
 }
 
 /**
