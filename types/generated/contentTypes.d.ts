@@ -540,6 +540,8 @@ export interface ApiBankBank extends Struct.CollectionTypeSchema {
       Schema.Attribute.DefaultTo<0>;
     seo: Schema.Attribute.Component<'shared.seo', false>;
     shortDescription: Schema.Attribute.Text & Schema.Attribute.Required;
+    showTrendingDeals: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<true>;
     slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
     topPickCoupons: Schema.Attribute.Relation<
       'manyToMany',
@@ -548,7 +550,7 @@ export interface ApiBankBank extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    websiteUrl: Schema.Attribute.String & Schema.Attribute.Required;
+    websiteUrl: Schema.Attribute.String;
   };
 }
 
@@ -598,6 +600,8 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
       Schema.Attribute.DefaultTo<0>;
     seo: Schema.Attribute.Component<'shared.seo', false>;
     shortDescription: Schema.Attribute.Text & Schema.Attribute.Required;
+    showTrendingDeals: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<true>;
     slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
     topPickCoupons: Schema.Attribute.Relation<
       'manyToMany',
@@ -606,7 +610,7 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    websiteUrl: Schema.Attribute.String & Schema.Attribute.Required;
+    websiteUrl: Schema.Attribute.String;
   };
 }
 
@@ -718,6 +722,8 @@ export interface ApiCategoryCategory extends Struct.CollectionTypeSchema {
       Schema.Attribute.DefaultTo<0>;
     seo: Schema.Attribute.Component<'shared.seo', false>;
     shortDescription: Schema.Attribute.Text & Schema.Attribute.Required;
+    showTrendingDeals: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<true>;
     slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
     topPickCoupons: Schema.Attribute.Relation<
       'manyToMany',
@@ -726,7 +732,7 @@ export interface ApiCategoryCategory extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    websiteUrl: Schema.Attribute.String & Schema.Attribute.Required;
+    websiteUrl: Schema.Attribute.String;
   };
 }
 
@@ -1360,6 +1366,8 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
       Schema.Attribute.DefaultTo<0>;
     seo: Schema.Attribute.Component<'shared.seo', false>;
     shortDescription: Schema.Attribute.Text & Schema.Attribute.Required;
+    showTrendingDeals: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<true>;
     slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
     topPickCoupons: Schema.Attribute.Relation<
       'manyToMany',
@@ -1368,7 +1376,7 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    websiteUrl: Schema.Attribute.String & Schema.Attribute.Required;
+    websiteUrl: Schema.Attribute.String;
   };
 }
 

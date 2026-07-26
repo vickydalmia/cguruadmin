@@ -79,10 +79,13 @@ import {
 const HIDE_FROM_EDIT: Record<string, string[]> = {
   'api::deal.deal': ['stores', 'brands', 'categories', 'banks'],
   'api::coupon.coupon': ['stores', 'brands', 'categories', 'banks'],
-  'api::store.store': ['topPickCoupons'],
-  'api::brand.brand': ['topPickCoupons'],
-  'api::bank.bank': ['topPickCoupons'],
-  'api::category.category': ['topPickCoupons'],
+  // Deal membership is maintained from Deal records and consumed
+  // programmatically by the storefront. It is not an editorial ordering
+  // control, so entity editors only need the visibility switch.
+  'api::store.store': ['deals', 'topPickCoupons'],
+  'api::brand.brand': ['deals', 'topPickCoupons'],
+  'api::bank.bank': ['deals', 'topPickCoupons'],
+  'api::category.category': ['deals', 'topPickCoupons'],
 };
 
 // The offer lifecycle fields are edited ONLY in the Publishing side panel
@@ -483,6 +486,13 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
         'Public URL segment. Must be unique across stores, brands, categories ' +
         'and banks, and must not match a reserved page or an active redirect.',
     },
+    {
+      uid: `api::${name}.${name}`,
+      field: 'showTrendingDeals',
+      hint:
+        'Show automatically selected live Product Deals on this entity page. ' +
+        'Turn this off to hide the entire Trending Deals section.',
+    },
   ]),
 ];
 
@@ -543,6 +553,12 @@ export const CONTENT_TYPE_FIELD_HINTS: Record<string, Record<string, string>> = 
 const CONTENT_TYPE_FIELD_LABELS: Record<string, Record<string, string>> = {
   'api::coupon.coupon': { publishedOn: 'Published date' },
   'api::deal.deal': { publishedOn: 'Published date' },
+  ...Object.fromEntries(
+    ['store', 'brand', 'category', 'bank'].map((name) => [
+      `api::${name}.${name}`,
+      { showTrendingDeals: 'Show Trending Deals' },
+    ]),
+  ),
 };
 
 // Content-type counterpart of ensureComponentFieldDescriptions: pins the

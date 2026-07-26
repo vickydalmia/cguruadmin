@@ -62,6 +62,10 @@
       "type": "boolean",
       "default": false
     },
+    "showTrendingDeals": {
+      "type": "boolean",
+      "default": true
+    },
     "coupons": {
       "type": "relation",
       "relation": "manyToMany",
