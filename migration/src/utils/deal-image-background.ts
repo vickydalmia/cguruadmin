@@ -46,6 +46,12 @@ export async function prepareMigrationDealImage(
     fileName: source.fileName,
     outputDirectory: DEAL_IMAGE_ARCHIVE_DIR,
     permanent: true,
+    // Phase 08a historically archived the optimized Strapi representation,
+    // while Phase 08 reads the original WordPress bytes. The picture and
+    // original filename are stable, but the byte hashes differ. This
+    // migration-only bridge reuses one unambiguous legacy filename match and
+    // aliases it under the current source hash instead of paying FAL twice.
+    allowLegacyFileNameArchive: true,
     falKey: config.fal.key,
     timeoutMs: config.fal.timeoutMs,
     maxAttempts: config.fal.maxAttempts,

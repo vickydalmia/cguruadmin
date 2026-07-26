@@ -142,6 +142,112 @@ describe('prepareTransparentDealImage', () => {
     expect(reused.png).toEqual(output);
   });
 
+  it('reuses a legacy source-hash archive after the source filename changes', async () => {
+    const directory = await temporaryDirectory();
+    const source = await opaqueJpeg();
+    const output = await transparentPng();
+    let calls = 0;
+    const first = await prepareTransparentDealImage({
+      source,
+      sourceMime: 'image/jpeg',
+      fileName: 'Original Product Name.jpg',
+      outputDirectory: directory,
+      permanent: true,
+      removeBackground: async () => {
+        calls += 1;
+        return { png: output };
+      },
+    });
+    const sourceHash = path.basename(first.pngPath, '.png');
+    const legacyPath = path.join(
+      directory,
+      `${sourceHash}-original-product-name.png`,
+    );
+    await fs.rename(first.pngPath, legacyPath);
+
+    const reused = await prepareTransparentDealImage({
+      source,
+      sourceMime: 'image/jpeg',
+      fileName: 'Renamed Product.jpg',
+      outputDirectory: directory,
+      permanent: true,
+      removeBackground: async () => {
+        calls += 1;
+        return { png: output };
+      },
+    });
+
+    expect(calls).toBe(1);
+    expect(reused.reusedArchive).toBe(true);
+    expect(reused.pngPath).toBe(legacyPath);
+    expect(reused.png).toEqual(output);
+  });
+
+  it('allows migration to alias one legacy filename match under a new source hash', async () => {
+    const directory = await temporaryDirectory();
+    const oldSource = await opaqueJpeg();
+    const newSource = await sharp(oldSource).png().toBuffer();
+    const output = await transparentPng();
+    const old = await prepareTransparentDealImage({
+      source: oldSource,
+      sourceMime: 'image/jpeg',
+      fileName: 'Stable Product.jpg',
+      outputDirectory: directory,
+      permanent: true,
+      removeBackground: async () => ({ png: output }),
+    });
+    const legacyPath = path.join(
+      directory,
+      `${path.basename(old.pngPath, '.png')}-stable-product.png`,
+    );
+    await fs.rename(old.pngPath, legacyPath);
+    let providerCalls = 0;
+
+    const reused = await prepareTransparentDealImage({
+      source: newSource,
+      sourceMime: 'image/png',
+      fileName: 'Stable Product.jpg',
+      outputDirectory: directory,
+      permanent: true,
+      allowLegacyFileNameArchive: true,
+      removeBackground: async () => {
+        providerCalls += 1;
+        return { png: output };
+      },
+    });
+
+    expect(providerCalls).toBe(0);
+    expect(reused.reusedArchive).toBe(true);
+    expect(reused.pngPath).not.toBe(legacyPath);
+    expect(await fs.readFile(reused.pngPath)).toEqual(output);
+  });
+
+  it('does not use an ambiguous legacy filename match', async () => {
+    const directory = await temporaryDirectory();
+    const source = await opaqueJpeg();
+    const output = await transparentPng();
+    await Promise.all([
+      fs.writeFile(path.join(directory, `old-a-same-name.png`), output),
+      fs.writeFile(path.join(directory, `old-b-same-name.png`), output),
+    ]);
+    let providerCalls = 0;
+
+    await prepareTransparentDealImage({
+      source,
+      sourceMime: 'image/jpeg',
+      fileName: 'Same Name.jpg',
+      outputDirectory: directory,
+      permanent: true,
+      allowLegacyFileNameArchive: true,
+      removeBackground: async () => {
+        providerCalls += 1;
+        return { png: output };
+      },
+    });
+
+    expect(providerCalls).toBe(1);
+  });
+
   it('rejects an opaque provider result and does not create an archive', async () => {
     const directory = await temporaryDirectory();
     const source = await opaqueJpeg();
@@ -201,6 +307,22 @@ describe('classifyFalError', () => {
       code: 'BACKGROUND_REMOVAL_CREDITS_EXHAUSTED',
       retryable: false,
       providerRequestId: 'fal-credit-request',
+    });
+  });
+
+  it('reads exhausted-credit details from a forbidden provider body', () => {
+    const error = classifyFalError(
+      new ApiError({
+        message: 'Forbidden',
+        status: 403,
+        body: { detail: 'Spending limit exhausted' },
+        requestId: 'fal-spend-limit-request',
+      }),
+    );
+    expect(error).toMatchObject({
+      code: 'BACKGROUND_REMOVAL_CREDITS_EXHAUSTED',
+      retryable: false,
+      providerRequestId: 'fal-spend-limit-request',
     });
   });
 

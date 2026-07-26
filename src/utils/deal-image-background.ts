@@ -155,6 +155,13 @@ export interface PrepareTransparentDealImageOptions {
   fileName: string;
   outputDirectory: string;
   permanent: boolean;
+  /**
+   * Migration-only bridge for archives created from a differently encoded
+   * copy of the same WordPress attachment. Normal uploads must remain
+   * content-hash-only so replacing bytes under the same name cannot reuse a
+   * stale transparent image.
+   */
+  allowLegacyFileNameArchive?: boolean;
   falKey?: string;
   timeoutMs?: number;
   maxAttempts?: number;
@@ -259,6 +266,16 @@ function providerRequestId(error: unknown): string | undefined {
 }
 
 function providerMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    let body = '';
+    try {
+      body = JSON.stringify(error.body);
+    } catch {
+      // The provider body is diagnostic input only; classification can still
+      // fall back to the public error message when it is not serializable.
+    }
+    return `${error.message} ${body}`.toLowerCase();
+  }
   if (error instanceof Error) return error.message.toLowerCase();
   return String(error).toLowerCase();
 }
@@ -274,7 +291,9 @@ export function classifyFalError(error: unknown): DealImageProcessingError {
 
   if (
     status === 402 ||
-    /insufficient|credit|balance|quota|billing|payment/.test(message)
+    /insufficient|credit|balance|quota|billing|payment|spend(?:ing)?|exhausted|funds/.test(
+      message,
+    )
   ) {
     return new DealImageProcessingError(
       'BACKGROUND_REMOVAL_CREDITS_EXHAUSTED',
@@ -438,6 +457,71 @@ async function atomicWrite(filePath: string, bytes: Buffer): Promise<void> {
   }
 }
 
+async function readValidPermanentArchive(
+  outputDirectory: string,
+  sourceHash: string,
+  fileName: string,
+  allowLegacyFileNameArchive: boolean,
+): Promise<{
+  png: Buffer;
+  pngPath: string;
+  width: number;
+  height: number;
+  matchedSourceHash: boolean;
+} | null> {
+  let names: string[];
+  try {
+    names = await fs.readdir(outputDirectory);
+  } catch (error: any) {
+    if (error?.code === 'ENOENT') return null;
+    throw new DealImageProcessingError('DEAL_IMAGE_ARCHIVE_WRITE_FAILED', {
+      cause: error,
+    });
+  }
+
+  const canonicalName = `${sourceHash}.png`;
+  const hashCandidates = [
+    canonicalName,
+    ...names
+      .filter(
+        (name) =>
+          name.startsWith(`${sourceHash}-`) &&
+          name.toLowerCase().endsWith('.png'),
+      )
+      .sort(),
+  ];
+  const legacySuffix = `-${safeFileStem(fileName)}.png`;
+  const legacyNameCandidates = allowLegacyFileNameArchive
+    ? names.filter((name) => name.endsWith(legacySuffix)).sort()
+    : [];
+  const candidates = [
+    ...[...new Set(hashCandidates)].map((name) => ({
+      name,
+      matchedSourceHash: true,
+    })),
+    ...(legacyNameCandidates.length === 1
+      ? [{ name: legacyNameCandidates[0]!, matchedSourceHash: false }]
+      : []),
+  ];
+  for (const { name, matchedSourceHash } of candidates) {
+    const candidatePath = path.join(outputDirectory, name);
+    try {
+      const png = await fs.readFile(candidatePath);
+      const dimensions = await validateTransparentDealPng(png);
+      return {
+        png,
+        pngPath: candidatePath,
+        ...dimensions,
+        matchedSourceHash,
+      };
+    } catch (error: any) {
+      if (error?.code === 'ENOENT') continue;
+      await fs.rm(candidatePath, { force: true }).catch(() => undefined);
+    }
+  }
+  return null;
+}
+
 export async function prepareTransparentDealImage(
   options: PrepareTransparentDealImageOptions,
 ): Promise<PreparedTransparentDealImage> {
@@ -445,10 +529,9 @@ export async function prepareTransparentDealImage(
   const suffix = options.permanent
     ? ''
     : `-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
-  const pngPath = path.join(
-    options.outputDirectory,
-    `${sourceHash}-${safeFileStem(options.fileName)}${suffix}.png`,
-  );
+  const pngPath = path.join(options.outputDirectory, options.permanent
+    ? `${sourceHash}.png`
+    : `${sourceHash}-${safeFileStem(options.fileName)}${suffix}.png`);
 
   try {
     await fs.mkdir(options.outputDirectory, { recursive: true });
@@ -459,21 +542,27 @@ export async function prepareTransparentDealImage(
   }
 
   if (options.permanent) {
-    try {
-      const archived = await fs.readFile(pngPath);
-      const dimensions = await validateTransparentDealPng(archived);
+    const archived = await readValidPermanentArchive(
+      options.outputDirectory,
+      sourceHash,
+      options.fileName,
+      options.allowLegacyFileNameArchive ?? false,
+    );
+    if (archived) {
+      let archivedPath = archived.pngPath;
+      if (!archived.matchedSourceHash) {
+        await atomicWrite(pngPath, archived.png);
+        archivedPath = pngPath;
+      }
       return {
-        png: archived,
-        pngPath,
+        png: archived.png,
+        pngPath: archivedPath,
         sourceHash,
-        ...dimensions,
+        width: archived.width,
+        height: archived.height,
         reusedArchive: true,
         skippedProvider: true,
       };
-    } catch (error: any) {
-      if (error?.code !== 'ENOENT') {
-        await fs.rm(pngPath, { force: true }).catch(() => undefined);
-      }
     }
   }
 
