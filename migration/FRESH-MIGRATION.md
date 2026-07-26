@@ -67,20 +67,21 @@ where it stopped. To re-run one phase against existing data, use
 
 > 🛑 **`yarn migrate:fresh` is `tsx src/index.ts --clean` — the most
 > destructive command in this repo. It is not a checkpoint reset.** Against
-> whatever `PG_CONNECTION_STRING` and `S3_BUCKET` point at, and with no
-> confirmation prompt, it deletes:
+> whatever `PG_CONNECTION_STRING` points at, and with no confirmation prompt,
+> it deletes:
 
 | # | What | Detail |
 |---|---|---|
 | 1 | Checkpoint files | `.checkpoints/*.json` — every phase becomes eligible again |
 | 2 | **All six ID map files** | `termIdMap` / `postIdMap` / `mediaIdMap` / `poolIdMap` / `poolNameMap` / `userIdMap` `.json` are unlinked from disk (`clearAllMaps()`). Relationship data from earlier phases is **not** retained |
-| 3 | Every migrated table | `TRUNCATE … RESTART IDENTITY CASCADE` over the explicit list in [`src/index.ts`](./src/index.ts) — coupons, deals, stores, brands, categories, banks, unique pools/codes, `files`, all link tables, all `components_*` tables — **plus** every `*_cmps` / `*_lnk` table auto-discovered from `information_schema` under the owned-prefix allowlist |
+| 3 | Every migrated non-media table | `TRUNCATE … RESTART IDENTITY CASCADE` over the explicit list in [`src/index.ts`](./src/index.ts) — coupons, deals, stores, brands, categories, banks, unique pools/codes, all link tables, all `components_*` tables — **plus** every `*_cmps` / `*_lnk` table auto-discovered from `information_schema` under the owned-prefix allowlist. The `files` table is preserved so its hashes can reuse existing media |
 | 4 | **The four singles** | `homepages`, `menus`, `footers`, `globals` and their component join tables are in that truncate list. A "fresh" run therefore wipes the curated homepage, menu, footer and global settings, and phase 13 reseeds them from WordPress |
 | 5 | Migration-created admin users | `admin_users` rows owned by `migration_source_entities` (phase 06a's accounts) and their role links. Accounts created by hand in the admin — including the super admin — survive |
-| 6 | **The whole S3 prefix** | `clearS3Bucket()` deletes every object under `S3_ROOT_PATH/` in `S3_BUCKET`. It refuses to run when `S3_ROOT_PATH` is empty (that would empty the entire bucket) and is skipped when S3 is not configured |
+| 6 | Media only with `--delete-media` | Ordinary `--clean` preserves the `files` table and all S3 objects. Reuse verifies each retained AWS master in S3 and regenerates only a missing object. `yarn migrate:fresh --delete-media` also truncates `files`, then `clearS3Bucket()` deletes every object under `S3_ROOT_PATH/` in `S3_BUCKET`. It refuses an empty `S3_ROOT_PATH`, and `--delete-media` is rejected unless paired with `--clean` |
 
-> Only the admin-user step and the S3 prefix guard are scoped. Nothing else is
-> reversible without a database backup. On a live catalog, take one first.
+> Only the admin-user step and optional S3 deletion guard are scoped. Nothing
+> else is reversible without a database backup. On a live catalog, take one
+> first.
 
 ### Phase order
 

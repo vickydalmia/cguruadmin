@@ -18,6 +18,7 @@ import {
   generateStrapiFormats,
   slugifyFileName,
 } from "../utils/image-optimizer.js";
+import { mediaSourceResolution } from "../utils/media-source-candidates.js";
 
 // The application owns the algorithm; the migration imports it dynamically
 // because cguruadmin is CommonJS while this package runs as ESM under tsx.
@@ -80,10 +81,17 @@ async function getImageDimensions(
 /** Everything content rewriting needs to point at an uploaded file. */
 export interface UploadedFileRecord {
   id: number;
+  name?: string;
+  hash?: string;
+  ext?: string;
   url: string;
   formats: Record<string, any> | null;
   width: number | null;
   height: number | null;
+  /** Present for records loaded by the migration uploader; optional for
+   * callers that only need responsive-image fields. */
+  provider?: string;
+  providerMetadata?: unknown;
 }
 
 function parseFormats(value: unknown): Record<string, any> | null {
@@ -124,24 +132,137 @@ export async function getFileRecordById(
   if (cached) return cached;
   const rows = await pgQuery<{
     id: number;
+    name: string;
+    hash: string;
+    ext: string;
     url: string;
     formats: unknown;
     width: number | null;
     height: number | null;
-  }>(`SELECT id, url, formats, width, height FROM files WHERE id = $1`, [fileId]);
+    provider: string;
+    provider_metadata: unknown;
+  }>(
+    `SELECT id, name, hash, ext, url, formats, width, height, provider, provider_metadata
+       FROM files
+      WHERE id = $1`,
+    [fileId]
+  );
   if (!rows[0]) return undefined;
   const record: UploadedFileRecord = {
     id: rows[0].id,
+    name: rows[0].name,
+    hash: rows[0].hash,
+    ext: rows[0].ext,
     url: rows[0].url,
     formats: parseFormats(rows[0].formats),
     width: rows[0].width,
     height: rows[0].height,
+    provider: rows[0].provider,
+    providerMetadata: rows[0].provider_metadata,
   };
   fileRecords.set(record.id, record);
   return record;
 }
 
 let uploadStats = { uploaded: 0, skipped: 0, failed: 0 };
+const availabilityByFileId = new Map<number, Promise<boolean>>();
+let s3KeyIndexPromise: Promise<Set<string>> | null = null;
+
+function providerKey(value: unknown): string | null {
+  if (!value) return null;
+  let metadata = value;
+  if (typeof value === "string") {
+    try {
+      metadata = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof metadata !== "object") return null;
+  const key = (metadata as Record<string, unknown>).key;
+  return typeof key === "string" && key.length > 0 ? key : null;
+}
+
+/**
+ * Load the configured migration prefix once. A full paginated LIST is much
+ * cheaper than issuing a sequential HEAD request for every retained file, and
+ * turns the rest of the migration's availability checks into local Set reads.
+ */
+async function getS3KeyIndex(): Promise<Set<string>> {
+  if (s3KeyIndexPromise) return s3KeyIndexPromise;
+  s3KeyIndexPromise = (async () => {
+    const keys = new Set<string>();
+    const prefix = config.s3.rootPath
+      ? `${config.s3.rootPath.replace(/^\/+|\/+$/g, "")}/`
+      : "";
+    let continuationToken: string | undefined;
+    do {
+      const response = await getS3Client().send(
+        new ListObjectsV2Command({
+          Bucket: config.s3.bucket,
+          Prefix: prefix,
+          ContinuationToken: continuationToken,
+        })
+      );
+      for (const object of response.Contents ?? []) {
+        if (object.Key) keys.add(object.Key);
+      }
+      continuationToken = response.NextContinuationToken;
+    } while (continuationToken);
+    logger.info(
+      `S3 media delta: indexed ${keys.size} existing object(s) under ` +
+        `${prefix || "(bucket root)"}`
+    );
+    return keys;
+  })();
+  return s3KeyIndexPromise;
+}
+
+/**
+ * A retained files row is reusable only while its immutable master still
+ * exists in S3. Results are cached because one file can be referenced by many
+ * entities during one migration run.
+ */
+export async function isStoredFileAvailable(
+  record: UploadedFileRecord | undefined
+): Promise<boolean> {
+  if (!record) return false;
+  if (record.provider !== "aws-s3") return true;
+
+  if (!config.s3.bucket || !config.s3.accessKeyId) {
+    // We cannot verify or repair an AWS record without an AWS destination.
+    // Retain the old behavior instead of creating a duplicate local record.
+    return true;
+  }
+
+  const explicitKey = providerKey(record.providerMetadata);
+  const rootPrefix = config.s3.rootPath
+    ? `${config.s3.rootPath.replace(/^\/+|\/+$/g, "")}/`
+    : "";
+  const keyCandidates = explicitKey
+    ? [explicitKey]
+    : record.name && record.hash && record.ext
+      ? mediaSourceResolution(
+          {
+            name: record.name,
+            hash: record.hash,
+            ext: record.ext,
+          },
+          rootPrefix,
+        ).keyCandidates
+      : [];
+  if (keyCandidates.length === 0) return false;
+
+  let task = availabilityByFileId.get(record.id);
+  if (!task) {
+    task = (async () => {
+      const keys = await getS3KeyIndex();
+      return keyCandidates.some((key) => keys.has(key));
+    })();
+    availabilityByFileId.set(record.id, task);
+  }
+  return task;
+}
 
 /**
  * Phase 2 — Preload hash cache only. Actual uploads happen on-demand
@@ -241,16 +362,7 @@ async function doUploadFileFromDisk(
     // One read serves both the hash and the upload body.
     const sourceBytes = fs.readFileSync(filePath);
     const hash = hashBuffer(sourceBytes);
-    let backgroundColour: string | null = null;
-    if (source.mimeType.startsWith("image/")) {
-      try {
-        backgroundColour = await calculateImageBackgroundColour(sourceBytes);
-      } catch (error: any) {
-        logger.warn(
-          `Could not calculate background colour for ${source.fileName}: ${error.message}`
-        );
-      }
-    }
+    let repairExistingId: number | null = null;
 
     if (source.backgroundRemoval) {
       const existing = await pgQuery<{ id: number }>(
@@ -265,9 +377,13 @@ async function doUploadFileFromDisk(
         ],
       );
       if (existing[0]) {
-        uploadStats.skipped++;
-        existingHashes.set(hash, existing[0].id);
-        return getFileRecordById(existing[0].id);
+        const record = await getFileRecordById(existing[0].id);
+        if (await isStoredFileAvailable(record)) {
+          uploadStats.skipped++;
+          existingHashes.set(hash, existing[0].id);
+          return record;
+        }
+        repairExistingId = existing[0].id;
       }
     }
 
@@ -276,6 +392,33 @@ async function doUploadFileFromDisk(
     // still identifies the correct media record safely.
     if (existingHashes.has(hash)) {
       const existingId = existingHashes.get(hash)!;
+      const record = await getFileRecordById(existingId);
+      if (await isStoredFileAvailable(record)) {
+        if (source.backgroundRemoval) {
+          await pgQuery(
+            `UPDATE files
+             SET background_removal_source_hash = $2,
+                 background_removal_version = $3,
+                 background_removed_at = COALESCE(background_removed_at, $4)
+             WHERE id = $1`,
+            [
+              existingId,
+              source.backgroundRemoval.sourceHash,
+              source.backgroundRemoval.version,
+              source.backgroundRemoval.removedAt,
+            ],
+          );
+        }
+        uploadStats.skipped++;
+        return record;
+      }
+      repairExistingId ??= existingId;
+      logger.warn(
+        `Media ${source.fileName} is indexed as file ${repairExistingId} ` +
+          "but its S3 master is missing; regenerating and uploading it"
+      );
+      availabilityByFileId.delete(repairExistingId);
+      fileRecords.delete(repairExistingId);
       if (source.backgroundRemoval) {
         await pgQuery(
           `UPDATE files
@@ -291,8 +434,19 @@ async function doUploadFileFromDisk(
           ],
         );
       }
-      uploadStats.skipped++;
-      return getFileRecordById(existingId);
+    }
+
+    // Do image decoding only for a new or missing S3 object. Retained media
+    // that passed the hash + S3 availability delta above needs no processing.
+    let backgroundColour: string | null = null;
+    if (source.mimeType.startsWith("image/")) {
+      try {
+        backgroundColour = await calculateImageBackgroundColour(sourceBytes);
+      } catch (error: any) {
+        logger.warn(
+          `Could not calculate background colour for ${source.fileName}: ${error.message}`
+        );
+      }
     }
 
     const sourceExt = getExtension(source.fileName);
@@ -420,50 +574,90 @@ async function doUploadFileFromDisk(
       providerMetadata = JSON.stringify({ sourcePath: source.localPath });
     }
 
-    const result = await pgQuery<{ id: number }>(
-      `INSERT INTO files (
-        document_id, name, alternative_text, caption, width, height,
-        formats, ext, mime, size, hash, url, provider, provider_metadata,
-        background_colour, background_removal_source_hash,
-        background_removal_version, background_removed_at,
-        folder_path, created_at, updated_at, published_at
-      ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-        $16, $17, $18, $19, NOW(), NOW(), NOW()
-      ) RETURNING id`,
-      [
-        documentId,
-        source.fileName,
-        source.altText || null,
-        source.caption || null,
-        width,
-        height,
-        formatsJson ? JSON.stringify(formatsJson) : null,
-        ext,
-        mime,
-        parseFloat((sizeInBytes / 1024).toFixed(2)),
-        hash,
-        fileUrl,
-        provider,
-        providerMetadata,
-        backgroundColour,
-        source.backgroundRemoval?.sourceHash ?? null,
-        source.backgroundRemoval?.version ?? null,
-        source.backgroundRemoval?.removedAt ?? null,
-        "/",
-      ]
-    );
+    const fileValues = [
+      documentId,
+      source.fileName,
+      source.altText || null,
+      source.caption || null,
+      width,
+      height,
+      formatsJson ? JSON.stringify(formatsJson) : null,
+      ext,
+      mime,
+      parseFloat((sizeInBytes / 1024).toFixed(2)),
+      hash,
+      fileUrl,
+      provider,
+      providerMetadata,
+      backgroundColour,
+      source.backgroundRemoval?.sourceHash ?? null,
+      source.backgroundRemoval?.version ?? null,
+      source.backgroundRemoval?.removedAt ?? null,
+      "/",
+    ];
+    const result = repairExistingId
+      ? await pgQuery<{ id: number }>(
+          `UPDATE files
+              SET name = $2,
+                  alternative_text = $3,
+                  caption = $4,
+                  width = $5,
+                  height = $6,
+                  formats = $7,
+                  ext = $8,
+                  mime = $9,
+                  size = $10,
+                  hash = $11,
+                  url = $12,
+                  provider = $13,
+                  provider_metadata = $14,
+                  background_colour = $15,
+                  background_removal_source_hash = $16,
+                  background_removal_version = $17,
+                  background_removed_at = $18,
+                  folder_path = $19,
+                  updated_at = NOW(),
+                  published_at = COALESCE(published_at, NOW())
+            WHERE id = $20
+            RETURNING id`,
+          [...fileValues, repairExistingId]
+        )
+      : await pgQuery<{ id: number }>(
+          `INSERT INTO files (
+            document_id, name, alternative_text, caption, width, height,
+            formats, ext, mime, size, hash, url, provider, provider_metadata,
+            background_colour, background_removal_source_hash,
+            background_removal_version, background_removed_at,
+            folder_path, created_at, updated_at, published_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+            $15, $16, $17, $18, $19, NOW(), NOW(), NOW()
+          ) RETURNING id`,
+          fileValues
+        );
 
     const fileId = result[0].id;
     existingHashes.set(hash, fileId);
     const record: UploadedFileRecord = {
       id: fileId,
+      name: source.fileName,
+      hash,
+      ext,
       url: fileUrl,
       formats: formatsJson,
       width,
       height,
+      provider,
+      providerMetadata,
     };
     fileRecords.set(fileId, record);
+    availabilityByFileId.set(fileId, Promise.resolve(true));
+    if (provider === "aws-s3") {
+      const key = providerKey(providerMetadata);
+      if (key && s3KeyIndexPromise) {
+        (await s3KeyIndexPromise).add(key);
+      }
+    }
     uploadStats.uploaded++;
 
     if (uploadStats.uploaded % 100 === 0) {
@@ -485,7 +679,7 @@ export function logMediaUploadStats(): void {
 
 /**
  * Delete all objects under the configured rootPath in the S3 bucket.
- * Called during --clean to avoid orphan files from previous runs.
+ * Called only by the explicit --clean --delete-media path.
  */
 export async function clearS3Bucket(): Promise<void> {
   if (!config.s3.bucket || !config.s3.accessKeyId) {

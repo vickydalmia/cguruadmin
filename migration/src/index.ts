@@ -71,13 +71,21 @@ const phases: Phase[] = [
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const startTime = Date.now();
+  const cleanRequested = args.includes("--clean");
+  const deleteMedia = args.includes("--delete-media");
 
   logger.info("========================================");
   logger.info("CouponzGuru WordPress -> Strapi Migration");
   logger.info("========================================");
 
+  if (deleteMedia && !cleanRequested) {
+    logger.error("--delete-media is only valid together with --clean");
+    process.exitCode = 1;
+    return;
+  }
+
   // Handle --clean flag
-  if (args.includes("--clean")) {
+  if (cleanRequested) {
     clearCheckpoints();
     clearAllMaps();
     // Truncate all migrated data tables (order matters for foreign keys)
@@ -128,9 +136,15 @@ async function main(): Promise<void> {
       "migration_source_entities",
       // Single types (re-seeded by phase 13)
       "homepages", "menus", "footers", "globals",
-      // Media (only migration-created records)
-      "files",
     ];
+    // Media is deliberately retained during a normal --clean run. The files
+    // table is the hash-based reuse index for existing S3 objects; deleting
+    // only the database rows would force every source image to be optimized
+    // and uploaded again even if its immutable object still exists in S3.
+    // Destructive media cleanup therefore requires an explicit second flag.
+    if (deleteMedia) {
+      tablesToTruncate.push("files");
+    }
 
     // Fetch every existing public table once so we can (a) auto-discover the
     // nested component join tables (components_*_cmps) and relation link tables
@@ -201,8 +215,17 @@ async function main(): Promise<void> {
       logger.warn(`Could not clean migrated admin_users: ${err.message}`);
     }
 
-    // Clear S3 bucket to avoid orphan files
-    await clearS3Bucket();
+    if (deleteMedia) {
+      logger.warn(
+        "--delete-media specified: deleting migration media records and S3 objects"
+      );
+      await clearS3Bucket();
+    } else {
+      logger.info(
+        "Preserved media records and S3 objects for hash-based reuse " +
+          "(use --clean --delete-media to remove them)"
+      );
+    }
   }
 
   // Handle --phase flag to run specific phase

@@ -154,9 +154,37 @@ export async function wpQuery<T = any>(
   sql: string,
   params?: any[]
 ): Promise<T[]> {
-  const p = await getWpPool();
-  const [rows] = await p.execute(sql, params);
-  return rows as T[];
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const p = await getWpPool();
+      const [rows] = await p.execute(sql, params);
+      return rows as T[];
+    } catch (error: any) {
+      const code = String(error?.code ?? "");
+      const message = String(error?.message ?? "");
+      const retryable =
+        [
+          "PROTOCOL_CONNECTION_LOST",
+          "ECONNRESET",
+          "ETIMEDOUT",
+          "EPIPE",
+          "ER_SERVER_SHUTDOWN",
+        ].includes(code) ||
+        /connection lost|server closed the connection|read econnreset|socket hang up/i.test(
+          message
+        );
+      if (!retryable || attempt === maxAttempts) throw error;
+
+      const delayMs = 250 * 2 ** (attempt - 1);
+      logger.warn(
+        `WordPress DB connection dropped; retrying read ` +
+          `(attempt ${attempt + 1}/${maxAttempts}) in ${delayMs}ms`
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw new Error("WordPress query retry loop exhausted");
 }
 
 export async function closeWp(): Promise<void> {

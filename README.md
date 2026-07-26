@@ -96,8 +96,10 @@ codes, SEO.
   does internally, data mapping, the media pipeline, idempotency.
 
 ⚠️ `yarn migrate:fresh` (`--clean`) is destructive: it truncates every migrated
-table **including the homepage/menu/footer/global singles**, deletes all ID
-maps, and empties the S3 prefix. Read
+non-media table **including the homepage/menu/footer/global singles** and
+deletes all ID maps, but preserves existing media records and S3 objects so
+images can be reused by hash. Add the explicit `--delete-media` flag only when
+the media records and configured S3 prefix must also be removed. Read
 [What `--clean` destroys](./migration/FRESH-MIGRATION.md#what---clean-destroys)
 before running it against anything you care about.
 

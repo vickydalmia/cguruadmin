@@ -9,8 +9,17 @@ import {
   missingAvifTwinKeys,
   readAvifTombstones,
 } from "../src/utils/format-gaps.js";
-import { parseLimitFlag } from "../src/utils/cli.js";
+import {
+  parseLimitFlag,
+  parseResumeFromTermFlag,
+} from "../src/utils/cli.js";
 import { mediaSourceResolution } from "../src/utils/media-source-candidates.js";
+import {
+  deduplicateSlug,
+  primeSlugTracker,
+  resetSlugTracker,
+} from "../src/utils/slug-dedup.js";
+import { resolveBackfillRemovalTimestamp } from "../src/utils/deal-image-backfill-state.js";
 
 // Phase 15's candidate WHERE is GENERATED from IMAGE_BREAKPOINTS/THUMBNAIL —
 // the same constants expectedFormatKeys derives from — so these drift guards
@@ -149,10 +158,62 @@ test("metadata-less legacy S3 candidates remain distinct per file name", () => {
   );
 
   assert.equal(first.keyCandidates[0], second.keyCandidates[0]);
+  assert.equal(first.keyCandidates[0], "uploads/shared.jpg");
   assert.notEqual(first.keyCandidates[1], second.keyCandidates[1]);
   assert.notEqual(first.groupKey, second.groupKey);
   assert.equal(first.keyCandidates[1], "uploads/shared_Hero One.jpg");
   assert.equal(second.keyCandidates[1], "uploads/shared_Hero Two.jpg");
+});
+
+test("taxonomy resume replays skipped slug collisions before the resumed row", () => {
+  resetSlugTracker();
+  primeSlugTracker([
+    { slug: "shopping/amazon", table: "stores" },
+    { slug: "shopping/amazon", table: "stores" },
+  ]);
+
+  assert.equal(
+    deduplicateSlug("shopping/amazon", "stores"),
+    "shopping/amazon-2",
+  );
+  assert.equal(
+    deduplicateSlug("shopping/amazon", "brands"),
+    "shopping/amazon",
+  );
+  resetSlugTracker();
+});
+
+test("deal-image timestamp is preserved only for archive-only S3 repair", () => {
+  const previousRemovedAt = "2025-01-01T00:00:00.000Z";
+  const processedAt = "2026-07-26T12:00:00.000Z";
+
+  assert.equal(
+    resolveBackfillRemovalTimestamp({
+      repairMissingS3: true,
+      reusedTransparentOutput: true,
+      previousRemovedAt,
+      processedAt,
+    }),
+    previousRemovedAt,
+  );
+  assert.equal(
+    resolveBackfillRemovalTimestamp({
+      repairMissingS3: false,
+      reusedTransparentOutput: true,
+      previousRemovedAt,
+      processedAt,
+    }),
+    processedAt,
+  );
+  assert.equal(
+    resolveBackfillRemovalTimestamp({
+      repairMissingS3: true,
+      reusedTransparentOutput: false,
+      previousRemovedAt,
+      processedAt,
+    }),
+    processedAt,
+  );
 });
 
 test("parseLimitFlag accepts both --limit N and --limit=N", () => {
@@ -193,4 +254,29 @@ test("parseLimitFlag inspects every occurrence", () => {
     kind: "valid",
     value: 50,
   });
+});
+
+test("parseResumeFromTermFlag accepts an inclusive positive term ID", () => {
+  assert.deepEqual(parseResumeFromTermFlag([]), { kind: "absent" });
+  assert.deepEqual(parseResumeFromTermFlag(["--resume-from-term", "4234"]), {
+    kind: "valid",
+    value: 4234,
+  });
+  assert.deepEqual(parseResumeFromTermFlag(["--resume-from-term=4234"]), {
+    kind: "valid",
+    value: 4234,
+  });
+});
+
+test("parseResumeFromTermFlag rejects missing, malformed and duplicate values", () => {
+  for (const argv of [
+    ["--resume-from-term"],
+    ["--resume-from-term", "--clean"],
+    ["--resume-from-term=0"],
+    ["--resume-from-term=-1"],
+    ["--resume-from-term=abc"],
+    ["--resume-from-term", "4234", "--resume-from-term=5000"],
+  ]) {
+    assert.equal(parseResumeFromTermFlag(argv).kind, "invalid");
+  }
 });

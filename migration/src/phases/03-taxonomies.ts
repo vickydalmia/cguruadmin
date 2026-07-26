@@ -4,7 +4,11 @@ import { setTermMapping } from "../utils/id-maps.js";
 import { resolveMediaRef } from "../utils/media-resolver.js";
 import { parseFaqRepeater } from "../utils/acf-repeater.js";
 import { resolveYoastVariables } from "../utils/yoast-vars.js";
-import { deduplicateSlug } from "../utils/slug-dedup.js";
+import {
+  deduplicateSlug,
+  primeSlugTracker,
+  resetSlugTracker,
+} from "../utils/slug-dedup.js";
 import {
   generateDocumentId,
   getEntityIdByDocumentId,
@@ -16,6 +20,7 @@ import { clean, cleanHtml, cleanSlug } from "../utils/sanitize.js";
 import { parseDecimal, parseInteger } from "../utils/price.js";
 import { rewriteContentMedia } from "../utils/content-media.js";
 import { logger } from "../utils/logger.js";
+import { parseResumeFromTermFlag } from "../utils/cli.js";
 
 interface WpTerm {
   term_id: number;
@@ -48,6 +53,16 @@ const TYPE_TO_STRAPI_TYPE: Record<string, string> = {
 };
 
 export async function runTaxonomies(): Promise<void> {
+  const resumeFlag = parseResumeFromTermFlag(process.argv.slice(2));
+  if (resumeFlag.kind === "invalid") {
+    throw new Error(resumeFlag.reason);
+  }
+  if (resumeFlag.kind === "valid" && process.argv.includes("--clean")) {
+    throw new Error(
+      "--resume-from-term cannot be combined with --clean because earlier terms were deleted",
+    );
+  }
+
   logger.info("=== Phase 3: Taxonomy Migration ===");
 
   // Get all category terms with their metadata
@@ -77,6 +92,24 @@ export async function runTaxonomies(): Promise<void> {
   `);
 
   logger.info(`Found ${terms.length} category terms`);
+  resetSlugTracker();
+  let termsToProcess = terms;
+  let resumeIndex = 0;
+  if (resumeFlag.kind === "valid") {
+    resumeIndex = terms.findIndex(
+      (term) => term.term_id === resumeFlag.value,
+    );
+    if (resumeIndex === -1) {
+      throw new Error(
+        `--resume-from-term ${resumeFlag.value} does not match a WordPress category term`,
+      );
+    }
+    termsToProcess = terms.slice(resumeIndex);
+    logger.warn(
+      `Taxonomy resume: skipping ${resumeIndex} earlier completed term(s); ` +
+        `starting with term ${resumeFlag.value}`,
+    );
+  }
 
   // Build a slug lookup map: term_id → slug (for parent chain resolution)
   const slugByTermId = new Map<number, string>();
@@ -100,6 +133,18 @@ export async function runTaxonomies(): Promise<void> {
       current = parentByTermId.get(current);
     }
     return parts.join("/");
+  }
+
+  if (resumeIndex > 0) {
+    primeSlugTracker(
+      terms.slice(0, resumeIndex).map((term) => ({
+        slug: buildFullSlug(term.term_id),
+        table: TYPE_TO_TABLE[term.choose_type || "Store"] || "stores",
+      })),
+    );
+    logger.info(
+      `Taxonomy resume: primed slug history from ${resumeIndex} skipped term(s)`,
+    );
   }
 
   // Log hierarchy depth info
@@ -183,7 +228,7 @@ export async function runTaxonomies(): Promise<void> {
     Unknown: 0,
   };
 
-  for (const term of terms) {
+  for (const [termIndex, term] of termsToProcess.entries()) {
     const chooseType = term.choose_type || "Store"; // Default to Store if missing
     const table = TYPE_TO_TABLE[chooseType];
     const strapiType = TYPE_TO_STRAPI_TYPE[chooseType];
@@ -202,11 +247,23 @@ export async function runTaxonomies(): Promise<void> {
         yoastByTerm,
         buildFullSlug
       );
+      const completed = termIndex + 1;
+      if (completed % 100 === 0 || completed === termsToProcess.length) {
+        logger.info(
+          `Taxonomy progress: ${completed}/${termsToProcess.length} resumed terms`,
+        );
+      }
       continue;
     }
 
     counts[chooseType]++;
     await insertTerm(term, table, strapiType, faqMetaByTerm, yoastByTerm, buildFullSlug);
+    const completed = termIndex + 1;
+    if (completed % 100 === 0 || completed === termsToProcess.length) {
+      logger.info(
+        `Taxonomy progress: ${completed}/${termsToProcess.length} resumed terms`,
+      );
+    }
   }
 
   logger.info(`Taxonomy migration complete:`);

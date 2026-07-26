@@ -114,20 +114,33 @@ npm run migrate
 # Reset all checkpoints and re-run everything
 npm run migrate -- --clean
 
+# Reset everything, including media records and the configured S3 prefix
+npm run migrate -- --clean --delete-media
+
 # Run a single phase by name
 npm run migrate -- --phase 07-coupons
 
 # Reset checkpoints and run a single phase
 npm run migrate -- --clean --phase 05-pools
+
+# Resume an interrupted taxonomy phase at the failed term (inclusive)
+npm run migrate -- --phase 03-taxonomies --resume-from-term 4234
 ```
 
 > ⚠️ **`--clean` is destructive — it is a full reset, not a checkpoint reset.**
 > Before any phase runs it deletes the checkpoint files, deletes **all six ID
 > map files** (`clearAllMaps()` in [`src/utils/id-maps.ts`](./src/utils/id-maps.ts)
 > unlinks every `*Map.json`), `TRUNCATE ... RESTART IDENTITY CASCADE`s every
-> migrated table — entities, link tables, component tables, **and the
-> homepage/menu/footer/global singles** — deletes registry-owned
-> `admin_users` rows created by phase 06a, and empties the entire S3 prefix.
+> migrated non-media table — entities, link tables, component tables, **and
+> the homepage/menu/footer/global singles** — and deletes registry-owned
+> `admin_users` rows created by phase 06a. The `files` rows and S3 objects are
+> preserved by default, allowing the on-demand uploader to reuse media by
+> source hash without optimizing or uploading it again. A retained AWS record
+> is reused only after its immutable master key is confirmed with S3; if that
+> object is missing, the source is processed and uploaded again and the same
+> `files` row is repaired. Add
+> `--delete-media` together with `--clean` to delete the `files` rows and empty
+> the configured S3 prefix; `--delete-media` is rejected on its own.
 > The exact destroy list is enumerated in
 > [FRESH-MIGRATION.md § What `--clean` destroys](./FRESH-MIGRATION.md#what---clean-destroys).
 >
@@ -135,6 +148,11 @@ npm run migrate -- --clean --phase 05-pools
 > did), but the `--clean` branch calls `clearAllMaps()` immediately afterwards,
 > so the net effect is that no relationship data survives. To re-run one phase
 > against existing data, use `--phase <name>` **without** `--clean`.
+>
+> An interrupted Phase 03 can avoid reconciling/upserting all earlier terms
+> with `--resume-from-term <term_id>`. The named term is processed again
+> because its entity row may have been inserted before media or components
+> failed. This flag is rejected with `--clean`.
 
 If Phase 06 is interrupted, keep the Phase 05 checkpoint and ID-map files and
 restart only the code phase:

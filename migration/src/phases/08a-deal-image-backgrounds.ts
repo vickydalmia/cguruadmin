@@ -7,19 +7,25 @@ import { pgQuery } from "../db/pg-client.js";
 import { config } from "../config.js";
 import {
   getS3Client,
+  isStoredFileAvailable,
   uploadFileFromDisk,
 } from "./02-media-upload.js";
 import {
+  DEAL_IMAGE_ARCHIVE_DIR,
   DEAL_IMAGE_PROCESSOR_VERSION,
   prepareMigrationDealImage,
 } from "../utils/deal-image-background.js";
+import { buildLocalHashMap } from "./14-media-optimize.js";
 import { replaceMedia } from "../utils/strapi-insert.js";
 import { logger } from "../utils/logger.js";
+import { resolveBackfillRemovalTimestamp } from "../utils/deal-image-backfill-state.js";
 
 interface DealImageRow {
   deal_id: number;
   file_id: number;
   name: string;
+  hash: string;
+  ext: string;
   mime: string;
   url: string;
   provider: string;
@@ -27,6 +33,11 @@ interface DealImageRow {
   formats: unknown;
   alternative_text: string | null;
   caption: string | null;
+  width: number | null;
+  height: number | null;
+  background_removal_source_hash: string | null;
+  background_removal_version: string | null;
+  background_removed_at: string | null;
 }
 
 const parseJson = (value: unknown): Record<string, any> => {
@@ -38,6 +49,29 @@ const parseJson = (value: unknown): Record<string, any> => {
     return {};
   }
 };
+
+const SOURCE_MIMES: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".avif": "image/avif",
+  ".tif": "image/tiff",
+  ".tiff": "image/tiff",
+};
+
+function archivedTransparentPath(row: DealImageRow): string | null {
+  const sourceHash = row.background_removal_source_hash;
+  if (!sourceHash || !fs.existsSync(DEAL_IMAGE_ARCHIVE_DIR)) return null;
+  try {
+    const name = fs
+      .readdirSync(DEAL_IMAGE_ARCHIVE_DIR)
+      .find((entry) => entry.startsWith(`${sourceHash}-`) && entry.endsWith(".png"));
+    return name ? path.join(DEAL_IMAGE_ARCHIVE_DIR, name) : null;
+  } catch {
+    return null;
+  }
+}
 
 async function downloadSource(row: DealImageRow, directory: string): Promise<string> {
   const metadata = parseJson(row.provider_metadata);
@@ -134,44 +168,77 @@ export async function runDealImageBackgroundBackfill(): Promise<void> {
        d.id AS deal_id,
        f.id AS file_id,
        f.name,
+       f.hash,
+       f.ext,
        f.mime,
        f.url,
        f.provider,
        f.provider_metadata,
        f.formats,
        f.alternative_text,
-       f.caption
+       f.caption,
+       f.width,
+       f.height,
+       f.background_removal_source_hash,
+       f.background_removal_version,
+       f.background_removed_at
      FROM deals d
      JOIN files_related_mph relation
        ON relation.related_id = d.id
       AND relation.related_type = 'api::deal.deal'
       AND relation.field = 'dealImage'
      JOIN files f ON f.id = relation.file_id
-     WHERE f.background_removal_version IS DISTINCT FROM $1
      ORDER BY d.id`,
-    [DEAL_IMAGE_PROCESSOR_VERSION],
   );
-  if (rows.length === 0) {
+  const availabilityLimit = pLimit(Math.max(1, config.mediaConcurrency));
+  const candidateResults = await Promise.all(
+    rows.map((row) =>
+      availabilityLimit(async () => {
+        if (row.background_removal_version !== DEAL_IMAGE_PROCESSOR_VERSION) {
+          return { row, repairMissingS3: false };
+        }
+        const available = await isStoredFileAvailable({
+          id: row.file_id,
+          name: row.name,
+          hash: row.hash,
+          ext: row.ext,
+          url: row.url,
+          formats: parseJson(row.formats),
+          width: row.width,
+          height: row.height,
+          provider: row.provider,
+          providerMetadata: row.provider_metadata,
+        });
+        return available ? null : { row, repairMissingS3: true };
+      }),
+    ),
+  );
+  const candidates = candidateResults.filter(
+    (candidate): candidate is { row: DealImageRow; repairMissingS3: boolean } =>
+      candidate !== null,
+  );
+  if (candidates.length === 0) {
     logger.info("All Deal images already use the current transparent processor");
     return;
   }
-  if (!config.fal.key) {
-    throw new Error(
-      `FAL_KEY is required to backfill ${rows.length} opaque Deal image(s)`,
-    );
-  }
-
-  logger.info(`Found ${rows.length} Deal image relation(s) to process`);
+  const missingS3Count = candidates.filter(
+    (candidate) => candidate.repairMissingS3,
+  ).length;
+  logger.info(
+    `Found ${candidates.length} Deal image relation(s) to process` +
+      (missingS3Count > 0 ? ` (${missingS3Count} missing from S3)` : ""),
+  );
   const limit = pLimit(Math.max(1, config.fal.concurrency));
   const replacedOpaque = new Map<number, DealImageRow>();
+  let localSourcesByHash: Map<string, string> | null = null;
   let processed = 0;
   let completed = 0;
   const failures: string[] = [];
 
   await Promise.all(
-    rows.map((row, index) =>
+    candidates.map(({ row, repairMissingS3 }, index) =>
       limit(async () => {
-        const progress = `${index + 1}/${rows.length}`;
+        const progress = `${index + 1}/${candidates.length}`;
         logger.info(
           `[deal-image ${progress}] processing deal=${row.deal_id}, ` +
             `source_file=${row.file_id}, name=${row.name}`,
@@ -180,24 +247,76 @@ export async function runDealImageBackgroundBackfill(): Promise<void> {
           path.join(os.tmpdir(), "deal-image-backfill-"),
         );
         try {
-          const localPath = await downloadSource(row, tempDirectory);
-          const prepared = await prepareMigrationDealImage({
-            localPath,
-            fileName: row.name,
-            mimeType: row.mime,
-            altText: row.alternative_text,
-            caption: row.caption,
-          });
+          const archivedPath = repairMissingS3
+            ? archivedTransparentPath(row)
+            : null;
+          let prepared:
+            | Awaited<ReturnType<typeof prepareMigrationDealImage>>
+            | null = null;
+          let uploadPath: string;
+          let uploadName: string;
+          let sourceHash: string;
+          let sourceLabel: string;
+          let reusedTransparentOutput = false;
+
+          if (archivedPath && row.background_removal_source_hash) {
+            uploadPath = archivedPath;
+            uploadName = `${row.name.replace(/\.[^.]+$/, "")}-transparent.png`;
+            sourceHash = row.background_removal_source_hash;
+            sourceLabel = "local-transparent-archive";
+            reusedTransparentOutput = true;
+          } else {
+            let localPath: string;
+            let mimeType = row.mime;
+            if (repairMissingS3 && row.background_removal_source_hash) {
+              localSourcesByHash ??= buildLocalHashMap();
+              const original = localSourcesByHash.get(
+                row.background_removal_source_hash.slice(0, 16),
+              );
+              if (!original) {
+                throw new Error(
+                  `S3 object and local transparent archive are missing, and ` +
+                    `no WordPress source matches ${row.background_removal_source_hash}`,
+                );
+              }
+              localPath = original;
+              mimeType =
+                SOURCE_MIMES[path.extname(original).toLowerCase()] ?? row.mime;
+            } else {
+              localPath = await downloadSource(row, tempDirectory);
+            }
+            prepared = await prepareMigrationDealImage({
+              localPath,
+              fileName: path.basename(localPath),
+              mimeType,
+              altText: row.alternative_text,
+              caption: row.caption,
+            });
+            uploadPath = prepared.pngPath;
+            uploadName = `${row.name.replace(/\.[^.]+$/, "")}-transparent.png`;
+            sourceHash = prepared.sourceHash;
+            reusedTransparentOutput = prepared.reusedArchive;
+            sourceLabel = prepared.reusedArchive
+              ? "local-transparent-archive"
+              : prepared.skippedProvider
+                ? "already-transparent-original"
+                : "fal-api";
+          }
           const transparent = await uploadFileFromDisk({
-            localPath: prepared.pngPath,
-            fileName: `${row.name.replace(/\.[^.]+$/, "")}-transparent.png`,
+            localPath: uploadPath,
+            fileName: uploadName,
             mimeType: "image/png",
             altText: row.alternative_text,
             caption: row.caption,
             backgroundRemoval: {
-              sourceHash: prepared.sourceHash,
+              sourceHash,
               version: DEAL_IMAGE_PROCESSOR_VERSION,
-              removedAt: new Date().toISOString(),
+              removedAt: resolveBackfillRemovalTimestamp({
+                repairMissingS3,
+                reusedTransparentOutput,
+                previousRemovedAt: row.background_removed_at,
+                processedAt: new Date().toISOString(),
+              }),
             },
             throwOnFailure: true,
           });
@@ -215,14 +334,8 @@ export async function runDealImageBackgroundBackfill(): Promise<void> {
           logger.info(
             `[deal-image ${progress}] complete: deal=${row.deal_id}, ` +
               `transparent_file=${transparent.id}, ` +
-              `archive=${prepared.reusedArchive ? "reused" : "written"}, ` +
-              `source=${
-                prepared.reusedArchive
-                  ? "local-transparent-archive"
-                  : prepared.skippedProvider
-                    ? "already-transparent-original"
-                    : "fal-api"
-              }`,
+              `archive=${prepared?.reusedArchive || archivedPath ? "reused" : "written"}, ` +
+              `source=${sourceLabel}`,
           );
         } catch (error: any) {
           failures.push(`deal ${row.deal_id} / file ${row.file_id}: ${error.message}`);
@@ -233,7 +346,7 @@ export async function runDealImageBackgroundBackfill(): Promise<void> {
         } finally {
           completed += 1;
           logger.info(
-            `[deal-image progress ${completed}/${rows.length}] ` +
+            `[deal-image progress ${completed}/${candidates.length}] ` +
               `processed=${processed}, failed=${failures.length}`,
           );
           fs.rmSync(tempDirectory, { recursive: true, force: true });

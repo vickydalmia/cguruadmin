@@ -16,6 +16,18 @@ export function deduplicateSlug(slug: string, table: string): string {
   return candidate;
 }
 
+/**
+ * Replay already-completed rows before an interrupted taxonomy run resumes.
+ * Order matters because each collision consumes the next numeric suffix.
+ */
+export function primeSlugTracker(
+  entries: Iterable<{ slug: string; table: string }>,
+): void {
+  for (const entry of entries) {
+    deduplicateSlug(entry.slug, entry.table);
+  }
+}
+
 export function resetSlugTracker(): void {
   usedSlugs.clear();
 }
