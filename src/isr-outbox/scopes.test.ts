@@ -163,13 +163,14 @@ describe('deal-of-the-day landing page scope', () => {
     });
   });
 
-  it('refreshes every entity page that owns a Coupon through coupons or topPickCoupons', async () => {
+  it('refreshes every entity page that owns a Coupon through membership or curation', async () => {
     const { computeScope } = await import('./scopes');
     const findMany = vi.fn(async (uid: string, args: any) => {
       expect(args.filters).toEqual({
         $or: [
           { coupons: { documentId: { $eq: 'coupon-1' } } },
           { topPickCoupons: { documentId: { $eq: 'coupon-1' } } },
+          { orderedCoupons: { documentId: { $eq: 'coupon-1' } } },
         ],
       });
       if (uid === 'api::store.store') return [{ slug: 'amazon' }];

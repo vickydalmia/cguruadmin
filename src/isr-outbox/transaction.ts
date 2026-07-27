@@ -10,16 +10,26 @@ export type CommittedIsrOutboxEvent = Readonly<{
   payload: IsrOutboxInsert['payload'];
 }>;
 
+/**
+ * `createEvent` receives the write's own transaction as its second argument.
+ *
+ * It runs BEFORE the commit, while `executeWrite()` still holds row locks on
+ * everything it touched. Any write it performs must therefore go through this
+ * `trx` — issuing it on a pool connection instead waits on a lock that cannot
+ * be released until this callback returns, which is a self-deadlock with no
+ * timeout. See the note on `touchEntityPageUpdatedAt`, which is exactly the
+ * bug this parameter exists to prevent.
+ */
 export async function runContentTransaction<T>(
   strapi: Core.Strapi,
   executeWrite: () => Promise<T>,
-  createEvent: (result: T) => Promise<IsrOutboxInsert | null>,
+  createEvent: (result: T, trx: any) => Promise<IsrOutboxInsert | null>,
   afterCommit: (event: CommittedIsrOutboxEvent | null) => void,
 ): Promise<T> {
   return strapi.db.transaction(
     async ({ trx, onCommit }: { trx: any; onCommit: (fn: () => void) => void }) => {
       const result = await executeWrite();
-      const input = await createEvent(result);
+      const input = await createEvent(result, trx);
       const inserted =
         input && hasOutboxWork(input.payload)
           ? await insertIsrOutboxEvent(trx, input)

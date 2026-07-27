@@ -33,6 +33,11 @@ describe('curated offer relation picker filtering', () => {
         '/content-manager/relations/api%3A%3Astore.store/store-1/topPickCoupons',
       ),
     ).toBe('api::coupon.coupon');
+    expect(
+      curatedOfferTargetForRelationPath(
+        '/content-manager/relations/api%3A%3Acategory.category/category-1/orderedCoupons',
+      ),
+    ).toBe('api::coupon.coupon');
   });
 
   it('adds the same live constraint to relation result and pagination queries', () => {
@@ -214,6 +219,47 @@ describe('curated offer relation cleanup', () => {
       data: { topPickCoupons: { disconnect: [22] } },
     });
     expect(JSON.stringify(update.mock.calls)).not.toContain('stores');
+  });
+
+  it('disconnects expired Ordered Coupons and reports the entity route for ISR', async () => {
+    const update = vi.fn(async () => undefined);
+    const strapi = {
+      db: {
+        query: vi.fn((uid: string) => ({
+          findMany: vi.fn(async (query: any) =>
+            uid === 'api::brand.brand' &&
+            query.populate?.orderedCoupons
+              ? [
+                  {
+                    id: 14,
+                    slug: 'nike-coupons',
+                    orderedCoupons: [
+                      { id: 31, contentStatus: 'published' },
+                      { id: 32, contentStatus: 'expired' },
+                    ],
+                  },
+                ]
+              : [],
+          ),
+          update,
+        })),
+      },
+    } as any;
+
+    await expect(
+      removeInactiveCuratedOfferRelations(
+        strapi,
+        new Date('2026-07-25T12:00:00.000Z'),
+      ),
+    ).resolves.toEqual({
+      removedSelections: 1,
+      affectedPaths: ['/nike-coupons/'],
+      requiresFullRevalidation: false,
+    });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 14 },
+      data: { orderedCoupons: { disconnect: [32] } },
+    });
   });
 
   it('falls back to full revalidation when an affected entity has no route slug', async () => {

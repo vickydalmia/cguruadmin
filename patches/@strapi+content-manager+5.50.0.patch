@@ -1,0 +1,78 @@
+diff --git a/node_modules/@strapi/content-manager/dist/admin/services/documents.js b/node_modules/@strapi/content-manager/dist/admin/services/documents.js
+index a46c395..7a433b8 100644
+--- a/node_modules/@strapi/content-manager/dist/admin/services/documents.js
++++ b/node_modules/@strapi/content-manager/dist/admin/services/documents.js
+@@ -364,18 +364,11 @@ const documentApi = api.contentManagerApi.injectEndpoints({
+                         }
+                     ];
+                 },
+-                async onQueryStarted ({ data, ...patch }, { dispatch, queryFulfilled }) {
+-                    // Optimistically update the cache with the new data
+-                    const patchResult = dispatch(documentApi.util.updateQueryData('getDocument', patch, (draft)=>{
+-                        Object.assign(draft.data, data);
+-                    }));
+-                    try {
+-                        await queryFulfilled;
+-                    } catch  {
+-                        // Rollback the optimistic update if there's an error
+-                        patchResult.undo();
+-                    }
+-                },
++                // PATCHED (cguruadmin, Strapi 5.50.0) — see the long comment on the
++                // matching block in documents.mjs. The optimistic update removed
++                // here discarded the editor's typed values on any rejected save,
++                // because <Form>'s SET_INITIAL_VALUES reducer replaces `values`
++                // wholesale whenever the getDocument cache moves.
+                 transformResponse: (response, meta, arg)=>{
+                     /**
+          * TODO v6
+diff --git a/node_modules/@strapi/content-manager/dist/admin/services/documents.mjs b/node_modules/@strapi/content-manager/dist/admin/services/documents.mjs
+index d44653c..10ed70e 100644
+--- a/node_modules/@strapi/content-manager/dist/admin/services/documents.mjs
++++ b/node_modules/@strapi/content-manager/dist/admin/services/documents.mjs
+@@ -362,18 +362,33 @@ const documentApi = contentManagerApi.injectEndpoints({
+                         }
+                     ];
+                 },
+-                async onQueryStarted ({ data, ...patch }, { dispatch, queryFulfilled }) {
+-                    // Optimistically update the cache with the new data
+-                    const patchResult = dispatch(documentApi.util.updateQueryData('getDocument', patch, (draft)=>{
+-                        Object.assign(draft.data, data);
+-                    }));
+-                    try {
+-                        await queryFulfilled;
+-                    } catch  {
+-                        // Rollback the optimistic update if there's an error
+-                        patchResult.undo();
+-                    }
+-                },
++                // PATCHED (cguruadmin, Strapi 5.50.0) — the optimistic update that
++                // used to live here DISCARDED THE EDITOR'S TYPED VALUES whenever a
++                // save was rejected with a 400.
++                //
++                // It ran `Object.assign(draft.data, data)` on the getDocument cache,
++                // then `patchResult.undo()` in the catch. Because <Form>'s
++                // initialValues are derived from that cache, the optimistic write
++                // moved `initialValues.current` up to the typed values; the undo
++                // then moved it back to the stored document. Form.mjs treats any
++                // initialValues change as a reinitialise and its SET_INITIAL_VALUES
++                // reducer does `draft.values = action.payload` — a wholesale replace
++                // — so everything the editor typed was thrown away. `errors` is not
++                // touched by that action, which is why the red messages remained on
++                // screen above reverted values.
++                //
++                // Removing the optimistic patch fixes it: the refetch triggered by
++                // invalidatesTags then returns data deep-equal to
++                // initialValues.current, Form's isEqual check short-circuits, and
++                // nothing is clobbered. The only loss is an optimistic repaint on
++                // the SUCCESS path, which is invisible — the real response updates
++                // the cache moments later anyway.
++                //
++                // Upstream refs (re-check on every Strapi upgrade):
++                //   @strapi/content-manager/dist/admin/services/documents.mjs  updateDocument
++                //   @strapi/admin/dist/admin/admin/src/components/Form.mjs     ~line 85 and ~line 368
++                // `createDocument` never had an onQueryStarted, so create was never
++                // affected — a useful way to confirm the diagnosis.
+                 transformResponse: (response, meta, arg)=>{
+                     /**
+          * TODO v6

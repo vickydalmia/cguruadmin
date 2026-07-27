@@ -88,6 +88,11 @@
       "relation": "manyToMany",
       "target": "api::coupon.coupon"
     },
+    "orderedCoupons": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::coupon.coupon"
+    },
     "faqEnabled": {
       "type": "boolean",
       "default": false

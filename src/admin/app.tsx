@@ -15,7 +15,11 @@ import {
   TextInput,
   Typography,
 } from '@strapi/design-system';
-import { Cross } from '@strapi/icons';
+import { ArrowDown, ArrowUp, Cross, Drag } from '@strapi/icons';
+import {
+  useDrag,
+  useDrop,
+} from 'react-dnd';
 
 import { useIntl } from 'react-intl';
 
@@ -39,6 +43,11 @@ import PublishingPanel from './components/PublishingPanel';
 import EntryLinkCell from './components/EntryLinkCell';
 import UniqueCodeImport from './components/UniqueCodeImport';
 import { isLinkableCellType } from './utils/entry-link';
+import {
+  mergeDescendingRelationPage,
+  orderedRelationCommands,
+  removalNeedsDisconnect,
+} from './utils/ordered-relation';
 import { createDealAwareMediaInput } from './features/deal-image/components/deal-aware-media-input';
 import {
   pendingRequiredFields,
@@ -53,6 +62,8 @@ type RelationConfig = {
   scopeRelationField?: 'stores' | 'brands' | 'categories' | 'banks';
   minSelections?: number;
   maxSelections?: number;
+  description?: string;
+  reorderable?: boolean;
 };
 
 const RELATION_CONFIG: Record<string, RelationConfig[]> = {
@@ -79,6 +90,9 @@ const ENTITY_TOP_PICK_CONFIG: Record<string, RelationConfig> = {
     scopeRelationField: 'stores',
     minSelections: 2,
     maxSelections: 4,
+    description:
+      'Select 2–4 live Coupons. The first two live selections are shown; ' +
+      'the next two are expiry buffers. Clear all selections to use the latest two.',
   },
   'api::brand.brand': {
     field: 'topPickCoupons',
@@ -88,6 +102,9 @@ const ENTITY_TOP_PICK_CONFIG: Record<string, RelationConfig> = {
     scopeRelationField: 'brands',
     minSelections: 2,
     maxSelections: 4,
+    description:
+      'Select 2–4 live Coupons. The first two live selections are shown; ' +
+      'the next two are expiry buffers. Clear all selections to use the latest two.',
   },
   'api::category.category': {
     field: 'topPickCoupons',
@@ -97,6 +114,9 @@ const ENTITY_TOP_PICK_CONFIG: Record<string, RelationConfig> = {
     scopeRelationField: 'categories',
     minSelections: 2,
     maxSelections: 4,
+    description:
+      'Select 2–4 live Coupons. The first two live selections are shown; ' +
+      'the next two are expiry buffers. Clear all selections to use the latest two.',
   },
   'api::bank.bank': {
     field: 'topPickCoupons',
@@ -106,6 +126,60 @@ const ENTITY_TOP_PICK_CONFIG: Record<string, RelationConfig> = {
     scopeRelationField: 'banks',
     minSelections: 2,
     maxSelections: 4,
+    description:
+      'Select 2–4 live Coupons. The first two live selections are shown; ' +
+      'the next two are expiry buffers. Clear all selections to use the latest two.',
+  },
+};
+
+const ENTITY_ORDERED_COUPON_CONFIG: Record<string, RelationConfig> = {
+  'api::store.store': {
+    field: 'orderedCoupons',
+    target: 'api::coupon.coupon',
+    label: 'Ordered Coupons',
+    mainField: 'title',
+    scopeRelationField: 'stores',
+    maxSelections: 10,
+    reorderable: true,
+    description:
+      'Select and reorder up to 10 live Coupons for the first positions. ' +
+      'All remaining Coupons follow newest-first.',
+  },
+  'api::brand.brand': {
+    field: 'orderedCoupons',
+    target: 'api::coupon.coupon',
+    label: 'Ordered Coupons',
+    mainField: 'title',
+    scopeRelationField: 'brands',
+    maxSelections: 10,
+    reorderable: true,
+    description:
+      'Select and reorder up to 10 live Coupons for the first positions. ' +
+      'All remaining Coupons follow newest-first.',
+  },
+  'api::category.category': {
+    field: 'orderedCoupons',
+    target: 'api::coupon.coupon',
+    label: 'Ordered Coupons',
+    mainField: 'title',
+    scopeRelationField: 'categories',
+    maxSelections: 10,
+    reorderable: true,
+    description:
+      'Select and reorder up to 10 live Coupons for the first positions. ' +
+      'All remaining Coupons follow newest-first.',
+  },
+  'api::bank.bank': {
+    field: 'orderedCoupons',
+    target: 'api::coupon.coupon',
+    label: 'Ordered Coupons',
+    mainField: 'title',
+    scopeRelationField: 'banks',
+    maxSelections: 10,
+    reorderable: true,
+    description:
+      'Select and reorder up to 10 live Coupons for the first positions. ' +
+      'All remaining Coupons follow newest-first.',
   },
 };
 
@@ -116,6 +190,9 @@ type RelationCommand = Candidate & {
     documentId: string;
     locale: string | null;
     isTemporary?: boolean;
+    position?:
+      | { before: string; status: 'published'; locale: null }
+      | { end: true };
   };
 };
 type RelationFormValue = {
@@ -138,7 +215,12 @@ const getRelationDocumentId = (relation: any): string | undefined =>
 
 const toRelationCommand = (
   candidate: Candidate,
-  options: { isTemporary?: boolean } = {}
+  options: {
+    isTemporary?: boolean;
+    position?:
+      | { before: string; status: 'published'; locale: null }
+      | { end: true };
+  } = {}
 ): RelationCommand => ({
   id: candidate.id,
   documentId: candidate.documentId,
@@ -148,8 +230,139 @@ const toRelationCommand = (
     documentId: candidate.documentId,
     locale: null,
     ...(options.isTemporary ? { isTemporary: true } : {}),
+    ...(options.position ? { position: options.position } : {}),
   },
 });
+
+function SelectedRelationRow({
+  candidate,
+  index,
+  count,
+  reorderable,
+  onDrop,
+  onMove,
+  onRemove,
+}: {
+  candidate: Candidate;
+  index: number;
+  count: number;
+  reorderable: boolean;
+  onDrop: (draggedDocumentId: string, targetDocumentId: string) => void;
+  onMove: (fromIndex: number, toIndex: number) => void;
+  onRemove: (candidate: Candidate) => void;
+}) {
+  const rowRef = React.useRef<HTMLDivElement>(null);
+  const handleRef = React.useRef<HTMLButtonElement>(null);
+  const [{ isDragging }, drag, preview] = useDrag(
+    () => ({
+      type: 'entity-ordered-coupon',
+      canDrag: reorderable,
+      item: { documentId: candidate.documentId },
+      collect: (monitor) => ({ isDragging: monitor.isDragging() }),
+    }),
+    [candidate.documentId, reorderable],
+  );
+  const [, drop] = useDrop(
+    () => ({
+      accept: 'entity-ordered-coupon',
+      drop: (item: { documentId: string }) => {
+        if (item.documentId !== candidate.documentId) {
+          onDrop(item.documentId, candidate.documentId);
+        }
+      },
+    }),
+    [candidate.documentId, onDrop],
+  );
+  drag(handleRef);
+  drop(preview(rowRef));
+
+  return (
+    <div
+      ref={rowRef}
+      style={{
+        opacity: isDragging ? 0.55 : 1,
+      }}
+    >
+      <Box
+        hasRadius
+        background="primary100"
+        borderColor="primary200"
+        paddingLeft={reorderable ? 1 : 3}
+        paddingRight={1}
+        paddingTop={1}
+        paddingBottom={1}
+        width="100%"
+      >
+        <Flex alignItems="center" gap={1} width="100%">
+          {reorderable ? (
+            <IconButton
+              ref={handleRef}
+              type="button"
+              label={`Drag to reorder ${candidate.name}`}
+              variant="ghost"
+              size="S"
+              style={{
+                cursor: isDragging ? 'grabbing' : 'grab',
+                touchAction: 'none',
+              }}
+            >
+              <Drag />
+            </IconButton>
+          ) : null}
+          <Box style={{ flex: 1, minWidth: 0 }}>
+            <Typography
+              variant="pi"
+              fontWeight="bold"
+              textColor="primary600"
+              style={{
+                display: 'block',
+                lineHeight: 1.35,
+                overflowWrap: 'anywhere',
+              }}
+            >
+              {reorderable ? `${index + 1}. ` : ''}
+              {candidate.name}
+            </Typography>
+          </Box>
+          {reorderable ? (
+            <>
+              <IconButton
+                type="button"
+                label={`Move ${candidate.name} up`}
+                variant="ghost"
+                size="S"
+                disabled={index === 0}
+                onClick={() => onMove(index, index - 1)}
+              >
+                <ArrowUp />
+              </IconButton>
+              <IconButton
+                type="button"
+                label={`Move ${candidate.name} down`}
+                variant="ghost"
+                size="S"
+                disabled={index === count - 1}
+                onClick={() => onMove(index, index + 1)}
+              >
+                <ArrowDown />
+              </IconButton>
+            </>
+          ) : null}
+          <IconButton
+            type="button"
+            label={`Remove ${candidate.name}`}
+            variant="ghost"
+            size="S"
+            onClick={() => onRemove(candidate)}
+            style={{ flexShrink: 0 }}
+          >
+            <Cross />
+          </IconButton>
+        </Flex>
+      </Box>
+    </div>
+  );
+}
 
 function useDeferredMount(): boolean {
   const [ready, setReady] = React.useState(false);
@@ -185,6 +398,12 @@ function RelationSection({
   const onChangeForm = useForm('RelationSection', (state) => state.onChange);
 
   const [selectedList, setSelectedList] = React.useState<Candidate[]>([]);
+  const persistedDocumentIdsRef = React.useRef<Set<string> | null>(
+    documentId ? null : new Set(),
+  );
+  React.useEffect(() => {
+    persistedDocumentIdsRef.current = documentId ? null : new Set();
+  }, [documentId, config.field]);
 
   const formValueRef = React.useRef(formValue);
   React.useEffect(() => {
@@ -192,7 +411,16 @@ function RelationSection({
   }, [formValue]);
 
   React.useEffect(() => {
-    if (Array.isArray(formValue) && formValue.length > 0) {
+    if (Array.isArray(formValue)) {
+      persistedDocumentIdsRef.current ??= new Set(
+        formValue
+          .map((value: any) => value?.documentId)
+          .filter((value): value is string => typeof value === 'string'),
+      );
+      if (formValue.length === 0) {
+        setSelectedList([]);
+        return;
+      }
       setSelectedList(
         formValue.map((v: any) => ({
           id: v.id,
@@ -248,17 +476,20 @@ function RelationSection({
           );
           const body = res?.data?.data ?? res?.data;
           const results: any[] = body?.results ?? [];
-          all.push(
-            ...results.map((r: any) => ({
+          const pageCandidates = results.map((r: any) => ({
               id: r.id,
               documentId: r.documentId,
               name: r.name ?? r.title ?? String(r.id),
-            }))
-          );
+            }));
+          const merged = mergeDescendingRelationPage(all, pageCandidates);
+          all.splice(0, all.length, ...merged);
           const pageCount = body?.pagination?.pageCount ?? 1;
           if (page >= pageCount || results.length === 0) break;
         }
         if (cancelled) return;
+        persistedDocumentIdsRef.current = new Set(
+          all.map((relation) => relation.documentId),
+        );
         setSelectedList(() => {
           const latest = formValueRef.current;
           if (!isRelationFormValue(latest)) return all;
@@ -406,22 +637,33 @@ function RelationSection({
     setSelectedList(next);
 
     if (exists) {
-      const wasOnlyPendingConnect = currentConnect.some(
-        (relation) => getRelationDocumentId(relation) === c.documentId
+      const hasExplicitTemporaryConnect = currentConnect.some(
+        (relation) =>
+          getRelationDocumentId(relation) === c.documentId &&
+          relation.apiData?.isTemporary === true,
+      );
+      const needsDisconnect = removalNeedsDisconnect(
+        persistedDocumentIdsRef.current,
+        c.documentId,
+        hasExplicitTemporaryConnect,
       );
 
       onChangeForm(config.field, {
-        connect: currentConnect.filter(
-          (relation) => getRelationDocumentId(relation) !== c.documentId
-        ),
-        disconnect: wasOnlyPendingConnect
-          ? currentDisconnect
-          : [
+        // Rebuild every anchor from the final selection. After a prior reorder,
+        // a surviving command may still point `before` the removed Coupon.
+        connect: config.reorderable
+          ? orderedRelationCommands(next)
+          : currentConnect.filter(
+              (relation) => getRelationDocumentId(relation) !== c.documentId
+            ),
+        disconnect: needsDisconnect
+          ? [
               ...currentDisconnect.filter(
                 (relation) => getRelationDocumentId(relation) !== c.documentId
               ),
               toRelationCommand(c),
-            ],
+            ]
+          : currentDisconnect,
       });
 
       return;
@@ -432,20 +674,60 @@ function RelationSection({
     );
 
     onChangeForm(config.field, {
-      connect: wasPendingDisconnect
-        ? currentConnect.filter(
-            (relation) => getRelationDocumentId(relation) !== c.documentId
-          )
-        : [
-            ...currentConnect.filter(
+      // Canceling a disconnect changes the final ordered selection too. The
+      // shortened list's positional commands cannot be reused because they may
+      // place the restored Coupon before the wrong anchor.
+      connect: config.reorderable
+        ? orderedRelationCommands(next)
+        : wasPendingDisconnect
+          ? currentConnect.filter(
               (relation) => getRelationDocumentId(relation) !== c.documentId
-            ),
-            toRelationCommand(c, { isTemporary: true }),
-          ],
+            )
+          : [
+              ...currentConnect.filter(
+                (relation) => getRelationDocumentId(relation) !== c.documentId
+              ),
+              toRelationCommand(c, { isTemporary: true }),
+            ],
       disconnect: currentDisconnect.filter(
         (relation) => getRelationDocumentId(relation) !== c.documentId
       ),
     });
+  };
+
+  const moveSelection = (fromIndex: number, toIndex: number) => {
+    if (
+      !config.reorderable ||
+      fromIndex === toIndex ||
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= selectedList.length ||
+      toIndex >= selectedList.length
+    ) {
+      return;
+    }
+
+    const next = [...selectedList];
+    const [moved] = next.splice(fromIndex, 1);
+    if (!moved) return;
+    next.splice(toIndex, 0, moved);
+    const currentValue = isRelationFormValue(formValue) ? formValue : {};
+
+    setSelectedList(next);
+    onChangeForm(config.field, {
+      connect: orderedRelationCommands(next),
+      disconnect: currentValue.disconnect ?? [],
+    });
+  };
+
+  const dropSelection = (
+    draggedDocumentId: string,
+    targetDocumentId: string,
+  ) => {
+    moveSelection(
+      selectedList.findIndex((item) => item.documentId === draggedDocumentId),
+      selectedList.findIndex((item) => item.documentId === targetDocumentId),
+    );
   };
 
   const sentinelRef = React.useRef<HTMLDivElement>(null);
@@ -492,10 +774,8 @@ function RelationSection({
       {scopeEntityLabel && documentId ? (
         <Box paddingBottom={3} width="100%">
           <Typography variant="pi" textColor="neutral600">
-            Only live Coupons related to this {scopeEntityLabel} are
-            listed. Select {config.minSelections ?? 1}–{config.maxSelections}
-            {' '}Coupons. The first two live selections are shown; the next two
-            are expiry buffers. Clear all selections to use the latest two.
+            Only live Coupons related to this {scopeEntityLabel} are listed.{' '}
+            {config.description}
           </Typography>
         </Box>
       ) : null}
@@ -512,45 +792,17 @@ function RelationSection({
               block preserves `overflowWrap`, and centring the row lines the
               remove button up with a single-line label.
             */}
-            {selectedList.map((c) => (
-              <Box
-                key={c.documentId}
-                hasRadius
-                background="primary100"
-                borderColor="primary200"
-                paddingLeft={3}
-                paddingRight={1}
-                paddingTop={1}
-                paddingBottom={1}
-                width="100%"
-              >
-                <Flex alignItems="center" gap={2} width="100%">
-                  <Box style={{ flex: 1, minWidth: 0 }}>
-                    <Typography
-                      variant="pi"
-                      fontWeight="bold"
-                      textColor="primary600"
-                      style={{
-                        display: 'block',
-                        lineHeight: 1.35,
-                        overflowWrap: 'anywhere',
-                      }}
-                    >
-                      {c.name}
-                    </Typography>
-                  </Box>
-                  <IconButton
-                    type="button"
-                    label={`Remove ${c.name}`}
-                    variant="ghost"
-                    size="S"
-                    onClick={() => toggle(c)}
-                    style={{ flexShrink: 0 }}
-                  >
-                    <Cross />
-                  </IconButton>
-                </Flex>
-              </Box>
+            {selectedList.map((candidate, index) => (
+              <SelectedRelationRow
+                key={candidate.documentId}
+                candidate={candidate}
+                index={index}
+                count={selectedList.length}
+                reorderable={Boolean(config.reorderable)}
+                onDrop={dropSelection}
+                onMove={moveSelection}
+                onRemove={toggle}
+              />
             ))}
           </Flex>
         </Box>
@@ -691,6 +943,22 @@ const EntityTopPickCouponPanel: PanelComponent = ({ model, documentId }) => {
   };
 };
 
+const EntityOrderedCouponPanel: PanelComponent = ({ model, documentId }) => {
+  const config = ENTITY_ORDERED_COUPON_CONFIG[model];
+  if (!config) return null;
+
+  return {
+    title: 'Ordered Coupons',
+    content: (
+      <EntityTopPickPanelBody
+        config={config}
+        model={model}
+        documentId={documentId}
+      />
+    ),
+  };
+};
+
 // Bulk code import. The server-side importer already existed and was fully
 // implemented — this panel is the only thing that was missing, so editors had
 // no way to load a pool without hitting the API by hand.
@@ -816,9 +1084,12 @@ const imageHintFor = (path: Array<string | number>): string | null => {
 function ValidationProblemsList({
   problems,
   model,
+  intro,
 }: {
   problems: FlatError[];
   model: string;
+  /** Overrides the default copy, which assumes the fields are marked in red. */
+  intro?: string;
 }) {
   const { formatMessage } = useIntl();
 
@@ -833,8 +1104,9 @@ function ValidationProblemsList({
   return (
     <Flex direction="column" alignItems="stretch" gap={3} width="100%">
       <Typography variant="pi" textColor="neutral600">
-        Fix these to save. Each problem field is also marked in red in the
-        form, and any repeatable rows with problems open automatically.
+        {intro ??
+          'Fix these to save. Each problem field is also marked in red in the ' +
+            'form, and any repeatable rows with problems open automatically.'}
       </Typography>
       {problems.map((problem) => {
         // Server messages are already specific ("got 800×400 …") — only swap
@@ -856,36 +1128,34 @@ function ValidationProblemsList({
   );
 }
 
-// Content types that get the homepage-style "Validation problems" side panel.
+// The homepage-style "Validation problems" side panel, on EVERY content type.
 // Any create/update validation failure — client-side required-field checks or a
 // server ValidationError whose details.errors[].path map onto form fields (e.g.
 // the coupon/deal offer-text word caps) — is listed here with the offending
 // field highlighted inline.
-const VALIDATION_PANEL_UIDS = new Set<string>([
-  HOMEPAGE_UID,
-  DOTD_UID,
-  'api::coupon.coupon',
-  'api::deal.deal',
-  'api::store.store',
-  'api::category.category',
-  'api::bank.bank',
-  'api::brand.brand',
-]);
-
+//
+// This used to be gated on a hardcoded eight-UID allowlist, which meant the same
+// save failure read completely differently depending on the screen: redirects,
+// jobs, job applications, unique coupon pools and every single type got a bare
+// multi-line toast and no panel — exactly the screens where a toast is hardest
+// to act on. Nothing in the panel needs per-model knowledge to work:
+// flattenFormErrors walks arbitrary nested error state, and
+// pendingRequiredFields reads the content-manager's own schema attributes. The
+// two model-keyed lookups it does consult (SECTION_LABEL_BY_MODEL,
+// IMAGE_RULE_BY_PATH) already fall through to humanizeFieldName, so an unlisted
+// model gets sensible generic labels rather than nothing.
 const ValidationProblemsPanel: PanelComponent = ({ model }) => {
-  // Hook order must not depend on the model — select first, bail after.
   const formErrors = useForm('ValidationProblemsPanel', (state) => state.errors);
   const formValues = useForm('ValidationProblemsPanel', (state) => state.values);
   const { contentType, components, isCreatingEntry } =
     unstable_useContentManagerContext();
 
-  if (!VALIDATION_PANEL_UIDS.has(model)) return null;
+  const submitProblems = flattenFormErrors(formErrors);
 
-  const problems = flattenFormErrors(formErrors);
-  if (problems.length > 0) {
+  if (submitProblems.length > 0) {
     return {
-      title: `Validation problems (${problems.length})`,
-      content: <ValidationProblemsList problems={problems} model={model} />,
+      title: `Validation problems (${submitProblems.length})`,
+      content: <ValidationProblemsList problems={submitProblems} model={model} />,
     };
   }
 
@@ -1048,6 +1318,7 @@ export default {
       PublishingPanel,
       RelationMultiSelectPanel,
       EntityTopPickCouponPanel,
+      EntityOrderedCouponPanel,
       UniqueCodeImportPanel,
       ValidationProblemsPanel,
     ]);

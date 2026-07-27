@@ -40,13 +40,21 @@ export const CURATED_OFFER_RELATIONS: readonly CuratedOfferRelation[] = [
   { sourceUid: 'deal-day.store-tab', field: 'deals', targetUid: 'api::deal.deal' },
   { sourceUid: 'deal-day.telegram-deals', field: 'deals', targetUid: 'api::deal.deal' },
   { sourceUid: 'api::store.store', field: 'topPickCoupons', targetUid: 'api::coupon.coupon' },
+  { sourceUid: 'api::store.store', field: 'orderedCoupons', targetUid: 'api::coupon.coupon' },
   { sourceUid: 'api::brand.brand', field: 'topPickCoupons', targetUid: 'api::coupon.coupon' },
+  { sourceUid: 'api::brand.brand', field: 'orderedCoupons', targetUid: 'api::coupon.coupon' },
   {
     sourceUid: 'api::category.category',
     field: 'topPickCoupons',
     targetUid: 'api::coupon.coupon',
   },
+  {
+    sourceUid: 'api::category.category',
+    field: 'orderedCoupons',
+    targetUid: 'api::coupon.coupon',
+  },
   { sourceUid: 'api::bank.bank', field: 'topPickCoupons', targetUid: 'api::coupon.coupon' },
+  { sourceUid: 'api::bank.bank', field: 'orderedCoupons', targetUid: 'api::coupon.coupon' },
 ] as const;
 
 const relationTargetBySourceAndField = new Map(

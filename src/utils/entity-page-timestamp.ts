@@ -13,6 +13,7 @@ const RENDERED_OFFER_RELATIONS = new Set([
   'coupons',
   'deals',
   'topPickCoupons',
+  'orderedCoupons',
 ]);
 
 function isEntityUid(uid: string): uid is EntityUid {
@@ -39,14 +40,39 @@ export function changesEntityOfferMembership(
  * relation write succeeds. Raw Knex is intentional: a second Document Service
  * update would recurse through the global write middleware and enqueue a
  * duplicate ISR event.
+ *
+ * `trx` IS REQUIRED, AND IT MUST BE THE WRITE'S OWN TRANSACTION.
+ *
+ * This ran on `strapi.db.connection` — a fresh pool connection — and it
+ * self-deadlocked. The caller invokes this from inside `runContentTransaction`,
+ * after `executeWrite()` has already updated the entity row and taken its row
+ * lock. A second connection updating that same row waits for the lock; the
+ * transaction holding the lock waits for this function to return. Neither ever
+ * moves, there is no timeout, and the save hangs forever — burning three
+ * connections out of `pool.max` and holding the identity advisory lock, so
+ * every later taxonomy save degrades to "proceeding unserialized" too. Three
+ * such saves effectively wedge the instance until it is restarted.
+ *
+ * Passing the transaction is what makes the update part of the same lock
+ * holder, so it simply proceeds. Kept as a required positional argument rather
+ * than an option so it cannot be quietly dropped again — the failure mode is a
+ * hang, which no test or error log would surface on its own.
  */
 export async function touchEntityPageUpdatedAt(
   strapi: Core.Strapi,
+  trx: any,
   uid: EntityUid,
   result: unknown,
   documentId: string | undefined,
   now = new Date(),
 ): Promise<void> {
+  if (typeof trx !== 'function') {
+    throw new Error(
+      'touchEntityPageUpdatedAt requires the write transaction — see the ' +
+        'self-deadlock note above.',
+    );
+  }
+
   let id = Number((result as any)?.id);
 
   if ((!Number.isSafeInteger(id) || id <= 0) && documentId) {
@@ -61,8 +87,7 @@ export async function touchEntityPageUpdatedAt(
     throw new Error(`Could not resolve ${uid} row while touching entity-page updatedAt`);
   }
 
-  const updated = await (strapi.db as any)
-    .connection(ENTITY_TABLE_BY_UID[uid])
+  const updated = await trx(ENTITY_TABLE_BY_UID[uid])
     .where({ id })
     .update({ updated_at: now });
 

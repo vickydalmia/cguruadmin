@@ -40,37 +40,13 @@ import {
 import {
   changedFieldHints,
   changedFieldSeoHints,
-  validateChangedFields,
 } from './utils/changed-field-validation';
-import { validateEntityFieldsForWrite } from './utils/entity-field-validation';
-import {
-  isEntityTopPickUid,
-  validateEntityTopPickCoupons,
-} from './utils/entity-top-pick-validation';
-import { validateDealOfTheDaySectionLimits } from './utils/deal-of-the-day-validation';
-import { validateHomepageImages } from './utils/homepage-image-validation';
-import {
-  isCouponUid,
-  normaliseCouponTypeFields,
-  validateCouponTypeFields,
-} from './utils/coupon-type-consistency';
-import { isIdentityUid, validateIdentity } from './utils/identity-validation';
-import {
-  isOfferLifecycleUid,
-  validateOfferLifecycle,
-} from './utils/offer-lifecycle-validation';
-import { validateOfferFieldsForWrite, WORD_LIMITS } from './utils/offer-field-validation';
-import { validateRedirect } from './utils/redirect-validation';
-import { sanitizeRichtextData } from './utils/sanitize-richtext';
-import { acquireWriteSerializationLock } from './utils/write-serialization';
-import { isHumanWrite } from './utils/write-origin';
-import {
-  normaliseTextFields,
-  textFieldHints,
-  validateTextFieldsForWrite,
-} from './utils/text-field-validation';
+import { WORD_LIMITS } from './utils/offer-field-validation';
+import { textFieldHints } from './utils/text-field-validation';
+// Every write validator now runs through this one pipeline, which reports all
+// of their problems in a single error instead of the first one it hits.
+import { runWriteValidation } from './utils/write-validation/run';
 import { registerCuratedOfferRelationQueryFilter } from './utils/curated-offer-relations';
-import { ensureTransparentDealImageForWrite } from './utils/deal-image-upload';
 import {
   changesEntityOfferMembership,
   touchEntityPageUpdatedAt,
@@ -79,13 +55,13 @@ import {
 const HIDE_FROM_EDIT: Record<string, string[]> = {
   'api::deal.deal': ['stores', 'brands', 'categories', 'banks'],
   'api::coupon.coupon': ['stores', 'brands', 'categories', 'banks'],
-  // Deal membership is maintained from Deal records and consumed
-  // programmatically by the storefront. It is not an editorial ordering
-  // control, so entity editors only need the visibility switch.
-  'api::store.store': ['deals', 'topPickCoupons'],
-  'api::brand.brand': ['deals', 'topPickCoupons'],
-  'api::bank.bank': ['deals', 'topPickCoupons'],
-  'api::category.category': ['deals', 'topPickCoupons'],
+  // Offer membership is maintained from Coupon/Deal records. Entity editors
+  // use the dedicated Top Pick and Ordered Coupon panels; Deals remain fully
+  // automatic, so none of these raw relation inputs belongs in the edit form.
+  'api::store.store': ['coupons', 'deals', 'topPickCoupons', 'orderedCoupons'],
+  'api::brand.brand': ['coupons', 'deals', 'topPickCoupons', 'orderedCoupons'],
+  'api::bank.bank': ['coupons', 'deals', 'topPickCoupons', 'orderedCoupons'],
+  'api::category.category': ['coupons', 'deals', 'topPickCoupons', 'orderedCoupons'],
 };
 
 // The offer lifecycle fields are edited ONLY in the Publishing side panel
@@ -972,214 +948,28 @@ export default {
     strapi.documents.use(async (context: any, next: any) => {
       if (!DOCUMENT_WRITE_ACTIONS.has(context.action)) return next();
 
-      // "Clean as you touch": a human editing in the admin must save a FULLY
-      // valid record — every rule enforced on the whole record, including
-      // dirty untouched fields on WordPress-migrated rows. The status cron
-      // (partial {contentStatus} writes over possibly-dirty rows) has no HTTP
-      // request context, so it stays grandfathered/touched-only and never
-      // throws on migrated data. Computed once; passed to each validator.
-      const strictWrite = isHumanWrite(strapi);
-
-      // Richtext fields hold HTML rendered raw on the public site — enforce
-      // the migration-era allowlist on every write, whatever the editor.
-      if (['create', 'update', 'clone'].includes(context.action)) {
-        sanitizeRichtextData(context.uid, context.params?.data);
-        // Trim/collapse before ANY validator reads a value, so what is checked
-        // is byte-identical to what is stored. Collapse is string-only —
-        // collapsing a text/richtext field would destroy paragraph breaks.
-        normaliseTextFields(context.uid, context.action, context.params?.data);
-      }
-
-      // Product Deal media is a transparent-only contract. The dedicated
-      // admin uploader normally finishes this work before the form changes,
-      // while this server-side guard covers direct API callers and legacy
-      // opaque media selected into a Deal. A provider/credit failure rejects
-      // only the attempted image change and returns an inline field error.
-      if (
-        context.uid === 'api::deal.deal' &&
-        ['create', 'update', 'clone'].includes(context.action)
-      ) {
-        await ensureTransparentDealImageForWrite(
-          strapi,
-          context.params?.data,
-        );
-      }
-
-      // A coupon owns exactly one of `code` / `uniqueCouponPool`. The admin
-      // hides the irrelevant one, which means it is OMITTED from the payload
-      // and the stored value stays attached — clear it explicitly. No-ops when
-      // couponType is absent, so the cron's partial updates never detach a
-      // scheduled coupon's pool.
-      if (
-        isCouponUid(context.uid) &&
-        ['create', 'update', 'clone'].includes(context.action)
-      ) {
-        normaliseCouponTypeFields(context.params?.data);
-        await validateCouponTypeFields(
-          strapi,
-          context.action,
-          context.params?.data,
-          context.params?.documentId,
-          strictWrite,
-        );
-      }
-
-      // Constraints introduced on populated fields cannot live in the Strapi
-      // schema: the admin sends a full form on update and schema validation
-      // cannot grandfather an unchanged legacy value. Validate only creates,
-      // clones, and actual field changes after comparing with the stored row.
-      if (['create', 'update', 'clone'].includes(context.action)) {
-        await validateChangedFields(
-          strapi,
-          context.uid,
-          context.action,
-          context.params?.data,
-          context.params?.documentId,
-          strictWrite,
-        );
-      }
-
-      // Homepage section images must match their Figma sizes exactly — reject
-      // the save before any side effect (ISR enqueue, cache purge, override
-      // fill). Already-attached files are grandfathered inside the validator.
-      if (
-        context.uid === 'api::homepage.homepage' &&
-        ['create', 'update'].includes(context.action)
-      ) {
-        await validateHomepageImages(strapi, context.params?.data);
-      }
-
-      if (
-        context.uid === 'api::deal-of-the-day-page.deal-of-the-day-page' &&
-        ['create', 'update'].includes(context.action)
-      ) {
-        await validateDealOfTheDaySectionLimits(strapi, context.params?.data);
-      }
-
-      if (
-        isEntityTopPickUid(context.uid) &&
-        ['create', 'update'].includes(context.action)
-      ) {
-        await validateEntityTopPickCoupons(
-          strapi,
-          context.uid,
-          context.params?.data,
-          context.params?.documentId,
-        );
-      }
-
-      // Offer badge / cashback / bank texts are word-capped so they fit the
-      // fixed card slots — reject over-long values with an inline field error.
-      if (
-        ['api::coupon.coupon', 'api::deal.deal'].includes(context.uid) &&
-        ['create', 'update', 'clone'].includes(context.action)
-      ) {
-        await validateOfferFieldsForWrite(
-          strapi,
-          context.uid,
-          context.action,
-          context.params?.data,
-          context.params?.documentId,
-          strictWrite,
-        );
-      }
-
-      // Taxonomy cross-field checks (rating range, FAQ-enabled-but-empty, brand
-      // required SEO) — reject with an inline field error instead of a raw 500.
-      if (['create', 'update', 'clone'].includes(context.action)) {
-        await validateEntityFieldsForWrite(
-          strapi,
-          context.uid,
-          context.action,
-          context.params?.data,
-          context.params?.documentId,
-          strictWrite,
-        );
-      }
-
-      // contentStatus is DERIVED from scheduledAt/expiresAt, never editor-set.
-      // Merges the payload over the stored row before deriving — deriving from
-      // the payload alone would read the cron's partial {contentStatus} update
-      // as "no dates" and flip every expired offer back to published, forever.
-      if (
-        isOfferLifecycleUid(context.uid) &&
-        ['create', 'update', 'clone'].includes(context.action)
-      ) {
-        await validateOfferLifecycle(
-          strapi,
-          context.uid,
-          context.action,
-          context.params?.data,
-          context.params?.documentId,
-          strictWrite,
-        );
-      }
-
-      // Blank-after-trim rejection and required-field enforcement. Only fields
-      // the payload actually changes are checked, so a legacy row stays
-      // saveable when an editor touches something else on the same form.
-      if (['create', 'update', 'clone'].includes(context.action)) {
-        await validateTextFieldsForWrite(
-          strapi,
-          context.uid,
-          context.action,
-          context.params?.data,
-          context.params?.documentId,
-          strictWrite,
-        );
-      }
-
-      // Slug and redirect invariants below are validated with plain reads and
+      // Normalise the payload, then run every editor-facing validator and
+      // report ALL of their problems in one error — see
+      // src/utils/write-validation/run.ts for the pipeline and
+      // src/utils/write-validation/steps.ts for the ordered step registry.
+      // Before this was extracted, twelve validators were awaited inline here
+      // and the first to throw hid the other eleven, so an editor fixed one
+      // problem per save.
+      //
+      // Slug and redirect invariants are validated with plain reads and
       // committed by an INDEPENDENT write — two concurrent saves can both pass
       // validation on the same committed snapshot and both commit: one flat
       // route claimed by two taxonomy types (the ISR server silently drops the
       // loser), case-folded duplicate redirect `from`s, or /a→/b + /b→/a
       // closing a cycle. A unique index on the NORMALIZED values cannot be
-      // added over legacy duplicates (identity-validation.ts), so serialize
-      // the validate+commit window with one advisory lock per invariant domain
-      // instead. No-op on non-Postgres; on lock failure the save proceeds
-      // unserialized (the pre-existing rare race, never an outage).
-      const writeLockDomain = ['create', 'update', 'clone'].includes(context.action)
-        ? isIdentityUid(context.uid)
-          ? ('identity' as const)
-          : context.uid === 'api::redirect.redirect'
-            ? ('redirect' as const)
-            : null
-        : null;
-      const releaseWriteLock = writeLockDomain
-        ? await acquireWriteSerializationLock(strapi, writeLockDomain)
-        : null;
+      // added over legacy duplicates (identity-validation.ts), so the pipeline
+      // serializes that window with one advisory lock per invariant domain,
+      // and hands the release back here because the lock must stay held until
+      // the write below has COMMITTED. No-op on non-Postgres; on lock failure
+      // the save proceeds unserialized (the pre-existing rare race, never an
+      // outage).
+      const releaseWriteLock = await runWriteValidation(strapi, context);
       try {
-        // Name unique per type, slug unique across all four taxonomies (the
-        // public URL space is flat, so a Bank and a Store sharing a slug is a
-        // real route collision), and no collision with a reserved Astro route.
-        if (['create', 'update', 'clone'].includes(context.action)) {
-          await validateIdentity(
-            strapi,
-            context.uid,
-            context.action,
-            context.params?.data,
-            context.params?.documentId,
-            strictWrite,
-          );
-        }
-
-        // Redirects are evaluated by the storefront middleware on EVERY request,
-        // before routing, with no code review between the editor and production.
-        // A `from` shadowing a live entity or a reserved page makes that page
-        // unreachable site-wide, so reject that, self-redirects, and any write
-        // that closes a loop across the existing active rules.
-        if (['create', 'update', 'clone'].includes(context.action)) {
-          await validateRedirect(
-            strapi,
-            context.uid,
-            context.action,
-            context.params?.data,
-            context.params?.documentId,
-            strictWrite,
-          );
-        }
-
         // Redirect `note` is editor-only metadata, but the redirect UID scopes
         // to a FULL sweep (scopes.ts). Read the material fields before the
         // write so a note-only edit can skip the rebuild entirely (redirects
@@ -1224,13 +1014,17 @@ export default {
         return await runContentTransaction(
           strapi,
           () => next(),
-          async (result) => {
+          async (result, trx) => {
             if (
               context.action === 'update' &&
               changesEntityOfferMembership(context.uid, context.params?.data)
             ) {
+              // `trx`, not a pool connection: the write above still holds this
+              // row's lock until this callback returns, so a second connection
+              // touching it would deadlock with no timeout.
               await touchEntityPageUpdatedAt(
                 strapi,
+                trx,
                 context.uid,
                 result,
                 context.params?.documentId,

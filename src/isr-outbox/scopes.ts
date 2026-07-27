@@ -124,7 +124,8 @@ export async function offerRelationSlugs(
   }
   // Query every entity-owned offer relation as well as the offer-owned
   // relation arrays above. `coupons`/`deals` are mappedBy relations on the
-  // entities, while topPickCoupons is a separate one-way curated relation.
+  // entities, while topPickCoupons/orderedCoupons are separate one-way
+  // curated relations.
   // Reading both directions makes the rendered dependency explicit and
   // protects updates/deletes regardless of which side Strapi used to mutate
   // the join.
@@ -136,6 +137,7 @@ export async function offerRelationSlugs(
               $or: [
                 { coupons: { documentId: { $eq: documentId } } },
                 { topPickCoupons: { documentId: { $eq: documentId } } },
+                { orderedCoupons: { documentId: { $eq: documentId } } },
               ],
             }
           : { deals: { documentId: { $eq: documentId } } };

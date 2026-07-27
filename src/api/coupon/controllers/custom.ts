@@ -7,27 +7,11 @@ const MAX_PAGE_SIZE = 100;
 const clampPageSize = (raw: unknown, fallback: number) =>
   Math.max(1, Math.min(Number(raw) || fallback, MAX_PAGE_SIZE));
 
-// How many drag-ordered offers lead an entity listing before newest-first
-// members take over. Strapi 5 manyToMany joins carry an order column, so a
-// newly connected offer lands at the TAIL of the curated order — uncapped, a
-// category with 1300+ members pushed brand-new offers past page 26, far outside
-// the frontend's bounded read window, so they rendered on the store page but
-// never on the category page.
-//
-// INVARIANT: must stay <= OFFER_PAGE_SIZE * (OFFER_PAGE_CAP - 1) in the
-// frontend (currently 50 * 3 = 150; see features/entity/api/get-entity-page.ts
-// and requests/entity-offers-request.ts). That guarantees at least one whole
-// page of newest-first content is always inside the window, so recently tagged
-// offers surface no matter how large the curated relation grows.
-//
-// Also bounds the `documentId: { $notIn: [...] }` in the rest query to 50
-// elements instead of 1300+ — that query shape is close to one that previously
-// caused 504s on this database.
-//
-// The cap is enforced IN the relation populate query (see listEntityOffers),
-// so the id-only relation read is itself bounded to 50 link-ordered rows; the
-// JS slice merely re-asserts the bound.
-const CURATED_HEAD_LIMIT = 50;
+// Editors may promote any ten live, entity-scoped Coupons into an explicit
+// first-page order. This is deliberately separate from the mapped `coupons`
+// membership relation: a category can own 1300+ Coupons without turning all of
+// them into a curated sequence or creating a huge `$notIn` query.
+const ORDERED_COUPON_LIMIT = 10;
 
 // Map singular entityType to plural relation field name on coupons/deals
 const PLURAL_FIELD: Record<string, string> = {
@@ -101,9 +85,8 @@ async function listIsrOfferRoutes(
   return routes;
 }
 
-// Ordering for the global offer/deal listings: newest first. Per-entity
-// listings (store/category/brand/bank) instead follow the admin-curated
-// relation order — see getCouponsByEntity/getDealsByEntity.
+// Ordering for global listings and for the non-editorial portion of entity
+// listings: newest first. Entity Coupon listings may prepend orderedCoupons.
 const DEFAULT_OFFER_SORT = [
   // Editor-controlled sort key — see NEWEST_FIRST in src/utils/offer-visibility.ts.
   { publishedOn: 'desc' },
@@ -391,22 +374,13 @@ async function hydrateEntityTopPickCoupons(
   );
 }
 
-// Return an entity's offers with the admin-curated relation (drag) order first
-// — capped at CURATED_HEAD_LIMIT — then every other offer that belongs to the
-// entity, newest-first, filling the rest. Editors reorder the coupons/deals
-// relation on the entity's edit page; Strapi persists that order, and
-// populating the relation returns offers in it. Drag positions past the cap are
-// not honoured: they fall into the newest-first remainder instead (still
-// counted, still reachable — see CURATED_HEAD_LIMIT for why).
+// Return an entity's Coupons with its explicit `orderedCoupons` selection
+// first, then every other member newest-first. Product Deals have no curated
+// entity-side relation and therefore always use the newest-first path.
 //
-// The "rest" matters because the drag-ordered relation is not always the full
-// membership — an entity's offer relation can lag the offer-side taxonomy.
-// `entityOfferFilters` is the true membership, so members not in the ordered
-// relation are appended and counted — never silently dropped or
-// under-paginated.
-//
-// This also subsumes the "empty relation" case: with no drag order, every offer
-// comes from the newest-first member query. Returns null when the slug misses.
+// `entityOfferFilters` remains the true membership source, so a selection can
+// never limit the entity to ten Coupons. Empty selection means every offer is
+// newest-first. Returns null when the slug misses.
 //
 // NOTE: relies on Strapi ordering the populated relation by the link table's
 // order column (getJoinTableOrderBy in @strapi/database populate/apply).
@@ -435,7 +409,17 @@ async function listEntityOffers(
     filters: { slug },
     populate: {
       ...entityPopulate(entityType),
-      [relationField]: { fields: ['documentId'], filters: visibilityFilters() },
+      ...(offerKind === 'coupon'
+        ? {
+            orderedCoupons: {
+              fields: ['documentId'],
+              filters: {
+                ...visibilityFilters(),
+                [PLURAL_FIELD[entityType] || entityType]: { slug },
+              },
+            },
+          }
+        : {}),
     },
     limit: 1,
   });
@@ -455,6 +439,17 @@ async function listEntityOffers(
       fields: ['documentId'],
       filters: visibilityFilters(),
     },
+    ...(offerKind === 'coupon'
+      ? {
+          orderedCoupons: {
+            fields: ['documentId'],
+            filters: {
+              ...visibilityFilters(),
+              [PLURAL_FIELD[entityType] || entityType]: { slug },
+            },
+          },
+        }
+      : {}),
   };
   const entity = (await strapi.documents(apiId as any).findMany(entityQuery))[0];
   if (!entity) return null;
@@ -465,23 +460,30 @@ async function listEntityOffers(
     .map((coupon: any) => coupon?.documentId)
     .filter(Boolean)
     .slice(0, 4);
-  const orderedIds: string[] = (Array.isArray(entity[relationField]) ? entity[relationField] : [])
+  const orderedIds: string[] = (
+    offerKind === 'coupon' && Array.isArray(entity.orderedCoupons)
+      ? entity.orderedCoupons
+      : []
+  )
     .map((offer: any) => offer?.documentId)
     .filter(Boolean)
-    .slice(0, CURATED_HEAD_LIMIT);
+    .slice(0, ORDERED_COUPON_LIMIT);
   // Strip ID-only relations before sanitizing for output. Top Picks are
   // attached from their separately sanitized public Coupon projection.
   delete entity[relationField];
   delete entity.topPickCoupons;
+  delete entity.orderedCoupons;
   const sanitizedEntity = await sanitizeDocumentOutput(strapi, ctx, apiId, entity);
   sanitizedEntity.topPickCoupons = await hydrateEntityTopPickCoupons(
     strapi,
     topPickIds,
   );
+  // The storefront needs this identity-only projection to keep automatic Top
+  // Pick fallbacks separate from the explicitly ordered main-list Coupons.
+  sanitizedEntity.orderedCouponIds = orderedIds;
 
-  // True membership (superset of the ordered relation for Store deals). The
-  // "rest" is everything that belongs to the entity but is NOT in the drag
-  // order — appended newest-first after the curated head.
+  // Taxonomy is the true membership source. The remainder is every related
+  // offer not selected in Ordered Coupons, appended newest-first.
   const memberFilters = entityOfferFilters(entityType, entity.documentId, offerKind);
   const restFilters = orderedIds.length
     ? { ...memberFilters, documentId: { $notIn: orderedIds } }

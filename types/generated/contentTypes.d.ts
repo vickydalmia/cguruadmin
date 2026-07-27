@@ -521,6 +521,10 @@ export interface ApiBankBank extends Struct.CollectionTypeSchema {
     logo: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
     logoAlt: Schema.Attribute.String & Schema.Attribute.Required;
     name: Schema.Attribute.String & Schema.Attribute.Required;
+    orderedCoupons: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::coupon.coupon'
+    >;
     publishedAt: Schema.Attribute.DateTime;
     ratingAverage: Schema.Attribute.Decimal &
       Schema.Attribute.SetMinMax<
@@ -581,6 +585,10 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
     logo: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
     logoAlt: Schema.Attribute.String & Schema.Attribute.Required;
     name: Schema.Attribute.String & Schema.Attribute.Required;
+    orderedCoupons: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::coupon.coupon'
+    >;
     publishedAt: Schema.Attribute.DateTime;
     ratingAverage: Schema.Attribute.Decimal &
       Schema.Attribute.SetMinMax<
@@ -703,6 +711,10 @@ export interface ApiCategoryCategory extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Private;
     name: Schema.Attribute.String & Schema.Attribute.Required;
+    orderedCoupons: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::coupon.coupon'
+    >;
     publishedAt: Schema.Attribute.DateTime;
     ratingAverage: Schema.Attribute.Decimal &
       Schema.Attribute.SetMinMax<
@@ -1347,6 +1359,10 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
     logo: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
     logoAlt: Schema.Attribute.String & Schema.Attribute.Required;
     name: Schema.Attribute.String & Schema.Attribute.Required;
+    orderedCoupons: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::coupon.coupon'
+    >;
     publishedAt: Schema.Attribute.DateTime;
     ratingAverage: Schema.Attribute.Decimal &
       Schema.Attribute.SetMinMax<

@@ -15,7 +15,13 @@ ENV STRAPI_TELEMETRY_DISABLED=true
 
 WORKDIR /opt/app
 
+# `patches/` MUST be copied alongside the manifest: the `postinstall` script is
+# `patch-package`, which runs as part of the install below and needs the patch
+# files to already be on disk. Without this the install silently no-ops, `yarn
+# build` compiles the admin from unpatched sources, and the fix in
+# patches/@strapi+content-manager+*.patch never reaches production.
 COPY package.json yarn.lock ./
+COPY patches ./patches
 RUN corepack enable && corepack prepare yarn@1.22.22 --activate
 RUN yarn config set network-timeout 600000 -g && yarn install --frozen-lockfile --production=false
 

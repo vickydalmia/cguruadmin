@@ -53,6 +53,37 @@ const fileIdOf = (value: unknown): number | null => {
   return Number.isFinite(id) && id > 0 ? id : null;
 };
 
+async function dealImageProcessingCandidate(
+  strapi: Core.Strapi,
+  data: any,
+): Promise<any | null> {
+  if (
+    !data ||
+    typeof data !== 'object' ||
+    !Object.prototype.hasOwnProperty.call(data, 'dealImage')
+  ) {
+    return null;
+  }
+  const fileId = fileIdOf(data.dealImage);
+  if (!fileId) return null;
+
+  const file = await strapi.db.query('plugin::upload.file').findOne({
+    where: { id: fileId },
+    select: [
+      'id',
+      'name',
+      'url',
+      'mime',
+      'alternativeText',
+      'caption',
+      'backgroundRemovalVersion',
+    ],
+  });
+  return file && file.backgroundRemovalVersion !== DEAL_IMAGE_PROCESSOR_VERSION
+    ? file
+    : null;
+}
+
 const transparentFileName = (fileName: string): string => {
   const extension = path.extname(fileName);
   return `${path.basename(fileName, extension) || 'deal-image'}-transparent.png`;
@@ -203,31 +234,8 @@ export async function ensureTransparentDealImageForWrite(
   strapi: Core.Strapi,
   data: any,
 ): Promise<void> {
-  if (
-    !data ||
-    typeof data !== 'object' ||
-    !Object.prototype.hasOwnProperty.call(data, 'dealImage')
-  ) {
-    return;
-  }
-  const fileId = fileIdOf(data.dealImage);
-  if (!fileId) return;
-
-  const file = await strapi.db.query('plugin::upload.file').findOne({
-    where: { id: fileId },
-    select: [
-      'id',
-      'name',
-      'url',
-      'mime',
-      'alternativeText',
-      'caption',
-      'backgroundRemovalVersion',
-    ],
-  });
-  if (!file || file.backgroundRemovalVersion === DEAL_IMAGE_PROCESSOR_VERSION) {
-    return;
-  }
+  const file = await dealImageProcessingCandidate(strapi, data);
+  if (!file) return;
 
   const tempDirectory = await fs.mkdtemp(
     path.join(os.tmpdir(), 'deal-image-write-'),

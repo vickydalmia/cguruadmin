@@ -1,10 +1,23 @@
 import type { Core } from '@strapi/strapi';
-import { errors } from '@strapi/utils';
 import { publishedOnlyFilters } from './content-status';
 import {
   relationKeys,
   resultingRelations,
 } from './deal-of-the-day-validation';
+import { toValidationError } from './write-validation/problems';
+
+/**
+ * NOTE ON REPORTING. Unlike its sibling validators this file does not
+ * accumulate a problem list, because its four checks are mutually exclusive by
+ * construction: a selection cannot be both over the maximum and under the
+ * minimum, and the last two are only reachable once the count is in range.
+ * There is never more than one thing to say about `topPickCoupons`, so each
+ * check throws where it stands — through the shared `toValidationError`, so the
+ * wire shape and toast wording match every other validator.
+ */
+const reject = (message: string): never => {
+  throw toValidationError([{ path: ['topPickCoupons'], message }]);
+};
 
 export const ENTITY_TOP_PICK_COUPON_MAX = 4;
 export const ENTITY_TOP_PICK_COUPON_MIN = 2;
@@ -67,46 +80,25 @@ export async function validateEntityTopPickCoupons(
 
   if (count > ENTITY_TOP_PICK_COUPON_MAX) {
     const overBy = count - ENTITY_TOP_PICK_COUPON_MAX;
-    const message =
+    reject(
       `Top Pick Coupons accepts at most ${ENTITY_TOP_PICK_COUPON_MAX} Coupons. ` +
-      'Two are shown and two are buffered for expiry. ' +
-      `Remove ${overBy} Coupon${overBy === 1 ? '' : 's'}.`;
-    throw new errors.ValidationError(message, {
-      errors: [
-        {
-          path: ['topPickCoupons'],
-          message,
-          name: 'ValidationError',
-        },
-      ],
-      problems: [`topPickCoupons: ${message}`],
-    });
+        'Two are shown and two are buffered for expiry. ' +
+        `Remove ${overBy} Coupon${overBy === 1 ? '' : 's'}.`,
+    );
   }
 
   if (count === 0) return;
   if (count < ENTITY_TOP_PICK_COUPON_MIN) {
-    const message =
+    reject(
       `Select at least ${ENTITY_TOP_PICK_COUPON_MIN} Top Pick Coupons, ` +
-      'or clear the selection to use the latest-two fallback.';
-    throw new errors.ValidationError(message, {
-      errors: [
-        {
-          path: ['topPickCoupons'],
-          message,
-          name: 'ValidationError',
-        },
-      ],
-      problems: [`topPickCoupons: ${message}`],
-    });
+        'or clear the selection to use the latest-two fallback.',
+    );
   }
 
   if (!documentId) {
-    const message =
-      'Save this entity before selecting Top Pick Coupons so only its related Coupons can be chosen.';
-    throw new errors.ValidationError(message, {
-      errors: [{ path: ['topPickCoupons'], message, name: 'ValidationError' }],
-      problems: [`topPickCoupons: ${message}`],
-    });
+    reject(
+      'Save this entity before selecting Top Pick Coupons so only its related Coupons can be chosen.',
+    );
   }
 
   const documentIds = selections.flatMap((selection) => {
@@ -157,12 +149,9 @@ export async function validateEntityTopPickCoupons(
 
   if (invalidSelections.length === 0) return;
   const label = uid.split('::')[1]?.split('.')[0] ?? 'entity';
-  const message =
+  reject(
     `Top Pick Coupons must be published Coupons related to this ${label}. ` +
-    `Remove ${invalidSelections.length} unrelated or unavailable Coupon` +
-    `${invalidSelections.length === 1 ? '' : 's'}.`;
-  throw new errors.ValidationError(message, {
-    errors: [{ path: ['topPickCoupons'], message, name: 'ValidationError' }],
-    problems: [`topPickCoupons: ${message}`],
-  });
+      `Remove ${invalidSelections.length} unrelated or unavailable Coupon` +
+      `${invalidSelections.length === 1 ? '' : 's'}.`,
+  );
 }
