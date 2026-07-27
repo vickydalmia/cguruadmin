@@ -1,6 +1,9 @@
 import { computeContentStatus } from '../src/utils/content-status';
 import { enqueueStandaloneIsrEvent } from '../src/isr-outbox/runtime';
-import { removeInactiveCuratedOfferRelations } from '../src/utils/curated-offer-relations';
+import {
+  removeDisplayedTopPicksFromOrdered,
+  removeInactiveCuratedOfferRelations,
+} from '../src/utils/curated-offer-relations';
 
 export default {
   scheduler: {
@@ -93,6 +96,35 @@ export default {
           error: err?.message ?? String(err),
         });
         return;
+      }
+
+      // Separate try/catch ON PURPOSE. The pass above has already COMMITTED
+      // its disconnects; folding this one into the same block meant a failure
+      // here discarded those results and returned without enqueuing anything,
+      // leaving expired Coupons rendered until some unrelated write happened
+      // to revalidate the page.
+      //
+      // Must run AFTER that disconnect: it is what promotes a buffer into a
+      // displayed Top Pick slot, which is the main way a displayed pick ends
+      // up sitting in `orderedCoupons` as well.
+      try {
+        const promoted = await removeDisplayedTopPicksFromOrdered(strapi);
+        cleanup = {
+          removedSelections:
+            cleanup.removedSelections + promoted.removedSelections,
+          affectedPaths: [
+            ...new Set([...cleanup.affectedPaths, ...promoted.affectedPaths]),
+          ],
+          requiresFullRevalidation:
+            cleanup.requiresFullRevalidation ||
+            promoted.requiresFullRevalidation,
+        };
+      } catch (err: any) {
+        // Retried on the next pass; the expiry cleanup above still reports.
+        strapi.log.error({
+          event: 'content.displayed_top_pick_repair_failed',
+          error: err?.message ?? String(err),
+        });
       }
 
       if (cleanup.removedSelections > 0) {

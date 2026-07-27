@@ -8,19 +8,27 @@ import { toValidationError } from './write-validation/problems';
 
 /**
  * NOTE ON REPORTING. Unlike its sibling validators this file does not
- * accumulate a problem list, because its four checks are mutually exclusive by
- * construction: a selection cannot be both over the maximum and under the
- * minimum, and the last two are only reachable once the count is in range.
- * There is never more than one thing to say about `topPickCoupons`, so each
- * check throws where it stands — through the shared `toValidationError`, so the
- * wire shape and toast wording match every other validator.
+ * accumulate a problem list, because its checks are reached in sequence and
+ * only one can apply to a given selection: an over-maximum selection stops
+ * there, and the membership and liveness checks are only reachable once the
+ * count is in range. There is never more than one thing to say about
+ * `topPickCoupons`, so each check throws where it stands — through the shared
+ * `toValidationError`, so the wire shape and toast wording match every other
+ * validator.
  */
 const reject = (message: string): never => {
   throw toValidationError([{ path: ['topPickCoupons'], message }]);
 };
 
+/**
+ * Accepts zero Coupons, or 1–4.
+ *
+ * There is deliberately no minimum. A single selection is valid: the
+ * storefront keeps it in slot one and fills slot two with the newest eligible
+ * Coupon (`selectEntityTopPicks` in cguru-ui). Requiring two forced editors to
+ * pad a selection they did not want.
+ */
 export const ENTITY_TOP_PICK_COUPON_MAX = 4;
-export const ENTITY_TOP_PICK_COUPON_MIN = 2;
 
 export const ENTITY_TOP_PICK_UIDS = [
   'api::store.store',
@@ -88,12 +96,6 @@ export async function validateEntityTopPickCoupons(
   }
 
   if (count === 0) return;
-  if (count < ENTITY_TOP_PICK_COUPON_MIN) {
-    reject(
-      `Select at least ${ENTITY_TOP_PICK_COUPON_MIN} Top Pick Coupons, ` +
-        'or clear the selection to use the latest-two fallback.',
-    );
-  }
 
   if (!documentId) {
     reject(

@@ -49,6 +49,7 @@ import {
   removalNeedsDisconnect,
 } from './utils/ordered-relation';
 import { createDealAwareMediaInput } from './features/deal-image/components/deal-aware-media-input';
+import { couponLayoutPanel } from './features/coupon-layout/components/coupon-layout-panel';
 import {
   pendingRequiredFields,
   type PendingField,
@@ -79,108 +80,6 @@ const RELATION_CONFIG: Record<string, RelationConfig[]> = {
     { field: 'categories', target: 'api::category.category', label: 'Categories' },
     { field: 'banks', target: 'api::bank.bank', label: 'Banks' },
   ],
-};
-
-const ENTITY_TOP_PICK_CONFIG: Record<string, RelationConfig> = {
-  'api::store.store': {
-    field: 'topPickCoupons',
-    target: 'api::coupon.coupon',
-    label: 'Top Pick Coupons',
-    mainField: 'title',
-    scopeRelationField: 'stores',
-    minSelections: 2,
-    maxSelections: 4,
-    description:
-      'Select 2–4 live Coupons. The first two live selections are shown; ' +
-      'the next two are expiry buffers. Clear all selections to use the latest two.',
-  },
-  'api::brand.brand': {
-    field: 'topPickCoupons',
-    target: 'api::coupon.coupon',
-    label: 'Top Pick Coupons',
-    mainField: 'title',
-    scopeRelationField: 'brands',
-    minSelections: 2,
-    maxSelections: 4,
-    description:
-      'Select 2–4 live Coupons. The first two live selections are shown; ' +
-      'the next two are expiry buffers. Clear all selections to use the latest two.',
-  },
-  'api::category.category': {
-    field: 'topPickCoupons',
-    target: 'api::coupon.coupon',
-    label: 'Top Pick Coupons',
-    mainField: 'title',
-    scopeRelationField: 'categories',
-    minSelections: 2,
-    maxSelections: 4,
-    description:
-      'Select 2–4 live Coupons. The first two live selections are shown; ' +
-      'the next two are expiry buffers. Clear all selections to use the latest two.',
-  },
-  'api::bank.bank': {
-    field: 'topPickCoupons',
-    target: 'api::coupon.coupon',
-    label: 'Top Pick Coupons',
-    mainField: 'title',
-    scopeRelationField: 'banks',
-    minSelections: 2,
-    maxSelections: 4,
-    description:
-      'Select 2–4 live Coupons. The first two live selections are shown; ' +
-      'the next two are expiry buffers. Clear all selections to use the latest two.',
-  },
-};
-
-const ENTITY_ORDERED_COUPON_CONFIG: Record<string, RelationConfig> = {
-  'api::store.store': {
-    field: 'orderedCoupons',
-    target: 'api::coupon.coupon',
-    label: 'Ordered Coupons',
-    mainField: 'title',
-    scopeRelationField: 'stores',
-    maxSelections: 10,
-    reorderable: true,
-    description:
-      'Select and reorder up to 10 live Coupons for the first positions. ' +
-      'All remaining Coupons follow newest-first.',
-  },
-  'api::brand.brand': {
-    field: 'orderedCoupons',
-    target: 'api::coupon.coupon',
-    label: 'Ordered Coupons',
-    mainField: 'title',
-    scopeRelationField: 'brands',
-    maxSelections: 10,
-    reorderable: true,
-    description:
-      'Select and reorder up to 10 live Coupons for the first positions. ' +
-      'All remaining Coupons follow newest-first.',
-  },
-  'api::category.category': {
-    field: 'orderedCoupons',
-    target: 'api::coupon.coupon',
-    label: 'Ordered Coupons',
-    mainField: 'title',
-    scopeRelationField: 'categories',
-    maxSelections: 10,
-    reorderable: true,
-    description:
-      'Select and reorder up to 10 live Coupons for the first positions. ' +
-      'All remaining Coupons follow newest-first.',
-  },
-  'api::bank.bank': {
-    field: 'orderedCoupons',
-    target: 'api::coupon.coupon',
-    label: 'Ordered Coupons',
-    mainField: 'title',
-    scopeRelationField: 'banks',
-    maxSelections: 10,
-    reorderable: true,
-    description:
-      'Select and reorder up to 10 live Coupons for the first positions. ' +
-      'All remaining Coupons follow newest-first.',
-  },
 };
 
 type Candidate = { id: number; documentId: string; name: string };
@@ -907,57 +806,14 @@ const RelationMultiSelectPanel: PanelComponent = ({ model, documentId }) => {
   };
 };
 
-function EntityTopPickPanelBody({
-  config,
-  model,
-  documentId,
-}: {
-  config: RelationConfig;
-  model: string;
-  documentId?: string;
-}) {
-  const deferred = useDeferredMount();
-  return (
-    <RelationSection
-      config={config}
-      deferred={deferred}
-      model={model}
-      documentId={documentId}
-    />
-  );
-}
-
-const EntityTopPickCouponPanel: PanelComponent = ({ model, documentId }) => {
-  const config = ENTITY_TOP_PICK_CONFIG[model];
-  if (!config) return null;
-
-  return {
-    title: 'Top Pick Coupons',
-    content: (
-      <EntityTopPickPanelBody
-        config={config}
-        model={model}
-        documentId={documentId}
-      />
-    ),
-  };
-};
-
-const EntityOrderedCouponPanel: PanelComponent = ({ model, documentId }) => {
-  const config = ENTITY_ORDERED_COUPON_CONFIG[model];
-  if (!config) return null;
-
-  return {
-    title: 'Ordered Coupons',
-    content: (
-      <EntityTopPickPanelBody
-        config={config}
-        model={model}
-        documentId={documentId}
-      />
-    ),
-  };
-};
+/**
+ * Top Picks and Ordered Coupons were two separate sidebar panels. They are now
+ * one full-width dialog (features/coupon-layout): the two selections interact —
+ * a Coupon may not appear in both, and the server rejects the ENTIRE save if it
+ * does — so editing them apart is what made the conflict easy to create.
+ */
+const EntityCouponLayoutPanel: PanelComponent = ({ model, documentId }) =>
+  couponLayoutPanel(model, documentId);
 
 // Bulk code import. The server-side importer already existed and was fully
 // implemented — this panel is the only thing that was missing, so editors had
@@ -1317,8 +1173,7 @@ export default {
     apis.addEditViewSidePanel([
       PublishingPanel,
       RelationMultiSelectPanel,
-      EntityTopPickCouponPanel,
-      EntityOrderedCouponPanel,
+      EntityCouponLayoutPanel,
       UniqueCodeImportPanel,
       ValidationProblemsPanel,
     ]);

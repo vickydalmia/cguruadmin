@@ -4,6 +4,7 @@ import { IsrOutboxDispatcher } from './dispatcher';
 import { logIsrOutbox } from './log';
 import { insertIsrOutboxEvent } from './store';
 import type { IsrOutboxInsert } from './types';
+import { purgeResponseCaches } from '../middlewares/cache';
 
 let dispatcher: IsrOutboxDispatcher | null = null;
 
@@ -66,7 +67,14 @@ export async function enqueueStandaloneIsrEvent(
   return strapi.db.transaction(
     async ({ trx, onCommit }: { trx: any; onCommit: (fn: () => void) => void }) => {
       const event = await insertIsrOutboxEvent(trx, input);
-      onCommit(wakeIsrOutbox);
+      onCommit(() => {
+        // Standalone events are used after cron/Query Engine writes, which do
+        // not pass through the document middleware's after-commit purge. Wake
+        // only after clearing API responses so ISR cannot rebuild durable HTML
+        // from the pre-cleanup 60-second entity endpoint cache.
+        purgeResponseCaches();
+        wakeIsrOutbox();
+      });
       return event;
     },
   );

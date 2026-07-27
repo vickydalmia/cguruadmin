@@ -2,6 +2,33 @@
 
 Notes for anyone — human or agent — working in this repo.
 
+## ⚠️ Do not turn a review into an edit
+
+**A review request is a request for an answer, not for a patch. Report the
+findings and stop. Do not touch a file until you are asked to.**
+
+This applies to every form the request takes, including:
+
+- "check X, is it correct?" / "list why"
+- pasted review comments, findings, or lint output — **even when they are
+  clearly valid, and even when the user says they are correct**
+- "why does X happen?" / "how does X work?"
+- anything already qualified with "don't change anything"
+
+Confirming a finding is real is not the same as asking for it to be fixed.
+Those are two separate decisions and the second one belongs to the user. When
+you finish a review, say what you found and ask whether to fix it — a one-line
+question, not a diff.
+
+Why this matters here: unrequested edits arrive mixed into the working tree
+with the changes the user is actually reviewing, so the thing under review
+moves while they are reading it. It also spends their time and tokens on work
+they had not decided to do, and it hides the review's conclusion under a wall
+of implementation.
+
+**When you may edit without a fresh ask:** the user asked for an
+implementation in the first place and you are still delivering it. That is it.
+
 ## ⚠️ Patched dependencies — RE-CHECK ON EVERY STRAPI UPGRADE
 
 This repo carries `patch-package` patches against `node_modules`. They are applied

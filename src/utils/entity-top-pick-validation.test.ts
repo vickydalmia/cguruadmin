@@ -125,17 +125,26 @@ describe('entity Top Pick Coupon selection rules', () => {
     expect(findMany).not.toHaveBeenCalled();
   });
 
-  it('rejects a single curated Coupon but allows an empty fallback selection', async () => {
-    const { strapi, findMany } = harness();
+  it('accepts a single curated Coupon', async () => {
+    // There is no minimum. The storefront keeps a lone pick in slot one and
+    // fills slot two with the newest eligible Coupon, so requiring two only
+    // forced editors to pad a selection they did not want.
+    const selected = [{ id: 1, documentId: 'coupon-1' }];
+    const { strapi } = harness(null, selected);
 
     await expect(
       validateEntityTopPickCoupons(
         strapi,
         'api::store.store',
-        { topPickCoupons: [{ id: 1, documentId: 'coupon-1' }] },
+        { topPickCoupons: selected },
         'store-1',
       ),
-    ).rejects.toThrow(/Select at least 2 Top Pick Coupons/);
+    ).resolves.toBeUndefined();
+  });
+
+  it('accepts an empty selection without querying Coupons', async () => {
+    const { strapi, findMany } = harness();
+
     await expect(
       validateEntityTopPickCoupons(
         strapi,
@@ -145,5 +154,19 @@ describe('entity Top Pick Coupon selection rules', () => {
       ),
     ).resolves.toBeUndefined();
     expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it('still rejects a lone Coupon that is not related to the entity', async () => {
+    // Dropping the minimum must not weaken the membership check.
+    const { strapi } = harness(null, []);
+
+    await expect(
+      validateEntityTopPickCoupons(
+        strapi,
+        'api::store.store',
+        { topPickCoupons: [{ id: 99, documentId: 'coupon-99' }] },
+        'store-1',
+      ),
+    ).rejects.toThrow(/related to this store/);
   });
 });

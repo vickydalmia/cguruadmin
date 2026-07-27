@@ -356,7 +356,9 @@ describe('entity Coupon population', () => {
     });
     expect(entityPopulate.topPickCoupons).toEqual({
       fields: ['documentId'],
-      filters: expect.any(Object),
+      filters: expect.objectContaining({
+        categories: { slug: 'amazon-coupons' },
+      }),
     });
   });
 
@@ -414,6 +416,7 @@ describe('entity Coupon population', () => {
       ]),
       filters: {
         documentId: { $in: ['coupon-second', 'coupon-first'] },
+        stores: { slug: 'amazon-coupons' },
       },
       populate: {
         image: true,
@@ -426,6 +429,41 @@ describe('entity Coupon population', () => {
       limit: 2,
     });
   });
+
+  it.each([
+    ['store', 'stores'],
+    ['brand', 'brands'],
+    ['category', 'categories'],
+    ['bank', 'banks'],
+  ] as const)(
+    'requires a Top Pick to retain its %s membership in both lookup stages',
+    async (entityType, relationField) => {
+      const harness = createHarness();
+      harness.ctx.state.entityType = entityType;
+      harness.entityFindMany.mockResolvedValue([
+        {
+          documentId: `${entityType}-amazon`,
+          name: 'Amazon',
+          slug: 'amazon-coupons',
+          topPickCoupons: [{ documentId: 'coupon-featured' }],
+        },
+      ]);
+      harness.couponFindMany.mockResolvedValueOnce([
+        { documentId: 'coupon-featured', title: 'Featured' },
+      ]);
+
+      await harness.controller.getCouponsByEntity(harness.ctx as any);
+
+      const entityQuery = harness.entityFindMany.mock.calls[0]?.[0];
+      expect(entityQuery.populate.topPickCoupons.filters[relationField]).toEqual(
+        { slug: 'amazon-coupons' },
+      );
+      const hydrationQuery = harness.couponFindMany.mock.calls[0]?.[0];
+      expect(hydrationQuery.filters[relationField]).toEqual({
+        slug: 'amazon-coupons',
+      });
+    },
+  );
 
   it('returns the same hydrated Top Picks from the Deal entity endpoint', async () => {
     const harness = createHarness();
@@ -456,6 +494,10 @@ describe('entity Coupon population', () => {
         title: 'Featured',
       }),
     ]);
+    const topPickQuery = harness.couponFindMany.mock.calls[0]?.[0];
+    expect(topPickQuery.filters.stores).toEqual({
+      slug: 'amazon-coupons',
+    });
   });
 
   it('returns selected Coupons in orderedCoupons order, hydrated by id', async () => {

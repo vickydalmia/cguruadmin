@@ -339,6 +339,8 @@ async function sanitizePublicDocumentOutput(
 async function hydrateEntityTopPickCoupons(
   strapi: Core.Strapi,
   orderedIds: readonly string[],
+  entityType: string,
+  entitySlug: string,
 ): Promise<any[]> {
   if (orderedIds.length === 0) return [];
 
@@ -349,6 +351,7 @@ async function hydrateEntityTopPickCoupons(
       fields: COUPON_PUBLIC_FIELDS,
       filters: {
         documentId: { $in: orderedIds },
+        [PLURAL_FIELD[entityType] || entityType]: { slug: entitySlug },
         ...visibilityFilters(),
       },
       populate: COUPON_PUBLIC_POPULATE,
@@ -437,7 +440,10 @@ async function listEntityOffers(
     ...sanitizedPopulate,
     topPickCoupons: {
       fields: ['documentId'],
-      filters: visibilityFilters(),
+      filters: {
+        ...visibilityFilters(),
+        [PLURAL_FIELD[entityType] || entityType]: { slug },
+      },
     },
     ...(offerKind === 'coupon'
       ? {
@@ -477,6 +483,8 @@ async function listEntityOffers(
   sanitizedEntity.topPickCoupons = await hydrateEntityTopPickCoupons(
     strapi,
     topPickIds,
+    entityType,
+    slug,
   );
   // The storefront needs this identity-only projection to keep automatic Top
   // Pick fallbacks separate from the explicitly ordered main-list Coupons.

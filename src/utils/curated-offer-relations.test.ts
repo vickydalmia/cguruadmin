@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   curatedOfferTargetForRelationPath,
   registerCuratedOfferRelationQueryFilter,
+  removeDisplayedTopPicksFromOrdered,
   removeInactiveCuratedOfferRelations,
   runWithCuratedOfferRelationFilter,
 } from './curated-offer-relations';
@@ -287,6 +288,143 @@ describe('curated offer relation cleanup', () => {
     await expect(
       removeInactiveCuratedOfferRelations(strapi),
     ).resolves.toEqual({
+      removedSelections: 1,
+      affectedPaths: [],
+      requiresFullRevalidation: true,
+    });
+  });
+});
+
+describe('displayed Top Picks are kept out of Ordered Coupons', () => {
+  function harness(row: unknown, uid = 'api::store.store') {
+    const update = vi.fn(async () => undefined);
+    const strapi = {
+      db: {
+        query: vi.fn((queriedUid: string) => ({
+          findMany: vi.fn(async () => (queriedUid === uid && row ? [row] : [])),
+          update,
+        })),
+      },
+      log: { info: vi.fn() },
+    } as any;
+    return { strapi, update };
+  }
+
+  it('disconnects a displayed Top Pick from Ordered Coupons', async () => {
+    const { strapi, update } = harness({
+      id: 7,
+      slug: 'amazon-coupons',
+      // Index 0 and 1 are the displayed picks. Query Engine populate preserves
+      // link-table order, so position here is the rendered position.
+      topPickCoupons: [
+        { id: 21, documentId: 'coupon-21' },
+        { id: 22, documentId: 'coupon-22' },
+      ],
+      orderedCoupons: [
+        { id: 22, documentId: 'coupon-22' },
+        { id: 30, documentId: 'coupon-30' },
+      ],
+    });
+
+    await expect(removeDisplayedTopPicksFromOrdered(strapi)).resolves.toEqual({
+      removedSelections: 1,
+      affectedPaths: ['/amazon-coupons/'],
+      requiresFullRevalidation: false,
+    });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 7 },
+      data: { orderedCoupons: { disconnect: [22] } },
+    });
+    expect(strapi.log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'content.displayed_top_pick_removed_from_ordered',
+        coupons: ['coupon-22'],
+      }),
+    );
+  });
+
+  it('leaves an expiry buffer alone', async () => {
+    // Positions 3-4 never render, so ordering them in the main list is exactly
+    // what they are for.
+    const { strapi, update } = harness({
+      id: 8,
+      slug: 'nike-coupons',
+      topPickCoupons: [
+        { id: 21, documentId: 'coupon-21' },
+        { id: 22, documentId: 'coupon-22' },
+        { id: 23, documentId: 'coupon-23' },
+        { id: 24, documentId: 'coupon-24' },
+      ],
+      orderedCoupons: [
+        { id: 23, documentId: 'coupon-23' },
+        { id: 24, documentId: 'coupon-24' },
+      ],
+    });
+
+    await expect(removeDisplayedTopPicksFromOrdered(strapi)).resolves.toEqual({
+      removedSelections: 0,
+      affectedPaths: [],
+      requiresFullRevalidation: false,
+    });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('removes a buffer only once it has been promoted into a shown slot', async () => {
+    // What the expiry pass leaves behind: the two displayed picks are gone,
+    // so the buffer that is also ordered is now rendered and must leave the
+    // main list.
+    const { strapi, update } = harness({
+      id: 9,
+      slug: 'hdfc-offers',
+      topPickCoupons: [
+        { id: 23, documentId: 'coupon-23' },
+        { id: 24, documentId: 'coupon-24' },
+      ],
+      orderedCoupons: [
+        { id: 23, documentId: 'coupon-23' },
+        { id: 40, documentId: 'coupon-40' },
+      ],
+    });
+
+    await expect(removeDisplayedTopPicksFromOrdered(strapi)).resolves.toEqual({
+      removedSelections: 1,
+      affectedPaths: ['/hdfc-offers/'],
+      requiresFullRevalidation: false,
+    });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 9 },
+      data: { orderedCoupons: { disconnect: [23] } },
+    });
+  });
+
+  it('does nothing when either relation is empty', async () => {
+    const { strapi, update } = harness({
+      id: 10,
+      slug: 'puma-coupons',
+      topPickCoupons: [{ id: 21, documentId: 'coupon-21' }],
+      orderedCoupons: [],
+    });
+
+    await expect(removeDisplayedTopPicksFromOrdered(strapi)).resolves.toEqual({
+      removedSelections: 0,
+      affectedPaths: [],
+      requiresFullRevalidation: false,
+    });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('falls back to full revalidation when the entity has no route slug', async () => {
+    const { strapi } = harness(
+      {
+        id: 11,
+        slug: null,
+        topPickCoupons: [{ id: 21, documentId: 'coupon-21' }],
+        orderedCoupons: [{ id: 21, documentId: 'coupon-21' }],
+      },
+      'api::bank.bank',
+    );
+
+    await expect(removeDisplayedTopPicksFromOrdered(strapi)).resolves.toEqual({
       removedSelections: 1,
       affectedPaths: [],
       requiresFullRevalidation: true,

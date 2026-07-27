@@ -1,5 +1,24 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { startIsrOutbox } from './runtime';
+
+const mocks = vi.hoisted(() => ({
+  purgeResponseCaches: vi.fn(),
+  insertIsrOutboxEvent: vi.fn(async () => ({
+    id: 'event-1',
+    eventKey: 'key-1',
+    payload: { paths: ['/amazon/'] },
+  })),
+}));
+
+vi.mock('../middlewares/cache', () => ({
+  purgeResponseCaches: mocks.purgeResponseCaches,
+}));
+
+vi.mock('./store', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./store')>()),
+  insertIsrOutboxEvent: mocks.insertIsrOutboxEvent,
+}));
+
+import { enqueueStandaloneIsrEvent, startIsrOutbox } from './runtime';
 
 const strapi = { log: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } } as any;
 
@@ -26,5 +45,37 @@ describe('startIsrOutbox', () => {
     vi.stubEnv('ISR_ADMIN_SECRET', '');
     expect(() => startIsrOutbox(strapi)).not.toThrow();
     expect(strapi.log.warn).toHaveBeenCalled();
+  });
+});
+
+describe('enqueueStandaloneIsrEvent', () => {
+  it('purges response caches after commit before ISR delivery is woken', async () => {
+    let onCommit: (() => void) | undefined;
+    const trx = vi.fn();
+    const transaction = vi.fn(async (callback: any) => {
+      const result = await callback({
+        trx,
+        onCommit: (callback: () => void) => {
+          onCommit = callback;
+        },
+      });
+      expect(mocks.purgeResponseCaches).not.toHaveBeenCalled();
+      onCommit?.();
+      return result;
+    });
+    const standaloneStrapi = { db: { transaction } } as any;
+
+    await expect(
+      enqueueStandaloneIsrEvent(standaloneStrapi, {
+        reason: 'inactive curated offer relations cleaned',
+        payload: { paths: ['/amazon/'] },
+      }),
+    ).resolves.toMatchObject({ id: 'event-1', eventKey: 'key-1' });
+
+    expect(mocks.insertIsrOutboxEvent).toHaveBeenCalledWith(
+      trx,
+      expect.objectContaining({ payload: { paths: ['/amazon/'] } }),
+    );
+    expect(mocks.purgeResponseCaches).toHaveBeenCalledTimes(1);
   });
 });

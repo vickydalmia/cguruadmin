@@ -20,10 +20,8 @@ const COUPON_RELATION_BY_UID: Record<EntityTopPickUid, string> = {
   'api::category.category': 'categories',
 };
 
-type CouponSelectionPath = 'orderedCoupons' | 'topPickCoupons';
-
-const reject = (path: CouponSelectionPath, message: string): never => {
-  throw toValidationError([{ path: [path], message }]);
+const reject = (message: string): never => {
+  throw toValidationError([{ path: ['orderedCoupons'], message }]);
 };
 
 export function isEntityOrderedCouponUid(
@@ -34,28 +32,23 @@ export function isEntityOrderedCouponUid(
 
 function populatedRelations(
   document: unknown,
-  field: 'orderedCoupons' | 'topPickCoupons',
+  field: 'orderedCoupons',
 ): RelationEntry[] {
   if (!document || typeof document !== 'object') return [];
   const value = Reflect.get(document, field);
   return Array.isArray(value) ? value : [];
 }
 
-function sharesRelation(
-  candidate: RelationEntry,
-  others: readonly RelationEntry[],
-): boolean {
-  const keys = new Set(relationKeys(candidate));
-  return others.some((other) =>
-    relationKeys(other).some((key) => keys.has(key)),
-  );
-}
-
 /**
  * Ordered Coupons are an editorial projection, not entity membership:
  * membership continues to come from Coupon taxonomies. Validate the projection
- * on every change to it or Top Picks so the two page sections can never select
- * the same Coupon.
+ * whenever it changes.
+ *
+ * This no longer runs for a Top-Picks-only write. It used to, solely to catch
+ * a Coupon selected in both relations — a ban that has been lifted (see the
+ * note further down). Reacting to `topPickCoupons` now would only mean an
+ * unrelated Top Pick edit could be rejected for a pre-existing Ordered
+ * Coupons problem it did not cause.
  */
 export async function validateEntityOrderedCoupons(
   strapi: Core.Strapi,
@@ -64,66 +57,54 @@ export async function validateEntityOrderedCoupons(
   documentId?: string,
 ): Promise<void> {
   if (!data || typeof data !== 'object') return;
-
-  const orderedTouched = Object.prototype.hasOwnProperty.call(
-    data,
-    'orderedCoupons',
-  );
-  const topPicksTouched = Object.prototype.hasOwnProperty.call(
-    data,
-    'topPickCoupons',
-  );
-  if (!orderedTouched && !topPicksTouched) return;
+  if (!Object.prototype.hasOwnProperty.call(data, 'orderedCoupons')) return;
 
   const current: unknown = documentId
     ? await strapi.documents(uid).findOne({
         documentId,
         fields: ['documentId'],
-        populate: {
-          orderedCoupons: { fields: ['documentId'] },
-          topPickCoupons: { fields: ['documentId'] },
-        },
+        populate: { orderedCoupons: { fields: ['documentId'] } },
       })
     : null;
 
   const currentOrdered = populatedRelations(current, 'orderedCoupons');
-  const currentTopPicks = populatedRelations(current, 'topPickCoupons');
-  const ordered = orderedTouched
-    ? resultingRelations(Reflect.get(data, 'orderedCoupons'), currentOrdered) ??
-      currentOrdered
-    : currentOrdered;
-  const topPicks = topPicksTouched
-    ? resultingRelations(Reflect.get(data, 'topPickCoupons'), currentTopPicks) ??
-      currentTopPicks
-    : currentTopPicks;
+  const ordered =
+    resultingRelations(Reflect.get(data, 'orderedCoupons'), currentOrdered) ??
+    currentOrdered;
 
   if (ordered.length > ENTITY_ORDERED_COUPON_MAX) {
     const overBy = ordered.length - ENTITY_ORDERED_COUPON_MAX;
     reject(
-      'orderedCoupons',
       `Ordered Coupons accepts at most ${ENTITY_ORDERED_COUPON_MAX} Coupons. ` +
         `Remove ${overBy} Coupon${overBy === 1 ? '' : 's'}.`,
     );
   }
 
-  const overlap = ordered.filter((coupon) =>
-    sharesRelation(coupon, topPicks),
-  );
-  if (overlap.length > 0) {
-    const message =
-      'Top Pick Coupons cannot also be selected in Ordered Coupons. ' +
-      `Remove ${overlap.length} duplicate Coupon${overlap.length === 1 ? '' : 's'}.`;
-    const paths: CouponSelectionPath[] =
-      orderedTouched && topPicksTouched
-        ? ['orderedCoupons', 'topPickCoupons']
-        : [topPicksTouched ? 'topPickCoupons' : 'orderedCoupons'];
-    throw toValidationError(paths.map((path) => ({ path: [path], message })));
-  }
+  // NO OVERLAP CHECK. Top Picks 3–4 are expiry buffers that stay invisible
+  // until an earlier pick dies, so they are legitimately orderable in the main
+  // list meanwhile. Only the two DISPLAYED picks must stay out of
+  // `orderedCoupons`, and that is positional — which this validator cannot
+  // evaluate:
+  //
+  //   - `resultingRelations` returns the right SET but the wrong ORDER. It
+  //     computes uniqueRelations([...current, ...connect]), keeping the first
+  //     occurrence, so a pure drag-reorder resolves back to the OLD order;
+  //     Strapi's before/end position anchors are ignored entirely.
+  //   - The cleanup job writes through `strapi.db.query`, bypassing this
+  //     middleware. Once it promotes a buffer that is also ordered, a
+  //     positional rule here would reject EVERY later save of that entity,
+  //     including edits unrelated to Coupons.
+  //
+  // The invariant is therefore maintained by repair, not rejection:
+  // `removeDisplayedTopPicksFromOrdered` in utils/curated-offer-relations.ts
+  // drops a displayed pick out of `orderedCoupons` on the five-minute cron,
+  // and the admin dialog blocks the overlap up front. The storefront already
+  // degrades safely in the meantime — a displayed Top Pick is removed from the
+  // main list, so the ordered head simply closes up.
 
-  if (!orderedTouched || ordered.length === 0) return;
+  if (ordered.length === 0) return;
   if (!documentId) {
     reject(
-      'orderedCoupons',
       'Save this entity before selecting Ordered Coupons so only its related Coupons can be chosen.',
     );
   }
@@ -149,7 +130,6 @@ export async function validateEntityOrderedCoupons(
 
   if (!identityFilters.length) {
     reject(
-      'orderedCoupons',
       'Ordered Coupons contains an unavailable Coupon. Remove it and select again.',
     );
   }
@@ -180,7 +160,6 @@ export async function validateEntityOrderedCoupons(
   if (!invalid.length) return;
   const label = uid.split('::')[1]?.split('.')[0] ?? 'entity';
   reject(
-    'orderedCoupons',
     `Ordered Coupons must be published Coupons related to this ${label}. ` +
       `Remove ${invalid.length} unrelated or unavailable Coupon` +
       `${invalid.length === 1 ? '' : 's'}.`,

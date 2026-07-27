@@ -109,52 +109,50 @@ describe('entity Ordered Coupon selection rules', () => {
     ).rejects.toThrow(/at most 10 Coupons/);
   });
 
-  it('rejects overlap when Ordered Coupons or Top Picks changes', async () => {
-    const current = {
-      orderedCoupons: [{ id: 1, documentId: 'coupon-1' }],
-      topPickCoupons: [{ id: 2, documentId: 'coupon-2' }],
-    };
-    const { strapi } = harness(current);
+  it('allows a Coupon in both Ordered Coupons and Top Picks', async () => {
+    // Top Picks 3-4 are expiry buffers, invisible until an earlier pick dies,
+    // so they are legitimately orderable in the main list meanwhile. Only the
+    // two DISPLAYED picks must stay out — a positional rule this validator
+    // cannot evaluate, so the cron repairs it instead (see
+    // removeDisplayedTopPicksFromOrdered).
+    const selected = [{ id: 1, documentId: 'coupon-1' }];
+    const { strapi } = harness(
+      { orderedCoupons: [], topPickCoupons: selected },
+      selected,
+    );
 
-    try {
-      await validateEntityOrderedCoupons(
-        strapi,
-        'api::bank.bank',
-        {
-          topPickCoupons: {
-            connect: [{ id: 1, documentId: 'coupon-1' }],
-            disconnect: [],
-          },
-        },
-        'bank-1',
-      );
-      throw new Error('Expected overlap validation to fail.');
-    } catch (error: any) {
-      expect(error.message).toMatch(/cannot also be selected/);
-      expect(error.details?.errors?.[0]?.path).toEqual(['topPickCoupons']);
-    }
-  });
-
-  it('points at both controls when both overlapping selections changed', async () => {
-    const { strapi } = harness();
-
-    try {
-      await validateEntityOrderedCoupons(
+    await expect(
+      validateEntityOrderedCoupons(
         strapi,
         'api::store.store',
-        {
-          orderedCoupons: [{ id: 1, documentId: 'coupon-1' }],
-          topPickCoupons: [{ id: 1, documentId: 'coupon-1' }],
-        },
+        { orderedCoupons: selected },
         'store-1',
-      );
-      throw new Error('Expected overlap validation to fail.');
-    } catch (error: any) {
-      expect(error.details?.errors?.map((item: any) => item.path)).toEqual([
-        ['orderedCoupons'],
-        ['topPickCoupons'],
-      ]);
-    }
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it('ignores a write that does not touch Ordered Coupons', async () => {
+    // It used to run for Top-Picks-only writes purely to catch the overlap.
+    // Now that would only let an unrelated Top Pick edit be rejected for a
+    // pre-existing Ordered Coupons problem it did not cause.
+    const { strapi, findOne, findMany } = harness({
+      orderedCoupons: Array.from({ length: 20 }, (_, index) => ({
+        id: index + 1,
+        documentId: `coupon-${index + 1}`,
+      })),
+      topPickCoupons: [],
+    });
+
+    await expect(
+      validateEntityOrderedCoupons(
+        strapi,
+        'api::bank.bank',
+        { topPickCoupons: [{ id: 1, documentId: 'coupon-1' }] },
+        'bank-1',
+      ),
+    ).resolves.toBeUndefined();
+    expect(findOne).not.toHaveBeenCalled();
+    expect(findMany).not.toHaveBeenCalled();
   });
 
   it('rejects an unavailable or unrelated Coupon', async () => {
