@@ -5,13 +5,14 @@ function createHarness(result: any) {
   const entityService = {
     submitRating: vi.fn().mockResolvedValue(result),
     relatedStores: vi.fn().mockResolvedValue(result),
+    entityPopularSearches: vi.fn().mockResolvedValue(result),
   };
   const strapi = {
     service: vi.fn(() => entityService),
     config: { get: vi.fn(() => ['test-secret']) },
   } as any;
   const ctx = {
-    params: { slug: 'hdfc-bank' },
+    params: { kind: 'bank', slug: 'hdfc-bank' },
     query: {},
     state: { entityType: 'bank' },
     request: { body: { value: 5 }, ip: '203.0.113.1' },
@@ -73,5 +74,20 @@ describe('entity-page controller', () => {
       {},
     );
     expect(harness.ctx.send).toHaveBeenCalledWith(response);
+  });
+
+  it('serves the safe Popular Searches aggregate and rejects invalid kinds', async () => {
+    const response = { groups: [] };
+    const harness = createHarness(response);
+    await harness.controller.entityPopularSearches(harness.ctx as any);
+    expect(harness.entityService.entityPopularSearches).toHaveBeenCalledWith(
+      'bank',
+      'hdfc-bank',
+    );
+    expect(harness.ctx.send).toHaveBeenCalledWith(response);
+
+    harness.ctx.params.kind = 'coupon';
+    await harness.controller.entityPopularSearches(harness.ctx as any);
+    expect(harness.ctx.badRequest).toHaveBeenCalledWith('Unsupported entity type');
   });
 });

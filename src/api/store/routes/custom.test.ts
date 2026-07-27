@@ -3,6 +3,22 @@ import routes from './custom';
 
 describe('entity-page routes', () => {
   it('registers related Store and rating endpoints for all four entity types', () => {
+    const popular = routes.routes.find(
+      (route) => route.path === '/entity-popular-searches/:kind/:slug',
+    );
+    expect(popular).toMatchObject({
+      method: 'GET',
+      handler: 'custom.entityPopularSearches',
+      config: {
+        auth: false,
+        middlewares: [
+          {
+            name: 'global::cache',
+            config: { ttlMs: 60_000, keyByPath: true },
+          },
+        ],
+      },
+    });
     const relatedStorePaths = routes.routes
       .filter((route) => route.method === 'GET' && route.path.endsWith('/related-stores'))
       .map((route) => route.path)

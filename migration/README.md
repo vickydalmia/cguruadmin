@@ -135,6 +135,9 @@ npm run migrate -- --allow-partial-deals
 npm run migrate -- --phase 12-offer-backfill --allow-partial-deals
 npm run migrate -- --phase 13-site-content
 npm run migrate -- --phase 13a-homepage-offer-sections
+npm run migrate -- --phase 13b-footer-media
+npm run migrate -- --phase 13c-footer-country-links
+npm run migrate -- --phase 13d-site-selection-backfill
 npm run migrate -- --phase 14-media-optimize
 npm run migrate -- --phase 15-media-formats-backfill
 ```
@@ -361,7 +364,7 @@ Seeds the four Strapi single types the frontend needs:
 - `global` — header/footer codes from WP ACF option keys (`options_header_code`, `options_footer_code`).
 - `homepage` — created as a **single published row** (draftAndPublish is disabled on all four singles — homepage, menu, footer, global — they are publish-only), with the full component tree built once. Also seeds `title: "Homepage"` for the admin entry header. Curated sections: hero banners from the `options_slider_features` ACF repeater; hero products and Top Deals from migrated Deal entities; CG Exclusive, Fresh Drops, Explore Offers, and Offers By Brand from Coupon entities; Popular Stores from `options_featured_stores` (fallback: top stores by published-coupon count); bank offers ranked by published-coupon count; plus How It Works and FAQ copy mirrored from the frontend. Per-section item counts live in `src/utils/homepage-limits.ts` (each holds a +4 buffer over what the site renders; a parity test pins them to the component schema `max` values).
 - `menu` — topStores relation (same curated store list), one category section per explore category with its top stores, and the fixed extra nav items.
-- `footer` — link sections, social links, countries, and partner card mirrored from the frontend `footer-data.ts`; Popular Stores labels are resolved to real store relations where a matching store name exists.
+- `footer` — link sections, social links, countries, and partner card mirrored from the frontend `footer-data.ts`; Popular Stores labels are resolved to real store relations where a matching store name exists. Country flag media is attached by Phase 13b.
 
 All component and relation link table names are verified against `information_schema` before writing; anything missing (schema not migrated yet) is skipped with a clear warning. Each single type is skipped entirely if its table already has a row, so re-runs are safe.
 
@@ -373,6 +376,48 @@ Run only this compatibility phase after deploying the new Strapi component schem
 
 ```bash
 npm run migrate -- --phase 13a-homepage-offer-sections
+```
+
+### Phase 13b — Footer Media
+
+Backfills the footer's five country flags and Google Preferred Source card.
+The exact source PNGs live in `assets/footer/` and pass through the same
+hash-deduplicated media pipeline as other migration uploads. In S3
+environments that means PNG masters are converted to optimized WebP and the
+normal responsive WebP/AVIF format ladder is generated before the Strapi media
+relations are attached.
+
+The phase is fill-only: existing country flag or Google icon relations are
+preserved, missing country/card components are created, and blank Google card
+copy is filled with the migration defaults. It has its own checkpoint so
+environments where Phase 13 already completed still receive the backfill.
+Apply the latest Strapi footer schema before running it.
+
+```bash
+npm run migrate -- --phase 13b-footer-media
+```
+
+### Phase 13c — Footer Country Links
+
+Backfills the five international CouponzGuru homepage URLs into blank
+`footer.country.url` fields. Existing editor-entered destinations are
+preserved. This compatibility checkpoint exists for environments that already
+completed Phase 13b before the country component gained its URL field.
+
+```bash
+npm run migrate -- --phase 13c-footer-country-links
+```
+
+### Phase 13d — Homepage and Search Selections
+
+Compatibility backfill for deployments that completed Phase 13 before the
+Homepage Popular Searches relations and search-overlay fields were introduced.
+It converts legacy Popular Searches links to entity relations, fills an empty
+search overlay from the existing top-store ordering plus live-offer popularity,
+and preserves every non-empty editor-managed selection.
+
+```bash
+npm run migrate -- --phase 13d-site-selection-backfill
 ```
 
 ### Phase 14 — Media Optimize (backfill)

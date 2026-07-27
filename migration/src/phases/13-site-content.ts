@@ -15,6 +15,7 @@ import {
 } from "../utils/strapi-insert.js";
 import { clean } from "../utils/sanitize.js";
 import { logger } from "../utils/logger.js";
+import { HEADER_SEARCH_SUGGESTIONS } from "../utils/site-selection-defaults.js";
 
 /**
  * Phase 13 — Site Content
@@ -156,12 +157,12 @@ const SOCIAL_PLATFORMS: ReadonlyArray<string> = [
   "youtube",
 ];
 
-const FOOTER_COUNTRIES: ReadonlyArray<{ code: string; name: string }> = [
-  { code: "us", name: "USA" },
-  { code: "sg", name: "Singapore" },
-  { code: "ph", name: "Philippines" },
-  { code: "ae", name: "UAE" },
-  { code: "my", name: "Malaysia" },
+const FOOTER_COUNTRIES: ReadonlyArray<{ code: string; name: string; url: string }> = [
+  { code: "us", name: "USA", url: "https://www.couponzguruusa.com/" },
+  { code: "sg", name: "Singapore", url: "https://www.couponzguru.sg/" },
+  { code: "ph", name: "Philippines", url: "https://www.couponzguru.ph/" },
+  { code: "ae", name: "UAE", url: "https://www.couponzguru.ae/" },
+  { code: "my", name: "Malaysia", url: "https://www.couponzguru.my/" },
 ];
 
 const PARTNER_CARD = {
@@ -420,7 +421,8 @@ export async function runSiteContent(): Promise<void> {
 
   const summary: string[] = [];
 
-  // Curated store list shared by homepage.popularStores and menu.topStores
+  // Seed source for independently editable homepage, navigation, and search
+  // store selections.
   const curatedStores = await getCuratedStores();
 
   // Explore categories shared by homepage.exploreOffers and menu.categorySections
@@ -1928,7 +1930,13 @@ async function seedMenu(
   curatedStores: StoreRow[],
   exploreCategories: CategoryRow[]
 ): Promise<void> {
-  const missing = missingTables("menus", "menus_cmps", "components_nav_links");
+  const missing = missingTables(
+    "menus",
+    "menus_cmps",
+    "components_nav_links",
+    "components_header_search_top_stores",
+    "components_header_search_suggestions"
+  );
   if (missing.length > 0) {
     logger.warn(
       `${missing.join(", ")} not found — run the Strapi schema migration first. Skipping menu.`
@@ -1964,6 +1972,56 @@ async function seedMenu(
     }
   } else {
     logger.warn("menus top_stores link table not found — topStores skipped");
+  }
+
+  // ── searchTopStores (independent header selection, max 8) ──
+  let searchTopStoreCount = 0;
+  const searchTopStoreLnk = await detectLnk(
+    "components_header_search_top_stores",
+    "store",
+    "store"
+  );
+  if (searchTopStoreLnk) {
+    const searchTopStores = curatedStores.slice(0, 8);
+    for (let i = 0; i < searchTopStores.length; i++) {
+      const componentId = await insertRow(
+        "components_header_search_top_stores",
+        {}
+      );
+      await linkRel(searchTopStoreLnk, componentId, searchTopStores[i].id);
+      await addCmp(
+        "menus_cmps",
+        menuId,
+        componentId,
+        "header.search-top-store",
+        "searchTopStores",
+        i + 1
+      );
+      searchTopStoreCount++;
+    }
+  } else {
+    logger.warn(
+      "header search top-store relation table not found — searchTopStores skipped"
+    );
+  }
+
+  // ── searchSuggestions (editor-managed text + validated URL) ──
+  let searchSuggestionCount = 0;
+  for (let i = 0; i < HEADER_SEARCH_SUGGESTIONS.length; i++) {
+    const suggestion = HEADER_SEARCH_SUGGESTIONS[i];
+    const componentId = await insertRow(
+      "components_header_search_suggestions",
+      suggestion
+    );
+    await addCmp(
+      "menus_cmps",
+      menuId,
+      componentId,
+      "header.search-suggestion",
+      "searchSuggestions",
+      i + 1
+    );
+    searchSuggestionCount++;
   }
 
   // ── categorySections ──
@@ -2058,7 +2116,7 @@ async function seedMenu(
 
   logger.info("menu seeded");
   summary.push(
-    `menu: seeded (${topStoreCount} topStores, ${sectionCount} categorySections, ${extraCount} extraItems)`
+    `menu: seeded (${topStoreCount} topStores, ${searchTopStoreCount} searchTopStores, ${searchSuggestionCount} searchSuggestions, ${sectionCount} categorySections, ${extraCount} extraItems)`
   );
 }
 
@@ -2180,7 +2238,7 @@ async function seedFooter(summary: string[]): Promise<void> {
     logger.warn("components_footer_social_links missing — socialLinks skipped");
   }
 
-  // ── countries (flag media left null) ──
+  // ── countries (Phase 13b uploads and attaches the packaged flag media) ──
   let countryCount = 0;
   if (missingTables("components_footer_countries").length === 0) {
     for (let i = 0; i < FOOTER_COUNTRIES.length; i++) {
@@ -2188,6 +2246,7 @@ async function seedFooter(summary: string[]): Promise<void> {
       const id = await insertRow("components_footer_countries", {
         code: country.code,
         name: country.name,
+        url: country.url,
       });
       await addCmp(
         "footers_cmps",

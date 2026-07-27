@@ -33,6 +33,7 @@ describe('write-validation step order', () => {
       'validateCouponTypeFields',
       'validateChangedFields',
       'validateHomepageImages',
+      'validateHomepagePopularSearches',
       'validateDealOfTheDaySectionLimits',
       'validateEntityTopPickCoupons',
       'validateEntityOrderedCoupons',

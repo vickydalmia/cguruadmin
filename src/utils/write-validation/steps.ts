@@ -18,6 +18,7 @@ import {
   validateEntityOrderedCoupons,
 } from '../entity-ordered-coupon-validation';
 import { validateHomepageImages } from '../homepage-image-validation';
+import { validateHomepagePopularSearches } from '../homepage-popular-searches-validation';
 import { validateIdentity } from '../identity-validation';
 import { validateOfferFieldsForWrite } from '../offer-field-validation';
 import {
@@ -152,6 +153,13 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     actions: CREATE_UPDATE,
     applies: (uid) => uid === HOMEPAGE_UID,
     run: ({ strapi, data }) => validateHomepageImages(strapi, data),
+  },
+  {
+    name: 'validateHomepagePopularSearches',
+    actions: CREATE_UPDATE,
+    applies: (uid) => uid === HOMEPAGE_UID,
+    run: ({ strapi, data, documentId }) =>
+      validateHomepagePopularSearches(strapi, data, documentId),
   },
   {
     name: 'validateDealOfTheDaySectionLimits',

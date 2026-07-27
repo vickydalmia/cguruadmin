@@ -27,6 +27,9 @@ import { runEntityUpdatedAtBackfill } from "./backfill-entity-updated-at.js";
 import { runOfferPublishedOnBackfill } from "./phases/12b-offer-published-on.js";
 import { runSiteContent } from "./phases/13-site-content.js";
 import { runHomepageOfferBackfill } from "./phases/13a-homepage-offer-sections.js";
+import { runFooterMediaBackfill } from "./phases/13b-footer-media.js";
+import { runFooterCountryLinksBackfill } from "./phases/13c-footer-country-links.js";
+import { runSiteSelectionBackfill } from "./phases/13d-site-selection-backfill.js";
 import { runMediaOptimize } from "./phases/14-media-optimize.js";
 import { runMediaFormatsBackfill } from "./phases/15-media-formats-backfill.js";
 import {
@@ -76,6 +79,9 @@ const phases: Phase[] = [
   { name: "12b-offer-published-on", fn: runOfferPublishedOnBackfill },
   { name: "13-site-content", fn: runSiteContent },
   { name: "13a-homepage-offer-sections", fn: runHomepageOfferBackfill },
+  { name: "13b-footer-media", fn: runFooterMediaBackfill },
+  { name: "13c-footer-country-links", fn: runFooterCountryLinksBackfill },
+  { name: "13d-site-selection-backfill", fn: runSiteSelectionBackfill },
   { name: "14-media-optimize", fn: runMediaOptimize },
   // Re-runnable by design (candidate SQL is the idempotency guard); a
   // checkpoint would let a --dry-run/--limit pilot mark it complete and make
@@ -141,9 +147,13 @@ async function main(): Promise<void> {
       "components_home_bank_offers", "components_home_bank_offer_items",
       "components_home_how_it_works", "components_home_steps",
       "components_home_why_features", "components_home_faq_blocks",
+      "components_home_popular_searches",
       "components_nav_links", "components_nav_category_sections",
+      "components_header_search_top_stores",
+      "components_header_search_suggestions",
       "components_footer_link_sections", "components_footer_social_links",
       "components_footer_countries", "components_footer_partner_cards",
+      "components_footer_google_preferred_cards",
       // Entity tables
       "coupons", "deals",
       "unique_codes", "unique_coupon_pools",

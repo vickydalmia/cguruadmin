@@ -7,6 +7,20 @@ const ENTITY_ROUTES = [
 
 export default {
   routes: [
+    {
+      method: 'GET',
+      path: '/entity-popular-searches/:kind/:slug',
+      handler: 'custom.entityPopularSearches',
+      config: {
+        auth: false,
+        middlewares: [
+          {
+            name: 'global::cache',
+            config: { ttlMs: 60_000, keyByPath: true },
+          },
+        ],
+      },
+    },
     ...ENTITY_ROUTES.map(([plural]) => ({
       method: 'GET',
       path: `/${plural}/:slug/related-stores`,

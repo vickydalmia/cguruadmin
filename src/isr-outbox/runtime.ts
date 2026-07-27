@@ -5,6 +5,7 @@ import { logIsrOutbox } from './log';
 import { insertIsrOutboxEvent } from './store';
 import type { IsrOutboxInsert } from './types';
 import { purgeResponseCaches } from '../middlewares/cache';
+import { purgeEntityPopularSearchCatalog } from '../api/store/services/entity-popular-searches';
 
 let dispatcher: IsrOutboxDispatcher | null = null;
 
@@ -73,6 +74,7 @@ export async function enqueueStandaloneIsrEvent(
         // only after clearing API responses so ISR cannot rebuild durable HTML
         // from the pre-cleanup 60-second entity endpoint cache.
         purgeResponseCaches();
+        purgeEntityPopularSearchCatalog();
         wakeIsrOutbox();
       });
       return event;

@@ -98,6 +98,9 @@ where it stopped. To re-run one phase against existing data, use
 | `12a-entity-updated-at` | Re-derive entity `created_at`/`updated_at` from the offers now linked to them |
 | `13-site-content` | Global, **homepage**, menu, footer singles |
 | `13a-homepage-offer-sections` | Backfill for **pre-existing** homepages only — on a fresh run phase 13 already seeds everything and this is a no-op |
+| `13b-footer-media` | Upload optimized footer flags/Google Preferred icon and fill missing footer media/component relations |
+| `13c-footer-country-links` | Fill blank footer country destinations while preserving editor-entered URLs |
+| `13d-site-selection-backfill` | Preserve legacy homepage Popular Searches and fill empty search-overlay stores/suggestions without overwriting editor selections |
 | `14-media-optimize` | Image optimization backfill |
 | `15-media-formats-backfill` | Variant-matrix gap backfill for **already-migrated** media only — on a fresh run phase 02 already generates every variant and this is a no-op (never checkpointed, safe to re-run) |
 

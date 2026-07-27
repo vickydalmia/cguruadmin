@@ -323,6 +323,29 @@ describe('private offer redeem resolver', () => {
 });
 
 describe('entity Coupon population', () => {
+  it('adds a safe last-update attribution projection to the entity response', async () => {
+    const harness = createHarness();
+    harness.entityFindMany.mockResolvedValue([
+      {
+        id: 47,
+        documentId: 'store-amazon',
+        name: 'Amazon',
+        slug: 'amazon-coupons',
+        updatedAt: '2026-03-24T10:00:00.000Z',
+      },
+    ]);
+
+    const payload = await harness.controller.getCouponsByEntity(
+      harness.ctx as any,
+    );
+
+    expect(payload.store).toMatchObject({
+      lastUpdatedAt: '2026-03-24T10:00:00.000Z',
+      lastUpdatedByName: 'CouponzGuru Team',
+    });
+    expect(payload.store).not.toHaveProperty('updatedBy');
+  });
+
   it('keeps Coupons category-scoped and populates the ordered Store logo reference', async () => {
     const harness = createHarness();
     harness.ctx.state.entityType = 'category';

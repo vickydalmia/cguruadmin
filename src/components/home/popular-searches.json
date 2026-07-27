@@ -13,10 +13,25 @@
       "type": "string",
       "default": "Popular Searches"
     },
-    "links": {
-      "type": "component",
-      "repeatable": true,
-      "component": "nav.link"
+    "stores": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::store.store"
+    },
+    "brands": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::brand.brand"
+    },
+    "categories": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::category.category"
+    },
+    "banks": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::bank.bank"
     }
   }
 }

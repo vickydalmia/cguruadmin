@@ -606,6 +606,20 @@ export interface FooterCountry extends Struct.ComponentSchema {
     code: Schema.Attribute.String & Schema.Attribute.Required;
     flag: Schema.Attribute.Media<'images'>;
     name: Schema.Attribute.String & Schema.Attribute.Required;
+    url: Schema.Attribute.String & Schema.Attribute.Required;
+  };
+}
+
+export interface FooterGooglePreferredCard extends Struct.ComponentSchema {
+  collectionName: 'components_footer_google_preferred_cards';
+  info: {
+    displayName: 'Google Preferred Card';
+    icon: 'search';
+  };
+  attributes: {
+    icon: Schema.Attribute.Media<'images'>;
+    label: Schema.Attribute.String & Schema.Attribute.Required;
+    url: Schema.Attribute.String & Schema.Attribute.Required;
   };
 }
 
@@ -657,6 +671,38 @@ export interface FooterSocialLink extends Struct.ComponentSchema {
     > &
       Schema.Attribute.Required;
     url: Schema.Attribute.String & Schema.Attribute.Required;
+  };
+}
+
+export interface HeaderSearchSuggestion extends Struct.ComponentSchema {
+  collectionName: 'components_header_search_suggestions';
+  info: {
+    displayName: 'Search Suggestion';
+    icon: 'link';
+  };
+  attributes: {
+    text: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    url: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }>;
+  };
+}
+
+export interface HeaderSearchTopStore extends Struct.ComponentSchema {
+  collectionName: 'components_header_search_top_stores';
+  info: {
+    displayName: 'Search Top Store';
+    icon: 'search';
+  };
+  attributes: {
+    store: Schema.Attribute.Relation<'oneToOne', 'api::store.store'> &
+      Schema.Attribute.Required;
   };
 }
 
@@ -948,10 +994,16 @@ export interface HomePopularSearches extends Struct.ComponentSchema {
     icon: 'search';
   };
   attributes: {
+    banks: Schema.Attribute.Relation<'oneToMany', 'api::bank.bank'>;
+    brands: Schema.Attribute.Relation<'oneToMany', 'api::brand.brand'>;
+    categories: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::category.category'
+    >;
     enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     heading: Schema.Attribute.String &
       Schema.Attribute.DefaultTo<'Popular Searches'>;
-    links: Schema.Attribute.Component<'nav.link', true>;
+    stores: Schema.Attribute.Relation<'oneToMany', 'api::store.store'>;
   };
 }
 
@@ -1350,9 +1402,12 @@ declare module '@strapi/strapi' {
       'error-page.link-card': ErrorPageLinkCard;
       'error-page.trust-banner': ErrorPageTrustBanner;
       'footer.country': FooterCountry;
+      'footer.google-preferred-card': FooterGooglePreferredCard;
       'footer.link-section': FooterLinkSection;
       'footer.partner-card': FooterPartnerCard;
       'footer.social-link': FooterSocialLink;
+      'header.search-suggestion': HeaderSearchSuggestion;
+      'header.search-top-store': HeaderSearchTopStore;
       'home.bank-offer-item': HomeBankOfferItem;
       'home.bank-offers': HomeBankOffers;
       'home.cg-exclusive': HomeCgExclusive;

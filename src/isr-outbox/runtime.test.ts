@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   purgeResponseCaches: vi.fn(),
+  purgeEntityPopularSearchCatalog: vi.fn(),
   insertIsrOutboxEvent: vi.fn(async () => ({
     id: 'event-1',
     eventKey: 'key-1',
@@ -11,6 +12,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../middlewares/cache', () => ({
   purgeResponseCaches: mocks.purgeResponseCaches,
+}));
+vi.mock('../api/store/services/entity-popular-searches', () => ({
+  purgeEntityPopularSearchCatalog: mocks.purgeEntityPopularSearchCatalog,
 }));
 
 vi.mock('./store', async (importOriginal) => ({
@@ -77,5 +81,6 @@ describe('enqueueStandaloneIsrEvent', () => {
       expect.objectContaining({ payload: { paths: ['/amazon/'] } }),
     );
     expect(mocks.purgeResponseCaches).toHaveBeenCalledTimes(1);
+    expect(mocks.purgeEntityPopularSearchCatalog).toHaveBeenCalledTimes(1);
   });
 });

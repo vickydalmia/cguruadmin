@@ -25,7 +25,7 @@ export const HOMEPAGE_SECTION_LABELS: SectionLabel[] = [
     attr: 'hero',
     label: '1 · Hero — banner slider & products',
     description:
-      'Top of the page: banner slider (1668×864 images) plus up to 4 product cards beside it.',
+      'Top of the page: banner slider (1664×720 images) plus up to 4 product cards beside it.',
   },
   {
     attr: 'popularStores',
@@ -110,7 +110,9 @@ export const HOMEPAGE_SECTION_LABELS: SectionLabel[] = [
   {
     attr: 'popularSearches',
     label: '13 · Popular Searches',
-    description: 'Link list at the very bottom of the page, below the newsletter block.',
+    description:
+      'Switch the section on, then select Stores, Brands, Categories, or Banks. ' +
+      'Selected entities become canonical Popular Searches links at the bottom of the page.',
   },
   {
     attr: 'exploreDeals',

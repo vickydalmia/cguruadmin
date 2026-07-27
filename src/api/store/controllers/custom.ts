@@ -4,6 +4,20 @@ import { isEntityPageType } from '../services/entity-page';
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
 
+  async entityPopularSearches(ctx) {
+    const { kind, slug } = ctx.params;
+    if (!isEntityPageType(kind)) {
+      return ctx.badRequest('Unsupported entity type');
+    }
+    const result = await strapi
+      .service('api::store.custom' as any)
+      .entityPopularSearches(kind, slug);
+    if (!result) {
+      return ctx.notFound(`${kind} not found`);
+    }
+    return ctx.send(result);
+  },
+
   async relatedStores(ctx) {
     const { slug } = ctx.params;
     const entityType = ctx.state.entityType ?? 'store';

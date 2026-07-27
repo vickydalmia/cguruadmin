@@ -24,6 +24,17 @@
       "type": "string",
       "default": "/stores/"
     },
+    "searchTopStores": {
+      "type": "component",
+      "repeatable": true,
+      "component": "header.search-top-store",
+      "max": 8
+    },
+    "searchSuggestions": {
+      "type": "component",
+      "repeatable": true,
+      "component": "header.search-suggestion"
+    },
     "categoriesTitle": {
       "type": "string"
     },

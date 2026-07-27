@@ -31,9 +31,9 @@ export const HOMEPAGE_IMAGE_RULES: HomepageImageRule[] = [
     componentUid: 'homepage.slider-slide',
     field: 'desktopImage',
     label: 'Hero slide desktop image',
-    width: 1668,
-    height: 864,
-    display: [834, 432],
+    width: 1664,
+    height: 720,
+    display: [832, 360],
     required: true,
   },
   {

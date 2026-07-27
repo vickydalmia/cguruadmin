@@ -98,6 +98,12 @@ describe('homepage aggregate offer population', () => {
     expect(populate.bankOffers.populate.items.populate.bank.fields).toContain(
       'shortDescription',
     );
+    expect(populate.popularSearches.populate).toEqual({
+      stores: { fields: ['name', 'slug'] },
+      brands: { fields: ['name', 'slug'] },
+      categories: { fields: ['name', 'slug'] },
+      banks: { fields: ['name', 'slug'] },
+    });
   });
 
   it('filters and sorts Coupon and Deal relations with Document Service-compatible keys', async () => {
@@ -273,6 +279,74 @@ describe('homepage aggregate offer population', () => {
 
     expect(response.data.topDeals.deals).toHaveLength(6);
     expect(harness.findManyDeals).not.toHaveBeenCalled();
+  });
+});
+
+describe('site chrome aggregate population', () => {
+  it('populates footer country flags and the Google Preferred icon', async () => {
+    const rows: Record<string, any> = {
+      'api::menu.menu': {
+        documentId: 'menu-1',
+        topStores: [],
+        searchTopStores: Array.from({ length: 10 }, (_, index) => ({
+          store: { documentId: `store-${index}` },
+        })),
+        searchSuggestions: [
+          { text: 'Today’s offers', url: '/todays-deals/' },
+        ],
+      },
+      'api::footer.footer': {
+        documentId: 'footer-1',
+        countries: [{ code: 'us', name: 'USA', flag: { url: '/usa.png' } }],
+        googlePreferredCard: {
+          label: 'Add as a preferred source on Google',
+          url: 'https://google.com/preferences/source?q=www.couponzguru.com',
+          icon: { url: '/google.png' },
+        },
+      },
+      'api::global.global': { documentId: 'global-1' },
+    };
+    const findFirstByUid = new Map<string, ReturnType<typeof vi.fn>>();
+    const documents = vi.fn((uid: string) => {
+      const findFirst =
+        findFirstByUid.get(uid) ??
+        vi.fn().mockResolvedValue(rows[uid] ?? null);
+      findFirstByUid.set(uid, findFirst);
+      return { findFirst };
+    });
+    const sanitizeOutput = vi.fn(async (data: any) => data);
+    const controller = createHomepageController({
+      strapi: {
+        documents,
+        contentType: vi.fn(() => ({})),
+        contentAPI: { sanitize: { output: sanitizeOutput } },
+      } as any,
+    });
+    const ctx = {
+      state: { auth: null },
+      send: vi.fn((payload: any) => payload),
+    };
+
+    const response = await controller.siteChrome(ctx as any);
+    const menuCall = findFirstByUid
+      .get('api::menu.menu')
+      ?.mock.calls[0]?.[0];
+    const footerCall = findFirstByUid
+      .get('api::footer.footer')
+      ?.mock.calls[0]?.[0];
+
+    expect(menuCall.populate.searchTopStores).toEqual({
+      populate: { store: expect.any(Object) },
+    });
+    expect(menuCall.populate.searchSuggestions).toBe(true);
+    expect(response.menu.searchTopStores).toHaveLength(8);
+    expect(footerCall.populate.countries).toEqual({
+      populate: { flag: true },
+    });
+    expect(footerCall.populate.googlePreferredCard).toEqual({
+      populate: { icon: true },
+    });
+    expect(response.footer).toEqual(rows['api::footer.footer']);
   });
 });
 

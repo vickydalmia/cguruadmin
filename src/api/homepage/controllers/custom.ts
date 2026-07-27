@@ -175,13 +175,20 @@ const HOMEPAGE_POPULATE = {
   howItWorks: { populate: { steps: true, features: true } },
   faq: { populate: { items: true } },
   popularSearches: {
-    populate: { links: { populate: { store: storeRef, category: categoryRef } } },
+    populate: {
+      stores: { fields: ['name', 'slug'] },
+      brands: { fields: ['name', 'slug'] },
+      categories: { fields: ['name', 'slug'] },
+      banks: { fields: ['name', 'slug'] },
+    },
   },
   latestInsights: { populate: { viewAllCta: true } },
 } as const;
 
 const MENU_POPULATE = {
   topStores: storeRef,
+  searchTopStores: { populate: { store: storeRef } },
+  searchSuggestions: true,
   categorySections: {
     populate: {
       category: categoryRef,
@@ -198,6 +205,7 @@ const FOOTER_POPULATE = {
   socialLinks: true,
   countries: { populate: { flag: true } },
   partnerCard: true,
+  googlePreferredCard: { populate: { icon: true } },
 } as const;
 
 const GLOBAL_POPULATE = {
@@ -412,6 +420,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
 
     if (sanitizedMenu?.topStores) {
       sanitizedMenu.topStores = cap(sanitizedMenu.topStores, MAX_LIST_ITEMS);
+    }
+    if (sanitizedMenu?.searchTopStores) {
+      sanitizedMenu.searchTopStores = cap(sanitizedMenu.searchTopStores, 8);
     }
 
     return ctx.send({

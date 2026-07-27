@@ -22,6 +22,16 @@ import {
   wakeIsrOutbox,
 } from './isr-outbox/runtime';
 import { runContentTransaction } from './isr-outbox/transaction';
+import {
+  affectsPopularSearchInventory,
+  entityPublicIdentityChanged,
+  isPopularSearchEntityUid,
+} from './isr-outbox/popular-search-invalidation';
+import {
+  popularSearchLeaderboardsChanged,
+  purgeEntityPopularSearchCatalog,
+  readPopularSearchFallbackLeaderboards,
+} from './api/store/services/entity-popular-searches';
 import type {
   OfferInvalidation,
   ScopeRequest,
@@ -1011,6 +1021,40 @@ export default {
           }
         }
 
+        let entityIdentityBefore: { name?: unknown; slug?: unknown } | null = null;
+        if (
+          context.action === 'update' &&
+          isPopularSearchEntityUid(context.uid) &&
+          context.params?.documentId
+        ) {
+          try {
+            entityIdentityBefore = await strapi.documents(context.uid).findOne({
+              documentId: context.params.documentId,
+              fields: ['name', 'slug'] as any,
+            });
+          } catch {
+            entityIdentityBefore = null;
+          }
+        }
+
+        const comparePopularSearchLeaderboards =
+          affectsPopularSearchInventory(
+            context.uid,
+            context.action,
+            context.params?.data,
+          );
+        let popularSearchLeaderboardsBefore = null;
+        if (comparePopularSearchLeaderboards) {
+          try {
+            popularSearchLeaderboardsBefore =
+              await readPopularSearchFallbackLeaderboards(strapi);
+          } catch (err: any) {
+            strapi.log.warn(
+              `[popular-searches] pre-write leaderboard unavailable: ${err?.message ?? err}`,
+            );
+          }
+        }
+
         return await runContentTransaction(
           strapi,
           () => next(),
@@ -1064,6 +1108,57 @@ export default {
                 : mergeScope(preScope, afterScope);
 
             if (
+              entityIdentityBefore &&
+              isPopularSearchEntityUid(context.uid) &&
+              documentId
+            ) {
+              const entityIdentityAfter: any = await strapi
+                .documents(context.uid)
+                .findOne({
+                  documentId,
+                  fields: ['name', 'slug'] as any,
+                });
+              if (
+                entityPublicIdentityChanged(
+                  entityIdentityBefore,
+                  entityIdentityAfter,
+                )
+              ) {
+                scope = mergeScope(scope, {
+                  full: true,
+                  refreshScopes: ['routes'],
+                });
+              }
+            }
+
+            if (
+              comparePopularSearchLeaderboards &&
+              popularSearchLeaderboardsBefore
+            ) {
+              try {
+                // The required trx argument prevents this post-write read from
+                // regressing to a fresh pool connection while the write still
+                // holds relation locks.
+                const after = await readPopularSearchFallbackLeaderboards(
+                  strapi,
+                  trx,
+                );
+                if (
+                  popularSearchLeaderboardsChanged(
+                    popularSearchLeaderboardsBefore,
+                    after,
+                  )
+                ) {
+                  scope = mergeScope(scope, { full: true });
+                }
+              } catch (err: any) {
+                strapi.log.warn(
+                  `[popular-searches] post-write leaderboard unavailable: ${err?.message ?? err}`,
+                );
+              }
+            }
+
+            if (
               scope &&
               redirectBefore &&
               isRedirectNoteOnlyChange(redirectBefore, context.params?.data)
@@ -1106,6 +1201,7 @@ export default {
             // Only after the database commit: renderers must never observe
             // invalidation before the content and its durable outbox event.
             purgeResponseCaches();
+            purgeEntityPopularSearchCatalog();
             logIsrOutbox(strapi, 'info', 'isr.outbox.enqueued', {
               outboxId: event.id,
               eventKey: event.eventKey,
@@ -1147,6 +1243,19 @@ export default {
       contentContractPath
     );
     await reconcileContentContractAfterSchemaSync(
+      (strapi as any).db.connection,
+      strapi.log
+    );
+
+    const siteSelectionPath = join(
+      (strapi as any).dirs.app.root,
+      'database',
+      'site-selection-reconciliation.js'
+    );
+    const { reconcileSiteSelectionsAfterSchemaSync } = require(
+      siteSelectionPath
+    );
+    await reconcileSiteSelectionsAfterSchemaSync(
       (strapi as any).db.connection,
       strapi.log
     );

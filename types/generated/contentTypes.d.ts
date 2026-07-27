@@ -987,7 +987,7 @@ export interface ApiErrorPageErrorPage extends Struct.SingleTypeSchema {
 export interface ApiFooterFooter extends Struct.SingleTypeSchema {
   collectionName: 'footers';
   info: {
-    description: 'Footer link sections, socials, countries, partner card';
+    description: 'Footer link sections, socials, countries, partner and Google Preferred cards';
     displayName: 'Footer';
     pluralName: 'footers';
     singularName: 'footer';
@@ -1002,6 +1002,10 @@ export interface ApiFooterFooter extends Struct.SingleTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    googlePreferredCard: Schema.Attribute.Component<
+      'footer.google-preferred-card',
+      false
+    >;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -1264,6 +1268,20 @@ export interface ApiMenuMenu extends Struct.SingleTypeSchema {
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::menu.menu'> &
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
+    searchSuggestions: Schema.Attribute.Component<
+      'header.search-suggestion',
+      true
+    >;
+    searchTopStores: Schema.Attribute.Component<
+      'header.search-top-store',
+      true
+    > &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 8;
+        },
+        number
+      >;
     title: Schema.Attribute.String & Schema.Attribute.DefaultTo<'Menu'>;
     topStores: Schema.Attribute.Relation<'oneToMany', 'api::store.store'>;
     topStoresViewAllUrl: Schema.Attribute.String &

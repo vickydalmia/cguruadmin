@@ -1,6 +1,7 @@
 import type { Core } from '@strapi/strapi';
 import { publishedOnlyFilters } from '../../../utils/content-status';
 import type { EntityPageType } from './entity-page';
+import { buildEntityPopularSearches } from './entity-popular-searches';
 
 // Raw Knex ON PURPOSE: rating votes must NOT go through strapi.documents —
 // the global documents middleware in src/index.ts enqueues static rebuilds on
@@ -271,6 +272,11 @@ async function highRatedStoreFallback(
 }
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
+
+  async entityPopularSearches(entityType: EntityPageType, slug: string) {
+    const groups = await buildEntityPopularSearches(strapi, entityType, slug);
+    return groups ? { groups } : null;
+  },
 
   /** Return Store-only suggestions for any public entity page. */
   async relatedStores(

@@ -1,0 +1,15 @@
+{
+  "collectionName": "components_header_search_top_stores",
+  "info": {
+    "displayName": "Search Top Store",
+    "icon": "search"
+  },
+  "attributes": {
+    "store": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::store.store",
+      "required": true
+    }
+  }
+}

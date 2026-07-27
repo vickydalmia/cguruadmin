@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { resolveEntityLastUpdate } from '../services/entity-last-update';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { publishedOnlyFilters } from '../../../utils/content-status';
 import { arrayizeOfferText } from '../../../utils/offer-text';
@@ -480,6 +481,15 @@ async function listEntityOffers(
   delete entity.topPickCoupons;
   delete entity.orderedCoupons;
   const sanitizedEntity = await sanitizeDocumentOutput(strapi, ctx, apiId, entity);
+  if (offerKind === 'coupon') {
+    const lastUpdate = await resolveEntityLastUpdate(strapi, {
+      entityType,
+      entityId: Number(entity.id),
+      entityUpdatedAt: entity.updatedAt,
+    });
+    sanitizedEntity.lastUpdatedAt = lastUpdate.updatedAt;
+    sanitizedEntity.lastUpdatedByName = lastUpdate.updatedByName;
+  }
   sanitizedEntity.topPickCoupons = await hydrateEntityTopPickCoupons(
     strapi,
     topPickIds,
