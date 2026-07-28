@@ -703,17 +703,27 @@ export function settingsComparator(
     left.name.localeCompare(right.name, 'en', { sensitivity: 'base' })
     || left.entityType.localeCompare(right.entityType)
     || left.documentId.localeCompare(right.documentId);
+  const timestamp = (item: SortableItem): number | null => {
+    if (!item.updatedAt) return null;
+    const value = Date.parse(item.updatedAt);
+    return Number.isNaN(value) ? null : value;
+  };
 
   return (left, right) => {
     let primary = 0;
     if (sort.field === 'liveDealCount') {
       primary = left.liveDealCount - right.liveDealCount;
     } else if (sort.field === 'updatedAt') {
-      // Entities that have never been touched sort last ascending, so the
-      // useful rows are never buried behind a block of blanks.
-      const value = (item: SortableItem) =>
-        item.updatedAt ? Date.parse(item.updatedAt) || 0 : -Infinity;
-      primary = value(left) - value(right);
+      // Missing or invalid timestamps stay last in both directions. Applying
+      // the normal direction multiplier to a sentinel would move them to the
+      // front for one direction.
+      const leftTimestamp = timestamp(left);
+      const rightTimestamp = timestamp(right);
+      if (leftTimestamp === null || rightTimestamp === null) {
+        if (leftTimestamp === rightTimestamp) return byIdentity(left, right);
+        return leftTimestamp === null ? 1 : -1;
+      }
+      primary = leftTimestamp - rightTimestamp;
     } else {
       primary = left.name.localeCompare(right.name, 'en', {
         sensitivity: 'base',

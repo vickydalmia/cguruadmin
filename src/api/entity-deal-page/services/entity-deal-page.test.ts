@@ -322,16 +322,21 @@ describe('settings sort', () => {
     expect(sorted([...rows].reverse())).toEqual(['Alpha', 'Mike', 'Zulu']);
   });
 
-  it('sorts never-updated entities last when ascending', () => {
+  it('sorts missing and invalid Updated timestamps last in both directions', () => {
     const items = [
       item('Bravo', 1, '2026-07-01T00:00:00.000Z'),
       item('Alpha', 1, undefined),
       item('Charlie', 1, '2026-07-20T00:00:00.000Z'),
+      item('Delta', 1, 'not-a-date'),
     ];
 
     expect(
       [...items].sort(settingsComparator({ field: 'updatedAt', desc: true }))
         .map((row) => row.name),
-    ).toEqual(['Charlie', 'Bravo', 'Alpha']);
+    ).toEqual(['Charlie', 'Bravo', 'Alpha', 'Delta']);
+    expect(
+      [...items].sort(settingsComparator({ field: 'updatedAt', desc: false }))
+        .map((row) => row.name),
+    ).toEqual(['Bravo', 'Charlie', 'Alpha', 'Delta']);
   });
 });

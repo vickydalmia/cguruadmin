@@ -58,6 +58,7 @@ export async function deliverOutboxEvent(
   fetchImpl: typeof fetch = globalThis.fetch,
 ): Promise<{
   paths: Array<{ path: string; version: number }>;
+  removedPaths: string[];
   globalVersion?: number;
 }> {
   const response = await fetchImpl(`${config.gatewayUrl}/revalidate`, {
@@ -77,9 +78,16 @@ export async function deliverOutboxEvent(
     );
   }
   const body = (await response.json().catch(() => null)) as any;
+  const removedPaths = Array.isArray(body?.removedPaths)
+    ? body.removedPaths.filter(
+        (path: unknown): path is string => typeof path === 'string',
+      )
+    : [];
+  const removed = new Set(removedPaths);
   const skippedPaths = Array.isArray(body?.skippedPaths)
     ? body.skippedPaths.filter(
-        (path: unknown): path is string => typeof path === 'string',
+        (path: unknown): path is string =>
+          typeof path === 'string' && !removed.has(path),
       )
     : [];
   if (skippedPaths.length > 0) {
@@ -100,6 +108,7 @@ export async function deliverOutboxEvent(
       path: entry.path,
       version: Number(entry.version),
     })),
+    removedPaths,
     ...(Number.isSafeInteger(Number(body?.globalVersion))
       ? { globalVersion: Number(body.globalVersion) }
       : {}),

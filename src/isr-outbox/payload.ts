@@ -26,7 +26,7 @@ export function offerEntityTypeFromUid(uid: string): OfferEntityType | null {
  * Must stay in sync with SITEMAP_INDEX_PATH in
  * cguru-ui/src/features/routing/services/sitemap-shards.ts.
  */
-const SITEMAP_INDEX_PATH = '/sitemap_index.xml';
+export const SITEMAP_INDEX_PATH = '/sitemap_index.xml';
 
 function normalizePath(slug: string): string {
   const clean = slug.trim().replace(/^\/+|\/+$/g, '');

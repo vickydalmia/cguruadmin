@@ -169,11 +169,37 @@ export default {
   // stale in O(1) and BullMQ converges in the background; no build runs here.
   nightlyIsrConsistency: {
     task: async ({ strapi }: { strapi: any }) => {
-      const cleanup = await removeInactiveCuratedOfferRelations(
-        strapi,
-        new Date(),
-      );
-      const conflicts = await removeDisplayedTopPicksFromOrdered(strapi);
+      // Both scans are guarded SEPARATELY, and both separately from the
+      // consistency event below — same discipline as the five-minute job, for
+      // the same reason. These two were prepended unguarded, so one scan
+      // throwing silently cancelled the entire nightly sweep, including the
+      // unconditional consistency event that has nothing to do with them.
+      const NO_CHANGES = {
+        removedSelections: 0,
+        affectedPaths: [] as string[],
+        requiresFullRevalidation: false,
+      };
+
+      let cleanup = NO_CHANGES;
+      try {
+        cleanup = await removeInactiveCuratedOfferRelations(strapi, new Date());
+      } catch (err: any) {
+        strapi.log.error({
+          event: 'content.nightly_curated_cleanup_failed',
+          error: err?.message ?? String(err),
+        });
+      }
+
+      let conflicts = NO_CHANGES;
+      try {
+        conflicts = await removeDisplayedTopPicksFromOrdered(strapi);
+      } catch (err: any) {
+        strapi.log.error({
+          event: 'content.nightly_displayed_top_pick_repair_failed',
+          error: err?.message ?? String(err),
+        });
+      }
+
       const affectedPaths = [
         ...new Set([...cleanup.affectedPaths, ...conflicts.affectedPaths]),
       ];

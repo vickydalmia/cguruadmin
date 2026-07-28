@@ -264,15 +264,6 @@ const entityPopulate = (entityType: string) => ({
   [entityType === 'category' ? 'icon' : 'logo']: true,
   faqs: true,
   seo: { populate: { ogImage: true } },
-  // Read only the ordered IDs here. The selected Coupons are hydrated through
-  // the custom endpoint's explicit public projection after the base entity is
-  // sanitized; otherwise an API token without core Coupon.find permission can
-  // silently strip this nested relation while leaving scalar entity edits
-  // visible.
-  topPickCoupons: {
-    fields: ['documentId'],
-    filters: visibilityFilters(),
-  },
 });
 
 function entityOfferFilters(
@@ -427,10 +418,11 @@ async function listEntityOffers(
     },
     limit: 1,
   });
-  // `topPickCoupons` is part of this custom public endpoint's reviewed output
-  // contract. Re-apply its safe ID-only populate after auth-aware query
-  // sanitization so an optional server API token cannot change the response
-  // shape by removing the relation.
+  // Coupon-only relations are part of the Coupon endpoint's reviewed output
+  // contract. Re-apply their safe ID-only populates after auth-aware query
+  // sanitization so an optional server API token cannot silently remove them.
+  // Product Deal Top Deals are derived from Deal records and never use these
+  // Coupon relations.
   const sanitizedPopulate =
     entityQuery.populate &&
     typeof entityQuery.populate === 'object' &&
@@ -439,15 +431,15 @@ async function listEntityOffers(
       : {};
   entityQuery.populate = {
     ...sanitizedPopulate,
-    topPickCoupons: {
-      fields: ['documentId'],
-      filters: {
-        ...visibilityFilters(),
-        [PLURAL_FIELD[entityType] || entityType]: { slug },
-      },
-    },
     ...(offerKind === 'coupon'
       ? {
+          topPickCoupons: {
+            fields: ['documentId'],
+            filters: {
+              ...visibilityFilters(),
+              [PLURAL_FIELD[entityType] || entityType]: { slug },
+            },
+          },
           orderedCoupons: {
             fields: ['documentId'],
             filters: {
@@ -462,7 +454,9 @@ async function listEntityOffers(
   if (!entity) return null;
 
   const topPickIds: string[] = (
-    Array.isArray(entity.topPickCoupons) ? entity.topPickCoupons : []
+    offerKind === 'coupon' && Array.isArray(entity.topPickCoupons)
+      ? entity.topPickCoupons
+      : []
   )
     .map((coupon: any) => coupon?.documentId)
     .filter(Boolean)
@@ -490,15 +484,17 @@ async function listEntityOffers(
     sanitizedEntity.lastUpdatedAt = lastUpdate.updatedAt;
     sanitizedEntity.lastUpdatedByName = lastUpdate.updatedByName;
   }
-  sanitizedEntity.topPickCoupons = await hydrateEntityTopPickCoupons(
-    strapi,
-    topPickIds,
-    entityType,
-    slug,
-  );
-  // The storefront needs this identity-only projection to keep automatic Top
-  // Pick fallbacks separate from the explicitly ordered main-list Coupons.
-  sanitizedEntity.orderedCouponIds = orderedIds;
+  if (offerKind === 'coupon') {
+    sanitizedEntity.topPickCoupons = await hydrateEntityTopPickCoupons(
+      strapi,
+      topPickIds,
+      entityType,
+      slug,
+    );
+    // The storefront needs this identity-only projection to keep automatic Top
+    // Pick fallbacks separate from the explicitly ordered main-list Coupons.
+    sanitizedEntity.orderedCouponIds = orderedIds;
+  }
 
   // Taxonomy is the true membership source. The remainder is every related
   // offer not selected in Ordered Coupons, appended newest-first.

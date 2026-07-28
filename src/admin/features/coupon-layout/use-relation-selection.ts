@@ -61,6 +61,12 @@ export type RelationSelection = {
   removeMany: (documentIds: readonly string[]) => void;
   move: (fromIndex: number, toIndex: number) => void;
   moveByDocumentId: (draggedId: string, targetId: string) => void;
+  /**
+   * Replace the draft wholesale. Used when the server state moves underneath
+   * an open dialog — the draft was built against a version that no longer
+   * exists, so keeping it would let the next save overwrite whoever won.
+   */
+  reset: (next: readonly CouponCandidate[]) => void;
 };
 
 /**
@@ -75,7 +81,19 @@ export function useLocalRelationSelection(
   const [selected, setSelected] = React.useState<CouponCandidate[]>(() => [
     ...initial,
   ]);
-  const [dirty, setDirty] = React.useState(false);
+
+  // `dirty` is DERIVED, not stored. It used to be set from inside the
+  // setSelected updater, which breaks React's rule that updaters are pure:
+  // React may re-invoke one under StrictMode, or discard a concurrent render
+  // entirely, and a discarded render would still have left `dirty` true for a
+  // change that never landed. Comparing against the initial order also makes
+  // it correct in a way a flag never was — undoing an edit now clears it.
+  const initialKey = React.useMemo(
+    () => initial.map((item) => item.documentId).join('\u0000'),
+    [initial],
+  );
+  const dirty =
+    selected.map((item) => item.documentId).join('\u0000') !== initialKey;
   const add = React.useCallback(
     (candidate: CouponCandidate) => {
       setSelected((current) => {
@@ -85,7 +103,6 @@ export function useLocalRelationSelection(
         ) {
           return current;
         }
-        setDirty(true);
         return [...current, candidate];
       });
     },
@@ -94,9 +111,7 @@ export function useLocalRelationSelection(
   const removeMany = React.useCallback((ids: readonly string[]) => {
     const targets = new Set(ids);
     setSelected((current) => {
-      const next = current.filter((item) => !targets.has(item.documentId));
-      if (next.length !== current.length) setDirty(true);
-      return next;
+      return current.filter((item) => !targets.has(item.documentId));
     });
   }, []);
   const remove = React.useCallback(
@@ -117,7 +132,6 @@ export function useLocalRelationSelection(
       const next = [...current];
       const [moved] = next.splice(fromIndex, 1);
       next.splice(toIndex, 0, moved);
-      setDirty(true);
       return next;
     });
   }, []);
@@ -130,12 +144,15 @@ export function useLocalRelationSelection(
         const next = [...current];
         const [moved] = next.splice(from, 1);
         next.splice(to, 0, moved);
-        setDirty(true);
         return next;
       });
     },
     [],
   );
+  const reset = React.useCallback((next: readonly CouponCandidate[]) => {
+    setSelected([...next]);
+  }, []);
+
   return {
     selected,
     loading: false,
@@ -145,6 +162,7 @@ export function useLocalRelationSelection(
     removeMany,
     move,
     moveByDocumentId,
+    reset,
   };
 }
 
@@ -379,6 +397,15 @@ export function useRelationSelection(
     [move, selected],
   );
 
+  // The Content Manager-backed hook re-reads the form whenever an array value
+  // arrives, so a reset here also has to clear the local dirty flag or the
+  // next load would be treated as an edit to preserve.
+  const reset = React.useCallback((next: readonly CouponCandidate[]) => {
+    dirtyRef.current = false;
+    setDirty(false);
+    setSelected([...next]);
+  }, []);
+
   return {
     selected,
     loading,
@@ -388,5 +415,6 @@ export function useRelationSelection(
     removeMany,
     move,
     moveByDocumentId,
+    reset,
   };
 }

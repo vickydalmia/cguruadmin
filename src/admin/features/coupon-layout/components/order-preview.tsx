@@ -38,27 +38,24 @@ export function OrderPreview({
   pendingOrdered: CouponCandidate[] | null;
   pendingTopPicks: CouponCandidate[];
 }) {
-  // Which Coupons the Top Pick section actually renders. The storefront takes
-  // the curated selections first, then fills any empty slot from the newest
-  // eligible Coupons that are NOT in the ordered head — which is exactly the
-  // remainder of this endpoint's sequence, already in that order.
+  // Which Coupons the Top Pick section actually renders, as reported by the
+  // endpoint. Do NOT re-derive this: the backend performs the automatic fill
+  // itself and then EXCLUDES those Coupons from `coupons`, so filling from
+  // that already-filtered sequence picked the wrong ones — the genuinely
+  // displayed picks disappeared from the preview and the next two down were
+  // shown in a section they will never render in.
+  //
+  // `automatic` is inferred by asking whether the editor curated it, which is
+  // the one thing the client knows and the response does not.
   const displayedTopPicks = React.useMemo(() => {
-    const curated = pendingTopPicks.slice(0, TOP_PICK_DISPLAYED);
-    const taken = new Set(curated.map((pick) => pick.documentId));
-    const orderedIds = new Set(
-      (pendingOrdered ?? []).map((coupon) => coupon.documentId),
+    const curated = new Set(
+      pendingTopPicks.slice(0, TOP_PICK_DISPLAYED).map((pick) => pick.documentId),
     );
-    const fill = source.sequence.filter(
-      (coupon) =>
-        !taken.has(coupon.documentId) && !orderedIds.has(coupon.documentId),
-    );
-    return [
-      ...curated.map((pick) => ({ pick, automatic: false })),
-      ...fill
-        .slice(0, TOP_PICK_DISPLAYED - curated.length)
-        .map((pick) => ({ pick, automatic: true })),
-    ];
-  }, [pendingTopPicks, pendingOrdered, source.sequence]);
+    return source.displayedTopPicks.map((pick) => ({
+      pick,
+      automatic: !curated.has(pick.documentId),
+    }));
+  }, [pendingTopPicks, source.displayedTopPicks]);
 
   const rows = React.useMemo(
     () =>

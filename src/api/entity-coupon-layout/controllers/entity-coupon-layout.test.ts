@@ -94,3 +94,72 @@ describe('entity Coupon layout Super Admin capability', () => {
     );
   });
 });
+
+describe('refresh endpoint authorization', () => {
+  function ctxFor(roleCode: string, can = () => false) {
+    const first = vi.fn().mockResolvedValue({
+      id: 41,
+      status: 'pending',
+      attempt_count: 0,
+      last_error: 'internal detail',
+      delivery_receipt: JSON.stringify({ paths: [{ path: '/a/', version: 1 }] }),
+      accepted_at: null,
+      delivered_at: null,
+    });
+    const connection = vi.fn(() => ({
+      where: vi.fn(() => ({ select: vi.fn(() => ({ first })) })),
+    }));
+    const strapi = {
+      db: {
+        connection,
+        query: vi.fn(() => ({
+          findOne: vi.fn().mockResolvedValue({ roles: [{ code: roleCode }] }),
+        })),
+      },
+    } as any;
+    const ctx = {
+      state: { user: { id: 7 }, userAbility: { can } },
+      params: { outboxId: '41' },
+      send: vi.fn(),
+      forbidden: vi.fn(),
+      badRequest: vi.fn(),
+      notFound: vi.fn(),
+    };
+    return { strapi, ctx, first };
+  }
+
+  // outboxId is a bare incrementing integer, so without a capability check any
+  // admin of any role could walk the whole outbox.
+  it('rejects an admin without the layout capability', async () => {
+    const { strapi, ctx, first } = ctxFor('strapi-author');
+
+    await createController({ strapi }).refresh(ctx);
+
+    expect(ctx.forbidden).toHaveBeenCalled();
+    expect(ctx.send).not.toHaveBeenCalled();
+    // Denied before the row is ever read.
+    expect(first).not.toHaveBeenCalled();
+  });
+
+  it('allows a Super Admin but returns no outbox internals', async () => {
+    const { strapi, ctx } = ctxFor('strapi-super-admin');
+
+    await createController({ strapi }).refresh(ctx);
+
+    expect(ctx.forbidden).not.toHaveBeenCalled();
+    const payload = ctx.send.mock.calls[0][0];
+    expect(payload).toMatchObject({ outboxId: '41', state: 'queued' });
+    expect(payload).not.toHaveProperty('error');
+    expect(payload).not.toHaveProperty('receipt');
+    expect(JSON.stringify(payload)).not.toContain('internal detail');
+  });
+
+  it('allows a non-Super-Admin holding the layout action', async () => {
+    const { strapi, ctx } = ctxFor('strapi-editor', () => true);
+
+    await createController({ strapi }).refresh(ctx);
+
+    expect(ctx.forbidden).not.toHaveBeenCalled();
+    expect(ctx.send).toHaveBeenCalled();
+  });
+});

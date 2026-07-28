@@ -16,7 +16,7 @@ import {
   TOP_PICK_MAX,
   type CouponLayoutConfig,
 } from '../config';
-import { topPickSlotRole } from '../coupon-layout';
+import { toCandidate, topPickSlotRole } from '../coupon-layout';
 import { useOrderPreview } from '../use-order-preview';
 import { useLocalRelationSelection } from '../use-relation-selection';
 import type { EntityCouponLayout } from '../use-entity-coupon-layout';
@@ -91,6 +91,8 @@ export function CouponLayoutDialog({
   open,
   onOpenChange,
   onSaved,
+  onReloadRequested,
+  onDropped,
 }: {
   config: CouponLayoutConfig;
   documentId?: string;
@@ -98,6 +100,10 @@ export function CouponLayoutDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: (layout: EntityCouponLayout) => void;
+  /** Refetch the layout from the server — used to recover from a 409. */
+  onReloadRequested: () => void;
+  /** Report picks the backend self-healed out of the saved selection. */
+  onDropped: (message: string) => void;
 }) {
   const { put } = useFetchClient();
   const topPicks = useLocalRelationSelection(
@@ -119,6 +125,35 @@ export function CouponLayoutDialog({
   React.useEffect(() => {
     if (open && showPreview) setPreviewToken((token) => token + 1);
   }, [open, showPreview]);
+  // Adopt the server's state whenever its version moves while this dialog is
+  // open — which is exactly what a 409 recovery does.
+  //
+  // useLocalRelationSelection seeds from `initial` only on mount, and the
+  // panel renders this dialog without a key, so a refetch swapped in the
+  // winner's `layout.version` while the visible selections stayed the losing
+  // draft. The next save then matched on version and SILENTLY overwrote the
+  // other editor's layout — strictly worse than the 409 loop it replaced.
+  // Discarding the draft is the point: the editor is told to reapply.
+  const appliedVersionRef = React.useRef(layout.version);
+  React.useEffect(() => {
+    if (appliedVersionRef.current === layout.version) return;
+    appliedVersionRef.current = layout.version;
+    topPicks.reset(layout.topPickCoupons);
+    ordered.reset(layout.orderedCoupons);
+  }, [
+    layout.version,
+    layout.topPickCoupons,
+    layout.orderedCoupons,
+    topPicks.reset,
+    ordered.reset,
+  ]);
+
+  // The PERSISTED ordered ids, not the pending selection: this is what the
+  // preview diffs against to mark rows as unsaved.
+  const savedOrderedIds = React.useMemo(
+    () => layout.orderedCoupons.map((coupon) => coupon.documentId),
+    [layout.orderedCoupons],
+  );
   const preview = useOrderPreview(
     config,
     documentId,
@@ -126,6 +161,7 @@ export function CouponLayoutDialog({
     previewToken,
     topPicks.selected,
     ordered.selected,
+    savedOrderedIds,
   );
 
   // Only the DISPLAYED Top Picks are barred from Ordered Coupons. Positions
@@ -182,9 +218,14 @@ export function CouponLayoutDialog({
     if (!documentId || !edited || saving) return;
     setSaving(true);
     setSaveError(null);
+    // ONLY the request belongs in the try. Mapping the response, notifying the
+    // parent and closing all used to sit here too, so a throw in any of them
+    // reported "could not be saved" for a write that had already committed —
+    // and the retry then conflicted forever against the bumped version.
+    let response: any;
     try {
-      const response = await put(
-        `/entity-coupon-layout/${config.kind}/${documentId}`,
+      response = await put(
+        `/entity-coupon-layout/${config.kind}/${encodeURIComponent(documentId)}`,
         {
           data: {
             version: layout.version,
@@ -197,31 +238,55 @@ export function CouponLayoutDialog({
           },
         },
       );
-      const body = response?.data?.data ?? response?.data;
-      const saved: EntityCouponLayout = {
-        ...body,
-        topPickCoupons: body.topPickCoupons.map((coupon: any) => ({
-          ...coupon,
-          name: coupon.title ?? coupon.name,
-        })),
-        orderedCoupons: body.orderedCoupons.map((coupon: any) => ({
-          ...coupon,
-          name: coupon.title ?? coupon.name,
-        })),
-      };
-      onSaved(saved);
-      onOpenChange(false);
     } catch (error: any) {
-      const status = Number(error?.response?.status);
-      setSaveError(
-        status === 409
-          ? 'Another editor changed this layout. Close and reopen it to load their version.'
-          : error?.response?.data?.error?.message ??
-              'Coupon layout could not be saved. Your draft is still open.',
-      );
-    } finally {
+      // The HTTP status lives on the error itself. `error.response` is
+      // `{ data }` only, so the old `error.response.status` was always
+      // undefined and this branch never ran.
+      if (Number(error?.status) === 409) {
+        // Refetch so the editor is working from the winning version. Telling
+        // them to close and reopen did nothing: reopening reuses the same
+        // loaded layout and re-sends the same stale version forever.
+        onReloadRequested();
+        setSaveError(
+          'Another editor changed this layout. It has been reloaded with their version — reapply your changes and save again.',
+        );
+      } else {
+        setSaveError(
+          error?.response?.data?.error?.message ??
+            'Coupon layout could not be saved. Your draft is still open.',
+        );
+      }
       setSaving(false);
+      return;
     }
+    setSaving(false);
+
+    const body = response?.data?.data ?? response?.data;
+    // toCandidate, not a hand-rolled spread: it is what derives `offerType`
+    // and `detailed` from the same server projection the GET path uses.
+    // Without them every saved row rendered "NO CODE" and lost its expiry
+    // label until the page was reloaded.
+    const saved: EntityCouponLayout = {
+      ...body,
+      topPickCoupons: (body?.topPickCoupons ?? []).map(toCandidate),
+      orderedCoupons: (body?.orderedCoupons ?? []).map(toCandidate),
+    };
+    // The backend self-heals saved picks that are no longer live. Say so
+    // rather than leaving the editor with a layout they did not submit.
+    const dropped: any[] = Array.isArray(body?.dropped) ? body.dropped : [];
+    if (dropped.length > 0) {
+      const names = dropped
+        .map((entry) => entry?.title)
+        .filter(Boolean)
+        .join(', ');
+      onDropped(
+        dropped.length === 1
+          ? `1 Coupon was removed because it is no longer live${names ? `: ${names}` : ''}.`
+          : `${dropped.length} Coupons were removed because they are no longer live${names ? `: ${names}` : ''}.`,
+      );
+    }
+    onSaved(saved);
+    onOpenChange(false);
   }, [
     config.kind,
     documentId,

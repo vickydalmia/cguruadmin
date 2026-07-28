@@ -158,16 +158,36 @@ Only Coupons with `contentStatus = published` and no elapsed `expiresAt` are
 eligible for either picker or public output. Scheduled, expired, unpublished,
 and already elapsed Coupons are excluded.
 
-The five-minute lifecycle job targets only Coupons/Deals whose status changed
-in that pass and removes them from curated relations. It preserves the order of
-every remaining selection, so removing a displayed Top Pick promotes an expiry
-buffer into its place. A nightly full reconciliation remains the safety net for
-legacy corruption or a previously failed targeted pass.
+Three things remove a non-live Coupon from curated relations, covering
+different paths:
 
-A second pass then runs — always, not only when something expired — and drops
-any newly displayed Top Pick out of `orderedCoupons`. Both passes contribute to
-one ISR revalidation for the affected entity pages. The storefront applies the
-fallback rules above on the next render.
+1. **On write.** A Coupon or Deal that stops being published — an editor
+   unpublishing it in Content Manager, an import, a script — is stripped from
+   curated relations in the same transaction as that write. This is the only
+   mechanism that covers a manual unpublish: the five-minute job below acts on
+   what its own expiry pass changed, which a hand edit never enters.
+2. **Every five minutes.** The lifecycle job targets only Coupons/Deals whose
+   status *it* changed in that pass and removes them from curated relations. It
+   preserves the order of every remaining selection, so removing a displayed
+   Top Pick promotes an expiry buffer into its place. A second pass then drops
+   any newly displayed Top Pick out of `orderedCoupons`, scoped to the entities
+   the first pass touched.
+3. **Nightly.** A full reconciliation remains the safety net for legacy
+   corruption or a previously failed targeted pass. Its two scans are guarded
+   independently, so one failing cannot cancel the other or the nightly
+   consistency event.
+
+Deletes need none of these — the relation row cascades with the document.
+
+All passes contribute to one ISR revalidation for the affected entity pages.
+The storefront applies the fallback rules above on the next render.
+
+Because a Coupon can still go stale between the layout dialog loading and the
+editor saving, `PUT /entity-coupon-layout/:kind/:documentId` **self-heals**: a
+selection entry that was already saved and is no longer live is dropped from
+the write and reported back in a `dropped` array, rather than failing the save.
+An ineligible id that was *not* already saved is still rejected — the candidate
+list only offers live Coupons, so that indicates a race or a client bug.
 
 ## Pagination
 

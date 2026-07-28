@@ -1,22 +1,14 @@
 import { useFetchClient } from '@strapi/strapi/admin';
 import * as React from 'react';
 
-import { toCandidate, type CouponCandidate } from './coupon-layout';
+import type { CouponCandidate } from './coupon-layout';
 import type { CouponLayoutConfig } from './config';
+import {
+  orderPreviewSourceFromResponse,
+  type OrderPreviewSource,
+} from './order-preview-response';
 
-/** Enough rows to show the head plus a useful stretch of the remainder. */
-const PREVIEW_PAGE_SIZE = 30;
-
-export type OrderPreviewSource = {
-  /** The saved main-list sequence exactly as the public endpoint returns it. */
-  sequence: CouponCandidate[];
-  /** documentIds currently persisted in `orderedCoupons`. */
-  savedOrderedIds: string[];
-  total: number;
-  loading: boolean;
-  /** Set when the entity has no saved slug yet, or the request failed. */
-  error: string | null;
-};
+export type { OrderPreviewSource } from './order-preview-response';
 
 /**
  * Read the resulting order from the SAME endpoint the storefront consumes.
@@ -37,6 +29,8 @@ export function useOrderPreview(
   reloadToken: number,
   pendingTopPicks: readonly CouponCandidate[],
   pendingOrdered: readonly CouponCandidate[],
+  /** documentIds PERSISTED in orderedCoupons — what "unsaved" is diffed against. */
+  savedOrderedIds: readonly string[],
 ): OrderPreviewSource {
   // Same client as every other request in this feature. A bare `fetch` would
   // resolve against the admin's own origin, which breaks wherever the admin is
@@ -44,6 +38,7 @@ export function useOrderPreview(
   const { post } = useFetchClient();
   const [state, setState] = React.useState<OrderPreviewSource>({
     sequence: [],
+    displayedTopPicks: [],
     savedOrderedIds: [],
     total: 0,
     loading: false,
@@ -57,6 +52,7 @@ export function useOrderPreview(
     if (!resolvedDocumentId) {
       setState({
         sequence: [],
+        displayedTopPicks: [],
         savedOrderedIds: [],
         total: 0,
         loading: false,
@@ -71,7 +67,7 @@ export function useOrderPreview(
     const run = async () => {
       try {
         const res = await post(
-          `/entity-coupon-layout/${config.kind}/${resolvedDocumentId}/preview`,
+          `/entity-coupon-layout/${config.kind}/${encodeURIComponent(resolvedDocumentId)}/preview`,
           {
             data: {
               topPickCouponIds: pendingTopPicks.map(
@@ -80,33 +76,23 @@ export function useOrderPreview(
               orderedCouponIds: pendingOrdered.map(
                 (coupon) => coupon.documentId,
               ),
-              limit: PREVIEW_PAGE_SIZE,
             },
           },
         );
         const body = res?.data?.data ?? res?.data;
         if (cancelled) return;
 
-        setState({
-          sequence: (Array.isArray(body?.coupons) ? body.coupons : []).map(
-            toCandidate,
-          ),
-          savedOrderedIds: pendingOrdered.map(
-            (coupon) => coupon.documentId,
-          ),
-          total: Number(body?.pagination?.total) || 0,
-          loading: false,
-          error: null,
-        });
+        setState(orderPreviewSourceFromResponse(body, savedOrderedIds));
       } catch (err) {
         if (cancelled) return;
         console.error('[coupon-layout] Failed to load order preview', err);
         setState({
           sequence: [],
+          displayedTopPicks: [],
           savedOrderedIds: [],
           total: 0,
           loading: false,
-          error: 'Could not load the current order from the public API.',
+          error: 'Could not load the resulting order.',
         });
       }
     };
@@ -123,6 +109,7 @@ export function useOrderPreview(
     pendingTopPicks,
     post,
     reloadToken,
+    savedOrderedIds,
   ]);
 
   return state;

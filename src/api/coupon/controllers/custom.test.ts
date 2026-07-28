@@ -488,7 +488,7 @@ describe('entity Coupon population', () => {
     },
   );
 
-  it('returns the same hydrated Top Picks from the Deal entity endpoint', async () => {
+  it('keeps Coupon curation out of the Deal entity endpoint', async () => {
     const harness = createHarness();
     harness.entityFindMany.mockResolvedValue([
       {
@@ -499,28 +499,15 @@ describe('entity Coupon population', () => {
         deals: [],
       },
     ]);
-    harness.couponFindMany.mockResolvedValue([
-      {
-        documentId: 'coupon-featured',
-        title: 'Featured',
-        affiliateLink: 'https://partner.example.com/featured',
-      },
-    ]);
-
     const payload = await harness.controller.getDealsByEntity(
       harness.ctx as any,
     );
 
-    expect(payload.store.topPickCoupons).toEqual([
-      expect.objectContaining({
-        documentId: 'coupon-featured',
-        title: 'Featured',
-      }),
-    ]);
-    const topPickQuery = harness.couponFindMany.mock.calls[0]?.[0];
-    expect(topPickQuery.filters.stores).toEqual({
-      slug: 'amazon-coupons',
-    });
+    expect(payload.store).not.toHaveProperty('topPickCoupons');
+    expect(payload.store).not.toHaveProperty('orderedCouponIds');
+    expect(harness.entityFindMany.mock.calls[0]?.[0].populate)
+      .not.toHaveProperty('topPickCoupons');
+    expect(harness.couponFindMany).not.toHaveBeenCalled();
   });
 
   it('returns selected Coupons in orderedCoupons order, hydrated by id', async () => {

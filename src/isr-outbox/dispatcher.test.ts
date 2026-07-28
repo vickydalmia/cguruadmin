@@ -204,6 +204,37 @@ describe('deliverOutboxEvent', () => {
     ).rejects.toThrow('gateway skipped 1 path');
   });
 
+  it('accepts a 202 receipt when inventory intentionally removed the path', async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          ok: true,
+          paths: [],
+          skippedPaths: ['/retired-entity-deals/'],
+          removedPaths: ['/retired-entity-deals/'],
+        }),
+        {
+          status: 202,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+    await expect(
+      deliverOutboxEvent(
+        { ...event, payload: { paths: ['/retired-entity-deals/'] } },
+        {
+          gatewayUrl: 'http://gateway.test',
+          adminSecret: 'secret',
+          requestTimeoutMs: 1_000,
+        },
+        fetchImpl as any,
+      ),
+    ).resolves.toEqual({
+      paths: [],
+      removedPaths: ['/retired-entity-deals/'],
+    });
+  });
+
   it('throws a useful error for a rejected delivery', async () => {
     await expect(
       deliverOutboxEvent(

@@ -57,7 +57,10 @@ import { textFieldHints } from './utils/text-field-validation';
 // Every write validator now runs through this one pipeline, which reports all
 // of their problems in a single error instead of the first one it hits.
 import { runWriteValidation } from './utils/write-validation/run';
-import { registerCuratedOfferRelationQueryFilter } from './utils/curated-offer-relations';
+import {
+  registerCuratedOfferRelationQueryFilter,
+  removeInactiveCuratedOfferRelations,
+} from './utils/curated-offer-relations';
 import {
   changesEntityOfferMembership,
   touchEntityPageUpdatedAt,
@@ -978,7 +981,7 @@ async function ensureSortableListColumns(strapi: Core.Strapi): Promise<void> {
 }
 
 export default {
-  register({ strapi }: { strapi: Core.Strapi }) {
+  async register({ strapi }: { strapi: Core.Strapi }) {
     // NOTE: no custom /_health route — Strapi core already serves /_health
     // (all methods, 204, no auth) and registers it BEFORE this lifecycle,
     // so a route here would be dead code. The docker healthcheck and
@@ -1032,6 +1035,24 @@ export default {
         },
       ],
     } as any);
+
+    // Register the coupon-layout RBAC action HERE, not in `bootstrap`.
+    //
+    // The admin plugin's own bootstrap runs before the user bootstrap
+    // (Strapi.js: runPluginsLifecycles(BOOTSTRAP) then runUserLifecycles) and
+    // calls cleanPermissionsInDatabase(), which deletes every permission row
+    // whose action is not yet in the action provider. Registering in the user
+    // bootstrap therefore let the cleanup delete the granted row first and
+    // register the action immediately afterwards — so every grant survived
+    // exactly until the next restart, including ones made by hand in
+    // Settings → Roles.
+    //
+    // The user `register` lifecycle runs before all of that, and the provider
+    // only refuses registration once `strapi.isLoaded` is set (after
+    // bootstrap), so this is both early enough and allowed.
+    await strapi.service('admin::permission').actionProvider.registerMany([
+      ENTITY_COUPON_LAYOUT_ACTION_ATTRIBUTES,
+    ]);
 
     // Coupon layout is deliberately outside Content Manager's generic
     // relation update route. GET remains authenticated-only so restricted
@@ -1123,6 +1144,32 @@ export default {
               });
           } catch {
             redirectBefore = null;
+          }
+        }
+
+        // Was this offer live before the write? Only the expiry cron feeds
+        // `changedOffers`, so an editor unpublishing by hand in Content
+        // Manager reached no cleanup at all and left the coupon sitting in
+        // curated relations until the NIGHTLY full scan — up to a day of a
+        // dead Top Pick in a layout, and a layout the save then refused.
+        // Expiry and delete were already covered (the cron flips status and
+        // feeds itself; deletes cascade); this closes the remaining path.
+        let offerWasPublished = false;
+        if (
+          offerEntityTypeFromUid(context.uid) &&
+          context.params?.documentId &&
+          ['update', 'unpublish', 'discardDraft'].includes(context.action)
+        ) {
+          try {
+            const before: any = await strapi
+              .documents(context.uid)
+              .findOne({
+                documentId: context.params.documentId,
+                fields: ['contentStatus'] as any,
+              });
+            offerWasPublished = before?.contentStatus === 'published';
+          } catch {
+            offerWasPublished = false;
           }
         }
 
@@ -1296,6 +1343,35 @@ export default {
               scope = null;
             }
 
+            // Strip this offer out of curated relations the moment it stops
+            // being live. Runs INSIDE the write transaction (the Query Engine
+            // picks up the ambient one), so a renderer can never observe the
+            // page mid-way: either the unpublish and the relation removal are
+            // both visible, or neither is. The entity pages are already in
+            // `preScope`, so this needs no extra invalidation of its own.
+            if (offerWasPublished && documentId) {
+              try {
+                const after: any = await strapi
+                  .documents(context.uid)
+                  .findOne({
+                    documentId,
+                    fields: ['contentStatus'] as any,
+                  });
+                if (after && after.contentStatus !== 'published') {
+                  await removeInactiveCuratedOfferRelations(strapi, new Date(), {
+                    [context.uid]: [documentId],
+                  } as any);
+                }
+              } catch (err: any) {
+                // Never fail the editor's write for this: the five-minute and
+                // nightly passes still converge.
+                strapi.log.warn(
+                  `[curated-offers] inline cleanup failed for ${context.uid} ${documentId}: `
+                  + `${err?.message ?? err}`,
+                );
+              }
+            }
+
             const offerInvalidations: OfferInvalidation[] = [];
             const entityType = offerEntityTypeFromUid(context.uid);
             if (
@@ -1344,18 +1420,21 @@ export default {
   },
 
   async bootstrap({ strapi }: { strapi: Core.Strapi }) {
-    await strapi.service('admin::permission').actionProvider.registerMany([
-      ENTITY_COUPON_LAYOUT_ACTION_ATTRIBUTES,
-    ]);
     // Seed only once. The marker intentionally survives later manual
     // revocation, so a boot never grants this permission back behind an
     // administrator's back.
+    //
+    // The marker key is versioned because the action used to be registered in
+    // THIS lifecycle, which silently deleted the granted row on every boot
+    // (see the registration site in `register` for why). Databases seeded
+    // under the old key hold the marker but no permission, so they would never
+    // be re-seeded. Bumping the key re-seeds each of them exactly once.
     try {
       const store = strapi.store({
         type: 'plugin',
         name: 'entity-coupon-layout',
       });
-      const seeded = await store.get({ key: 'editor-permission-seeded' });
+      const seeded = await store.get({ key: 'editor-permission-seeded-v2' });
       if (!seeded) {
         const editor = await strapi.db.query('admin::role').findOne({
           where: { code: 'strapi-editor' },
@@ -1382,7 +1461,7 @@ export default {
           }
         }
         await store.set({
-          key: 'editor-permission-seeded',
+          key: 'editor-permission-seeded-v2',
           value: true,
         });
       }

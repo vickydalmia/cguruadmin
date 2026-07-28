@@ -3,6 +3,11 @@ import * as React from 'react';
 
 import { toCandidate, type CouponCandidate } from './coupon-layout';
 import type { CouponLayoutConfig } from './config';
+import {
+  isTerminalRefreshState,
+  refreshPollDelayMs,
+  REFRESH_POLL_MAX_ATTEMPTS,
+} from './refresh-poll';
 
 export type CouponLayoutCapabilities = {
   canRead: boolean;
@@ -38,7 +43,9 @@ export function useEntityCouponLayout(
     if (!active || !documentId) return;
     let cancelled = false;
     setState((current) => ({ ...current, loading: true, error: null }));
-    get(`/entity-coupon-layout/${config.kind}/${documentId}`)
+    get(
+      `/entity-coupon-layout/${config.kind}/${encodeURIComponent(documentId)}`,
+    )
       .then((response) => {
         if (cancelled) return;
         const body = response?.data?.data ?? response?.data;
@@ -69,45 +76,49 @@ export function useEntityCouponLayout(
   React.useEffect(() => {
     const outboxId = state.data?.refresh?.outboxId;
     const currentState = state.data?.refresh?.state;
-    if (
-      !outboxId ||
-      currentState === 'rendered' ||
-      currentState === 'failed'
-    ) {
+    if (!outboxId || isTerminalRefreshState(currentState)) {
       return;
     }
     let cancelled = false;
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
     const poll = async () => {
+      attempts += 1;
       try {
         const response = await get(
           `/entity-coupon-layout/refresh/${outboxId}`,
         );
         if (cancelled) return;
         const body = response?.data?.data ?? response?.data;
+        const next = String(body?.state ?? 'queued');
+        // Only re-render when the value actually moved. This used to spread a
+        // fresh object every tick, re-rendering the panel every two seconds
+        // even when nothing had changed.
         setState((current) =>
-          current.data
+          current.data && current.data.refresh?.state !== next
             ? {
                 ...current,
                 data: {
                   ...current.data,
-                  refresh: {
-                    outboxId,
-                    state: String(body?.state ?? 'queued'),
-                  },
+                  refresh: { outboxId, state: next },
                 },
               }
             : current,
         );
+        if (isTerminalRefreshState(next)) return;
       } catch {
         // Keep the saved state and retry; refresh status must never turn a
         // successful layout write into a false save failure.
       }
+      if (cancelled || attempts >= REFRESH_POLL_MAX_ATTEMPTS) return;
+      timer = setTimeout(poll, refreshPollDelayMs(attempts));
     };
+
     void poll();
-    const timer = setInterval(poll, 2_000);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
     };
   }, [get, state.data?.refresh?.outboxId, state.data?.refresh?.state]);
 

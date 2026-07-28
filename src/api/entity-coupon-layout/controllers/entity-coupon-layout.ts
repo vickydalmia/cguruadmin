@@ -206,6 +206,22 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     },
 
     async refresh(ctx: any) {
+      // `outboxId` is a bare incrementing integer, so this endpoint is an
+      // enumeration surface over the WHOLE outbox — not just this caller's
+      // saves. Gated only by isAuthenticatedAdmin it let any admin of any role
+      // walk 1..N and read last_error and delivery_receipt (which carries the
+      // invalidated paths) for every event the system ever queued, while each
+      // call fired an unthrottled authenticated request at the gateway. Same
+      // capability the other handlers require.
+      if (!(await isCouponLayoutSuperAdmin(strapi, ctx))) {
+        const ability = ctx.state?.userAbility;
+        if (!can(ability, ENTITY_COUPON_LAYOUT_ACTION)) {
+          return ctx.forbidden(
+            'You do not have permission to manage Coupon layout.',
+          );
+        }
+      }
+
       const id = String(ctx.params?.outboxId ?? '');
       if (!/^\d+$/.test(id)) return ctx.badRequest('Invalid outbox id');
       const row = await strapi.db.connection('isr_outbox')
@@ -221,10 +237,18 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
         ])
         .first();
       if (!row) return ctx.notFound('Refresh event not found');
-      const receipt =
-        typeof row.delivery_receipt === 'string'
-          ? JSON.parse(row.delivery_receipt)
-          : row.delivery_receipt;
+      // A malformed column must not 500 out of a handler that otherwise
+      // degrades gracefully (see the deliberate catch around the gateway
+      // probe below).
+      let receipt: any = null;
+      try {
+        receipt =
+          typeof row.delivery_receipt === 'string'
+            ? JSON.parse(row.delivery_receipt)
+            : row.delivery_receipt;
+      } catch {
+        receipt = null;
+      }
       let state =
         row.status === 'delivered'
           ? 'accepted'
@@ -263,15 +287,15 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
           // Accepted remains useful progress even if status probing is down.
         }
       }
+      // Only what the panel renders. `last_error` and the delivery receipt are
+      // internal delivery detail — the receipt in particular lists invalidated
+      // paths — and the panel shows neither.
       ctx.send({
         outboxId: id,
         state,
         attemptCount: Number(row.attempt_count),
-        error: row.last_error ?? null,
         acceptedAt: row.accepted_at ?? null,
         deliveredAt: row.delivered_at ?? null,
-        receipt: receipt ?? null,
-        render,
       });
     },
   };

@@ -210,3 +210,58 @@ describe('content lifecycle cron', () => {
     expect(mocks.enqueueStandaloneIsrEvent).not.toHaveBeenCalled();
   });
 });
+
+describe('nightly ISR consistency cron', () => {
+  beforeEach(() => {
+    mocks.enqueueStandaloneIsrEvent.mockReset();
+    mocks.removeInactiveCuratedOfferRelations.mockReset();
+    mocks.removeDisplayedTopPicksFromOrdered.mockReset();
+    mocks.removeDisplayedTopPicksFromOrdered.mockResolvedValue(NO_CHANGES);
+    mocks.removeInactiveCuratedOfferRelations.mockResolvedValue(NO_CHANGES);
+  });
+
+  // The two reconciliation scans were prepended unguarded, so one of them
+  // throwing cancelled the whole nightly sweep — including the consistency
+  // event, which has nothing to do with curated relations.
+  it('still enqueues the consistency event when a scan throws', async () => {
+    const { strapi } = strapiHarness();
+    mocks.removeInactiveCuratedOfferRelations.mockRejectedValueOnce(
+      new Error('scan unavailable'),
+    );
+
+    await expect(
+      cronTasks.nightlyIsrConsistency.task({ strapi }),
+    ).resolves.toBeUndefined();
+
+    expect(strapi.log.error).toHaveBeenCalledWith({
+      event: 'content.nightly_curated_cleanup_failed',
+      error: 'scan unavailable',
+    });
+    expect(mocks.enqueueStandaloneIsrEvent).toHaveBeenCalledWith(
+      strapi,
+      expect.objectContaining({ reason: 'nightly ISR consistency' }),
+    );
+  });
+
+  it('isolates the two scans from each other', async () => {
+    const { strapi } = strapiHarness();
+    mocks.removeInactiveCuratedOfferRelations.mockResolvedValueOnce({
+      removedSelections: 1,
+      affectedPaths: ['/amazon/'],
+      requiresFullRevalidation: false,
+    });
+    mocks.removeDisplayedTopPicksFromOrdered.mockRejectedValueOnce(
+      new Error('repair unavailable'),
+    );
+
+    await expect(
+      cronTasks.nightlyIsrConsistency.task({ strapi }),
+    ).resolves.toBeUndefined();
+
+    // The first scan's results still reach the outbox.
+    expect(mocks.enqueueStandaloneIsrEvent).toHaveBeenCalledWith(
+      strapi,
+      expect.objectContaining({ payload: { paths: ['/amazon/'] } }),
+    );
+  });
+});

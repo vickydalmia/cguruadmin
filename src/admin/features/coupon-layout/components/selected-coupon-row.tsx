@@ -38,6 +38,21 @@ const Grip = styled(IconButton)`
 
 type DragItem = { documentId: string; index: number };
 
+/**
+ * Move focus to the adjacent reorder button before this one is disabled.
+ * Called on the click that takes a row to a list boundary, so the keyboard
+ * user keeps a focused control instead of being dropped on document.body.
+ */
+function focusSibling(button: HTMLButtonElement, direction: 'up' | 'down') {
+  const sibling =
+    direction === 'up'
+      ? button.previousElementSibling
+      : button.nextElementSibling;
+  if (sibling instanceof HTMLButtonElement && !sibling.disabled) {
+    sibling.focus();
+  }
+}
+
 export function SelectedCouponRow({
   candidate,
   index,
@@ -136,13 +151,24 @@ export function SelectedCouponRow({
               <CouponMeta candidate={candidate} extra={positionLabel} />
             </Box>
 
+            {/*
+              A keyboard user repeatedly pressing Up to walk a row to the top
+              lands on a button that becomes `disabled` in the SAME commit, so
+              focus falls to document.body and they lose their place mid
+              reorder. Hand focus to the opposite button instead, which is
+              where the next useful action is.
+            */}
             <IconButton
               type="button"
               label={`Move ${candidate.name} up`}
               variant="ghost"
               size="S"
               disabled={index === 0}
-              onClick={() => onMove(index, index - 1)}
+              onClick={(event: React.MouseEvent<HTMLButtonElement>) => {
+                const nextIndex = index - 1;
+                if (nextIndex === 0) focusSibling(event.currentTarget, 'down');
+                onMove(index, nextIndex);
+              }}
             >
               <ArrowUp />
             </IconButton>
@@ -152,7 +178,13 @@ export function SelectedCouponRow({
               variant="ghost"
               size="S"
               disabled={index === count - 1}
-              onClick={() => onMove(index, index + 1)}
+              onClick={(event: React.MouseEvent<HTMLButtonElement>) => {
+                const nextIndex = index + 1;
+                if (nextIndex === count - 1) {
+                  focusSibling(event.currentTarget, 'up');
+                }
+                onMove(index, nextIndex);
+              }}
             >
               <ArrowDown />
             </IconButton>

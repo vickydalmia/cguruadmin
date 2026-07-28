@@ -33,6 +33,9 @@ export function CouponLayoutPanelBody({
   documentId?: string;
 }) {
   const [open, setOpen] = React.useState(false);
+  // Set when a save self-healed picks that had gone stale, so the change is
+  // never made silently under the editor.
+  const [droppedNotice, setDroppedNotice] = React.useState<string | null>(null);
   const ready = useDeferredMount();
 
   const layout = useEntityCouponLayout(config, documentId, ready);
@@ -117,12 +120,21 @@ export function CouponLayoutPanelBody({
         </Typography>
       ) : null}
 
+      {droppedNotice ? (
+        <Typography variant="pi" textColor="warning600" role="status">
+          {droppedNotice}
+        </Typography>
+      ) : null}
+
       <Button
         type="button"
         variant="secondary"
         fullWidth
         disabled={layout.loading || !layout.data?.capabilities?.canManageLayout}
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setDroppedNotice(null);
+          setOpen(true);
+        }}
       >
         Arrange Coupons
       </Button>
@@ -135,6 +147,8 @@ export function CouponLayoutPanelBody({
           open={open}
           onOpenChange={setOpen}
           onSaved={layout.replace}
+          onReloadRequested={layout.retry}
+          onDropped={setDroppedNotice}
         />
       ) : null}
     </Flex>

@@ -78,7 +78,8 @@ export function useCouponPool(
         }
 
         const res = await get(
-          `/entity-coupon-layout/${config.kind}/${documentId}/candidates?${params.toString()}`,
+          `/entity-coupon-layout/${config.kind}/${encodeURIComponent(documentId)}`
+          + `/candidates?${params.toString()}`,
         );
         if (cancelled) return;
 
@@ -113,6 +114,10 @@ export function useCouponPool(
     debouncedSearch,
     sort,
     documentId,
+    // `config.kind` is interpolated into the request path, so it belongs here.
+    // Only `scopeRelationField` was listed — a leftover from when this queried
+    // Content Manager. The two co-vary today, which is why it never bit.
+    config.kind,
     config.scopeRelationField,
     get,
     reloadToken,

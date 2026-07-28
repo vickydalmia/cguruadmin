@@ -8,6 +8,7 @@ import {
   SingleSelect,
   SingleSelectOption,
   Typography,
+  VisuallyHidden,
 } from '@strapi/design-system';
 import * as React from 'react';
 import styled from 'styled-components';
@@ -192,6 +193,19 @@ export function CouponColumn({
           ))}
         </SelectionScroller>
       )}
+
+      {/*
+        Reordering is otherwise silent to a screen reader: the position is
+        plain text inside each row, so moving one announces nothing. This
+        mirrors the current order after every change.
+      */}
+      <VisuallyHidden aria-live="polite">
+        {selection.selected.length > 0
+          ? `${title}: ${selection.selected
+              .map((candidate, index) => `${index + 1}. ${candidate.name}`)
+              .join(', ')}`
+          : ''}
+      </VisuallyHidden>
 
       <Flex gap={2} alignItems="flex-end">
         <Box style={{ flex: 1, minWidth: 0 }}>
