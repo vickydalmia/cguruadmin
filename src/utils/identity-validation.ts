@@ -113,6 +113,7 @@ const RESERVED_ROUTE_SEGMENTS = new Map<string, string>([
 const NAME_SCAN_PAGE = 500;
 const NAME_SCAN_MAX_PAGES = 40;
 const SLUG_CANDIDATE_LIMIT = 25;
+const ENTITY_DEAL_PAGE_SUFFIX = '-deals';
 
 type Problem = { path: string[]; message: string };
 
@@ -382,23 +383,72 @@ export async function validateIdentity(
             collision.slug === incomingRoute ? '' : ` (stored as "${collision.slug}")`;
           problems.push({
             path: ['slug'],
-            message:
-              `Slug "${incomingRoute}" is already used by the ${collision.kind} ` +
-              `"${collision.name}"${via}. Stores, brands, categories and banks share ` +
-              `one flat URL space, so only one of them can own /${incomingRoute}/ — ` +
-              `two would break the site build. Choose a different slug.`,
+              message:
+                `Slug "${incomingRoute}" is already used by the ${collision.kind} ` +
+                `"${collision.name}"${via}. Stores, brands, categories and banks share ` +
+                `one flat URL space, so only one of them can own /${incomingRoute}/ — ` +
+                `two would break the site build. Choose a different slug.`,
           });
         } else {
-          const redirect = await findActiveRedirectCollision(strapi, incomingRoute);
-          if (redirect) {
+          const derivedRoute = `${incomingRoute}${ENTITY_DEAL_PAGE_SUFFIX}`;
+          const derivedCollision = await findSlugCollision(
+            strapi,
+            uid,
+            derivedRoute,
+            excludeDocumentId,
+          );
+          const baseRoute =
+            incomingRoute.endsWith(ENTITY_DEAL_PAGE_SUFFIX)
+              ? incomingRoute.slice(0, -ENTITY_DEAL_PAGE_SUFFIX.length)
+              : '';
+          const baseCollision = baseRoute
+            ? await findSlugCollision(
+                strapi,
+                uid,
+                baseRoute,
+                excludeDocumentId,
+              )
+            : null;
+
+          if (derivedCollision) {
             problems.push({
               path: ['slug'],
               message:
-                `Slug "${incomingRoute}" is already claimed by the active redirect ` +
-                `"${redirect.from}" → "${redirect.to}". Redirects run before entity ` +
-                `routing, so this ${kind}'s page would be unreachable. Disable or ` +
-                `move that redirect before using this slug.`,
+                `Slug "${incomingRoute}" generates /${derivedRoute}/ for its ` +
+                `Product Deal page, but that URL is already the live entity page ` +
+                `of the ${derivedCollision.kind} "${derivedCollision.name}". ` +
+                `Choose a slug whose generated "-deals" URL is unused.`,
             });
+          } else if (baseCollision) {
+            problems.push({
+              path: ['slug'],
+              message:
+                `Slug "${incomingRoute}" is reserved for the generated Product ` +
+                `Deal page of the ${baseCollision.kind} "${baseCollision.name}" ` +
+                `at /${incomingRoute}/. Choose a slug that does not end in a ` +
+                `different entity's "-deals" URL.`,
+            });
+          } else {
+            const redirect = await findActiveRedirectCollision(strapi, incomingRoute);
+            const derivedRedirect = redirect
+              ? null
+              : await findActiveRedirectCollision(strapi, derivedRoute);
+            const claimedRedirect = redirect ?? derivedRedirect;
+            const claimedRoute = redirect ? incomingRoute : derivedRoute;
+            if (!claimedRedirect) {
+              // No collision across either the entity page or its generated
+              // Product Deal page.
+            } else {
+              problems.push({
+                path: ['slug'],
+                message:
+                  `URL "/${claimedRoute}/" is already claimed by the active ` +
+                  `redirect "${claimedRedirect.from}" → "${claimedRedirect.to}". ` +
+                  `Redirects run before entity routing, so this ${kind}'s ` +
+                  `${redirect ? 'entity page' : 'generated Product Deal page'} ` +
+                  `would be unreachable. Disable or move that redirect first.`,
+              });
+            }
           }
         }
       }

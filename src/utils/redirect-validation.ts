@@ -359,36 +359,55 @@ export function classifyTarget(value: unknown): RedirectTarget {
 async function findLiveEntity(
   strapi: Core.Strapi,
   path: string,
-): Promise<{ kind: IdentityKind; name: string; slug: string } | null> {
+): Promise<{
+  kind: IdentityKind;
+  name: string;
+  slug: string;
+  entityDealPage?: boolean;
+} | null> {
   const route = path.replace(/^\/+/, '');
   if (!route) return null;
   const routeKey = route.toLowerCase();
 
-  for (const targetUid of IDENTITY_UIDS) {
-    const kind = KIND_BY_UID[targetUid];
-    if (!kind) continue;
+  const findRoute = async (
+    candidateRoute: string,
+    entityDealPage: boolean,
+  ) => {
+    const candidateKey = candidateRoute.toLowerCase();
+    for (const targetUid of IDENTITY_UIDS) {
+      const kind = KIND_BY_UID[targetUid];
+      if (!kind) continue;
 
-    // The three stored forms that all route to `route`.
-    const candidates = routeSlugCandidates(route, kind);
+      // The three stored forms that all route to `candidateRoute`.
+      const candidates = routeSlugCandidates(candidateRoute, kind);
 
-    const rows: unknown = await strapi.documents(targetUid).findMany({
-      filters: { $or: candidates.map((candidate) => ({ slug: { $eqi: candidate } })) } as any,
-      fields: ['name', 'slug'],
-      limit: ENTITY_CANDIDATE_LIMIT,
-    });
+      const rows: unknown = await strapi.documents(targetUid).findMany({
+        filters: { $or: candidates.map((candidate) => ({ slug: { $eqi: candidate } })) } as any,
+        fields: ['name', 'slug'],
+        limit: ENTITY_CANDIDATE_LIMIT,
+      });
 
-    for (const row of Array.isArray(rows) ? rows : []) {
-      const slug = readString(row, 'slug');
-      if (toRouteSlug(slug, kind).toLowerCase() !== routeKey) continue;
-      return {
-        kind,
-        name: readString(row, 'name') ?? '(untitled)',
-        slug: slug ?? route,
-      };
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const slug = readString(row, 'slug');
+        if (toRouteSlug(slug, kind).toLowerCase() !== candidateKey) continue;
+        return {
+          kind,
+          name: readString(row, 'name') ?? '(untitled)',
+          slug: slug ?? candidateRoute,
+          ...(entityDealPage ? { entityDealPage: true } : {}),
+        };
+      }
     }
-  }
+    return null;
+  };
 
-  return null;
+  const direct = await findRoute(route, false);
+  if (direct) return direct;
+
+  const suffix = '-deals';
+  return routeKey.endsWith(suffix) && route.length > suffix.length
+    ? await findRoute(route.slice(0, -suffix.length), true)
+    : null;
 }
 
 type Edge = { fromPath: string; toPath: string | null; note: string };
@@ -658,10 +677,13 @@ export async function validateRedirect(
         const via = entity.slug.toLowerCase() === fromPath.replace(/^\/+/, '').toLowerCase()
           ? ''
           : ` (stored as "${entity.slug}")`;
+        const pageLabel = entity.entityDealPage
+          ? `generated Product Deal page of the ${entity.kind}`
+          : `live page of the ${entity.kind}`;
         problems.push({
           path: ['from'],
           message:
-            `"${fromPath}" is the live page of the ${entity.kind} "${entity.name}"` +
+            `"${fromPath}" is the ${pageLabel} "${entity.name}"` +
             `${via}. This redirect runs before routing, so saving it would make ` +
             `that page unreachable everywhere on the site while it still appears ` +
             `in the sitemap and in every link to it. Redirect a retired URL, or ` +

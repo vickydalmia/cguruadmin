@@ -512,6 +512,10 @@ export interface ApiBankBank extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     deals: Schema.Attribute.Relation<'manyToMany', 'api::deal.deal'>;
     description: Schema.Attribute.RichText;
+    entityDealPageSeo: Schema.Attribute.Component<
+      'shared.entity-deal-page-seo',
+      false
+    >;
     faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     faqs: Schema.Attribute.Component<'shared.faq-item', true>;
     isVerified: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
@@ -576,6 +580,10 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     deals: Schema.Attribute.Relation<'manyToMany', 'api::deal.deal'>;
     description: Schema.Attribute.RichText;
+    entityDealPageSeo: Schema.Attribute.Component<
+      'shared.entity-deal-page-seo',
+      false
+    >;
     faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     faqs: Schema.Attribute.Component<'shared.faq-item', true>;
     isVerified: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
@@ -699,6 +707,10 @@ export interface ApiCategoryCategory extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     deals: Schema.Attribute.Relation<'manyToMany', 'api::deal.deal'>;
     description: Schema.Attribute.RichText;
+    entityDealPageSeo: Schema.Attribute.Component<
+      'shared.entity-deal-page-seo',
+      false
+    >;
     faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     faqs: Schema.Attribute.Component<'shared.faq-item', true>;
     icon: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
@@ -1367,6 +1379,10 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     deals: Schema.Attribute.Relation<'manyToMany', 'api::deal.deal'>;
     description: Schema.Attribute.RichText;
+    entityDealPageSeo: Schema.Attribute.Component<
+      'shared.entity-deal-page-seo',
+      false
+    >;
     faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     faqs: Schema.Attribute.Component<'shared.faq-item', true>;
     isCjEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;

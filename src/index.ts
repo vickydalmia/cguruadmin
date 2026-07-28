@@ -68,10 +68,34 @@ const HIDE_FROM_EDIT: Record<string, string[]> = {
   // Offer membership is maintained from Coupon/Deal records. Entity editors
   // use the dedicated Top Pick and Ordered Coupon panels; Deals remain fully
   // automatic, so none of these raw relation inputs belongs in the edit form.
-  'api::store.store': ['coupons', 'deals', 'topPickCoupons', 'orderedCoupons'],
-  'api::brand.brand': ['coupons', 'deals', 'topPickCoupons', 'orderedCoupons'],
-  'api::bank.bank': ['coupons', 'deals', 'topPickCoupons', 'orderedCoupons'],
-  'api::category.category': ['coupons', 'deals', 'topPickCoupons', 'orderedCoupons'],
+  'api::store.store': [
+    'coupons',
+    'deals',
+    'topPickCoupons',
+    'orderedCoupons',
+    'entityDealPageSeo',
+  ],
+  'api::brand.brand': [
+    'coupons',
+    'deals',
+    'topPickCoupons',
+    'orderedCoupons',
+    'entityDealPageSeo',
+  ],
+  'api::bank.bank': [
+    'coupons',
+    'deals',
+    'topPickCoupons',
+    'orderedCoupons',
+    'entityDealPageSeo',
+  ],
+  'api::category.category': [
+    'coupons',
+    'deals',
+    'topPickCoupons',
+    'orderedCoupons',
+    'entityDealPageSeo',
+  ],
 };
 
 // The offer lifecycle fields are edited ONLY in the Publishing side panel

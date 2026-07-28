@@ -1,0 +1,44 @@
+{
+  "collectionName": "components_shared_entity_deal_page_seos",
+  "info": {
+    "displayName": "Entity Deal Page SEO",
+    "icon": "search",
+    "description": "SEO overrides and indexing opt-in for the generated entity Product Deal page."
+  },
+  "attributes": {
+    "indexingEnabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "metaTitle": {
+      "type": "string",
+      "maxLength": 70
+    },
+    "metaDescription": {
+      "type": "text",
+      "maxLength": 170
+    },
+    "canonicalUrl": {
+      "type": "string"
+    },
+    "ogTitle": {
+      "type": "string",
+      "maxLength": 95
+    },
+    "ogDescription": {
+      "type": "text",
+      "maxLength": 200
+    },
+    "ogImage": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": [
+        "images"
+      ]
+    },
+    "ogImageAlt": {
+      "type": "string",
+      "maxLength": 125
+    }
+  }
+}

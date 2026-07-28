@@ -18,6 +18,10 @@ ceiling on staleness, not a fixed delay.
 | `GET /api/directories/:kind` | anonymous | 120 / 60s | 60s, keyed by path |
 | `GET /api/homepage-full` | anonymous | 60 / 60s | 60s |
 | `GET /api/deal-of-the-day-full` | anonymous | 60 / 60s | 60s, keyed by path |
+| `GET /api/entity-deal-pages/:dealSlug` | anonymous | 60 / 60s | 60s |
+| `GET /api/entity-deal-page-routes` | anonymous | 60 / 60s | 60s |
+| `GET /api/admin/entity-deal-pages` | **Super Admin session** | — | none |
+| `PATCH /api/admin/entity-deal-pages/:kind/:documentId` | **Super Admin session** | — | none |
 | `GET /api/site-chrome` | anonymous | — | 300s |
 | `GET /api/public-route-metadata` | anonymous | 60 / 60s | 60s, keyed by path |
 | `GET /api/sitemap-entities` | anonymous | 60 / 60s | 60s, keyed by path |
@@ -40,6 +44,7 @@ Route definitions: [`src/api/search/routes/search.ts`](../src/api/search/routes/
 [`src/api/directory/routes/directory.ts`](../src/api/directory/routes/directory.ts),
 [`src/api/homepage/routes/custom.ts`](../src/api/homepage/routes/custom.ts),
 [`src/api/deal-of-the-day-page/routes/custom.ts`](../src/api/deal-of-the-day-page/routes/custom.ts),
+[`src/api/entity-deal-page/routes/entity-deal-page.ts`](../src/api/entity-deal-page/routes/entity-deal-page.ts),
 [`src/api/coupon/routes/custom.ts`](../src/api/coupon/routes/custom.ts),
 [`src/api/store/routes/custom.ts`](../src/api/store/routes/custom.ts),
 [`src/api/redirect/routes/redirect.ts`](../src/api/redirect/routes/redirect.ts),
@@ -200,6 +205,44 @@ hydrated with media. Only published, unexpired offers are counted.
 - `GET /api/site-chrome` — `{ menu, footer, global }` in one call, each `null`
   if that single type is unseeded. This is the header/footer payload; its 300s
   cache is the longest on the public surface because chrome changes rarely.
+
+### Generated entity Product Deal pages
+
+For the complete operator and implementation workflow, see
+[`entity-deal-pages.md`](./entity-deal-pages.md).
+
+Every Store, Brand, Category, and Bank owns a deterministic generated
+permalink: its normalized public entity slug plus `-deals`, for example
+`/mobile-deals/`. `GET /api/entity-deal-pages/mobile-deals?page=1&pageSize=50`
+resolves the owning entity across all four types and returns only actionable
+Deal-schema records; Coupon records never enter this response.
+
+The response is `{ data: { route, entity, seo, deals, pagination } }`.
+`seo.noIndex` defaults to `true`. An explicit Super Admin opt-in only becomes
+effectively indexable when the page has at least one live actionable deal, its
+canonical is the generated URL itself, and no entity or redirect owns that
+route. `seo.blockers` reports any failed condition. This keeps empty or
+conflicting pages reachable for the future template while forcing `noindex`.
+
+`GET /api/entity-deal-page-routes` returns the minimal generated route
+inventory used by Astro and the ISR gateway:
+`{ entityType, documentId, id, path, updatedAt, noIndex }`. `updatedAt` is the
+newer of the entity row and its latest live Deal update. The route is anonymous,
+rate-limited, and cached for 60 seconds.
+
+The dormant administration contract is:
+
+- `GET /api/admin/entity-deal-pages` lists all generated permalinks and updates
+  automatically as entities are added. It accepts `kind`, `search`,
+  `indexState` (`enabled`, `disabled`, or `blocked`), `page`, and `pageSize`.
+- `PATCH /api/admin/entity-deal-pages/:kind/:documentId` accepts
+  `{ "data": { "entityDealPageSeo": { ... } } }` and only updates the hidden
+  Deal-page SEO component.
+
+Both administration routes require an authenticated Strapi Super Admin. The
+component is intentionally hidden from each entity edit form until a dedicated
+settings screen is designed. Public pages remain `noindex` unless the dormant
+Super Admin contract explicitly enables one and every SEO blocker passes.
 
 ## Route metadata and redirects
 

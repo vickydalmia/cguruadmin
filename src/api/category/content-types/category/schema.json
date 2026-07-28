@@ -101,6 +101,11 @@
       "type": "component",
       "repeatable": false,
       "component": "shared.seo"
+    },
+    "entityDealPageSeo": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.entity-deal-page-seo"
     }
   }
 }

@@ -9,6 +9,7 @@ import {
 import { ensureTransparentDealImageForWrite } from '../deal-image-upload';
 import { validateDealOfTheDaySectionLimits } from '../deal-of-the-day-validation';
 import { validateEntityFieldsForWrite } from '../entity-field-validation';
+import { validateEntityDealPageSeo } from '../entity-deal-page-seo-validation';
 import {
   isEntityTopPickUid,
   validateEntityTopPickCoupons,
@@ -201,6 +202,12 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     name: 'validateEntityFieldsForWrite',
     run: ({ strapi, uid, action, data, documentId, strict }) =>
       validateEntityFieldsForWrite(strapi, uid, action, data, documentId, strict),
+  },
+  {
+    // Hidden today, but still writable by the dedicated Super Admin API,
+    // imports, and future admin settings UI.
+    name: 'validateEntityDealPageSeo',
+    run: ({ uid, data }) => validateEntityDealPageSeo(uid, data),
   },
   {
     // contentStatus is DERIVED from scheduledAt/expiresAt, never editor-set.

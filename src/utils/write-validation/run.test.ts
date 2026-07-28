@@ -39,6 +39,7 @@ describe('write-validation step order', () => {
       'validateEntityOrderedCoupons',
       'validateOfferFieldsForWrite',
       'validateEntityFieldsForWrite',
+      'validateEntityDealPageSeo',
       'validateOfferLifecycle',
       'validateTextFieldsForWrite',
     ]);

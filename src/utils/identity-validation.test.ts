@@ -339,7 +339,38 @@ describe('validateIdentity — flat slug namespace (row 113)', () => {
 
     expect(queries.filter((q) => q.filters?.$or).map((q) => q.uid)).toEqual([
       ...IDENTITY_UIDS,
+      ...IDENTITY_UIDS,
     ]);
+  });
+
+  it('rejects an entity whose root would occupy another entity Deal-page URL', async () => {
+    const { strapi } = harness({
+      'api::category.category': [
+        { documentId: 'c1', name: 'Mobile', slug: 'mobile' },
+      ],
+    });
+
+    await expect(
+      validateIdentity(strapi, 'api::store.store', 'create', {
+        name: 'Mobile Deals',
+        slug: 'mobile-deals',
+      }),
+    ).rejects.toThrow(/generated Product Deal page.*category "Mobile"/);
+  });
+
+  it('rejects an entity whose generated Deal-page URL is an entity root', async () => {
+    const { strapi } = harness({
+      'api::brand.brand': [
+        { documentId: 'b1', name: 'Nike Deals', slug: 'nike-deals' },
+      ],
+    });
+
+    await expect(
+      validateIdentity(strapi, 'api::store.store', 'create', {
+        name: 'Nike',
+        slug: 'nike',
+      }),
+    ).rejects.toThrow(/generates.*nike-deals.*brand "Nike Deals"/);
   });
 
   it('sees through a stored type namespace on the OTHER row', async () => {

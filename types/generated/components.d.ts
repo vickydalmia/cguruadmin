@@ -1159,6 +1159,41 @@ export interface SharedCta extends Struct.ComponentSchema {
   };
 }
 
+export interface SharedEntityDealPageSeo extends Struct.ComponentSchema {
+  collectionName: 'components_shared_entity_deal_page_seos';
+  info: {
+    description: 'SEO overrides and indexing opt-in for the generated entity Product Deal page.';
+    displayName: 'Entity Deal Page SEO';
+    icon: 'search';
+  };
+  attributes: {
+    canonicalUrl: Schema.Attribute.String;
+    indexingEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
+    metaDescription: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 170;
+      }>;
+    metaTitle: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 70;
+      }>;
+    ogDescription: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 200;
+      }>;
+    ogImage: Schema.Attribute.Media<'images'>;
+    ogImageAlt: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 125;
+      }>;
+    ogTitle: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 95;
+      }>;
+  };
+}
+
 export interface SharedFaqItem extends Struct.ComponentSchema {
   collectionName: 'components_shared_faq_items';
   info: {
@@ -1436,6 +1471,7 @@ declare module '@strapi/strapi' {
       'nav.link': NavLink;
       'shared.breadcrumb-item': SharedBreadcrumbItem;
       'shared.cta': SharedCta;
+      'shared.entity-deal-page-seo': SharedEntityDealPageSeo;
       'shared.faq-item': SharedFaqItem;
       'shared.icon-card': SharedIconCard;
       'shared.logo-item': SharedLogoItem;

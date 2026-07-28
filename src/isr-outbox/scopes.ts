@@ -116,10 +116,11 @@ export async function offerRelationSlugs(
   if (!Number.isSafeInteger(numericId) || numericId <= 0) return null;
   const detailKind = uid === 'api::coupon.coupon' ? 'coupon' : 'deal';
   const slugs = new Set<string>([`${detailKind}/${numericId}`]);
+  const entitySlugs = new Set<string>();
   for (const [field, kind] of RELATION_KINDS) {
     for (const related of doc[field] ?? []) {
       const slug = publicSlug(related?.slug, kind);
-      if (slug) slugs.add(slug);
+      if (slug) entitySlugs.add(slug);
     }
   }
   // Query every entity-owned offer relation as well as the offer-owned
@@ -150,7 +151,11 @@ export async function offerRelationSlugs(
         .filter((slug): slug is string => Boolean(slug));
     }),
   );
-  for (const slug of entityPages.flat()) slugs.add(slug);
+  for (const slug of entityPages.flat()) entitySlugs.add(slug);
+  for (const slug of entitySlugs) {
+    slugs.add(slug);
+    if (uid === 'api::deal.deal') slugs.add(`${slug}-deals`);
+  }
 
   return [...slugs];
 }
@@ -271,8 +276,8 @@ export async function computeScope(
     // names/icons into its HTML — same reason entity edits carry homepage.
     const slugs =
       kind === 'store' || kind === 'category'
-        ? [...new Set([slug, DEAL_OF_THE_DAY_SLUG])]
-        : [slug];
+        ? [...new Set([slug, `${slug}-deals`, DEAL_OF_THE_DAY_SLUG])]
+        : [slug, `${slug}-deals`];
     return { slugs, homepage: true, sitemap: true };
   }
 

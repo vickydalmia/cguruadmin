@@ -269,6 +269,21 @@ describe('validateRedirect — guard 2: shadowing a live page', () => {
     expect(result.message).toContain('live page of the brand "Nike"');
   });
 
+  it('rejects a redirect whose from is a generated entity Deal-page slug', async () => {
+    const result = await expectRejection({
+      categories: [{ name: 'Mobile', slug: 'mobile' }],
+    }, {
+      from: '/mobile-deals/',
+      to: '/offers/',
+      active: true,
+    });
+
+    expect(result.paths).toContain('from');
+    expect(result.message).toContain(
+      'generated Product Deal page of the category "Mobile"',
+    );
+  });
+
   // The whole point of the guard: the collision is invisible to every other
   // part of the stack, so a casing or namespace difference must not slip past.
   it('catches a live slug stored with different casing', async () => {

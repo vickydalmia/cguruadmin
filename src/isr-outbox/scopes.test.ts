@@ -105,7 +105,7 @@ describe('deal-of-the-day landing page scope', () => {
     await expect(
       computeScope(strapi, 'api::deal.deal', 'update', 'doc1'),
     ).resolves.toEqual({
-      slugs: ['deal/42', 'amazon', 'deal-of-the-day'],
+      slugs: ['deal/42', 'amazon', 'amazon-deals', 'deal-of-the-day'],
       homepage: true,
       sitemap: true,
       refreshScopes: ['routes'],
@@ -230,7 +230,14 @@ describe('deal-of-the-day landing page scope', () => {
     await expect(
       computeScope(strapi, 'api::deal.deal', 'update', 'deal-1'),
     ).resolves.toEqual({
-      slugs: ['deal/88', 'samsung', 'hdfc', 'deal-of-the-day'],
+      slugs: [
+        'deal/88',
+        'samsung',
+        'samsung-deals',
+        'hdfc',
+        'hdfc-deals',
+        'deal-of-the-day',
+      ],
       homepage: true,
       sitemap: true,
       refreshScopes: ['routes'],
@@ -270,7 +277,7 @@ describe('deal-of-the-day landing page scope', () => {
     await expect(
       preDeleteScope(strapi, 'api::deal.deal', 'doc1', 'update'),
     ).resolves.toEqual({
-      slugs: ['deal/42', 'amazon', 'deal-of-the-day'],
+      slugs: ['deal/42', 'amazon', 'amazon-deals', 'deal-of-the-day'],
       homepage: true,
       sitemap: true,
       refreshScopes: ['routes'],
@@ -377,7 +384,7 @@ describe('entity edits baked into the deal landing page', () => {
     await expect(
       computeScope(strapi, 'api::store.store', 'update', 'doc1'),
     ).resolves.toEqual({
-      slugs: ['amazon', 'deal-of-the-day'],
+      slugs: ['amazon', 'amazon-deals', 'deal-of-the-day'],
       homepage: true,
       sitemap: true,
     });
@@ -386,7 +393,7 @@ describe('entity edits baked into the deal landing page', () => {
     await expect(
       computeScope(strapiCat, 'api::category.category', 'update', 'doc1'),
     ).resolves.toEqual({
-      slugs: ['electronics', 'deal-of-the-day'],
+      slugs: ['electronics', 'electronics-deals', 'deal-of-the-day'],
       homepage: true,
       sitemap: true,
     });
@@ -398,7 +405,7 @@ describe('entity edits baked into the deal landing page', () => {
     await expect(
       computeScope(strapi, 'api::bank.bank', 'update', 'doc1'),
     ).resolves.toEqual({
-      slugs: ['hdfc'],
+      slugs: ['hdfc', 'hdfc-deals'],
       homepage: true,
       sitemap: true,
     });
