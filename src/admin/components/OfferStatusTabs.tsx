@@ -31,7 +31,10 @@ import {
  */
 const OfferStatusTabs = () => {
   const { slug } = useParams<{ slug: string }>();
-  const [{ query }, setQuery] = useQueryParams<{ filters?: unknown }>();
+  const [{ query }, setQuery] = useQueryParams<{
+    filters?: unknown;
+    page?: number;
+  }>();
 
   // The injection zone renders on EVERY collection type; only the two with a
   // `contentStatus` lifecycle field get tabs.

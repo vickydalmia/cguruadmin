@@ -5,6 +5,7 @@ import createEntityDealPageService, {
   entityDealPageSlug,
   parseEntityDealPageSlug,
   parseSettingsSort,
+  publicEntityDealPageRoute,
   resolveEntityDealPageSeo,
   settingsComparator,
 } from './entity-deal-page';
@@ -17,6 +18,24 @@ describe('entity Deal-page URL contract', () => {
     expect(parseEntityDealPageSlug('mobile')).toBeNull();
     expect(parseEntityDealPageSlug('-deals')).toBeNull();
     expect(parseEntityDealPageSlug('categories/mobile-deals')).toBeNull();
+  });
+
+  it('publishes redirect conflicts as route-membership blockers', () => {
+    expect(
+      publicEntityDealPageRoute({
+        entityType: 'store',
+        id: 7,
+        permalink: '/amazon-deals/',
+        resolvedSeo: {
+          noIndex: true,
+          blockers: ['route-conflict'],
+        },
+      }),
+    ).toMatchObject({
+      path: '/amazon-deals/',
+      noIndex: true,
+      routeConflict: true,
+    });
   });
 });
 

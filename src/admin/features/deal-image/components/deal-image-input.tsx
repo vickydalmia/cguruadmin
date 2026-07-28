@@ -322,6 +322,7 @@ const DealImageInput = ({
           <Alert
             variant="warning"
             title="Deal image upload in progress"
+            closeLabel="Dismiss upload status"
           >
             <Typography role="status" aria-live="polite">
               The image is being made transparent, optimized, and saved to

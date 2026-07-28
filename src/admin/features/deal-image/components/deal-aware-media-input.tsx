@@ -13,7 +13,16 @@ export function createDealAwareMediaInput(
   ) {
     const { model } = unstable_useContentManagerContext();
     if (model === DEAL_UID && props.name === 'dealImage') {
-      return <DealImageInput {...props} />;
+      return (
+        <DealImageInput
+          name={props.name}
+          label={props.label}
+          hint={props.hint}
+          disabled={props.disabled}
+          required={props.required}
+          labelAction={props.labelAction}
+        />
+      );
     }
     return <StandardMediaInput {...props} ref={forwardedRef} />;
   });

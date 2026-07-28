@@ -650,6 +650,29 @@ function mapSettingItem(input: {
   };
 }
 
+export function publicEntityDealPageRoute(item: {
+  entityType: string;
+  id?: number;
+  permalink: string;
+  updatedAt?: string;
+  resolvedSeo: {
+    noIndex: boolean;
+    blockers: readonly EntityDealPageIndexBlocker[];
+  };
+}) {
+  return {
+    entityType: item.entityType,
+    id: item.id,
+    path: item.permalink,
+    updatedAt: item.updatedAt,
+    noIndex: item.resolvedSeo.noIndex,
+    // A redirect-owned path is not merely non-indexable: it must be absent
+    // from live route membership so the gateway can resolve the authored
+    // redirect instead of a generated page.
+    routeConflict: item.resolvedSeo.blockers.includes('route-conflict'),
+  };
+}
+
 export const SETTINGS_SORT_FIELDS = [
   'name',
   'liveDealCount',
@@ -1018,13 +1041,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       // anonymous, and documentId is the path parameter the Super-Admin PATCH
       // endpoint takes. `id` stays — the frontend assigns sitemap shards from
       // it (features/routing/services/route-inventory.ts).
-      data: items.map((item) => ({
-        entityType: item.entityType,
-        id: item.id,
-        path: item.permalink,
-        updatedAt: item.updatedAt,
-        noIndex: item.resolvedSeo.noIndex,
-      })),
+      data: items.map(publicEntityDealPageRoute),
     };
   },
 
