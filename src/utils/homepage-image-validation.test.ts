@@ -63,6 +63,45 @@ describe('homepage image validation', () => {
     expect(findMany).toHaveBeenCalledOnce();
   });
 
+  it('pins and revalidates the Top Offers banner override at 584×354', () => {
+    const topOfferRule = HOMEPAGE_IMAGE_RULES.find(
+      (rule) => rule.path === 'topOffers.items[].banner'
+    );
+
+    expect(topOfferRule).toMatchObject({
+      width: 584,
+      height: 354,
+      display: [292, 177],
+      required: true,
+      validateExisting: true,
+    });
+  });
+
+  it('rejects the previous 584×356 Top Offers banner on the next save', async () => {
+    const file = {
+      id: 14,
+      name: 'old-top-offer.webp',
+      width: 584,
+      height: 356,
+    };
+    const { strapi } = harness({
+      current: { topOffers: { items: [{ banner: file }] } },
+      files: [file],
+    });
+
+    const error = await validateHomepageImages(strapi, {
+      topOffers: { items: [{ banner: file.id }] },
+    }).catch((value) => value);
+
+    expect(error.message).toContain('584×354');
+    expect(error.details.errors[0]).toMatchObject({
+      path: ['topOffers', 'items', 0, 'banner'],
+      message: expect.stringContaining(
+        '"old-top-offer.webp" is 584×356 px'
+      ),
+    });
+  });
+
   it('rejects an attached legacy hero image on the next homepage save', async () => {
     const file = {
       id: 12,
@@ -93,18 +132,18 @@ describe('homepage image validation', () => {
   it('still grandfathers unchanged legacy art in other homepage slots', async () => {
     const file = {
       id: 13,
-      name: 'legacy-top-offer.webp',
+      name: 'legacy-exclusive.webp',
       width: 400,
       height: 200,
     };
     const { strapi, findMany } = harness({
-      current: { topOffers: { items: [{ banner: file }] } },
+      current: { cgExclusive: { items: [{ bannerOverride: file }] } },
       files: [file],
     });
 
     await expect(
       validateHomepageImages(strapi, {
-        topOffers: { items: [{ banner: file.id }] },
+        cgExclusive: { items: [{ bannerOverride: file.id }] },
       })
     ).resolves.toBeUndefined();
     expect(findMany).not.toHaveBeenCalled();

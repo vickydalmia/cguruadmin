@@ -59,9 +59,10 @@ export const HOMEPAGE_IMAGE_RULES: HomepageImageRule[] = [
     field: 'banner',
     label: 'Top offer banner',
     width: 584,
-    height: 356,
-    display: [292, 178],
+    height: 354,
+    display: [292, 177],
     required: true,
+    validateExisting: true,
   },
   {
     path: 'cgExclusive.items[].bannerOverride',

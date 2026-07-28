@@ -1364,7 +1364,7 @@ async function buildHomepageTree(
   }
 
   // ── topOffers: newest coupons, each item reusing the coupon's image as the
-  //    banner (schema requires one; editors can swap in 584×356 art later) ──
+  //    banner (schema requires one; editors can swap in 584×354 art later) ──
   if (
     missingTables(
       "components_home_top_offers",

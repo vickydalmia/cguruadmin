@@ -37,7 +37,7 @@ export const HOMEPAGE_SECTION_LABELS: SectionLabel[] = [
     attr: 'topOffers',
     label: '3 · Top Offers',
     description:
-      'Latest coupon banner cards (up to 8, 584×356 images) after Popular Stores. ' +
+      'Latest coupon banner cards (up to 8, 584×354 images) after Popular Stores. ' +
       'The site shows 4; the extras backfill automatically when an offer expires.',
   },
   {
