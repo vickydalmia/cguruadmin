@@ -67,9 +67,10 @@ function collectOccurrences(root: any, rules: HomepageImageRule[]): Occurrence[]
 }
 
 // Narrow db-layer populate of just the rule'd media on the stored homepage —
-// used to grandfather already-assigned files so legacy images never block
-// unrelated edits. strapi.db.query (not strapi.documents) so the documents
-// middleware is never re-entered.
+// used to grandfather already-assigned files for rules that retain the legacy
+// policy. Rules with validateExisting opt out and re-check the stored file on
+// the next full homepage save. strapi.db.query (not strapi.documents) so the
+// documents middleware is never re-entered.
 const CURRENT_MEDIA_POPULATE = {
   hero: {
     populate: {
@@ -87,9 +88,10 @@ const CURRENT_MEDIA_POPULATE = {
  *
  * - Required rules fail when a row is saved with the media field empty.
  * - Newly assigned files must match the rule's exact width × height.
- * - Files already attached anywhere in the rule'd fields of the stored entry
- *   are grandfathered (id-based, order-insensitive), so pre-existing images
- *   never block unrelated homepage edits.
+ * - Files already attached anywhere in a grandfathered rule's fields are
+ *   skipped (id-based, order-insensitive).
+ * - Rules with validateExisting re-check an attached file so a legacy asset
+ *   blocks the next full homepage save until it is replaced.
  *
  * Throws errors.ValidationError (400 in the admin) listing every problem.
  */
@@ -125,7 +127,9 @@ export async function validateHomepageImages(
         .filter((id): id is number => id != null)
     );
 
-    const toCheck = assigned.filter((o) => !grandfathered.has(o.fileId!));
+    const toCheck = assigned.filter(
+      (o) => o.rule.validateExisting || !grandfathered.has(o.fileId!)
+    );
     if (toCheck.length) {
       const ids = [...new Set(toCheck.map((o) => o.fileId!))];
       const files = await strapi.db.query('plugin::upload.file').findMany({

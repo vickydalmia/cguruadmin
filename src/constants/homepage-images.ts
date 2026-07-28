@@ -1,5 +1,6 @@
 // Exact upload sizes for homepage section images, taken from the Figma spec
-// (@2x of the rendered @1x card size). Every rule is path-scoped to one
+// and final responsive render targets (@2x of the rendered @1x size).
+// Every rule is path-scoped to one
 // homepage slot — enforcement never applies to the media library globally,
 // and a component reused in another slot is unaffected unless listed here.
 // All targets are below the 1920px upload cap (src/constants/image.ts), so
@@ -23,6 +24,11 @@ export type HomepageImageRule = {
   display: [number, number];
   /** Whether the media must be set on every row of this slot. */
   required: boolean;
+  /**
+   * Re-check files already attached to the stored homepage. Defaults to false,
+   * which preserves the existing grandfathering policy for legacy card art.
+   */
+  validateExisting?: boolean;
 };
 
 export const HOMEPAGE_IMAGE_RULES: HomepageImageRule[] = [
@@ -31,10 +37,11 @@ export const HOMEPAGE_IMAGE_RULES: HomepageImageRule[] = [
     componentUid: 'homepage.slider-slide',
     field: 'desktopImage',
     label: 'Hero slide desktop image',
-    width: 1664,
-    height: 720,
-    display: [832, 360],
+    width: 1882,
+    height: 781,
+    display: [941, 390.5],
     required: true,
+    validateExisting: true,
   },
   {
     path: 'hero.products[].imageOverride',

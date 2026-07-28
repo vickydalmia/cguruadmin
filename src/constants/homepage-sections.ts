@@ -25,7 +25,7 @@ export const HOMEPAGE_SECTION_LABELS: SectionLabel[] = [
     attr: 'hero',
     label: '1 · Hero — banner slider & products',
     description:
-      'Top of the page: banner slider (1664×720 images) plus up to 4 product cards beside it.',
+      'Top of the page: banner slider (1882×781 images) plus up to 4 product cards beside it.',
   },
   {
     attr: 'popularStores',
