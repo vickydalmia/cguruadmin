@@ -18,14 +18,39 @@ export type Sort = { field: SortField; desc: boolean };
 export const DEFAULT_SORT: Sort = { field: 'name', desc: false };
 
 /**
- * Clicking the active column flips direction; clicking a new one starts it in
- * the direction that answers the obvious question — "which pages have the most
- * Deals?" and "what changed most recently?" both want descending first, while
- * a name column wants A-Z.
+ * The URL form of {@link DEFAULT_SORT}.
+ *
+ * `Table.HeaderCell` owns the sort toggle and writes `<field>:ASC|DESC` into
+ * the query string, so the URL — not component state — is the source of truth.
  */
-export function nextSort(current: Sort, field: SortField): Sort {
-  if (current.field === field) return { field, desc: !current.desc };
-  return { field, desc: field !== 'name' };
+export const DEFAULT_SORT_PARAM = 'name:ASC';
+
+/**
+ * Read the query-string sort back into the shape `listQueryString` wants.
+ *
+ * Anything unrecognised falls back to the default rather than throwing: the
+ * value arrives from a user-editable URL, and a hand-typed `?sort=nope` should
+ * render the default list, not an error page.
+ */
+export function parseSort(raw: unknown): Sort {
+  const [field, order] = (typeof raw === 'string' ? raw : '').split(':');
+  const known = SORT_FIELDS.find((candidate) => candidate === field);
+  if (!known) return DEFAULT_SORT;
+  return { field: known, desc: order?.toUpperCase() === 'DESC' };
+}
+
+/**
+ * `SearchInput` percent-encodes before writing `_q`, so the value read back out
+ * is still encoded. Decode defensively — a malformed escape sequence in a
+ * hand-edited URL must not throw during render.
+ */
+export function parseSearch(raw: unknown): string {
+  if (typeof raw !== 'string' || raw === '') return '';
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
 }
 
 export type ListQuery = {

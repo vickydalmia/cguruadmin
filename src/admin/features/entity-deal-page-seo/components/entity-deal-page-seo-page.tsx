@@ -1,39 +1,37 @@
 import * as React from 'react';
 import {
-  Box,
   Button,
   Flex,
   IconButton,
-  Loader,
-  Searchbar,
   SingleSelect,
   SingleSelectOption,
   Status,
-  Table,
-  Tbody,
-  Td,
-  TextButton,
-  Th,
-  Thead,
   Tooltip,
-  Tr,
   Typography,
   type StatusVariant,
 } from '@strapi/design-system';
-import { CaretDown, CaretUp, Duplicate, Pencil } from '@strapi/icons';
-import { Layouts, Page, useFetchClient, useNotification } from '@strapi/strapi/admin';
+import { Duplicate, Pencil } from '@strapi/icons';
+import {
+  Layouts,
+  Page,
+  Pagination,
+  SearchInput,
+  Table,
+  useFetchClient,
+  useNotification,
+  useQueryParams,
+} from '@strapi/strapi/admin';
 
 import type { IdentityKind } from '../../../../utils/route-normalization';
 import {
-  DEFAULT_SORT,
+  DEFAULT_SORT_PARAM,
   listQueryString,
-  nextSort,
+  parseSearch,
+  parseSort,
   toSeoPatch,
   unwrapList,
   updatePath,
   type SeoFormState,
-  type Sort,
-  type SortField,
 } from '../api';
 import {
   BLOCKER_LABELS,
@@ -45,7 +43,10 @@ import {
 } from '../types';
 import SeoEditDialog from './seo-edit-dialog';
 
-const PAGE_SIZE = 25;
+const DEFAULT_PAGE_SIZE = 25;
+// 25 must appear here or the page-size select would render a value it has no
+// option for. The rest mirror Strapi's own defaults.
+const PAGE_SIZE_OPTIONS = ['10', '25', '50', '100'];
 
 const STATUS_VARIANT: Record<IndexState, StatusVariant> = {
   enabled: 'success',
@@ -56,43 +57,34 @@ const STATUS_VARIANT: Record<IndexState, StatusVariant> = {
 };
 
 /**
- * A sortable column header.
- *
- * `aria-sort` on the cell is what tells a screen-reader user the table is
- * ordered and by which column — the arrow glyph alone conveys nothing.
+ * Column definitions. `name` doubles as the sort key sent to the server, so the
+ * sortable entries must match SORT_FIELDS in `../api` (and SETTINGS_SORT_FIELDS
+ * in the entity-deal-page service).
  */
-function SortableTh({
-  field,
-  label,
-  sort,
-  onSort,
-}: {
-  field: SortField;
-  label: string;
-  sort: Sort;
-  onSort: (sort: Sort) => void;
-}) {
-  const active = sort.field === field;
-  const ariaSort = active ? (sort.desc ? 'descending' : 'ascending') : 'none';
+const HEADERS: { name: string; label: string; sortable: boolean }[] = [
+  { name: 'name', label: 'Entity', sortable: true },
+  { name: 'permalink', label: 'Permalink', sortable: false },
+  { name: 'liveDealCount', label: 'Live Deals', sortable: true },
+  { name: 'indexState', label: 'Index state', sortable: false },
+  { name: 'updatedAt', label: 'Updated', sortable: true },
+  { name: 'actions', label: 'Actions', sortable: false },
+];
 
-  return (
-    <Th aria-sort={ariaSort}>
-      <TextButton onClick={() => onSort(nextSort(sort, field))}>
-        <Flex gap={1} alignItems="center">
-          <Typography
-            variant="sigma"
-            textColor={active ? 'primary600' : undefined}
-          >
-            {label}
-          </Typography>
-          {active ? (
-            sort.desc ? <CaretDown width="1rem" /> : <CaretUp width="1rem" />
-          ) : null}
-        </Flex>
-      </TextButton>
-    </Th>
-  );
-}
+type ListQueryParams = {
+  page?: string;
+  pageSize?: string;
+  sort?: string;
+  kind?: string;
+  indexState?: string;
+  _q?: string;
+};
+
+/**
+ * `Table.Root` requires an `id` on every row, but the entity's own numeric `id`
+ * is only unique within one content type and this list mixes all four. Carry a
+ * composite key beside the row rather than overwriting it.
+ */
+type TableRow = { id: string; row: EntityDealPageRow };
 
 function formatUpdatedAt(value?: string): string {
   if (!value) return '—';
@@ -104,31 +96,37 @@ export default function EntityDealPageSeoPage() {
   const { get, put } = useFetchClient();
   const { toggleNotification } = useNotification();
 
+  // All list state lives in the URL: a filtered view is shareable, survives a
+  // refresh, and the browser Back button undoes a filter the way it does on
+  // every other Strapi list screen.
+  const [{ query }, setQuery] = useQueryParams<ListQueryParams>({
+    page: '1',
+    pageSize: String(DEFAULT_PAGE_SIZE),
+    sort: DEFAULT_SORT_PARAM,
+  });
+
+  const page = Number(query.page) || 1;
+  const pageSize = Number(query.pageSize) || DEFAULT_PAGE_SIZE;
+  const sort = parseSort(query.sort);
+  const search = parseSearch(query._q);
+  const kind = (query.kind ?? '') as IdentityKind | '';
+  const indexState = (query.indexState ?? '') as IndexState | '';
+
   const [rows, setRows] = React.useState<EntityDealPageRow[]>([]);
   const [pageCount, setPageCount] = React.useState(1);
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-
-  const [page, setPage] = React.useState(1);
-  const [kind, setKind] = React.useState<IdentityKind | ''>('');
-  const [indexState, setIndexState] = React.useState<IndexState | ''>('');
-  const [search, setSearch] = React.useState('');
-  const [debouncedSearch, setDebouncedSearch] = React.useState('');
-  const [sort, setSort] = React.useState<Sort>(DEFAULT_SORT);
+  const [forbidden, setForbidden] = React.useState(false);
 
   const [editing, setEditing] = React.useState<EntityDealPageRow | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [reloadToken, setReloadToken] = React.useState(0);
 
-  React.useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 250);
-    return () => clearTimeout(timer);
-  }, [search]);
-
-  // Any filter or sort change invalidates the current page number: page 3 of
-  // an A-Z list has nothing to do with page 3 of a most-Deals-first list.
-  React.useEffect(() => setPage(1), [debouncedSearch, kind, indexState, sort]);
+  // Any filter change invalidates the current page number: page 3 of an A-Z
+  // list has nothing to do with page 3 of a most-Deals-first list.
+  const setFilter = (next: Partial<ListQueryParams>) =>
+    setQuery({ ...next, page: '1' });
 
   React.useEffect(() => {
     let cancelled = false;
@@ -136,16 +134,10 @@ export default function EntityDealPageSeoPage() {
     const run = async () => {
       setLoading(true);
       setError(null);
+      setForbidden(false);
       try {
         const response = await get(
-          listQueryString({
-            page,
-            pageSize: PAGE_SIZE,
-            kind,
-            indexState,
-            search: debouncedSearch,
-            sort,
-          }),
+          listQueryString({ page, pageSize, kind, indexState, search, sort }),
         );
         if (cancelled) return;
         const list = unwrapList(response?.data);
@@ -157,12 +149,14 @@ export default function EntityDealPageSeoPage() {
         // 403 here means the account is not a Super Admin. Say that, rather
         // than showing an empty table that looks like "no entities exist".
         const status = err?.response?.status;
-        setError(
-          status === 403 || status === 401
-            ? 'Only a Super Admin can view Deal page SEO settings.'
-            : (err?.message ?? 'Failed to load Deal page settings.'),
-        );
+        if (status === 403 || status === 401) {
+          setForbidden(true);
+        } else {
+          setError(err?.message ?? 'Failed to load Deal page settings.');
+        }
         setRows([]);
+        setTotal(0);
+        setPageCount(1);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -172,7 +166,18 @@ export default function EntityDealPageSeoPage() {
     return () => {
       cancelled = true;
     };
-  }, [get, page, kind, indexState, debouncedSearch, sort, reloadToken]);
+    // `sort` and the primitives it is derived from change together; depending on
+    // the parsed object would re-fetch on every render.
+  }, [
+    get,
+    page,
+    pageSize,
+    kind,
+    indexState,
+    search,
+    query.sort,
+    reloadToken,
+  ]);
 
   const copyPermalink = async (row: EntityDealPageRow) => {
     try {
@@ -209,190 +214,190 @@ export default function EntityDealPageSeoPage() {
     }
   };
 
+  if (forbidden) {
+    return (
+      <Page.Main>
+        <Page.Title>Deal page SEO</Page.Title>
+        <Page.NoPermissions />
+      </Page.Main>
+    );
+  }
+
+  if (error) {
+    return (
+      <Page.Main>
+        <Page.Title>Deal page SEO</Page.Title>
+        <Page.Error content={error} />
+      </Page.Main>
+    );
+  }
+
+  const tableRows: TableRow[] = rows.map((row) => ({
+    id: `${row.entityType}:${row.documentId}`,
+    row,
+  }));
+
+  const hasFilters = Boolean(search || kind || indexState);
+
   return (
     <Page.Main>
       <Page.Title>Deal page SEO</Page.Title>
-      <Layouts.Header
-        title="Deal page SEO"
-        subtitle={`Generated Product Deal pages for stores, brands, categories and banks — ${total} total`}
-      />
+      <Layouts.Root>
+        <Layouts.Header
+          title="Deal page SEO"
+          subtitle={`Generated Product Deal pages for stores, brands, categories and banks — ${total} total`}
+        />
 
-      <Layouts.Action
-        startActions={
-          <>
-            <Searchbar
-              name="search"
-              value={search}
-              onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                setSearch(event.target.value)
-              }
-              onClear={() => setSearch('')}
-              clearLabel="Clear search"
-              placeholder="Search name, slug or permalink"
-            >
-              Search Deal pages
-            </Searchbar>
-            <SingleSelect
-              aria-label="Entity type"
-              placeholder="All types"
-              value={kind}
-              onClear={() => setKind('')}
-              onChange={(value: string | number) =>
-                setKind(String(value) as IdentityKind)
-              }
-            >
-              {ENTITY_KINDS.map((value) => (
-                <SingleSelectOption key={value} value={value}>
-                  {value}
-                </SingleSelectOption>
-              ))}
-            </SingleSelect>
-            <SingleSelect
-              aria-label="Index state"
-              placeholder="All states"
-              value={indexState}
-              onClear={() => setIndexState('')}
-              onChange={(value: string | number) =>
-                setIndexState(String(value) as IndexState)
-              }
-            >
-              {INDEX_STATES.map((value) => (
-                <SingleSelectOption key={value} value={value}>
-                  {INDEX_STATE_LABELS[value]}
-                </SingleSelectOption>
-              ))}
-            </SingleSelect>
-          </>
-        }
-      />
+        <Layouts.Action
+          startActions={
+            <>
+              <SearchInput
+                label="Search Deal pages"
+                placeholder="Search name, slug or permalink"
+              />
+              <SingleSelect
+                aria-label="Entity type"
+                placeholder="All types"
+                value={kind}
+                onClear={() => setFilter({ kind: '' })}
+                onChange={(value: string | number) =>
+                  setFilter({ kind: String(value) })
+                }
+              >
+                {ENTITY_KINDS.map((value) => (
+                  <SingleSelectOption key={value} value={value}>
+                    {value}
+                  </SingleSelectOption>
+                ))}
+              </SingleSelect>
+              <SingleSelect
+                aria-label="Index state"
+                placeholder="All states"
+                value={indexState}
+                onClear={() => setFilter({ indexState: '' })}
+                onChange={(value: string | number) =>
+                  setFilter({ indexState: String(value) })
+                }
+              >
+                {INDEX_STATES.map((value) => (
+                  <SingleSelectOption key={value} value={value}>
+                    {INDEX_STATE_LABELS[value]}
+                  </SingleSelectOption>
+                ))}
+              </SingleSelect>
+            </>
+          }
+        />
 
-      <Layouts.Content>
-        {error ? (
-          <Box padding={8} background="neutral0" hasRadius>
-            <Typography textColor="danger600">{error}</Typography>
-          </Box>
-        ) : loading ? (
-          <Flex justifyContent="center" padding={8}>
-            <Loader>Loading Deal pages…</Loader>
-          </Flex>
-        ) : rows.length === 0 ? (
-          <Box padding={8} background="neutral0" hasRadius>
-            <Typography textColor="neutral600">
-              No Deal pages match these filters.
-            </Typography>
-          </Box>
-        ) : (
-          <Table colCount={6} rowCount={rows.length}>
-            <Thead>
-              <Tr>
-                <SortableTh field="name" label="Entity" sort={sort} onSort={setSort} />
-                <Th><Typography variant="sigma">Permalink</Typography></Th>
-                <SortableTh
-                  field="liveDealCount"
-                  label="Live Deals"
-                  sort={sort}
-                  onSort={setSort}
-                />
-                <Th><Typography variant="sigma">Index state</Typography></Th>
-                <SortableTh
-                  field="updatedAt"
-                  label="Updated"
-                  sort={sort}
-                  onSort={setSort}
-                />
-                <Th><Typography variant="sigma">Actions</Typography></Th>
-              </Tr>
-            </Thead>
-            <Tbody>
-              {rows.map((row) => (
-                <Tr key={`${row.entityType}:${row.documentId}`}>
-                  <Td>
-                    <Flex direction="column" alignItems="start">
-                      <Typography fontWeight="semiBold">{row.name}</Typography>
-                      <Typography variant="pi" textColor="neutral600">
-                        {row.entityType}
-                      </Typography>
-                    </Flex>
-                  </Td>
-                  <Td>
-                    <Flex gap={2} alignItems="center">
-                      <Typography variant="pi">{row.permalink}</Typography>
-                      <IconButton
-                        label="Copy permalink"
-                        variant="ghost"
-                        onClick={() => copyPermalink(row)}
-                      >
-                        <Duplicate />
-                      </IconButton>
-                    </Flex>
-                  </Td>
-                  <Td>
-                    <Typography
-                      textColor={row.liveDealCount > 0 ? 'neutral800' : 'danger600'}
-                    >
-                      {row.liveDealCount}
-                    </Typography>
-                  </Td>
-                  <Td>
-                    <Tooltip
-                      label={
-                        row.resolvedSeo.blockers.length
-                          ? row.resolvedSeo.blockers
-                              .map((blocker) => BLOCKER_LABELS[blocker])
-                              .join('; ')
-                          : 'No blockers — this page is indexable.'
+        <Layouts.Content>
+          <Table.Root rows={tableRows} headers={HEADERS} isLoading={loading}>
+            <Table.Content>
+              <Table.Head>
+                {HEADERS.map((header) => (
+                  <Table.HeaderCell key={header.name} {...header} />
+                ))}
+              </Table.Head>
+              <Table.Loading>Loading Deal pages…</Table.Loading>
+              <Table.Empty
+                content={
+                  hasFilters
+                    ? 'No Deal pages match these filters.'
+                    : 'No Deal pages yet.'
+                }
+                action={
+                  hasFilters ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() =>
+                        setQuery(
+                          { kind: '', indexState: '', _q: '', page: '1' },
+                          'remove',
+                        )
                       }
                     >
-                      <Status variant={STATUS_VARIANT[row.indexState]} size="S">
-                        <Typography variant="pi" fontWeight="bold">
-                          {INDEX_STATE_LABELS[row.indexState]}
-                        </Typography>
-                      </Status>
-                    </Tooltip>
-                  </Td>
-                  <Td>
-                    <Typography variant="pi" textColor="neutral600">
-                      {formatUpdatedAt(row.updatedAt)}
-                    </Typography>
-                  </Td>
-                  <Td>
-                    <Button
-                      variant="tertiary"
-                      size="S"
-                      startIcon={<Pencil />}
-                      onClick={() => setEditing(row)}
-                    >
-                      Edit SEO
+                      Clear filters
                     </Button>
-                  </Td>
-                </Tr>
-              ))}
-            </Tbody>
-          </Table>
-        )}
+                  ) : undefined
+                }
+              />
+              <Table.Body>
+                {tableRows.map(({ id, row }) => (
+                  <Table.Row key={id}>
+                    <Table.Cell>
+                      <Flex direction="column" alignItems="start">
+                        <Typography fontWeight="semiBold">{row.name}</Typography>
+                        <Typography variant="pi" textColor="neutral600">
+                          {row.entityType}
+                        </Typography>
+                      </Flex>
+                    </Table.Cell>
+                    <Table.Cell>
+                      <Flex gap={2} alignItems="center">
+                        <Typography variant="pi">{row.permalink}</Typography>
+                        <IconButton
+                          label="Copy permalink"
+                          variant="ghost"
+                          onClick={() => copyPermalink(row)}
+                        >
+                          <Duplicate />
+                        </IconButton>
+                      </Flex>
+                    </Table.Cell>
+                    <Table.Cell>
+                      <Typography
+                        textColor={row.liveDealCount > 0 ? 'neutral800' : 'danger600'}
+                      >
+                        {row.liveDealCount}
+                      </Typography>
+                    </Table.Cell>
+                    <Table.Cell>
+                      <Tooltip
+                        label={
+                          row.resolvedSeo.blockers.length
+                            ? row.resolvedSeo.blockers
+                                .map((blocker) => BLOCKER_LABELS[blocker])
+                                .join('; ')
+                            : 'No blockers — this page is indexable.'
+                        }
+                      >
+                        <Status variant={STATUS_VARIANT[row.indexState]} size="S">
+                          <Typography variant="pi" fontWeight="bold">
+                            {INDEX_STATE_LABELS[row.indexState]}
+                          </Typography>
+                        </Status>
+                      </Tooltip>
+                    </Table.Cell>
+                    <Table.Cell>
+                      <Typography variant="pi" textColor="neutral600">
+                        {formatUpdatedAt(row.updatedAt)}
+                      </Typography>
+                    </Table.Cell>
+                    <Table.Cell>
+                      <Button
+                        variant="tertiary"
+                        size="S"
+                        startIcon={<Pencil />}
+                        onClick={() => setEditing(row)}
+                      >
+                        Edit SEO
+                      </Button>
+                    </Table.Cell>
+                  </Table.Row>
+                ))}
+              </Table.Body>
+            </Table.Content>
+          </Table.Root>
 
-        {pageCount > 1 ? (
-          <Flex justifyContent="space-between" paddingTop={4} alignItems="center">
-            <Button
-              variant="tertiary"
-              disabled={page <= 1 || loading}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-            >
-              Previous
-            </Button>
-            <Typography variant="pi" textColor="neutral600">
-              {`Page ${page} of ${pageCount}`}
-            </Typography>
-            <Button
-              variant="tertiary"
-              disabled={page >= pageCount || loading}
-              onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
-            >
-              Next
-            </Button>
-          </Flex>
-        ) : null}
-      </Layouts.Content>
+          <Pagination.Root
+            pageCount={pageCount}
+            total={total}
+            defaultPageSize={DEFAULT_PAGE_SIZE}
+          >
+            <Pagination.PageSize options={PAGE_SIZE_OPTIONS} />
+            <Pagination.Links />
+          </Pagination.Root>
+        </Layouts.Content>
+      </Layouts.Root>
 
       {editing ? (
         <SeoEditDialog
