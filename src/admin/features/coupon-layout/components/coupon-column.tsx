@@ -91,8 +91,7 @@ export function CouponColumn({
   warning?: string | null;
   /**
    * Coupons that must not be ADDED here because the other list already renders
-   * them. Not a server rule — the server permits the overlap; this prevents
-   * the case that would render wrong.
+   * them. The server validates the same final positional rule.
    */
   blockedIds: ReadonlySet<string>;
   blockedNote: string;
@@ -237,6 +236,21 @@ export function CouponColumn({
         borderColor="neutral200"
         padding={2}
       >
+        {pool.error ? (
+          <Flex direction="column" alignItems="center" gap={2} padding={3}>
+            <Typography variant="pi" textColor="danger600">
+              {pool.error}
+            </Typography>
+            <Button
+              type="button"
+              variant="secondary"
+              size="S"
+              onClick={pool.retry}
+            >
+              Retry candidates
+            </Button>
+          </Flex>
+        ) : null}
         {pool.candidates.map((candidate) => {
           const isSelected = selectedIds.has(candidate.documentId);
           const isBlocked = blockedIds.has(candidate.documentId);
@@ -281,7 +295,7 @@ export function CouponColumn({
           </Flex>
         ) : null}
 
-        {!pool.loading && pool.candidates.length === 0 ? (
+        {!pool.loading && !pool.error && pool.candidates.length === 0 ? (
           <Typography variant="pi" textColor="neutral500">
             {search
               ? 'No Coupons match that search.'

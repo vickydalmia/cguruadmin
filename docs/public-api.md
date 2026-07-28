@@ -20,8 +20,8 @@ ceiling on staleness, not a fixed delay.
 | `GET /api/deal-of-the-day-full` | anonymous | 60 / 60s | 60s, keyed by path |
 | `GET /api/entity-deal-pages/:dealSlug` | anonymous | 60 / 60s | 60s |
 | `GET /api/entity-deal-page-routes` | anonymous | 60 / 60s | 60s |
-| `GET /api/admin/entity-deal-pages` | **Super Admin session** | — | none |
-| `PATCH /api/admin/entity-deal-pages/:kind/:documentId` | **Super Admin session** | — | none |
+| `GET /entity-deal-page/pages` | **Super Admin session** | — | none |
+| `PATCH /entity-deal-page/pages/:kind/:documentId` | **Super Admin session** | — | none |
 | `GET /api/site-chrome` | anonymous | — | 300s |
 | `GET /api/public-route-metadata` | anonymous | 60 / 60s | 60s, keyed by path |
 | `GET /api/sitemap-entities` | anonymous | 60 / 60s | 60s, keyed by path |
@@ -232,10 +232,10 @@ rate-limited, and cached for 60 seconds.
 
 The dormant administration contract is:
 
-- `GET /api/admin/entity-deal-pages` lists all generated permalinks and updates
+- `GET /entity-deal-page/pages` lists all generated permalinks and updates
   automatically as entities are added. It accepts `kind`, `search`,
   `indexState` (`enabled`, `disabled`, or `blocked`), `page`, and `pageSize`.
-- `PATCH /api/admin/entity-deal-pages/:kind/:documentId` accepts
+- `PATCH /entity-deal-page/pages/:kind/:documentId` accepts
   `{ "data": { "entityDealPageSeo": { ... } } }` and only updates the hidden
   Deal-page SEO component.
 

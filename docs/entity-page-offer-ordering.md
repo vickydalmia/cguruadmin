@@ -63,28 +63,18 @@ limits the page to only those selections.
 
 ### How that rule is enforced
 
-By **repair, not rejection**, in two places:
-
-1. **The dialog, immediately.** When a Coupon ends up in both a displayed Top
-   Pick slot and `orderedCoupons`, the Coupon layout dialog drops it from the
-   ordered selection in the same edit and says so. The editor sees it happen,
-   and the save already carries the right disconnect. The dialog can do this
-   because it owns the intended order; the server does not.
-2. **The five-minute cron, as a backstop.**
+The dedicated layout API validates the final ordered arrays and rejects a
+displayed overlap atomically. The dialog also removes a conflict as soon as an
+editor creates it, so the correction is visible before Save. As a backstop,
+the nightly reconciliation job
    `removeDisplayedTopPicksFromOrdered` disconnects a displayed Top Pick from
    `orderedCoupons` and logs every removal. It catches drift the dialog cannot
-   see — direct API writes, and the buffer promotion that
+   see — legacy/direct database writes, and the buffer promotion that
    `removeInactiveCuratedOfferRelations` performs when a displayed pick expires.
 
-The write validators do not check it at all.
-
-This is deliberate. The rule is positional, and the server cannot resolve the
-resulting order of a relation patch: `resultingRelations` keeps first
-occurrences and ignores Strapi's `before`/`end` anchors, so a drag-reorder
-resolves back to the old order. Worse, the cleanup job writes through Query
-Engine and bypasses the document-service middleware — once it promotes a buffer
-that is also ordered, a positional validator would reject **every** later save
-of that entity, including edits unrelated to Coupons.
+Generic Content Manager writes retain the repair behavior for compatibility,
+but the admin no longer uses relation patches. The layout endpoint receives
+the complete final order, so the positional rule is authoritative there.
 
 Until the cron runs, the page still renders correctly: the displayed Top Pick
 leaves the main list and the ordered head closes up.
@@ -106,17 +96,32 @@ position. The dialog gives each selection half the width, with its own search,
 sort, and candidate list, and blocks adding a displayed Top Pick to Ordered
 Coupons. Expiry buffers are not blocked — that overlap is legitimate.
 
-The server does **not** validate this; see the enforcement note above.
-
 Both lists are ordered and support drag or the up/down buttons. Top Picks were
 previously append-only even though their first two entries render in CMS order.
 
-The dialog also shows the resulting sequence as a list of titles. That preview
-reads the public `GET /api/{entity}/:slug/coupons` endpoint — the same one the
-storefront consumes — rather than re-deriving the ordering rules, so it cannot
-drift from `listEntityOffers`. It is not a page render, and cannot be: entity
-pages are served only from the ISR store through the gateway, which has no
-page-preview route.
+The dialog owns a draft. **Cancel** discards it; closing a dirty dialog asks for
+confirmation. **Save Coupon layout** sends both complete arrays in one request.
+It does not mutate the Content Manager form and does not require a second entity
+Save. A failed load is shown as an error with Retry and never as an empty
+selection.
+
+The preview is produced by
+`POST /entity-coupon-layout/:kind/:documentId/preview` from the pending arrays.
+It returns the two authoritative Top Picks and first 30 Newest-view main-list
+results without exposing Coupon codes, unique-code pools, or affiliate data.
+
+## Permissions and conflicts
+
+The feature action is **Manage entity coupon layout** under Administration
+Panel roles. Super Admin inherits it. The built-in Editor is seeded once; later
+manual revocation is preserved. Custom roles need that action plus read and
+update access to the relevant Store, Brand, Category, or Bank type. Without
+those capabilities the panel shows saved counts and a disabled explanation.
+
+Each load returns the entity `updatedAt` as a version. Save sends that version;
+if another editor has saved since the dialog opened, the endpoint returns
+`409 Conflict`. Close and reopen the dialog to review the newer order, then
+reapply the intended edit.
 
 ## What “newest” means
 
@@ -153,10 +158,11 @@ Only Coupons with `contentStatus = published` and no elapsed `expiresAt` are
 eligible for either picker or public output. Scheduled, expired, unpublished,
 and already elapsed Coupons are excluded.
 
-The curated-offer cleanup job (`config/cron-tasks.ts`, every five minutes)
-removes a Coupon from `topPickCoupons` and/or `orderedCoupons` when it stops
-being live. It preserves the order of every remaining selection, so removing a
-displayed Top Pick promotes an expiry buffer into its place.
+The five-minute lifecycle job targets only Coupons/Deals whose status changed
+in that pass and removes them from curated relations. It preserves the order of
+every remaining selection, so removing a displayed Top Pick promotes an expiry
+buffer into its place. A nightly full reconciliation remains the safety net for
+legacy corruption or a previously failed targeted pass.
 
 A second pass then runs — always, not only when something expired — and drops
 any newly displayed Top Pick out of `orderedCoupons`. Both passes contribute to
@@ -173,14 +179,18 @@ not only the editorial selections.
 
 ## ISR and sitemap behavior
 
-Saving either entity relation is a page-content change even though Strapi may
-only update a relation link table. The document middleware therefore:
+The layout endpoint replaces both relations, touches the entity timestamp, and
+inserts exactly one entity-route ISR outbox event in the same transaction.
+After commit it purges only that entity Coupon response cache before waking the
+dispatcher. An order-only save does not reload the global route inventory or
+sitemap catalogue.
 
-1. Detects `topPickCoupons` or `orderedCoupons` in the entity update.
-2. Touches the owning entity's `updatedAt` inside the same transaction.
-3. Enqueues ISR for the entity route and the normal entity scope.
-4. Lets the sitemap observe the entity-page change through the updated entity
-   timestamp.
+The panel reports **Saved—refresh queued** until the gateway accepts a path
+version, then **Public page updated** once the cached HTML reaches it. Gateway
+outages, terminal render failures, and a still-unknown route remain visible as
+retryable failures. A gateway response containing `skippedPaths` is never
+marked delivered: the gateway refreshes route inventory once, retries the
+unknown path, and the outbox retries if it is still absent.
 
 When a Coupon itself changes, ISR relation discovery includes normal membership,
 Top Pick selection, and Ordered Coupon selection, so every affected entity page

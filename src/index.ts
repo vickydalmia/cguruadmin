@@ -8,6 +8,7 @@ import {
   type SectionLabel,
 } from './constants/homepage-sections';
 import { purgeResponseCaches } from './middlewares/cache';
+import { hasTrustedIpsConfigured } from './middlewares/rate-limit';
 import { initializeSearchRuntime } from './api/search/services/search';
 import {
   createOutboxPayload,
@@ -61,6 +62,10 @@ import {
   changesEntityOfferMembership,
   touchEntityPageUpdatedAt,
 } from './utils/entity-page-timestamp';
+import {
+  ENTITY_COUPON_LAYOUT_ACTION,
+  ENTITY_COUPON_LAYOUT_ACTION_ATTRIBUTES,
+} from './api/entity-coupon-layout/services/entity-coupon-layout';
 
 const HIDE_FROM_EDIT: Record<string, string[]> = {
   'api::deal.deal': ['stores', 'brands', 'categories', 'banks'],
@@ -979,6 +984,100 @@ export default {
     // so a route here would be dead code. The docker healthcheck and
     // deploy.sh curl both hit the built-in.
 
+    // Entity Deal-page settings endpoints, mounted on the ADMIN router rather
+    // than under src/api/entity-deal-page/routes.
+    //
+    // registerAPIRoutes forces `type: 'content-api'` on every router loaded
+    // from src/api/*/routes, and `route.info.type` is what selects the auth
+    // strategy set. The content API serves only api-token and
+    // users-permissions, so an admin-panel session authenticating these routes
+    // there is impossible — and `ctx.state.user` would be a
+    // plugin::users-permissions.user, which super-admin-only must never look up
+    // against the unrelated admin::user id space.
+    //
+    // Registering here is safe: the user `register` lifecycle runs before
+    // `server.initRouting()` (Strapi.register → Strapi.bootstrap). The admin
+    // router mounts with an empty prefix, so these serve at
+    // /entity-deal-page/pages — there is no /api segment.
+    const entityDealPageAdminPolicies = [
+      'admin::isAuthenticatedAdmin',
+      'global::super-admin-only',
+    ];
+    strapi.server.routes({
+      type: 'admin',
+      prefix: '/entity-deal-page',
+      routes: [
+        {
+          method: 'GET',
+          path: '/pages',
+          handler: 'api::entity-deal-page.entity-deal-page.adminList',
+          config: { policies: entityDealPageAdminPolicies },
+        },
+        {
+          method: 'PATCH',
+          path: '/pages/:kind/:documentId',
+          handler: 'api::entity-deal-page.entity-deal-page.adminUpdate',
+          config: { policies: entityDealPageAdminPolicies },
+        },
+        // Same handler under PUT. PATCH is the documented verb and the correct
+        // one for a partial merge, but the admin panel's fetch client
+        // (useFetchClient) only exposes get/post/put/del — no patch — and the
+        // settings screen must not reimplement admin token handling just to
+        // reach this endpoint. Both verbs merge; neither replaces.
+        {
+          method: 'PUT',
+          path: '/pages/:kind/:documentId',
+          handler: 'api::entity-deal-page.entity-deal-page.adminUpdate',
+          config: { policies: entityDealPageAdminPolicies },
+        },
+      ],
+    } as any);
+
+    // Coupon layout is deliberately outside Content Manager's generic
+    // relation update route. GET remains authenticated-only so restricted
+    // editors can see saved counts and an actionable disabled-state reason;
+    // the controller applies both the feature action and model read/update
+    // capability before candidates, preview or writes are allowed.
+    strapi.server.routes({
+      type: 'admin',
+      prefix: '/entity-coupon-layout',
+      routes: [
+        {
+          method: 'GET',
+          path: '/refresh/:outboxId',
+          handler:
+            'api::entity-coupon-layout.entity-coupon-layout.refresh',
+          config: { policies: ['admin::isAuthenticatedAdmin'] },
+        },
+        {
+          method: 'GET',
+          path: '/:kind/:documentId',
+          handler: 'api::entity-coupon-layout.entity-coupon-layout.get',
+          config: { policies: ['admin::isAuthenticatedAdmin'] },
+        },
+        {
+          method: 'GET',
+          path: '/:kind/:documentId/candidates',
+          handler:
+            'api::entity-coupon-layout.entity-coupon-layout.candidates',
+          config: { policies: ['admin::isAuthenticatedAdmin'] },
+        },
+        {
+          method: 'POST',
+          path: '/:kind/:documentId/preview',
+          handler:
+            'api::entity-coupon-layout.entity-coupon-layout.preview',
+          config: { policies: ['admin::isAuthenticatedAdmin'] },
+        },
+        {
+          method: 'PUT',
+          path: '/:kind/:documentId',
+          handler: 'api::entity-coupon-layout.entity-coupon-layout.replace',
+          config: { policies: ['admin::isAuthenticatedAdmin'] },
+        },
+      ],
+    } as any);
+
     strapi.documents.use(async (context: any, next: any) => {
       if (!DOCUMENT_WRITE_ACTIONS.has(context.action)) return next();
 
@@ -1125,6 +1224,7 @@ export default {
                     context.uid,
                     context.action,
                     documentId,
+                    context.params?.data,
                   );
             let scope =
               context.action === 'delete'
@@ -1244,6 +1344,66 @@ export default {
   },
 
   async bootstrap({ strapi }: { strapi: Core.Strapi }) {
+    await strapi.service('admin::permission').actionProvider.registerMany([
+      ENTITY_COUPON_LAYOUT_ACTION_ATTRIBUTES,
+    ]);
+    // Seed only once. The marker intentionally survives later manual
+    // revocation, so a boot never grants this permission back behind an
+    // administrator's back.
+    try {
+      const store = strapi.store({
+        type: 'plugin',
+        name: 'entity-coupon-layout',
+      });
+      const seeded = await store.get({ key: 'editor-permission-seeded' });
+      if (!seeded) {
+        const editor = await strapi.db.query('admin::role').findOne({
+          where: { code: 'strapi-editor' },
+          select: ['id'],
+        });
+        if (editor) {
+          const existing = await strapi.db.query('admin::permission').findOne({
+            where: {
+              role: editor.id,
+              action: ENTITY_COUPON_LAYOUT_ACTION,
+            },
+            select: ['id'],
+          });
+          if (!existing) {
+            await strapi.db.query('admin::permission').create({
+              data: {
+                action: ENTITY_COUPON_LAYOUT_ACTION,
+                subject: null,
+                properties: {},
+                conditions: [],
+                role: editor.id,
+              },
+            });
+          }
+        }
+        await store.set({
+          key: 'editor-permission-seeded',
+          value: true,
+        });
+      }
+    } catch (err: any) {
+      strapi.log.warn(
+        `[permissions] entity Coupon layout Editor seed failed: ${err?.message ?? err}`,
+      );
+    }
+    // The renderer fetches every page of a Deal catalogue to regenerate one
+    // entity Deal page, so a single render can spend a large share of the
+    // public 60/min per-IP budget. RATE_LIMIT_TRUSTED_IPS is what exempts the
+    // Astro origin from the limiter; without it those bursts surface as
+    // intermittent 429s that the renderer turns into 5xx pages, which is very
+    // hard to read back from a stack trace. Say so at boot instead.
+    if (!hasTrustedIpsConfigured()) {
+      strapi.log.warn(
+        '[rate-limit] RATE_LIMIT_TRUSTED_IPS is empty — ISR renders share the '
+        + "public per-IP budget. Set it to the Astro origin's private IP.",
+      );
+    }
+
     // Content Manager's relation picker queries the immediate component UID,
     // not the Homepage / Deal of the Day single type. A request-scoped Query
     // Engine lifecycle filter keeps only live Coupons/Deals in those pickers

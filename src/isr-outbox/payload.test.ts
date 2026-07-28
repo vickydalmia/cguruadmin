@@ -16,7 +16,7 @@ describe('createOutboxPayload', () => {
       }),
     ).toEqual({
       paths: ['/', '/sitemap_index.xml', '/amazon/', '/categories/deals/'],
-      scopes: ['routes'],
+      scopes: ['sitemap'],
     });
   });
 
@@ -45,7 +45,7 @@ describe('createOutboxPayload', () => {
       '/sitemap_index.xml',
       '/amazon-coupons/',
     ]);
-    expect(payload.scopes).toEqual(['routes']);
+    expect(payload.scopes).toEqual(['sitemap', 'routes']);
   });
 
   it('marks global invalidation with route and redirect refresh scopes', () => {

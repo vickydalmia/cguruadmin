@@ -10,6 +10,10 @@ export default {
     task: async ({ strapi }: { strapi: any }) => {
       const now = new Date();
       let changed = 0;
+      const changedOffers: Record<string, string[]> = {
+        'api::coupon.coupon': [],
+        'api::deal.deal': [],
+      };
 
       for (const uid of [
         "api::coupon.coupon",
@@ -70,6 +74,7 @@ export default {
               },
             });
             changed += 1;
+            changedOffers[uid].push(doc.documentId);
           }
         }
       }
@@ -81,15 +86,16 @@ export default {
         });
       }
 
-      // Also heals legacy/manual selections: scheduled, expired, and
-      // published-but-past-expiry offers are physically disconnected from
-      // Homepage / Deal of the Day curation and every entity's Top Pick
-      // Coupons. Taxonomy relations on the Coupon/Deal remain untouched. This
-      // runs even when no status changed in this tick, so a previous transient
-      // failure is retried automatically on the next five-minute pass.
+      // Target only offers whose lifecycle changed in this pass. The old job
+      // loaded every curated relation on every entity every five minutes.
+      // Nightly reconciliation below retains the full-scan safety net.
       let cleanup;
       try {
-        cleanup = await removeInactiveCuratedOfferRelations(strapi, now);
+        cleanup = await removeInactiveCuratedOfferRelations(
+          strapi,
+          now,
+          changedOffers,
+        );
       } catch (err: any) {
         strapi.log.error({
           event: 'content.curated_offer_relations_cleanup_failed',
@@ -108,7 +114,10 @@ export default {
       // displayed Top Pick slot, which is the main way a displayed pick ends
       // up sitting in `orderedCoupons` as well.
       try {
-        const promoted = await removeDisplayedTopPicksFromOrdered(strapi);
+        const promoted = await removeDisplayedTopPicksFromOrdered(
+          strapi,
+          cleanup.affectedPaths,
+        );
         cleanup = {
           removedSelections:
             cleanup.removedSelections + promoted.removedSelections,
@@ -160,6 +169,24 @@ export default {
   // stale in O(1) and BullMQ converges in the background; no build runs here.
   nightlyIsrConsistency: {
     task: async ({ strapi }: { strapi: any }) => {
+      const cleanup = await removeInactiveCuratedOfferRelations(
+        strapi,
+        new Date(),
+      );
+      const conflicts = await removeDisplayedTopPicksFromOrdered(strapi);
+      const affectedPaths = [
+        ...new Set([...cleanup.affectedPaths, ...conflicts.affectedPaths]),
+      ];
+      if (affectedPaths.length > 0) {
+        await enqueueStandaloneIsrEvent(strapi, {
+          reason: 'nightly curated offer reconciliation',
+          payload:
+            cleanup.requiresFullRevalidation ||
+            conflicts.requiresFullRevalidation
+              ? { all: true, scopes: ['routes'] }
+              : { paths: affectedPaths },
+        });
+      }
       await enqueueStandaloneIsrEvent(strapi, {
         reason: 'nightly ISR consistency',
         payload: {

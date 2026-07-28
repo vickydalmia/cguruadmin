@@ -6,6 +6,7 @@ import {
   Modal,
   Typography,
 } from '@strapi/design-system';
+import { useFetchClient } from '@strapi/strapi/admin';
 import * as React from 'react';
 import styled from 'styled-components';
 
@@ -17,7 +18,8 @@ import {
 } from '../config';
 import { topPickSlotRole } from '../coupon-layout';
 import { useOrderPreview } from '../use-order-preview';
-import type { RelationSelection } from '../use-relation-selection';
+import { useLocalRelationSelection } from '../use-relation-selection';
+import type { EntityCouponLayout } from '../use-entity-coupon-layout';
 import { CouponColumn } from './coupon-column';
 import { OrderPreview } from './order-preview';
 
@@ -85,26 +87,30 @@ const EMPTY_IDS: ReadonlySet<string> = new Set();
 export function CouponLayoutDialog({
   config,
   documentId,
-  slug,
-  topPicks,
-  ordered,
+  layout,
   open,
   onOpenChange,
+  onSaved,
 }: {
   config: CouponLayoutConfig;
   documentId?: string;
-  slug?: string;
-  /**
-   * Owned by the sidebar panel, not created here — the panel renders the same
-   * counts in its collapsed summary, and one shared state keeps the two from
-   * disagreeing (and avoids reloading the relations on every open).
-   */
-  topPicks: RelationSelection;
-  ordered: RelationSelection;
+  layout: EntityCouponLayout;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onSaved: (layout: EntityCouponLayout) => void;
 }) {
+  const { put } = useFetchClient();
+  const topPicks = useLocalRelationSelection(
+    layout.topPickCoupons,
+    TOP_PICK_MAX,
+  );
+  const ordered = useLocalRelationSelection(
+    layout.orderedCoupons,
+    ORDERED_MAX,
+  );
   const [showPreview, setShowPreview] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const [saveError, setSaveError] = React.useState<string | null>(null);
 
   // Re-read the saved order every time the preview is opened, so it never
   // shows what an earlier session left behind — and costs nothing while the
@@ -115,9 +121,11 @@ export function CouponLayoutDialog({
   }, [open, showPreview]);
   const preview = useOrderPreview(
     config,
-    slug,
+    documentId,
     open && showPreview,
     previewToken,
+    topPicks.selected,
+    ordered.selected,
   );
 
   // Only the DISPLAYED Top Picks are barred from Ordered Coupons. Positions
@@ -156,6 +164,76 @@ export function CouponLayoutDialog({
   // come through here.
   const [autoRemoved, setAutoRemoved] = React.useState<string[]>([]);
   const edited = topPicks.dirty || ordered.dirty;
+  const requestClose = React.useCallback(
+    (nextOpen: boolean) => {
+      if (
+        !nextOpen &&
+        edited &&
+        !globalThis.confirm('Discard unsaved Coupon layout changes?')
+      ) {
+        return;
+      }
+      onOpenChange(nextOpen);
+    },
+    [edited, onOpenChange],
+  );
+
+  const save = React.useCallback(async () => {
+    if (!documentId || !edited || saving) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const response = await put(
+        `/entity-coupon-layout/${config.kind}/${documentId}`,
+        {
+          data: {
+            version: layout.version,
+            topPickCouponIds: topPicks.selected.map(
+              (coupon) => coupon.documentId,
+            ),
+            orderedCouponIds: ordered.selected.map(
+              (coupon) => coupon.documentId,
+            ),
+          },
+        },
+      );
+      const body = response?.data?.data ?? response?.data;
+      const saved: EntityCouponLayout = {
+        ...body,
+        topPickCoupons: body.topPickCoupons.map((coupon: any) => ({
+          ...coupon,
+          name: coupon.title ?? coupon.name,
+        })),
+        orderedCoupons: body.orderedCoupons.map((coupon: any) => ({
+          ...coupon,
+          name: coupon.title ?? coupon.name,
+        })),
+      };
+      onSaved(saved);
+      onOpenChange(false);
+    } catch (error: any) {
+      const status = Number(error?.response?.status);
+      setSaveError(
+        status === 409
+          ? 'Another editor changed this layout. Close and reopen it to load their version.'
+          : error?.response?.data?.error?.message ??
+              'Coupon layout could not be saved. Your draft is still open.',
+      );
+    } finally {
+      setSaving(false);
+    }
+  }, [
+    config.kind,
+    documentId,
+    edited,
+    layout.version,
+    onOpenChange,
+    onSaved,
+    ordered.selected,
+    put,
+    saving,
+    topPicks.selected,
+  ]);
   React.useEffect(() => {
     // While either list is loading its selection is empty, which would read as
     // "no conflict" and, worse, could remove against a half-known state.
@@ -191,7 +269,7 @@ export function CouponLayoutDialog({
   );
 
   return (
-    <Modal.Root open={open} onOpenChange={onOpenChange}>
+    <Modal.Root open={open} onOpenChange={requestClose}>
       <DialogContent>
         <Modal.Header closeLabel="Close Coupon layout">
           <Modal.Title>Coupon layout</Modal.Title>
@@ -285,14 +363,29 @@ export function CouponLayoutDialog({
         </Body>
 
         <Modal.Footer>
-          <Modal.Close>
-            <Button type="button" variant="tertiary">
-              Done
+          <Button
+            type="button"
+            variant="tertiary"
+            disabled={saving}
+            onClick={() => requestClose(false)}
+          >
+            Cancel
+          </Button>
+          <Flex gap={3}>
+            {saveError ? (
+              <Typography variant="pi" textColor="danger600">
+                {saveError}
+              </Typography>
+            ) : null}
+            <Button
+              type="button"
+              loading={saving}
+              disabled={!edited || saving}
+              onClick={save}
+            >
+              Save Coupon layout
             </Button>
-          </Modal.Close>
-          <Typography variant="pi" textColor="neutral600">
-            Remember to save the entry to apply these changes.
-          </Typography>
+          </Flex>
         </Modal.Footer>
       </DialogContent>
     </Modal.Root>

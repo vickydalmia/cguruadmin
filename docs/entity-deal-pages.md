@@ -69,10 +69,18 @@ yet. The backend contract is ready for the dedicated settings screen.
 
 Only an authenticated Strapi Super Admin can call the settings endpoints.
 
+These two live on the **admin router**, not the content API, so they carry no
+`/api` prefix and authenticate with the admin-panel session — call them from
+admin-panel code, not with an API token. They are registered in `src/index.ts`
+rather than under `src/api/entity-deal-page/routes/` because Strapi forces
+`type: 'content-api'` on every router loaded from `src/api/*/routes`, and the
+content API cannot authenticate an admin session at all. `super-admin-only`
+asserts the admin strategy and fails closed anywhere else.
+
 ### List generated permalinks
 
 ```http
-GET /api/admin/entity-deal-pages
+GET /entity-deal-page/pages
 ```
 
 Optional query parameters:
@@ -82,13 +90,22 @@ Optional query parameters:
 | `kind` | `store`, `brand`, `category`, `bank` | Filter entity type |
 | `search` | text | Search name, source slug, or permalink |
 | `indexState` | `enabled`, `disabled`, `blocked` | Filter effective state |
+| `sort` | `name`, `liveDealCount`, `updatedAt`, each optionally `:asc` / `:desc` | Result order (default `name:asc`) |
 | `page` | positive integer | Result page |
-| `pageSize` | `1`–`100` | Rows per page |
+| `pageSize` | `1`–`250` | Rows per page |
+
+Sorting is applied server-side, before pagination, and always falls back to a
+name/type/documentId tiebreak so ties keep a stable order across pages —
+hundreds of entities share `liveDealCount: 0`, and an unstable order would make
+offset pagination repeat one row while dropping another. An unrecognised `sort`
+value falls back to the default rather than erroring. Do not sort the rows in
+the client: the response is one page, so a client-side sort would reorder that
+page only and misreport which entities have the most Deals.
 
 Example:
 
 ```http
-GET /api/admin/entity-deal-pages?kind=category&search=mobile&page=1&pageSize=25
+GET /entity-deal-page/pages?kind=category&search=mobile&page=1&pageSize=25
 ```
 
 Each row includes:
@@ -106,7 +123,7 @@ appear automatically without creating a separate Deal-page record.
 ### Enable or edit SEO
 
 ```http
-PATCH /api/admin/entity-deal-pages/:kind/:documentId
+PATCH /entity-deal-page/pages/:kind/:documentId
 Content-Type: application/json
 
 {
@@ -144,7 +161,7 @@ the other saved component fields.
 To disable indexing without deleting authored SEO:
 
 ```http
-PATCH /api/admin/entity-deal-pages/category/CATEGORY_DOCUMENT_ID
+PATCH /entity-deal-page/pages/category/CATEGORY_DOCUMENT_ID
 Content-Type: application/json
 
 {
@@ -256,7 +273,7 @@ If legacy data already contains a conflict, the generated page remains
 
 ## Future admin settings screen
 
-Build the screen from `GET /api/admin/entity-deal-pages`; do not query and merge
+Build the screen from `GET /entity-deal-page/pages`; do not query and merge
 the four entity collections in the browser. Recommended columns:
 
 - entity name and type;

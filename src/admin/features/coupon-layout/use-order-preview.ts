@@ -32,14 +32,16 @@ export type OrderPreviewSource = {
  */
 export function useOrderPreview(
   config: CouponLayoutConfig,
-  slug: string | undefined,
+  documentId: string | undefined,
   active: boolean,
   reloadToken: number,
+  pendingTopPicks: readonly CouponCandidate[],
+  pendingOrdered: readonly CouponCandidate[],
 ): OrderPreviewSource {
   // Same client as every other request in this feature. A bare `fetch` would
   // resolve against the admin's own origin, which breaks wherever the admin is
   // served from a different host or base path than the API.
-  const { get } = useFetchClient();
+  const { post } = useFetchClient();
   const [state, setState] = React.useState<OrderPreviewSource>({
     sequence: [],
     savedOrderedIds: [],
@@ -51,8 +53,8 @@ export function useOrderPreview(
   React.useEffect(() => {
     if (!active) return;
 
-    const trimmedSlug = slug?.trim();
-    if (!trimmedSlug) {
+    const resolvedDocumentId = documentId?.trim();
+    if (!resolvedDocumentId) {
       setState({
         sequence: [],
         savedOrderedIds: [],
@@ -68,22 +70,30 @@ export function useOrderPreview(
 
     const run = async () => {
       try {
-        const res = await get(
-          `/api/${config.publicPath}/${encodeURIComponent(trimmedSlug)}/coupons?page=1&pageSize=${PREVIEW_PAGE_SIZE}`,
+        const res = await post(
+          `/entity-coupon-layout/${config.kind}/${resolvedDocumentId}/preview`,
+          {
+            data: {
+              topPickCouponIds: pendingTopPicks.map(
+                (coupon) => coupon.documentId,
+              ),
+              orderedCouponIds: pendingOrdered.map(
+                (coupon) => coupon.documentId,
+              ),
+              limit: PREVIEW_PAGE_SIZE,
+            },
+          },
         );
-        const body = res?.data;
+        const body = res?.data?.data ?? res?.data;
         if (cancelled) return;
 
-        const entity = body?.[config.publicEntityKey] ?? {};
         setState({
           sequence: (Array.isArray(body?.coupons) ? body.coupons : []).map(
             toCandidate,
           ),
-          savedOrderedIds: Array.isArray(entity?.orderedCouponIds)
-            ? entity.orderedCouponIds.filter(
-                (id: unknown): id is string => typeof id === 'string',
-              )
-            : [],
+          savedOrderedIds: pendingOrdered.map(
+            (coupon) => coupon.documentId,
+          ),
           total: Number(body?.pagination?.total) || 0,
           loading: false,
           error: null,
@@ -105,7 +115,15 @@ export function useOrderPreview(
     return () => {
       cancelled = true;
     };
-  }, [active, slug, config.publicPath, config.publicEntityKey, reloadToken, get]);
+  }, [
+    active,
+    config.kind,
+    documentId,
+    pendingOrdered,
+    pendingTopPicks,
+    post,
+    reloadToken,
+  ]);
 
   return state;
 }

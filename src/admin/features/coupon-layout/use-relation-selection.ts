@@ -63,6 +63,91 @@ export type RelationSelection = {
   moveByDocumentId: (draggedId: string, targetId: string) => void;
 };
 
+/**
+ * Dialog-owned selection used by the atomic layout API. Mounting the dialog
+ * creates a draft; closing it discards the hook with no Content Manager form
+ * mutations to leak into a later entity save.
+ */
+export function useLocalRelationSelection(
+  initial: readonly CouponCandidate[],
+  maxSelections: number,
+): RelationSelection {
+  const [selected, setSelected] = React.useState<CouponCandidate[]>(() => [
+    ...initial,
+  ]);
+  const [dirty, setDirty] = React.useState(false);
+  const add = React.useCallback(
+    (candidate: CouponCandidate) => {
+      setSelected((current) => {
+        if (
+          current.length >= maxSelections ||
+          current.some((item) => item.documentId === candidate.documentId)
+        ) {
+          return current;
+        }
+        setDirty(true);
+        return [...current, candidate];
+      });
+    },
+    [maxSelections],
+  );
+  const removeMany = React.useCallback((ids: readonly string[]) => {
+    const targets = new Set(ids);
+    setSelected((current) => {
+      const next = current.filter((item) => !targets.has(item.documentId));
+      if (next.length !== current.length) setDirty(true);
+      return next;
+    });
+  }, []);
+  const remove = React.useCallback(
+    (id: string) => removeMany([id]),
+    [removeMany],
+  );
+  const move = React.useCallback((fromIndex: number, toIndex: number) => {
+    setSelected((current) => {
+      if (
+        fromIndex === toIndex ||
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= current.length ||
+        toIndex >= current.length
+      ) {
+        return current;
+      }
+      const next = [...current];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      setDirty(true);
+      return next;
+    });
+  }, []);
+  const moveByDocumentId = React.useCallback(
+    (draggedId: string, targetId: string) => {
+      setSelected((current) => {
+        const from = current.findIndex((item) => item.documentId === draggedId);
+        const to = current.findIndex((item) => item.documentId === targetId);
+        if (from < 0 || to < 0 || from === to) return current;
+        const next = [...current];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        setDirty(true);
+        return next;
+      });
+    },
+    [],
+  );
+  return {
+    selected,
+    loading: false,
+    dirty,
+    add,
+    remove,
+    removeMany,
+    move,
+    moveByDocumentId,
+  };
+}
+
 export function useRelationSelection(
   field: string,
   model: string,

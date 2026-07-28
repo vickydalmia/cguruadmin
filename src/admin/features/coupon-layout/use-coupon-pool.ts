@@ -8,17 +8,11 @@ const PAGE_SIZE = 50;
 
 export type PoolSort = 'newest' | 'title';
 
-const SORT_PARAM: Record<PoolSort, string> = {
-  // Editors curate by recency, so this is the default. The old panel sorted
-  // alphabetically, which is close to random when six Coupons are all called
-  // "Flat 10% Off".
-  newest: 'publishedOn:DESC',
-  title: 'title:ASC',
-};
-
 export type CouponPool = {
   candidates: CouponCandidate[];
   loading: boolean;
+  error: string | null;
+  retry: () => void;
   hasMore: boolean;
   loadMore: () => void;
   /**
@@ -51,6 +45,8 @@ export function useCouponPool(
   const [pageCount, setPageCount] = React.useState(1);
   const [loading, setLoading] = React.useState(false);
   const [libraryTotal, setLibraryTotal] = React.useState<number | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [reloadToken, setReloadToken] = React.useState(0);
 
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
   React.useEffect(() => {
@@ -70,25 +66,19 @@ export function useCouponPool(
 
     const run = async () => {
       setLoading(true);
+      setError(null);
       try {
         const params = new URLSearchParams({
           page: String(page),
           pageSize: String(PAGE_SIZE),
-          sort: SORT_PARAM[sort],
+          sort,
         });
         if (debouncedSearch) {
-          params.set('filters[title][$containsi]', debouncedSearch);
+          params.set('search', debouncedSearch);
         }
-        params.set(
-          `filters[${config.scopeRelationField}][documentId][$eq]`,
-          documentId,
-        );
-        params.set('filters[contentStatus][$eq]', 'published');
-        params.set('filters[$or][0][expiresAt][$null]', 'true');
-        params.set('filters[$or][1][expiresAt][$gt]', new Date().toISOString());
 
         const res = await get(
-          `/content-manager/collection-types/api::coupon.coupon?${params.toString()}`,
+          `/entity-coupon-layout/${config.kind}/${documentId}/candidates?${params.toString()}`,
         );
         if (cancelled) return;
 
@@ -103,6 +93,11 @@ export function useCouponPool(
         }
       } catch (err) {
         console.error('[coupon-layout] Failed to load Coupon candidates', err);
+        if (!cancelled) {
+          setError(
+            'Coupon candidates could not be loaded. The saved selection is unchanged.',
+          );
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -120,6 +115,7 @@ export function useCouponPool(
     documentId,
     config.scopeRelationField,
     get,
+    reloadToken,
   ]);
 
   const hasMore = page < pageCount;
@@ -127,5 +123,18 @@ export function useCouponPool(
     setPage((current) => current + 1);
   }, []);
 
-  return { candidates, loading, hasMore, loadMore, libraryTotal };
+  const retry = React.useCallback(
+    () => setReloadToken((token) => token + 1),
+    [],
+  );
+
+  return {
+    candidates,
+    loading,
+    error,
+    retry,
+    hasMore,
+    loadMore,
+    libraryTotal,
+  };
 }

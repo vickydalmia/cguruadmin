@@ -1,5 +1,6 @@
 import { errors } from '@strapi/utils';
 
+import { CANONICAL_PATH_RULE, isValidCanonicalPath } from './canonical-path';
 import { isIdentityUid } from './identity-validation';
 
 const FIELD_LIMITS = {
@@ -10,18 +11,29 @@ const FIELD_LIMITS = {
   ogImageAlt: 125,
 } as const;
 
-type Problem = { path: string[]; message: string };
+// These render into <title>, <meta content> and Open Graph tags. Angle
+// brackets have no legitimate use in any of them, and the values reach a
+// renderer outside this repository, so reject them here rather than relying
+// on downstream escaping.
+const MARKUP = /[<>]/u;
 
-function isValidCanonicalPath(value: string): boolean {
+function isPositiveId(value: unknown): boolean {
   return (
-    value.startsWith('/')
-    && !value.startsWith('//')
-    && !value.includes('?')
-    && !value.includes('#')
-    && !value.includes('\\')
-    && !/[\u0000-\u001f\u007f<>]/u.test(value)
+    typeof value === 'number' && Number.isSafeInteger(value) && value > 0
   );
 }
+
+/** A media relation payload: an id, or an object carrying one. */
+export function isMediaRef(value: unknown): boolean {
+  if (isPositiveId(value)) return true;
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return isPositiveId(Reflect.get(value, 'id'));
+  }
+  return false;
+}
+
+type Problem = { path: string[]; message: string };
+
 
 /**
  * Validates the hidden entity Deal-page SEO component when an internal API,
@@ -70,7 +82,24 @@ export function validateEntityDealPageSeo(
           path: ['entityDealPageSeo', field],
           message: `${field} must be at most ${limit} characters.`,
         });
+      } else if (MARKUP.test(fieldValue)) {
+        problems.push({
+          path: ['entityDealPageSeo', field],
+          message: `${field} must not contain < or >.`,
+        });
       }
+    }
+
+    // ogImage is a media relation. It was the one allow-listed field with no
+    // validation on either write path, so anything that arrived went straight
+    // into the document.
+    const ogImage = Reflect.get(value, 'ogImage');
+    if (ogImage !== undefined && ogImage !== null && !isMediaRef(ogImage)) {
+      problems.push({
+        path: ['entityDealPageSeo', 'ogImage'],
+        message:
+          'ogImage must be a media id, an object with a numeric id, or null.',
+      });
     }
 
     const canonicalUrl = Reflect.get(value, 'canonicalUrl');
@@ -85,8 +114,7 @@ export function validateEntityDealPageSeo(
     ) {
       problems.push({
         path: ['entityDealPageSeo', 'canonicalUrl'],
-        message:
-          'Canonical URL must be a root-relative path without a query, fragment, backslash, or markup.',
+        message: `Canonical URL ${CANONICAL_PATH_RULE}.`,
       });
     }
   }

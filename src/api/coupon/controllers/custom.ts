@@ -503,34 +503,46 @@ async function listEntityOffers(
   // Taxonomy is the true membership source. The remainder is every related
   // offer not selected in Ordered Coupons, appended newest-first.
   const memberFilters = entityOfferFilters(entityType, entity.documentId, offerKind);
-  const restFilters = orderedIds.length
-    ? { ...memberFilters, documentId: { $notIn: orderedIds } }
+  // Hydrate the complete (maximum ten) editorial head before deriving totals
+  // or offsets. A Coupon can expire or lose membership after the relation
+  // populate above; counting its stale id as a slot creates a short page and
+  // shifts every later remainder offset by one.
+  let hydratedOrderedOffers: any[] = [];
+  if (orderedIds.length) {
+    const orderedQuery = await sanitizeDocumentQuery(strapi, ctx, offerUid, {
+      fields: offerFields,
+      filters: {
+        ...memberFilters,
+        documentId: { $in: orderedIds },
+      },
+      populate: offerPopulate,
+      limit: ORDERED_COUPON_LIMIT,
+    });
+    const fetched = await strapi.documents(offerUid as any).findMany(orderedQuery);
+    const byId = new Map(fetched.map((offer: any) => [offer.documentId, offer]));
+    hydratedOrderedOffers = orderedIds
+      .map((id) => byId.get(id))
+      .filter(Boolean);
+  }
+  const hydratedOrderedIds = hydratedOrderedOffers.map(
+    (offer) => offer.documentId,
+  );
+  const restFilters = hydratedOrderedIds.length
+    ? { ...memberFilters, documentId: { $notIn: hydratedOrderedIds } }
     : memberFilters;
 
   const restCountQuery = await sanitizeDocumentQuery(strapi, ctx, offerUid, { filters: restFilters });
   const restCount = await strapi.documents(offerUid as any).count(restCountQuery);
-  const total = orderedIds.length + restCount;
+  const total = hydratedOrderedIds.length + restCount;
 
   // Page = the drag-ordered slice first; newest-first members fill the rest.
-  const pageOrderedIds = orderedIds.slice(start, start + pageSize);
-  const remaining = pageSize - pageOrderedIds.length;
-
-  let orderedOffers: any[] = [];
-  if (pageOrderedIds.length) {
-    const orderedQuery = await sanitizeDocumentQuery(strapi, ctx, offerUid, {
-      fields: offerFields,
-      filters: { documentId: { $in: pageOrderedIds } },
-      populate: offerPopulate,
-    });
-    const fetched = await strapi.documents(offerUid as any).findMany(orderedQuery);
-    const byId = new Map(fetched.map((offer: any) => [offer.documentId, offer]));
-    orderedOffers = pageOrderedIds.map((id) => byId.get(id)).filter(Boolean);
-  }
+  const orderedOffers = hydratedOrderedOffers.slice(start, start + pageSize);
+  const remaining = pageSize - orderedOffers.length;
 
   let restOffers: any[] = [];
   if (remaining > 0 && restCount > 0) {
     // Once the ordered head is consumed, page into the newest-first remainder.
-    const restStart = Math.max(0, start - orderedIds.length);
+    const restStart = Math.max(0, start - hydratedOrderedIds.length);
     const restQuery = await sanitizeDocumentQuery(strapi, ctx, offerUid, {
       fields: offerFields,
       filters: restFilters,
@@ -818,7 +830,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     );
 
     return ctx.send({
-      [entityType]: result.sanitizedEntity,
+      ...(page === 1 ? { [entityType]: result.sanitizedEntity } : {}),
       coupons,
       pagination: {
         page,
@@ -854,7 +866,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     );
 
     return ctx.send({
-      [entityType]: result.sanitizedEntity,
+      ...(page === 1 ? { [entityType]: result.sanitizedEntity } : {}),
       deals,
       pagination: {
         page,

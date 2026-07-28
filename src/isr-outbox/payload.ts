@@ -90,7 +90,7 @@ export function createOutboxPayload(
         ? {
             scopes: [
               ...new Set([
-                ...(scope.sitemap ? ['routes'] : []),
+                ...(scope.sitemap ? ['sitemap'] : []),
                 ...(scope.refreshScopes ?? []),
               ]),
             ],

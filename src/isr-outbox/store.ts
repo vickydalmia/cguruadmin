@@ -199,7 +199,11 @@ export class IsrOutboxStore {
     });
   }
 
-  async markDelivered(event: IsrOutboxEvent): Promise<boolean> {
+  async markDelivered(
+    event: IsrOutboxEvent,
+    receipt?: unknown,
+  ): Promise<boolean> {
+    const now = new Date();
     const updated = await this.strapi.db.connection(ISR_OUTBOX_TABLE)
       .where({
         id: event.id,
@@ -209,7 +213,10 @@ export class IsrOutboxStore {
       })
       .update({
         status: 'delivered',
-        delivered_at: new Date(),
+        accepted_at: now,
+        delivered_at: now,
+        delivery_receipt:
+          receipt === undefined ? null : JSON.stringify(receipt),
         locked_at: null,
         lock_token: null,
         last_error: null,

@@ -1,18 +1,15 @@
-import { useForm } from '@strapi/strapi/admin';
 import { Box, Button, Flex, Typography } from '@strapi/design-system';
 import * as React from 'react';
 
 import {
   couponLayoutConfig,
-  ORDERED_FIELD,
   ORDERED_MAX,
   TOP_PICK_DISPLAYED,
-  TOP_PICK_FIELD,
   TOP_PICK_MAX,
   type CouponLayoutConfig,
 } from '../config';
 import { useDeferredMount } from '../use-deferred-mount';
-import { useRelationSelection } from '../use-relation-selection';
+import { useEntityCouponLayout } from '../use-entity-coupon-layout';
 import { CouponLayoutDialog } from './coupon-layout-dialog';
 
 /**
@@ -30,31 +27,15 @@ import { CouponLayoutDialog } from './coupon-layout-dialog';
  */
 export function CouponLayoutPanelBody({
   config,
-  model,
   documentId,
 }: {
   config: CouponLayoutConfig;
-  model: string;
   documentId?: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const ready = useDeferredMount();
 
-  const topPicks = useRelationSelection(
-    TOP_PICK_FIELD,
-    model,
-    documentId,
-    TOP_PICK_MAX,
-    ready,
-  );
-  const ordered = useRelationSelection(
-    ORDERED_FIELD,
-    model,
-    documentId,
-    ORDERED_MAX,
-    ready,
-  );
-  const slug = useForm('CouponLayoutPanel', (state: any) => state.values?.slug);
+  const layout = useEntityCouponLayout(config, documentId, ready);
 
   if (!documentId) {
     return (
@@ -63,6 +44,19 @@ export function CouponLayoutPanelBody({
           Save this entry first. Its related Coupons can then be arranged here.
         </Typography>
       </Box>
+    );
+  }
+
+  if (layout.error) {
+    return (
+      <Flex direction="column" alignItems="stretch" gap={2} paddingTop={2}>
+        <Typography variant="pi" textColor="danger600">
+          {layout.error}
+        </Typography>
+        <Button type="button" variant="secondary" onClick={layout.retry}>
+          Retry
+        </Button>
+      </Flex>
     );
   }
 
@@ -88,37 +82,59 @@ export function CouponLayoutPanelBody({
     >
       {summary(
         'Top Picks',
-        topPicks.selected.length,
+        layout.data?.counts.topPicks ?? 0,
         TOP_PICK_MAX,
         `newest ${TOP_PICK_DISPLAYED}`,
-        topPicks.loading,
+        layout.loading,
       )}
       {summary(
         'Ordered head',
-        ordered.selected.length,
+        layout.data?.counts.ordered ?? 0,
         ORDERED_MAX,
         'newest-first',
-        ordered.loading,
+        layout.loading,
       )}
+
+      {layout.data?.capabilities?.reason ? (
+        <Typography variant="pi" textColor="neutral600">
+          {layout.data.capabilities.reason}
+        </Typography>
+      ) : null}
+      {layout.data?.refresh ? (
+        <Typography
+          variant="pi"
+          textColor={
+            layout.data.refresh.state === 'failed'
+              ? 'danger600'
+              : 'success600'
+          }
+        >
+          {layout.data.refresh.state === 'rendered'
+            ? 'Public page updated'
+            : layout.data.refresh.state === 'failed'
+              ? 'Saved, but public refresh failed and will need retrying.'
+              : 'Saved—refresh queued'}
+        </Typography>
+      ) : null}
 
       <Button
         type="button"
         variant="secondary"
         fullWidth
+        disabled={layout.loading || !layout.data?.capabilities?.canManageLayout}
         onClick={() => setOpen(true)}
       >
         Arrange Coupons
       </Button>
 
-      {open ? (
+      {open && layout.data ? (
         <CouponLayoutDialog
           config={config}
           documentId={documentId}
-          slug={typeof slug === 'string' ? slug : undefined}
-          topPicks={topPicks}
-          ordered={ordered}
+          layout={layout.data}
           open={open}
           onOpenChange={setOpen}
+          onSaved={layout.replace}
         />
       ) : null}
     </Flex>
@@ -134,7 +150,6 @@ export function couponLayoutPanel(model: string, documentId?: string) {
     content: (
       <CouponLayoutPanelBody
         config={config}
-        model={model}
         documentId={documentId}
       />
     ),

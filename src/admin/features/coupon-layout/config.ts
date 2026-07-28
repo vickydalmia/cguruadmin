@@ -7,10 +7,9 @@
  * cannot also hold an Ordered Coupons position. Expiry buffers can — that
  * overlap is deliberate.
  *
- * The server does not validate this. The rule is positional, and a relation
- * patch does not carry its resulting order; it is maintained by repair
- * instead — this dialog resolves a conflict the editor creates, and the
- * five-minute cron catches everything else.
+ * The dedicated endpoint validates the complete final arrays atomically. The
+ * dialog resolves conflicts as they are created; nightly reconciliation is a
+ * safety net for legacy/direct-database corruption.
  *
  * Contract: cguruadmin/docs/entity-page-offer-ordering.md
  */
@@ -18,6 +17,7 @@
 export type EntityScopeField = 'stores' | 'brands' | 'categories' | 'banks';
 
 export type CouponLayoutConfig = {
+  kind: 'store' | 'brand' | 'category' | 'bank';
   /** Entity API id used by the public preview endpoint, e.g. `stores`. */
   publicPath: EntityScopeField;
   /** Key the public endpoint nests the entity under, e.g. `store`. */
@@ -45,24 +45,28 @@ export const TOP_PICK_DISPLAYED = 2;
 
 export const COUPON_LAYOUT_CONFIG: Record<string, CouponLayoutConfig> = {
   'api::store.store': {
+    kind: 'store',
     publicPath: 'stores',
     publicEntityKey: 'store',
     scopeRelationField: 'stores',
     label: 'Store',
   },
   'api::brand.brand': {
+    kind: 'brand',
     publicPath: 'brands',
     publicEntityKey: 'brand',
     scopeRelationField: 'brands',
     label: 'Brand',
   },
   'api::category.category': {
+    kind: 'category',
     publicPath: 'categories',
     publicEntityKey: 'category',
     scopeRelationField: 'categories',
     label: 'Category',
   },
   'api::bank.bank': {
+    kind: 'bank',
     publicPath: 'banks',
     publicEntityKey: 'bank',
     scopeRelationField: 'banks',

@@ -3,6 +3,7 @@ import type { Core } from '@strapi/strapi';
 import { publishedOnlyFilters } from './content-status';
 import { isLiveOffer } from './offer-visibility';
 import {
+  routeSlugCandidates,
   toRouteSlug,
   type IdentityKind,
 } from './route-normalization';
@@ -151,15 +152,29 @@ export function registerCuratedOfferRelationQueryFilter(strapi: Core.Strapi): vo
 export async function removeInactiveCuratedOfferRelations(
   strapi: Core.Strapi,
   now = new Date(),
+  changedOffers?: Readonly<Partial<Record<OfferUid, readonly string[]>>>,
 ): Promise<CuratedOfferCleanupResult> {
   let removedSelections = 0;
   let requiresFullRevalidation = false;
   const affectedPaths = new Set<string>();
 
   for (const relation of CURATED_OFFER_RELATIONS) {
+    const changedDocumentIds = changedOffers?.[relation.targetUid];
+    if (changedOffers && (!changedDocumentIds || changedDocumentIds.length === 0)) {
+      continue;
+    }
     const query = strapi.db.query(relation.sourceUid as any);
     const isEntitySource = Boolean(ENTITY_KIND_BY_UID[relation.sourceUid]);
     const rows = await query.findMany({
+      ...(changedDocumentIds
+        ? {
+            where: {
+              [relation.field]: {
+                documentId: { $in: [...changedDocumentIds] },
+              },
+            },
+          }
+        : {}),
       select: isEntitySource ? ['id', 'slug'] : ['id'],
       populate: {
         [relation.field]: {
@@ -238,18 +253,18 @@ const TOP_PICK_ENTITY_UIDS = Object.keys(ENTITY_KIND_BY_UID);
  *     state — and a validator would then reject EVERY later save of that
  *     entity, including edits unrelated to Coupons.
  *
- * Runs on every cron pass, not only after an expiry: a direct API write can
- * introduce the overlap too, and an unconditional pass is what makes it
- * self-healing. Until it runs the page still renders correctly, just with a
- * shorter ordered head.
+ * Lifecycle cleanup passes affected entity paths so buffer promotions are
+ * repaired immediately without scanning every entity. The nightly call omits
+ * that target and performs the full reconciliation safety pass.
  *
  * NOTE: this edits editorial data without the editor asking, so every removal
  * is logged. If someone deliberately puts a displayed Top Pick into Ordered
- * Coupons it will disappear within five minutes, and the log is the only
- * explanation available.
+ * Coupons it will be removed by reconciliation, and the log is the audit
+ * trail.
  */
 export async function removeDisplayedTopPicksFromOrdered(
   strapi: Core.Strapi,
+  targetPaths?: readonly string[],
 ): Promise<CuratedOfferCleanupResult> {
   let removedSelections = 0;
   let requiresFullRevalidation = false;
@@ -257,10 +272,18 @@ export async function removeDisplayedTopPicksFromOrdered(
 
   for (const sourceUid of TOP_PICK_ENTITY_UIDS) {
     const query = strapi.db.query(sourceUid as any);
+    const kind = ENTITY_KIND_BY_UID[sourceUid];
+    const slugs = targetPaths
+      ?.flatMap((path) => {
+        const route = path.replace(/^\/+|\/+$/g, '');
+        return route && kind ? routeSlugCandidates(route, kind) : [];
+      });
+    if (targetPaths && (!slugs || slugs.length === 0)) continue;
     // Query Engine populate preserves link-table order when no explicit sort
     // is given (getJoinTableOrderBy in @strapi/database), so index 0 and 1 are
     // the displayed picks.
     const rows = await query.findMany({
+      ...(slugs ? { where: { slug: { $in: slugs } } } : {}),
       select: ['id', 'slug'],
       populate: {
         topPickCoupons: { select: ['id', 'documentId'] },

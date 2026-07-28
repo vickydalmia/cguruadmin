@@ -15,7 +15,7 @@ import {
   TextInput,
   Typography,
 } from '@strapi/design-system';
-import { ArrowDown, ArrowUp, Cross, Drag } from '@strapi/icons';
+import { ArrowDown, ArrowUp, Cross, Drag, Earth } from '@strapi/icons';
 import {
   useDrag,
   useDrop,
@@ -1131,6 +1131,28 @@ export default {
     // UID/slug input that starts empty instead of seeding the model name
     // ("store"), auto-filling from `name` until hand-edited (QC bug).
     app.addFields({ type: 'uid', Component: SlugInput } as any);
+
+    // Generated Product Deal pages (/<entity-slug>-deals/) have no content
+    // type of their own — they are derived from the four entity collections —
+    // so there is nothing for the Content Manager to list. This screen is the
+    // only surface for them. `permissions: []` gates nothing on its own: the
+    // endpoints behind it are Super-Admin-only server-side, and the page
+    // renders the resulting 403 as an explanation rather than an empty table.
+    app.addMenuLink({
+      to: '/entity-deal-pages',
+      icon: Earth,
+      permissions: [],
+      intlLabel: {
+        id: 'entity-deal-pages.menu.label',
+        defaultMessage: 'Deal page SEO',
+      },
+      Component: async () => {
+        const page = await import(
+          './features/entity-deal-page-seo/components/entity-deal-page-seo-page'
+        );
+        return { default: page.default };
+      },
+    });
   },
 
   config: {

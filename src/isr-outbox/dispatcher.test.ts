@@ -177,6 +177,33 @@ describe('deliverOutboxEvent', () => {
     });
   });
 
+  it('rejects a 202 receipt when the gateway skipped a requested path', async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          ok: true,
+          paths: [],
+          skippedPaths: ['/new-store/'],
+        }),
+        {
+          status: 202,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+    await expect(
+      deliverOutboxEvent(
+        { ...event, payload: { paths: ['/new-store/'] } },
+        {
+          gatewayUrl: 'http://gateway.test',
+          adminSecret: 'secret',
+          requestTimeoutMs: 1_000,
+        },
+        fetchImpl as any,
+      ),
+    ).rejects.toThrow('gateway skipped 1 path');
+  });
+
   it('throws a useful error for a rejected delivery', async () => {
     await expect(
       deliverOutboxEvent(

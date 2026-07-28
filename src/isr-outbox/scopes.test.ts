@@ -325,6 +325,55 @@ describe('managed page SEO scopes', () => {
   });
 });
 
+describe('entity Deal-page SEO scope', () => {
+  const entityDoc = async () => ({ slug: 'amazon' });
+
+  it('narrows an entityDealPageSeo-only write to the generated page', async () => {
+    const { computeScope } = await import('./scopes');
+    const strapi = strapiWithFindOne(entityDoc);
+
+    // The hidden component renders on /amazon-deals/ and nowhere else, so the
+    // entity page, the homepage and the deal-of-the-day page stay untouched.
+    // `sitemap` survives: indexingEnabled decides shard membership.
+    await expect(
+      computeScope(strapi, 'api::store.store', 'update', 'store-1', {
+        entityDealPageSeo: { indexingEnabled: true },
+      }),
+    ).resolves.toEqual({ slugs: ['amazon-deals'], sitemap: true });
+  });
+
+  it('keeps the broad scope for any other entity write', async () => {
+    const { computeScope } = await import('./scopes');
+    const strapi = strapiWithFindOne(entityDoc);
+
+    const broad = {
+      slugs: ['amazon', 'amazon-deals', 'deal-of-the-day'],
+      homepage: true,
+      sitemap: true,
+    };
+
+    // No payload at all.
+    await expect(
+      computeScope(strapi, 'api::store.store', 'update', 'store-1'),
+    ).resolves.toEqual(broad);
+
+    // SEO alongside a visible field is NOT SEO-only.
+    await expect(
+      computeScope(strapi, 'api::store.store', 'update', 'store-1', {
+        name: 'Amazon India',
+        entityDealPageSeo: { indexingEnabled: true },
+      }),
+    ).resolves.toEqual(broad);
+
+    // A publish carrying the same payload still rebuilds broadly.
+    await expect(
+      computeScope(strapi, 'api::store.store', 'publish', 'store-1', {
+        entityDealPageSeo: { indexingEnabled: true },
+      }),
+    ).resolves.toEqual(broad);
+  });
+});
+
 describe('error page scope', () => {
   it('revalidates only the internal error documents', async () => {
     const { computeScope } = await import('./scopes');

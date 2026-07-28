@@ -27,6 +27,10 @@ const TRUSTED_IPS = (process.env.RATE_LIMIT_TRUSTED_IPS ?? '')
   .map((entry) => entry.trim())
   .filter(Boolean);
 
+export function hasTrustedIpsConfigured(): boolean {
+  return TRUSTED_IPS.length > 0;
+}
+
 function isTrustedSocket(remoteAddress: string | undefined): boolean {
   if (!remoteAddress || TRUSTED_IPS.length === 0) return false;
   const ip = remoteAddress.replace(/^::ffff:/, ''); // IPv4-mapped IPv6

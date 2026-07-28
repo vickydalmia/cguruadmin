@@ -10,11 +10,21 @@ import type { Core } from '@strapi/strapi';
  * Per-instance only (not shared across horizontally-scaled nodes) — good
  * enough as a DoS dampener; a CDN in front should be the primary cache.
  *
- * Configure with: { ttlMs?: number, keyByPath?: boolean }. Set `keyByPath` for
- * endpoints that ignore the query string (e.g. /directories/:kind): the cache
- * key is then the path alone, so `?nonce=1`, `?nonce=2`, … all share one entry
- * instead of each forcing a fresh full-catalog miss. Leave it off where the
- * query is semantically meaningful (e.g. /offers?page=2).
+ * Configure with: { ttlMs?: number, keyByPath?: boolean,
+ * cacheKeyParams?: string[] }.
+ *
+ * Set `keyByPath` for endpoints that ignore the query string (e.g.
+ * /directories/:kind): the cache key is then the path alone, so `?nonce=1`,
+ * `?nonce=2`, … all share one entry instead of each forcing a fresh
+ * full-catalog miss.
+ *
+ * Where SOME query parameters are meaningful, list exactly those in
+ * `cacheKeyParams` (e.g. ['page','pageSize']). The key is then the path plus
+ * those parameters in a fixed order, and every other parameter is ignored — so
+ * `?page=2` still caches independently while `?page=2&nonce=N` cannot mint
+ * unlimited distinct keys and evict real entries via MAX_ENTRIES.
+ *
+ * Leave both off only where the entire query string is meaningful.
  */
 interface CacheEntry {
   expiresAt: number;
@@ -32,27 +42,54 @@ const MAX_ENTRIES = 500;
 // re-render pages from a response cached BEFORE the edit (up to ttlMs stale).
 const allStores = new Set<Map<string, CacheEntry>>();
 
-export function purgeResponseCaches(): void {
-  for (const store of allStores) store.clear();
+export function purgeResponseCaches(pathPrefixes?: readonly string[]): void {
+  if (!pathPrefixes?.length) {
+    for (const store of allStores) store.clear();
+    return;
+  }
+  for (const store of allStores) {
+    for (const key of store.keys()) {
+      if (pathPrefixes.some((prefix) => key.startsWith(prefix))) {
+        store.delete(key);
+      }
+    }
+  }
 }
 
 export default (
-  config: { ttlMs?: number; keyByPath?: boolean },
+  config: { ttlMs?: number; keyByPath?: boolean; cacheKeyParams?: string[] },
   { strapi: _strapi }: { strapi: Core.Strapi },
 ) => {
   const ttlMs = config?.ttlMs ?? 60_000;
   const keyByPath = config?.keyByPath ?? false;
+  const cacheKeyParams = Array.isArray(config?.cacheKeyParams)
+    ? [...config.cacheKeyParams].sort()
+    : null;
   const store = new Map<string, CacheEntry>();
   allStores.add(store);
+
+  const cacheKey = (ctx: any): string => {
+    // Path-only key for query-agnostic endpoints, so arbitrary query strings
+    // can't multiply distinct keys and bypass the cache (full-scan DoS).
+    if (keyByPath) return ctx.path;
+    if (!cacheKeyParams) return ctx.originalUrl;
+
+    // Allow-listed parameters only, in a fixed order, so `?a=1&b=2` and
+    // `?b=2&a=1` share an entry and unknown parameters cannot mint new ones.
+    const parts = cacheKeyParams.map((name) => {
+      const raw = ctx.query?.[name];
+      const value = Array.isArray(raw) ? raw[0] : raw;
+      return `${name}=${value === undefined ? '' : String(value)}`;
+    });
+    return `${ctx.path}?${parts.join('&')}`;
+  };
 
   return async (ctx: any, next: () => Promise<void>) => {
     if (ctx.method !== 'GET') {
       return next();
     }
 
-    // Path-only key for query-agnostic endpoints, so arbitrary query strings
-    // can't multiply distinct keys and bypass the cache (full-scan DoS).
-    const key = keyByPath ? ctx.path : ctx.originalUrl;
+    const key = cacheKey(ctx);
     const now = Date.now();
     const hit = store.get(key);
     if (hit && now < hit.expiresAt) {

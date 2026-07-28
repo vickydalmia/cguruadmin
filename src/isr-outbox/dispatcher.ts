@@ -42,7 +42,7 @@ export async function cleanupDeliveredEvents(
 
 export interface OutboxDeliveryStore {
   claim(): Promise<IsrOutboxClaim | null>;
-  markDelivered(event: IsrOutboxEvent): Promise<boolean>;
+  markDelivered(event: IsrOutboxEvent, receipt?: unknown): Promise<boolean>;
   scheduleRetry(
     event: IsrOutboxEvent,
     error: string,
@@ -56,7 +56,10 @@ export async function deliverOutboxEvent(
     'gatewayUrl' | 'adminSecret' | 'requestTimeoutMs'
   >,
   fetchImpl: typeof fetch = globalThis.fetch,
-): Promise<void> {
+): Promise<{
+  paths: Array<{ path: string; version: number }>;
+  globalVersion?: number;
+}> {
   const response = await fetchImpl(`${config.gatewayUrl}/revalidate`, {
     method: 'POST',
     headers: {
@@ -73,11 +76,39 @@ export async function deliverOutboxEvent(
       `gateway returned ${response.status}${detail ? `: ${detail}` : ''}`,
     );
   }
+  const body = (await response.json().catch(() => null)) as any;
+  const skippedPaths = Array.isArray(body?.skippedPaths)
+    ? body.skippedPaths.filter(
+        (path: unknown): path is string => typeof path === 'string',
+      )
+    : [];
+  if (skippedPaths.length > 0) {
+    throw new Error(
+      `gateway skipped ${skippedPaths.length} path(s): ${skippedPaths.join(', ')}`,
+    );
+  }
+  const paths = Array.isArray(body?.paths)
+    ? body.paths.filter(
+        (entry: any) =>
+          entry &&
+          typeof entry.path === 'string' &&
+          Number.isSafeInteger(Number(entry.version)),
+      )
+    : [];
+  return {
+    paths: paths.map((entry: any) => ({
+      path: entry.path,
+      version: Number(entry.version),
+    })),
+    ...(Number.isSafeInteger(Number(body?.globalVersion))
+      ? { globalVersion: Number(body.globalVersion) }
+      : {}),
+  };
 }
 
 export async function dispatchOne(
   store: OutboxDeliveryStore,
-  deliver: (event: IsrOutboxEvent) => Promise<void>,
+  deliver: (event: IsrOutboxEvent) => Promise<unknown>,
   onResult: (
     result:
       | { state: 'empty' }
@@ -113,8 +144,12 @@ export async function dispatchOne(
   }
   const claimed = event.event;
   try {
-    await deliver(claimed);
-    if (await store.markDelivered(claimed)) {
+    const receipt = await deliver(claimed);
+    const marked =
+      receipt === undefined
+        ? await store.markDelivered(claimed)
+        : await store.markDelivered(claimed, receipt);
+    if (marked) {
       onResult({ state: 'delivered', event: claimed });
     } else {
       onResult({

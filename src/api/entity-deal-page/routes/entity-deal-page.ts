@@ -1,8 +1,9 @@
-const superAdminPolicies = [
-  'admin::isAuthenticatedAdmin',
-  'global::super-admin-only',
-] as const;
-
+// Only the two anonymous read routes live here. The Super-Admin settings
+// endpoints are registered as ADMIN-type routes in src/index.ts: everything
+// under src/api/*/routes is forced to `type: 'content-api'` by Strapi's
+// registerAPIRoutes, and the content API only serves the api-token and
+// users-permissions strategies — an admin-panel session can never authenticate
+// against it. See src/policies/super-admin-only.ts.
 export default {
   routes: [
     {
@@ -16,7 +17,13 @@ export default {
             name: 'global::rate-limit',
             config: { maxRequests: 60, windowMs: 60_000 },
           },
-          { name: 'global::cache', config: { ttlMs: 60_000 } },
+          // `page`/`pageSize` are the only meaningful parameters. Keying on the
+          // full URL let `?nonce=N` both miss the cache every time and evict
+          // real entries once the store hit MAX_ENTRIES.
+          {
+            name: 'global::cache',
+            config: { ttlMs: 60_000, cacheKeyParams: ['page', 'pageSize'] },
+          },
         ],
       },
     },
@@ -37,18 +44,6 @@ export default {
           },
         ],
       },
-    },
-    {
-      method: 'GET',
-      path: '/admin/entity-deal-pages',
-      handler: 'api::entity-deal-page.entity-deal-page.adminList',
-      config: { policies: superAdminPolicies },
-    },
-    {
-      method: 'PATCH',
-      path: '/admin/entity-deal-pages/:kind/:documentId',
-      handler: 'api::entity-deal-page.entity-deal-page.adminUpdate',
-      config: { policies: superAdminPolicies },
     },
   ],
 };
