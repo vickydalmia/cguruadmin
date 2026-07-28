@@ -53,6 +53,11 @@ function makeStrapi(seed: Seed) {
 
           const key = ENTITY_UIDS[uid as keyof typeof ENTITY_UIDS];
           const rows = key ? (seed[key] ?? []) : [];
+          if (!params?.filters?.$or) {
+            const start = Number(params?.start) || 0;
+            const limit = Number(params?.limit) || rows.length;
+            return rows.slice(start, start + limit);
+          }
           const wanted: string[] = (params?.filters?.$or ?? []).map(
             (clause: any) => String(clause.slug.$eqi).toLowerCase(),
           );

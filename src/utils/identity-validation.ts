@@ -6,6 +6,7 @@ import {
   toRouteSlug,
   type IdentityKind,
 } from './route-normalization';
+import { entityDealPageSlug } from '../api/entity-deal-page/services/entity-deal-route';
 
 /**
  * Identity rules for the taxonomy content types (store / brand / category /
@@ -113,7 +114,6 @@ const RESERVED_ROUTE_SEGMENTS = new Map<string, string>([
 const NAME_SCAN_PAGE = 500;
 const NAME_SCAN_MAX_PAGES = 40;
 const SLUG_CANDIDATE_LIMIT = 25;
-const ENTITY_DEAL_PAGE_SUFFIX = '-deals';
 
 type Problem = { path: string[]; message: string };
 
@@ -230,6 +230,37 @@ async function findSlugCollision(
         name: readString(row, 'name') ?? '(untitled)',
         slug: slug ?? route,
       };
+    }
+  }
+  return null;
+}
+
+async function findDealPageCollision(
+  strapi: Core.Strapi,
+  uid: IdentityUid,
+  dealRoute: string,
+  documentId: string | undefined,
+): Promise<{ kind: IdentityKind; name: string } | null> {
+  for (const targetUid of IDENTITY_UIDS) {
+    const targetKind = KIND_BY_UID[targetUid];
+    for (let page = 0; page < NAME_SCAN_MAX_PAGES; page += 1) {
+      const rows: unknown = await strapi.documents(targetUid).findMany({
+        fields: ['documentId', 'name'],
+        sort: [{ id: 'asc' }],
+        limit: NAME_SCAN_PAGE,
+        start: page * NAME_SCAN_PAGE,
+      });
+      const list = Array.isArray(rows) ? rows : [];
+      for (const row of list) {
+        const rowId = readString(row, 'documentId');
+        if (targetUid === uid && documentId && rowId === documentId) continue;
+
+        const name = readString(row, 'name');
+        if (entityDealPageSlug(name) === dealRoute) {
+          return { kind: targetKind, name: name ?? '(untitled)' };
+        }
+      }
+      if (list.length < NAME_SCAN_PAGE) break;
     }
   }
   return null;
@@ -390,63 +421,31 @@ export async function validateIdentity(
                 `two would break the site build. Choose a different slug.`,
           });
         } else {
-          const derivedRoute = `${incomingRoute}${ENTITY_DEAL_PAGE_SUFFIX}`;
-          const derivedCollision = await findSlugCollision(
+          const dealPageCollision = await findDealPageCollision(
             strapi,
             uid,
-            derivedRoute,
+            incomingRoute,
             excludeDocumentId,
           );
-          const baseRoute =
-            incomingRoute.endsWith(ENTITY_DEAL_PAGE_SUFFIX)
-              ? incomingRoute.slice(0, -ENTITY_DEAL_PAGE_SUFFIX.length)
-              : '';
-          const baseCollision = baseRoute
-            ? await findSlugCollision(
-                strapi,
-                uid,
-                baseRoute,
-                excludeDocumentId,
-              )
-            : null;
-
-          if (derivedCollision) {
-            problems.push({
-              path: ['slug'],
-              message:
-                `Slug "${incomingRoute}" generates /${derivedRoute}/ for its ` +
-                `Product Deal page, but that URL is already the live entity page ` +
-                `of the ${derivedCollision.kind} "${derivedCollision.name}". ` +
-                `Choose a slug whose generated "-deals" URL is unused.`,
-            });
-          } else if (baseCollision) {
+          if (dealPageCollision) {
             problems.push({
               path: ['slug'],
               message:
                 `Slug "${incomingRoute}" is reserved for the generated Product ` +
-                `Deal page of the ${baseCollision.kind} "${baseCollision.name}" ` +
-                `at /${incomingRoute}/. Choose a slug that does not end in a ` +
-                `different entity's "-deals" URL.`,
+                `Deal page of the ${dealPageCollision.kind} ` +
+                `"${dealPageCollision.name}" at /${incomingRoute}/. Choose a ` +
+                `different entity-page slug.`,
             });
           } else {
             const redirect = await findActiveRedirectCollision(strapi, incomingRoute);
-            const derivedRedirect = redirect
-              ? null
-              : await findActiveRedirectCollision(strapi, derivedRoute);
-            const claimedRedirect = redirect ?? derivedRedirect;
-            const claimedRoute = redirect ? incomingRoute : derivedRoute;
-            if (!claimedRedirect) {
-              // No collision across either the entity page or its generated
-              // Product Deal page.
-            } else {
+            if (redirect) {
               problems.push({
                 path: ['slug'],
                 message:
-                  `URL "/${claimedRoute}/" is already claimed by the active ` +
-                  `redirect "${claimedRedirect.from}" → "${claimedRedirect.to}". ` +
-                  `Redirects run before entity routing, so this ${kind}'s ` +
-                  `${redirect ? 'entity page' : 'generated Product Deal page'} ` +
-                  `would be unreachable. Disable or move that redirect first.`,
+                  `URL "/${incomingRoute}/" is already claimed by the active ` +
+                  `redirect "${redirect.from}" → "${redirect.to}". Redirects run ` +
+                  `before entity routing, so this ${kind}'s entity page would be ` +
+                  `unreachable. Disable or move that redirect first.`,
               });
             }
           }
@@ -455,6 +454,8 @@ export async function validateIdentity(
     }
   }
 
+  const dealRoute = entityDealPageSlug(effectiveName);
+  let duplicateNameFound = false;
   if (nameChanged) {
     const trimmed = typeof effectiveName === 'string' ? effectiveName.trim() : '';
     if (trimmed) {
@@ -465,6 +466,7 @@ export async function validateIdentity(
         excludeDocumentId,
       );
       if (duplicate !== null) {
+        duplicateNameFound = true;
         problems.push({
           path: ['name'],
           message:
@@ -472,6 +474,66 @@ export async function validateIdentity(
             `${kind.slice(1)} names must be unique, compared ignoring capitalisation ` +
             `and surrounding spaces. Rename this entry so editors can tell the two apart.`,
         });
+      }
+    }
+  }
+
+  if (nameChanged || slugChanged) {
+    if (!dealRoute) {
+      if (incomingRoute || !slugChanged) {
+        problems.push({
+          path: ['name'],
+          message:
+            `"${String(effectiveName ?? '').trim() || 'This name'}" contains no ` +
+            `characters the generated Product Deal URL can use. Add a Latin-script ` +
+            `name so the Deal page can receive a stable "-deals" route.`,
+        });
+      }
+    } else if (incomingRoute) {
+      if (incomingRoute === dealRoute) {
+        problems.push({
+          path: ['slug'],
+          message:
+            `Slug "${incomingRoute}" is also the generated Product Deal URL from ` +
+            `this entity's name. Choose a different entity-page slug so both pages ` +
+            `remain reachable.`,
+        });
+      } else {
+        const [entityCollision, generatedCollision, redirect] = await Promise.all([
+          findSlugCollision(strapi, uid, dealRoute, excludeDocumentId),
+          duplicateNameFound
+            ? Promise.resolve(null)
+            : findDealPageCollision(strapi, uid, dealRoute, excludeDocumentId),
+          findActiveRedirectCollision(strapi, dealRoute),
+        ]);
+
+        if (entityCollision) {
+          problems.push({
+            path: ['name'],
+            message:
+              `Name "${String(effectiveName ?? '').trim()}" generates ` +
+              `/${dealRoute}/ for its Product Deal page, but that URL is already ` +
+              `the entity page of the ${entityCollision.kind} ` +
+              `"${entityCollision.name}". Choose a different name.`,
+          });
+        } else if (generatedCollision) {
+          problems.push({
+            path: ['name'],
+            message:
+              `Name "${String(effectiveName ?? '').trim()}" generates the same ` +
+              `Product Deal URL /${dealRoute}/ as the ` +
+              `${generatedCollision.kind} "${generatedCollision.name}". Choose a ` +
+              `name with a different URL form.`,
+          });
+        } else if (redirect) {
+          problems.push({
+            path: ['name'],
+            message:
+              `The generated Product Deal URL "/${dealRoute}/" is already claimed ` +
+              `by the active redirect "${redirect.from}" → "${redirect.to}". ` +
+              `Disable or move that redirect, or choose a different name.`,
+          });
+        }
       }
     }
   }

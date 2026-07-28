@@ -212,8 +212,10 @@ For the complete operator and implementation workflow, see
 [`entity-deal-pages.md`](./entity-deal-pages.md).
 
 Every Store, Brand, Category, and Bank owns a deterministic generated
-permalink: its normalized public entity slug plus `-deals`, for example
-`/mobile-deals/`. `GET /api/entity-deal-pages/mobile-deals?page=1&pageSize=50`
+permalink: the shared slugification of its current name plus `-deals`, for
+example the name `Mobile Phones` produces `/mobile-phones-deals/` regardless
+of the entity page slug. `GET
+/api/entity-deal-pages/mobile-phones-deals?page=1&pageSize=50`
 resolves the owning entity across all four types and returns only actionable
 Deal-schema records; Coupon records never enter this response.
 

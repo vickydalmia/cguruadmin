@@ -16,8 +16,12 @@ import {
   toRouteSlug,
   type IdentityKind,
 } from '../../../utils/route-normalization';
+import {
+  entityDealPagePath,
+  entityDealPageSlug,
+  parseEntityDealPageSlug,
+} from './entity-deal-route';
 
-export const ENTITY_DEAL_PAGE_SUFFIX = '-deals';
 export const ENTITY_DEAL_PAGE_DEFAULT_PAGE_SIZE = 50;
 // Astro fetches every page of a catalogue during regeneration, so a larger
 // ceiling is a direct reduction in requests per render (and in how close a
@@ -137,6 +141,7 @@ type ResolvedEntity = {
   config: EntityConfig;
   entity: any;
   publicSlug: string;
+  dealSlug: string;
 };
 
 export type EntityDealPageIndexBlocker =
@@ -186,25 +191,11 @@ function configForKind(value: unknown): EntityConfig | null {
   return ENTITY_DEAL_PAGE_CONFIGS.find((config) => config.kind === value) ?? null;
 }
 
-export function entityDealPageSlug(publicEntitySlug: string): string {
-  return `${publicEntitySlug}${ENTITY_DEAL_PAGE_SUFFIX}`;
-}
-
-export function entityDealPagePath(publicEntitySlug: string): string {
-  return `/${entityDealPageSlug(publicEntitySlug)}/`;
-}
-
-export function parseEntityDealPageSlug(value: unknown): string | null {
-  const slug = cleanText(value)?.replace(/^\/+|\/+$/g, '') ?? '';
-  if (
-    !slug.endsWith(ENTITY_DEAL_PAGE_SUFFIX)
-    || slug.length === ENTITY_DEAL_PAGE_SUFFIX.length
-    || slug.includes('/')
-  ) {
-    return null;
-  }
-  return slug.slice(0, -ENTITY_DEAL_PAGE_SUFFIX.length) || null;
-}
+export {
+  entityDealPagePath,
+  entityDealPageSlug,
+  parseEntityDealPageSlug,
+} from './entity-deal-route';
 
 // Shared with the write-time validator so the read path can never accept a
 // value the validator would have rejected, or vice versa.
@@ -220,7 +211,10 @@ export function resolveEntityDealPageSeo(input: {
   const seo = entity?.entityDealPageSeo ?? {};
   const displayName =
     collapseText(entity?.name) ?? collapseText(publicSlug) ?? publicSlug;
-  const selfCanonical = entityDealPagePath(publicSlug);
+  const selfCanonical = entityDealPagePath(entity?.name);
+  if (!selfCanonical) {
+    throw new Error('Entity name cannot produce a Product Deal page route.');
+  }
   const authoredCanonical = canonicalPath(seo?.canonicalUrl);
   const canonical = authoredCanonical ?? selfCanonical;
   const blockers: EntityDealPageIndexBlocker[] = [];
@@ -343,55 +337,75 @@ async function sanitizePublicOutput(
   });
 }
 
-/**
- * Resolve a public slug to its owning entity.
- *
- * The four content types are queried CONCURRENTLY — awaiting inside a loop
- * made this up to four sequential round-trips, and getPublicPage runs a
- * resolution twice per request. Ties are impossible in practice (identity
- * validation rejects a slug that collides across types) but are broken by
- * ENTITY_DEAL_PAGE_CONFIGS order anyway, preserving the previous behaviour.
- *
- * Matching is `$eqi` and then re-checked exactly in Node, so the candidate set
- * is paged rather than capped: a fixed `limit` could push the real owner
- * outside the window and 404 a live page.
- */
-async function resolveEntityByPublicSlug(
+type EntityRouteOwner = {
+  config: EntityConfig;
+  documentId: string;
+  publicSlug: string;
+  dealSlug: string;
+};
+
+const ENTITY_ROUTE_OWNER_TTL_MS = 60_000;
+const entityRouteOwnerCache = new WeakMap<
+  Core.Strapi,
+  { expiresAt: number; owners: Map<string, EntityRouteOwner | null> }
+>();
+
+async function entityRouteOwners(
   strapi: Core.Strapi,
-  publicSlug: string,
-): Promise<ResolvedEntity | null> {
-  const matches = await Promise.all(
-    ENTITY_DEAL_PAGE_CONFIGS.map(async (config) => {
-      const candidates = routeSlugCandidates(publicSlug, config.kind);
-      const rows = await findAllDocuments(
+): Promise<Map<string, EntityRouteOwner | null>> {
+  const cached = entityRouteOwnerCache.get(strapi);
+  if (cached && cached.expiresAt > Date.now()) return cached.owners;
+
+  const perConfig = await Promise.all(
+    ENTITY_DEAL_PAGE_CONFIGS.map(async (config) => ({
+      config,
+      entities: await findAllDocuments(
         strapi,
         config.uid,
         {
-          filters: {
-            $or: candidates.map((candidate) => ({ slug: { $eqi: candidate } })),
-          },
-          fields: entityFields(config),
-          populate: entityPopulate(config),
+          fields: ['documentId', 'name', 'slug'],
           sort: [{ id: 'asc' }],
         },
         ENTITY_BATCH_SIZE,
-      );
-      return rows.find(
-        (row) => toRouteSlug(row?.slug, config.kind) === publicSlug,
-      );
-    }),
+      ),
+    })),
   );
-
-  for (const [index, entity] of matches.entries()) {
-    if (entity) {
-      return {
-        config: ENTITY_DEAL_PAGE_CONFIGS[index],
-        entity,
-        publicSlug,
-      };
+  const owners = new Map<string, EntityRouteOwner | null>();
+  for (const { config, entities } of perConfig) {
+    for (const entity of entities) {
+      const documentId = cleanText(entity?.documentId);
+      const publicSlug = toRouteSlug(entity?.slug, config.kind);
+      const dealSlug = entityDealPageSlug(entity?.name);
+      if (!documentId || !publicSlug || !dealSlug) continue;
+      const owner = { config, documentId, publicSlug, dealSlug };
+      owners.set(dealSlug, owners.has(dealSlug) ? null : owner);
     }
   }
-  return null;
+  entityRouteOwnerCache.set(strapi, {
+    expiresAt: Date.now() + ENTITY_ROUTE_OWNER_TTL_MS,
+    owners,
+  });
+  return owners;
+}
+
+async function resolveEntityByDealSlug(
+  strapi: Core.Strapi,
+  requestedDealSlug: string,
+): Promise<ResolvedEntity | null> {
+  const owner = (await entityRouteOwners(strapi)).get(requestedDealSlug);
+  if (!owner) return null;
+
+  const entity: any = await strapi.documents(owner.config.uid).findOne({
+    documentId: owner.documentId,
+    fields: entityFields(owner.config) as any,
+    populate: entityPopulate(owner.config) as any,
+  } as any);
+  const publicSlug = toRouteSlug(entity?.slug, owner.config.kind);
+  const dealSlug = entityDealPageSlug(entity?.name);
+  if (!entity || publicSlug !== owner.publicSlug || dealSlug !== requestedDealSlug) {
+    return null;
+  }
+  return { config: owner.config, entity, publicSlug, dealSlug };
 }
 
 async function findAllDocuments(
@@ -446,13 +460,14 @@ function normalizeRedirectFrom(value: unknown): string | null {
 }
 
 function routeConflictFor(
-  publicSlug: string,
+  dealSlug: string,
   publicEntitySlugs: ReadonlySet<string>,
+  dealSlugCounts: ReadonlyMap<string, number>,
   redirectPaths: ReadonlySet<string>,
 ): boolean {
-  const dealSlug = entityDealPageSlug(publicSlug);
   return (
     publicEntitySlugs.has(dealSlug)
+    || (dealSlugCounts.get(dealSlug) ?? 0) > 1
     || redirectPaths.has(`/${dealSlug}`.toLowerCase())
   );
 }
@@ -468,11 +483,11 @@ function routeConflictFor(
  */
 async function hasRouteConflict(
   strapi: Core.Strapi,
-  publicSlug: string,
+  resolved: ResolvedEntity,
 ): Promise<boolean> {
-  const dealSlug = entityDealPageSlug(publicSlug);
+  const { dealSlug } = resolved;
 
-  const [entityOwnsDealSlug, redirects] = await Promise.all([
+  const [entityOwnsDealSlug, anotherGeneratedOwner, redirects] = await Promise.all([
     Promise.all(
       ENTITY_DEAL_PAGE_CONFIGS.map(async (config) => {
         const candidates = routeSlugCandidates(dealSlug, config.kind);
@@ -488,6 +503,25 @@ async function hasRouteConflict(
         );
       }),
     ).then((results) => results.some(Boolean)),
+    Promise.all(
+      ENTITY_DEAL_PAGE_CONFIGS.map(async (config) => {
+        const rows = await findAllDocuments(
+          strapi,
+          config.uid,
+          {
+            fields: ['documentId', 'name'],
+            sort: [{ id: 'asc' }],
+          },
+          ENTITY_BATCH_SIZE,
+        );
+        return rows.some((entity) => {
+          const sameEntity =
+            config.uid === resolved.config.uid
+            && entity?.documentId === resolved.entity?.documentId;
+          return !sameEntity && entityDealPageSlug(entity?.name) === dealSlug;
+        });
+      }),
+    ).then((results) => results.some(Boolean)),
     strapi.documents('api::redirect.redirect' as any).findMany({
       filters: {
         active: true,
@@ -501,7 +535,11 @@ async function hasRouteConflict(
     } as any),
   ]);
 
-  return entityOwnsDealSlug || (Array.isArray(redirects) && redirects.length > 0);
+  return (
+    entityOwnsDealSlug
+    || anotherGeneratedOwner
+    || (Array.isArray(redirects) && redirects.length > 0)
+  );
 }
 
 /**
@@ -618,6 +656,7 @@ function mapSettingItem(input: {
   config: EntityConfig;
   entity: any;
   publicSlug: string;
+  dealSlug: string;
   liveDealCount: number;
   liveDealUpdatedAt?: string;
   routeConflict: boolean;
@@ -637,7 +676,7 @@ function mapSettingItem(input: {
     sourceSlug: input.entity.slug,
     publicSlug: input.publicSlug,
     entityPath: `/${input.publicSlug}/`,
-    permalink: entityDealPagePath(input.publicSlug),
+    permalink: `/${input.dealSlug}/`,
     liveDealCount: input.liveDealCount,
     updatedAt,
     entityDealPageSeo: input.entity.entityDealPageSeo ?? null,
@@ -794,12 +833,19 @@ async function loadSettingItems(
   const allEntityRows = perConfigEntities.flatMap(({ config, entities }) =>
     entities.flatMap((entity) => {
       const publicSlug = toRouteSlug(entity?.slug, config.kind);
-      return publicSlug ? [{ config, entity, publicSlug }] : [];
+      const dealSlug = entityDealPageSlug(entity?.name);
+      return publicSlug && dealSlug
+        ? [{ config, entity, publicSlug, dealSlug }]
+        : [];
     }),
   );
   const publicEntitySlugs = new Set(
     allEntityRows.map((row) => row.publicSlug),
   );
+  const dealSlugCounts = new Map<string, number>();
+  for (const row of allEntityRows) {
+    dealSlugCounts.set(row.dealSlug, (dealSlugCounts.get(row.dealSlug) ?? 0) + 1);
+  }
   const redirectPaths = new Set(
     (Array.isArray(activeRedirects) ? activeRedirects : [])
       .map((row: any) => normalizeRedirectFrom(row?.from))
@@ -869,17 +915,19 @@ async function loadSettingItems(
     }
   }
 
-  return allEntityRows.map(({ config, entity, publicSlug }) => {
+  return allEntityRows.map(({ config, entity, publicSlug, dealSlug }) => {
     const meta = liveDealMeta.get(entity.documentId);
     return mapSettingItem({
       config,
       entity,
       publicSlug,
+      dealSlug,
       liveDealCount: meta?.count ?? 0,
       liveDealUpdatedAt: meta?.updatedAt,
       routeConflict: routeConflictFor(
-        publicSlug,
+        dealSlug,
         publicEntitySlugs,
+        dealSlugCounts,
         redirectPaths,
       ),
     });
@@ -888,10 +936,11 @@ async function loadSettingItems(
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   async getPublicPage(rawDealSlug: unknown, rawQuery: Record<string, unknown> = {}) {
-    const entitySlug = parseEntityDealPageSlug(rawDealSlug);
-    if (!entitySlug) return null;
+    const nameSlug = parseEntityDealPageSlug(rawDealSlug);
+    if (!nameSlug) return null;
+    const requestedDealSlug = `${nameSlug}-deals`;
 
-    const resolved = await resolveEntityByPublicSlug(strapi, entitySlug);
+    const resolved = await resolveEntityByDealSlug(strapi, requestedDealSlug);
     if (!resolved) return null;
 
     const page = normalizePage(rawQuery.page);
@@ -917,7 +966,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       strapi.documents('api::deal.deal' as any).count({
         filters: filters as any,
       } as any),
-      hasRouteConflict(strapi, resolved.publicSlug),
+      hasRouteConflict(strapi, resolved),
     ]);
 
     const now = new Date();
@@ -954,7 +1003,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
           sourceSlug: resolved.entity.slug,
           publicSlug: resolved.publicSlug,
           entityPath: `/${resolved.publicSlug}/`,
-          permalink: entityDealPagePath(resolved.publicSlug),
+          permalink: `/${resolved.dealSlug}/`,
         },
         entity,
         seo: resolvedSeo,

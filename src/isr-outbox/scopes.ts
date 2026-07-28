@@ -4,6 +4,7 @@ import {
   toRouteSlug,
   type IdentityKind,
 } from '../utils/route-normalization';
+import { entityDealPageSlug } from '../api/entity-deal-page/services/entity-deal-route';
 
 // Maps a Strapi document change to every rendered page that consumes it.
 
@@ -104,10 +105,10 @@ export async function offerRelationSlugs(
   const doc: any = await strapi.documents(uid).findOne({
     documentId,
     populate: {
-      stores: { fields: ['slug'] },
-      brands: { fields: ['slug'] },
-      categories: { fields: ['slug'] },
-      banks: { fields: ['slug'] },
+      stores: { fields: ['name', 'slug'] },
+      brands: { fields: ['name', 'slug'] },
+      categories: { fields: ['name', 'slug'] },
+      banks: { fields: ['name', 'slug'] },
     } as any,
   });
   if (!doc) return null;
@@ -117,10 +118,13 @@ export async function offerRelationSlugs(
   const detailKind = uid === 'api::coupon.coupon' ? 'coupon' : 'deal';
   const slugs = new Set<string>([`${detailKind}/${numericId}`]);
   const entitySlugs = new Set<string>();
+  const entityDealSlugs = new Set<string>();
   for (const [field, kind] of RELATION_KINDS) {
     for (const related of doc[field] ?? []) {
       const slug = publicSlug(related?.slug, kind);
       if (slug) entitySlugs.add(slug);
+      const dealSlug = entityDealPageSlug(related?.name);
+      if (uid === 'api::deal.deal' && dealSlug) entityDealSlugs.add(dealSlug);
     }
   }
   // Query every entity-owned offer relation as well as the offer-owned
@@ -144,18 +148,24 @@ export async function offerRelationSlugs(
           : { deals: { documentId: { $eq: documentId } } };
       const entities: any[] = await strapi.documents(entityUid as any).findMany({
         filters: offerFilter as any,
-        fields: ['slug'] as any,
+        fields: ['name', 'slug'] as any,
       });
       return entities
-        .map((entity) => publicSlug(entity?.slug, kind))
-        .filter((slug): slug is string => Boolean(slug));
+        .map((entity) => ({
+          slug: publicSlug(entity?.slug, kind),
+          dealSlug: entityDealPageSlug(entity?.name),
+        }))
+        .filter((entity) => Boolean(entity.slug));
     }),
   );
-  for (const slug of entityPages.flat()) entitySlugs.add(slug);
-  for (const slug of entitySlugs) {
-    slugs.add(slug);
-    if (uid === 'api::deal.deal') slugs.add(`${slug}-deals`);
+  for (const entity of entityPages.flat()) {
+    if (entity.slug) entitySlugs.add(entity.slug);
+    if (uid === 'api::deal.deal' && entity.dealSlug) {
+      entityDealSlugs.add(entity.dealSlug);
+    }
   }
+  for (const slug of entitySlugs) slugs.add(slug);
+  for (const slug of entityDealSlugs) slugs.add(slug);
 
   return [...slugs];
 }
@@ -197,7 +207,8 @@ export async function preDeleteScope(
 /**
  * True when an entity update touches ONLY the hidden entityDealPageSeo
  * component. That component renders on exactly one page — the generated
- * `<slug>-deals` route — so it must not drag the entity page, the homepage or
+ * name-derived `<entity-name>-deals` route — so it must not drag the entity
+ * page, the homepage or
  * the deal-of-the-day landing page along with it.
  *
  * Uncertainty returns false, keeping the broad scope: a wrong `true` silently
@@ -284,25 +295,38 @@ export async function computeScope(
     if (!documentId) return { full: true, refreshScopes: ['routes'] };
     const doc: any = await strapi.documents(uid as any).findOne({
       documentId,
-      fields: ['slug'] as any,
+      fields: ['name', 'slug'] as any,
     });
     const slug = publicSlug(doc?.slug, kind);
-    if (!slug) return { full: true, refreshScopes: ['routes'] };
+    const dealSlug = entityDealPageSlug(doc?.name);
+    if (!slug || !dealSlug) return { full: true, refreshScopes: ['routes'] };
 
     // A settings-screen write that only sets entityDealPageSeo changes exactly
     // one page. `sitemap` stays because indexingEnabled decides whether the
     // generated route appears in a shard at all.
     if (action === 'update' && isEntityDealPageSeoOnlyChange(data)) {
-      return { slugs: [`${slug}-deals`], sitemap: true };
+      return { slugs: [dealSlug], sitemap: true };
     }
 
     // The deal landing page bakes store pill labels/logos and category tab
     // names/icons into its HTML — same reason entity edits carry homepage.
     const slugs =
       kind === 'store' || kind === 'category'
-        ? [...new Set([slug, `${slug}-deals`, DEAL_OF_THE_DAY_SLUG])]
-        : [slug, `${slug}-deals`];
-    return { slugs, homepage: true, sitemap: true };
+        ? [...new Set([slug, dealSlug, DEAL_OF_THE_DAY_SLUG])]
+        : [slug, dealSlug];
+    const identityChanged =
+      data
+      && typeof data === 'object'
+      && (
+        Object.prototype.hasOwnProperty.call(data, 'name')
+        || Object.prototype.hasOwnProperty.call(data, 'slug')
+      );
+    return {
+      slugs,
+      homepage: true,
+      sitemap: true,
+      ...(identityChanged ? { refreshScopes: ['routes'] } : {}),
+    };
   }
 
   return null; // unrelated content type (pools, users…)

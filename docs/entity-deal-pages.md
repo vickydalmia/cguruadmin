@@ -8,21 +8,23 @@ developers, and the future admin-settings UI.
 Every published Store, Brand, Category, and Bank owns one deterministic Deal
 page:
 
-| Entity URL | Generated Deal URL |
-| --- | --- |
-| `/amazon/` | `/amazon-deals/` |
-| `/mobile/` | `/mobile-deals/` |
-| `/nike/` | `/nike-deals/` |
-| `/hdfc/` | `/hdfc-deals/` |
+| Entity name | Entity URL | Generated Deal URL |
+| --- | --- | --- |
+| Amazon India | `/amazon-coupons/` | `/amazon-india-deals/` |
+| Mobile Phones | `/mobile/` | `/mobile-phones-deals/` |
+| Nike | `/nike-coupons/` | `/nike-deals/` |
+| HDFC Bank | `/hdfc-offers/` | `/hdfc-bank-deals/` |
 
-The public slug is normalized with the same rules as the entity page. A stored
-slug such as `categories/mobile` therefore still produces `/mobile-deals/`.
+The generated URL is `slugify(entity.name) + "-deals"`. It is independent of
+the entity page’s editable `slug`: changing the entity name changes its Deal
+URL, while changing only the entity slug does not. Former slug-derived Deal
+URLs are not redirected because this route family was corrected before launch.
 The generated page contains Product Deal records only; Coupon records are not
 included.
 
 The Deal of the Day page also derives its Store and Category “View All” links
-from this contract. Selecting the Amazon tab links to `/amazon-deals/`, and
-selecting the Mobile tab links to `/mobile-deals/`.
+from this contract. Selecting Amazon India links to `/amazon-india-deals/`, and
+selecting Mobile Phones links to `/mobile-phones-deals/`.
 
 ## Default indexing policy
 
@@ -242,8 +244,9 @@ Generated Deal pages use on-demand ISR:
 5. A previously visited page is proactively regenerated after invalidation.
 6. An unvisited page remains cold until its first request.
 
-Entity slug or SEO changes invalidate the entity page, generated Deal page, and
-sitemap metadata. Deal-page route metadata is refreshed through the `routes`
+Entity edits invalidate the entity page and its name-derived Deal page. A name
+change also refreshes route membership so ISR removes the former path and
+admits the new one. Deal-page route metadata is refreshed through the `routes`
 invalidation scope.
 
 ## Sitemap behavior
@@ -264,8 +267,10 @@ the main entity sitemap.
 Strapi rejects changes that would make an entity root, generated Deal page, or
 active redirect occupy the same URL. Examples:
 
-- creating entity `mobile-deals` when entity `mobile` already exists;
-- creating entity `mobile` when `mobile-deals` is already an entity root; or
+- naming an entity `Mobile` when another entity name already generates
+  `/mobile-deals/`;
+- using entity slug `mobile-deals` when any entity name generates that Deal
+  route; or
 - creating an active redirect from `/mobile-deals/`.
 
 If legacy data already contains a conflict, the generated page remains

@@ -75,7 +75,7 @@ describe('preDeleteScope failure escalation', () => {
 describe('deal-of-the-day landing page scope', () => {
   const relationDoc = {
     id: 42,
-    stores: [{ slug: 'amazon' }],
+    stores: [{ name: 'Amazon India', slug: 'amazon' }],
     brands: [],
     categories: [],
     banks: [],
@@ -105,7 +105,7 @@ describe('deal-of-the-day landing page scope', () => {
     await expect(
       computeScope(strapi, 'api::deal.deal', 'update', 'doc1'),
     ).resolves.toEqual({
-      slugs: ['deal/42', 'amazon', 'amazon-deals', 'deal-of-the-day'],
+      slugs: ['deal/42', 'amazon', 'amazon-india-deals', 'deal-of-the-day'],
       homepage: true,
       sitemap: true,
       refreshScopes: ['routes'],
@@ -212,8 +212,12 @@ describe('deal-of-the-day landing page scope', () => {
       expect(args.filters).toEqual({
         deals: { documentId: { $eq: 'deal-1' } },
       });
-      if (uid === 'api::brand.brand') return [{ slug: 'brands/samsung' }];
-      if (uid === 'api::bank.bank') return [{ slug: 'banks/hdfc' }];
+      if (uid === 'api::brand.brand') {
+        return [{ name: 'Samsung Mobile', slug: 'brands/samsung' }];
+      }
+      if (uid === 'api::bank.bank') {
+        return [{ name: 'HDFC Bank', slug: 'banks/hdfc' }];
+      }
       return [];
     });
     const strapi = strapiWithFindOne(
@@ -233,9 +237,9 @@ describe('deal-of-the-day landing page scope', () => {
       slugs: [
         'deal/88',
         'samsung',
-        'samsung-deals',
         'hdfc',
-        'hdfc-deals',
+        'samsung-mobile-deals',
+        'hdfc-bank-deals',
         'deal-of-the-day',
       ],
       homepage: true,
@@ -277,7 +281,7 @@ describe('deal-of-the-day landing page scope', () => {
     await expect(
       preDeleteScope(strapi, 'api::deal.deal', 'doc1', 'update'),
     ).resolves.toEqual({
-      slugs: ['deal/42', 'amazon', 'amazon-deals', 'deal-of-the-day'],
+      slugs: ['deal/42', 'amazon', 'amazon-india-deals', 'deal-of-the-day'],
       homepage: true,
       sitemap: true,
       refreshScopes: ['routes'],
@@ -326,20 +330,20 @@ describe('managed page SEO scopes', () => {
 });
 
 describe('entity Deal-page SEO scope', () => {
-  const entityDoc = async () => ({ slug: 'amazon' });
+  const entityDoc = async () => ({ name: 'Amazon India', slug: 'amazon' });
 
   it('narrows an entityDealPageSeo-only write to the generated page', async () => {
     const { computeScope } = await import('./scopes');
     const strapi = strapiWithFindOne(entityDoc);
 
-    // The hidden component renders on /amazon-deals/ and nowhere else, so the
+    // The hidden component renders on /amazon-india-deals/ and nowhere else, so the
     // entity page, the homepage and the deal-of-the-day page stay untouched.
     // `sitemap` survives: indexingEnabled decides shard membership.
     await expect(
       computeScope(strapi, 'api::store.store', 'update', 'store-1', {
         entityDealPageSeo: { indexingEnabled: true },
       }),
-    ).resolves.toEqual({ slugs: ['amazon-deals'], sitemap: true });
+    ).resolves.toEqual({ slugs: ['amazon-india-deals'], sitemap: true });
   });
 
   it('keeps the broad scope for any other entity write', async () => {
@@ -347,7 +351,7 @@ describe('entity Deal-page SEO scope', () => {
     const strapi = strapiWithFindOne(entityDoc);
 
     const broad = {
-      slugs: ['amazon', 'amazon-deals', 'deal-of-the-day'],
+      slugs: ['amazon', 'amazon-india-deals', 'deal-of-the-day'],
       homepage: true,
       sitemap: true,
     };
@@ -363,7 +367,7 @@ describe('entity Deal-page SEO scope', () => {
         name: 'Amazon India',
         entityDealPageSeo: { indexingEnabled: true },
       }),
-    ).resolves.toEqual(broad);
+    ).resolves.toEqual({ ...broad, refreshScopes: ['routes'] });
 
     // A publish carrying the same payload still rebuilds broadly.
     await expect(
@@ -429,20 +433,26 @@ describe('entity edits baked into the deal landing page', () => {
 
   it('adds the landing slug for store and category updates', async () => {
     const { computeScope } = await import('./scopes');
-    const strapi = strapiWithFindOne(async () => ({ slug: 'amazon' }));
+    const strapi = strapiWithFindOne(async () => ({
+      name: 'Amazon India',
+      slug: 'amazon',
+    }));
     await expect(
       computeScope(strapi, 'api::store.store', 'update', 'doc1'),
     ).resolves.toEqual({
-      slugs: ['amazon', 'amazon-deals', 'deal-of-the-day'],
+      slugs: ['amazon', 'amazon-india-deals', 'deal-of-the-day'],
       homepage: true,
       sitemap: true,
     });
 
-    const strapiCat = strapiWithFindOne(async () => ({ slug: 'electronics' }));
+    const strapiCat = strapiWithFindOne(async () => ({
+      name: 'Consumer Electronics',
+      slug: 'electronics',
+    }));
     await expect(
       computeScope(strapiCat, 'api::category.category', 'update', 'doc1'),
     ).resolves.toEqual({
-      slugs: ['electronics', 'electronics-deals', 'deal-of-the-day'],
+      slugs: ['electronics', 'consumer-electronics-deals', 'deal-of-the-day'],
       homepage: true,
       sitemap: true,
     });
@@ -450,11 +460,14 @@ describe('entity edits baked into the deal landing page', () => {
 
   it('leaves bank and brand updates surgical — they do not render on the landing page', async () => {
     const { computeScope } = await import('./scopes');
-    const strapi = strapiWithFindOne(async () => ({ slug: 'hdfc' }));
+    const strapi = strapiWithFindOne(async () => ({
+      name: 'HDFC Bank',
+      slug: 'hdfc',
+    }));
     await expect(
       computeScope(strapi, 'api::bank.bank', 'update', 'doc1'),
     ).resolves.toEqual({
-      slugs: ['hdfc', 'hdfc-deals'],
+      slugs: ['hdfc', 'hdfc-bank-deals'],
       homepage: true,
       sitemap: true,
     });

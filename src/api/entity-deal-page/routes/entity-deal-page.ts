@@ -17,9 +17,8 @@ export default {
             name: 'global::rate-limit',
             config: { maxRequests: 60, windowMs: 60_000 },
           },
-          // `page`/`pageSize` are the only meaningful parameters. Keying on the
-          // full URL let `?nonce=N` both miss the cache every time and evict
-          // real entries once the store hit MAX_ENTRIES.
+          // `page`/`pageSize` are the only meaningful parameters. Ignore
+          // unrelated query noise so `?nonce=N` cannot churn the cache.
           {
             name: 'global::cache',
             config: { ttlMs: 60_000, cacheKeyParams: ['page', 'pageSize'] },

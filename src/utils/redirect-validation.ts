@@ -6,6 +6,10 @@ import {
   toRouteSlug,
   type IdentityKind,
 } from './route-normalization';
+import {
+  entityDealPageSlug,
+  parseEntityDealPageSlug,
+} from '../api/entity-deal-page/services/entity-deal-route';
 
 /**
  * Write-time safety rules for the editor-managed `redirect` collection.
@@ -77,6 +81,7 @@ export const REDIRECT_MAX_HOPS = 5;
 // grows pathologically.
 const ACTIVE_REDIRECT_LIMIT = 2000;
 const ENTITY_CANDIDATE_LIMIT = 25;
+const ENTITY_NAME_SCAN_PAGE = 500;
 
 const KIND_BY_UID: Record<string, IdentityKind> = {
   'api::store.store': 'store',
@@ -369,10 +374,7 @@ async function findLiveEntity(
   if (!route) return null;
   const routeKey = route.toLowerCase();
 
-  const findRoute = async (
-    candidateRoute: string,
-    entityDealPage: boolean,
-  ) => {
+  const findRoute = async (candidateRoute: string) => {
     const candidateKey = candidateRoute.toLowerCase();
     for (const targetUid of IDENTITY_UIDS) {
       const kind = KIND_BY_UID[targetUid];
@@ -394,20 +396,43 @@ async function findLiveEntity(
           kind,
           name: readString(row, 'name') ?? '(untitled)',
           slug: slug ?? candidateRoute,
-          ...(entityDealPage ? { entityDealPage: true } : {}),
         };
       }
     }
     return null;
   };
 
-  const direct = await findRoute(route, false);
+  const direct = await findRoute(route);
   if (direct) return direct;
 
-  const suffix = '-deals';
-  return routeKey.endsWith(suffix) && route.length > suffix.length
-    ? await findRoute(route.slice(0, -suffix.length), true)
-    : null;
+  if (!parseEntityDealPageSlug(route)) return null;
+  for (const targetUid of IDENTITY_UIDS) {
+    const kind = KIND_BY_UID[targetUid];
+    if (!kind) continue;
+    let start = 0;
+    while (true) {
+      const rows: unknown = await strapi.documents(targetUid).findMany({
+        fields: ['name', 'slug'],
+        sort: [{ id: 'asc' }],
+        start,
+        limit: ENTITY_NAME_SCAN_PAGE,
+      });
+      const list = Array.isArray(rows) ? rows : [];
+      for (const row of list) {
+        const name = readString(row, 'name') ?? '(untitled)';
+        if (entityDealPageSlug(name)?.toLowerCase() !== routeKey) continue;
+        return {
+          kind,
+          name,
+          slug: readString(row, 'slug') ?? route,
+          entityDealPage: true,
+        };
+      }
+      if (list.length < ENTITY_NAME_SCAN_PAGE) break;
+      start += list.length;
+    }
+  }
+  return null;
 }
 
 type Edge = { fromPath: string; toPath: string | null; note: string };

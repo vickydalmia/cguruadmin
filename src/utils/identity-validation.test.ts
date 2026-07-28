@@ -220,19 +220,19 @@ describe('validateIdentity — name uniqueness within a type', () => {
     ).resolves.toEqual([['name']]);
   });
 
-  it('scopes name uniqueness to the entity type', async () => {
-    // A brand and a store may legitimately share a name; only their slugs
-    // have to differ.
+  it('rejects a cross-type name collision because Deal routes share one namespace', async () => {
     const { strapi } = harness({
       'api::brand.brand': [{ documentId: 'b1', name: 'Amazon', slug: 'amazon-brand' }],
     });
 
     await expect(
-      validateIdentity(strapi, 'api::store.store', 'create', {
-        name: 'Amazon',
-        slug: 'amazon-store',
-      })
-    ).resolves.toBeUndefined();
+      detailPaths(
+        validateIdentity(strapi, 'api::store.store', 'create', {
+          name: 'Amazon',
+          slug: 'amazon-store',
+        })
+      )
+    ).resolves.toEqual([['name']]);
   });
 
   it('excludes the row being edited even when the query hands it back', async () => {
@@ -278,7 +278,7 @@ describe('validateIdentity — name uniqueness within a type', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('saves a name containing a LIKE wildcard instead of matching on it', async () => {
+  it('rejects distinct names that slugify to the same Deal route', async () => {
     // "50% Off Store" makes $containsi build LIKE '%50% Off Store%', which the
     // database happily matches against "50 Off Store". Confirming the hit in
     // JS is the only thing standing between this store and a bogus rejection.
@@ -290,11 +290,13 @@ describe('validateIdentity — name uniqueness within a type', () => {
     });
 
     await expect(
-      validateIdentity(strapi, 'api::store.store', 'create', {
-        name: '50% Off Store',
-        slug: '50-off-store',
-      })
-    ).resolves.toBeUndefined();
+      detailPaths(
+        validateIdentity(strapi, 'api::store.store', 'create', {
+          name: '50% Off Store',
+          slug: '50-off-store',
+        })
+      )
+    ).resolves.toEqual([['name']]);
 
     // Prove the DB really did return the wildcard matches that JS discarded.
     const nameQuery = queries.find((q) => q.filters?.name);
@@ -371,6 +373,17 @@ describe('validateIdentity — flat slug namespace (row 113)', () => {
         slug: 'nike',
       }),
     ).rejects.toThrow(/generates.*nike-deals.*brand "Nike Deals"/);
+  });
+
+  it('rejects an entity whose own root equals its name-derived Deal route', async () => {
+    const { strapi } = harness();
+
+    await expect(
+      validateIdentity(strapi, 'api::store.store', 'create', {
+        name: 'Nike',
+        slug: 'nike-deals',
+      }),
+    ).rejects.toThrow(/also the generated Product Deal URL/);
   });
 
   it('sees through a stored type namespace on the OTHER row', async () => {
@@ -691,15 +704,17 @@ describe('validateIdentity — non-Latin name yields no slug (row 102)', () => {
     ).rejects.toThrow(/日本ストア/);
   });
 
-  it('accepts a non-Latin name once a slug is typed by hand', async () => {
+  it('rejects a non-Latin name even when the entity-page slug is typed by hand', async () => {
     const { strapi } = harness();
 
     await expect(
-      validateIdentity(strapi, 'api::store.store', 'create', {
-        name: '日本ストア',
-        slug: 'nihon-store',
-      })
-    ).resolves.toBeUndefined();
+      detailPaths(
+        validateIdentity(strapi, 'api::store.store', 'create', {
+          name: '日本ストア',
+          slug: 'nihon-store',
+        })
+      )
+    ).resolves.toEqual([['name']]);
   });
 
   it('does not run the empty-slug rule when the slug is untouched', async () => {

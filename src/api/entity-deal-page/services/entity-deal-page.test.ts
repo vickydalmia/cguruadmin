@@ -12,9 +12,12 @@ import createEntityDealPageService, {
 
 describe('entity Deal-page URL contract', () => {
   it('derives and parses the generated flat route', () => {
-    expect(entityDealPageSlug('mobile')).toBe('mobile-deals');
-    expect(entityDealPagePath('mobile')).toBe('/mobile-deals/');
-    expect(parseEntityDealPageSlug('/mobile-deals/')).toBe('mobile');
+    expect(entityDealPageSlug('Mobile Phones')).toBe('mobile-phones-deals');
+    expect(entityDealPagePath('Mobile Phones')).toBe('/mobile-phones-deals/');
+    expect(entityDealPageSlug('Häagen-Dazs™')).toBe('haagen-dazs-deals');
+    expect(entityDealPageSlug('日本語')).toBeNull();
+    expect(entityDealPagePath('日本語')).toBeNull();
+    expect(parseEntityDealPageSlug('/mobile-phones-deals/')).toBe('mobile-phones');
     expect(parseEntityDealPageSlug('mobile')).toBeNull();
     expect(parseEntityDealPageSlug('-deals')).toBeNull();
     expect(parseEntityDealPageSlug('categories/mobile-deals')).toBeNull();
@@ -187,14 +190,24 @@ describe('entity Deal-page public read', () => {
       if (uid === 'api::redirect.redirect') {
         return { findMany: vi.fn().mockResolvedValue([]) };
       }
-      // Only the store collection owns the slug; the other three miss.
+      const entity = {
+        id: 7,
+        documentId: 'store-1',
+        slug: 'amazon-coupons',
+        name: 'Amazon India',
+      };
       return {
+        findOne: vi.fn().mockResolvedValue(
+          uid === 'api::store.store' ? entity : null,
+        ),
         findMany: vi.fn(async (options: any) => {
-          const wantsDealSlug = JSON.stringify(options.filters).includes(
-            'amazon-deals',
-          );
-          if (uid !== 'api::store.store' || wantsDealSlug) return [];
-          return [{ documentId: 'store-1', slug: 'amazon', name: 'Amazon' }];
+          if (uid !== 'api::store.store') return [];
+          if (options.filters) {
+            return JSON.stringify(options.filters).includes('amazon-coupons')
+              ? [entity]
+              : [];
+          }
+          return [entity];
         }),
       };
     });
@@ -221,7 +234,7 @@ describe('entity Deal-page public read', () => {
     const { strapi, dealFindMany, dealCount } = harness([deal], 137);
     const service = createEntityDealPageService({ strapi });
 
-    const result = await service.getPublicPage('amazon-deals', {
+    const result = await service.getPublicPage('amazon-india-deals', {
       page: 2,
       pageSize: 50,
     });
@@ -245,7 +258,10 @@ describe('entity Deal-page public read', () => {
     const { strapi, dealFindMany } = harness([], 0);
     const service = createEntityDealPageService({ strapi });
 
-    await service.getPublicPage('amazon-deals', { page: 2.9, pageSize: 10.7 });
+    await service.getPublicPage('amazon-india-deals', {
+      page: 2.9,
+      pageSize: 10.7,
+    });
 
     expect(dealFindMany.mock.calls[0][0]).toMatchObject({
       start: 10,
@@ -266,7 +282,7 @@ describe('entity Deal-page public read', () => {
     const { strapi, dealFindMany } = harness([unsafe], 3);
     const service = createEntityDealPageService({ strapi });
 
-    const result = await service.getPublicPage('amazon-deals', {});
+    const result = await service.getPublicPage('amazon-india-deals', {});
 
     expect(result?.data.deals).toHaveLength(0);
     // One paged read plus the reconciling scan.

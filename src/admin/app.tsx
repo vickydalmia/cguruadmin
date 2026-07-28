@@ -1132,7 +1132,7 @@ export default {
     // ("store"), auto-filling from `name` until hand-edited (QC bug).
     app.addFields({ type: 'uid', Component: SlugInput } as any);
 
-    // Generated Product Deal pages (/<entity-slug>-deals/) have no content
+    // Generated Product Deal pages (/<slugified-entity-name>-deals/) have no content
     // type of their own — they are derived from the four entity collections —
     // so there is nothing for the Content Manager to list. This screen is the
     // only surface for them. `permissions: []` gates nothing on its own: the
