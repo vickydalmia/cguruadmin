@@ -74,8 +74,11 @@ RENDER_PORT="${RENDER_PORT:-$(read_env RENDER_PORT)}"
 RENDER_PORT="${RENDER_PORT:-1338}"
 # Both Strapi containers share one image and env file; `strapi` keeps the
 # admin panel + cron on APP_PORT, `strapi-render` serves render traffic on
-# RENDER_PORT with cron disabled.
-SERVICES="strapi strapi-render"
+# RENDER_PORT with cron disabled. Order matters at startup — see the deploy
+# section below.
+ADMIN_SERVICE="strapi"
+RENDER_SERVICE="strapi-render"
+SERVICES="${ADMIN_SERVICE} ${RENDER_SERVICE}"
 # APP_BIND (the extra VPC-private-IP publish) is read straight from ${ENV_FILE}
 # by `docker compose --env-file` interpolation — the compose `:?` guard aborts
 # the deploy if it is missing — so deploy.sh does not need to handle it here.
@@ -96,12 +99,7 @@ log "Compose config valid"
 log "Pulling ${APP_IMAGE}:${TAG} ..."
 compose pull ${SERVICES}
 
-# ── Deploy ───────────────────────────────────────────────────────────────────
-
-log "Starting containers ..."
-compose up -d --remove-orphans ${SERVICES}
-
-# ── Health check ─────────────────────────────────────────────────────────────
+# ── Health helpers ───────────────────────────────────────────────────────────
 
 container_status() {
   local service="$1"
@@ -114,39 +112,49 @@ container_status() {
   docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${container_id}" 2>/dev/null || echo "unknown"
 }
 
-log "Waiting for healthy (max $(( HEALTH_ATTEMPTS * HEALTH_INTERVAL ))s) ..."
+wait_for_healthy() {
+  local service="$1"
+  local attempts=${HEALTH_ATTEMPTS}
+  local status
 
-ATTEMPTS=${HEALTH_ATTEMPTS}
-while [ "${ATTEMPTS}" -gt 0 ]; do
-  ALL_HEALTHY=1
-  for SERVICE in ${SERVICES}; do
-    STATUS=$(container_status "${SERVICE}")
-    if [ "${STATUS}" != "healthy" ]; then
-      ALL_HEALTHY=0
-      log "${SERVICE}: ${STATUS}  (${ATTEMPTS} attempts left)"
+  log "Waiting for ${service} (max $(( HEALTH_ATTEMPTS * HEALTH_INTERVAL ))s) ..."
+  while [ "${attempts}" -gt 0 ]; do
+    status=$(container_status "${service}")
+    if [ "${status}" = "healthy" ]; then
+      log "${service} is healthy"
+      return 0
     fi
+    log "${service}: ${status}  (${attempts} attempts left)"
+    attempts=$(( attempts - 1 ))
+    sleep "${HEALTH_INTERVAL}"
   done
 
-  if [ "${ALL_HEALTHY}" = "1" ]; then
-    log "All containers are healthy"
-    break
-  fi
+  status=$(container_status "${service}")
+  err "${service} did not become healthy. Last status: ${status}"
+  err "Recent logs:"
+  compose logs --tail=100 "${service}"
+  exit 1
+}
 
-  ATTEMPTS=$(( ATTEMPTS - 1 ))
-  sleep "${HEALTH_INTERVAL}"
-done
+# ── Deploy ───────────────────────────────────────────────────────────────────
 
-# ── Final check ──────────────────────────────────────────────────────────────
+# Start SEQUENTIALLY, admin first. Every Strapi boot runs schema sync plus the
+# reconciliation steps in src/index.ts bootstrap; two processes doing that at
+# once race on DDL that is not all lock-guarded (e.g. the check-then-
+# createTable in database/site-selection-reconciliation.js). Letting the admin
+# container finish first means the render container boots against an already
+# reconciled schema and its own reconcilers become no-ops.
+# No --remove-orphans here: combined with a single-service `up` its scope has
+# differed across Compose versions, and removing the sibling container mid
+# deploy is not worth the hygiene. Run `docker compose ... down
+# --remove-orphans` by hand if a service is ever renamed or dropped.
+log "Starting ${ADMIN_SERVICE} ..."
+compose up -d "${ADMIN_SERVICE}"
+wait_for_healthy "${ADMIN_SERVICE}"
 
-for SERVICE in ${SERVICES}; do
-  FINAL=$(container_status "${SERVICE}")
-  if [ "${FINAL}" != "healthy" ]; then
-    err "${SERVICE} did not become healthy. Last status: ${FINAL}"
-    err "Recent logs:"
-    compose logs --tail=100 "${SERVICE}"
-    exit 1
-  fi
-done
+log "Starting ${RENDER_SERVICE} ..."
+compose up -d "${RENDER_SERVICE}"
+wait_for_healthy "${RENDER_SERVICE}"
 
 # ── Verify health endpoints ─────────────────────────────────────────────────
 
