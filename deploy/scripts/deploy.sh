@@ -70,6 +70,12 @@ fi
 TAG="${1:-${APP_IMAGE_TAG:-latest}}"
 APP_PORT="${APP_PORT:-$(read_env APP_PORT)}"
 APP_PORT="${APP_PORT:-1337}"
+RENDER_PORT="${RENDER_PORT:-$(read_env RENDER_PORT)}"
+RENDER_PORT="${RENDER_PORT:-1338}"
+# Both Strapi containers share one image and env file; `strapi` keeps the
+# admin panel + cron on APP_PORT, `strapi-render` serves render traffic on
+# RENDER_PORT with cron disabled.
+SERVICES="strapi strapi-render"
 # APP_BIND (the extra VPC-private-IP publish) is read straight from ${ENV_FILE}
 # by `docker compose --env-file` interpolation — the compose `:?` guard aborts
 # the deploy if it is missing — so deploy.sh does not need to handle it here.
@@ -88,28 +94,42 @@ log "Compose config valid"
 # ── Pull ─────────────────────────────────────────────────────────────────────
 
 log "Pulling ${APP_IMAGE}:${TAG} ..."
-compose pull strapi
+compose pull ${SERVICES}
 
 # ── Deploy ───────────────────────────────────────────────────────────────────
 
-log "Starting container ..."
-compose up -d --remove-orphans strapi
+log "Starting containers ..."
+compose up -d --remove-orphans ${SERVICES}
 
 # ── Health check ─────────────────────────────────────────────────────────────
+
+container_status() {
+  local service="$1"
+  local container_id
+  container_id=$(compose ps -q "${service}" 2>/dev/null || true)
+  if [ -z "${container_id}" ]; then
+    echo "missing"
+    return
+  fi
+  docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${container_id}" 2>/dev/null || echo "unknown"
+}
 
 log "Waiting for healthy (max $(( HEALTH_ATTEMPTS * HEALTH_INTERVAL ))s) ..."
 
 ATTEMPTS=${HEALTH_ATTEMPTS}
 while [ "${ATTEMPTS}" -gt 0 ]; do
-  CONTAINER_ID=$(compose ps -q strapi 2>/dev/null || true)
-
-  if [ -n "${CONTAINER_ID}" ]; then
-    STATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${CONTAINER_ID}" 2>/dev/null || echo "unknown")
-    if [ "${STATUS}" = "healthy" ]; then
-      log "Container is healthy"
-      break
+  ALL_HEALTHY=1
+  for SERVICE in ${SERVICES}; do
+    STATUS=$(container_status "${SERVICE}")
+    if [ "${STATUS}" != "healthy" ]; then
+      ALL_HEALTHY=0
+      log "${SERVICE}: ${STATUS}  (${ATTEMPTS} attempts left)"
     fi
-    log "Status: ${STATUS}  (${ATTEMPTS} attempts left)"
+  done
+
+  if [ "${ALL_HEALTHY}" = "1" ]; then
+    log "All containers are healthy"
+    break
   fi
 
   ATTEMPTS=$(( ATTEMPTS - 1 ))
@@ -118,24 +138,26 @@ done
 
 # ── Final check ──────────────────────────────────────────────────────────────
 
-CONTAINER_ID=$(compose ps -q strapi)
-FINAL=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${CONTAINER_ID}")
+for SERVICE in ${SERVICES}; do
+  FINAL=$(container_status "${SERVICE}")
+  if [ "${FINAL}" != "healthy" ]; then
+    err "${SERVICE} did not become healthy. Last status: ${FINAL}"
+    err "Recent logs:"
+    compose logs --tail=100 "${SERVICE}"
+    exit 1
+  fi
+done
 
-if [ "${FINAL}" != "healthy" ]; then
-  err "Container did not become healthy. Last status: ${FINAL}"
-  err "Recent logs:"
-  compose logs --tail=100 strapi
-  exit 1
-fi
+# ── Verify health endpoints ─────────────────────────────────────────────────
 
-# ── Verify health endpoint ──────────────────────────────────────────────────
-
-HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${APP_PORT}/_health" 2>/dev/null || echo "000")
-if [ "${HTTP_CODE}" = "204" ]; then
-  log "Health endpoint returned 204"
-else
-  err "Health endpoint returned ${HTTP_CODE} (expected 204)"
-fi
+for PORT in "${APP_PORT}" "${RENDER_PORT}"; do
+  HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/_health" 2>/dev/null || echo "000")
+  if [ "${HTTP_CODE}" = "204" ]; then
+    log "Health endpoint on :${PORT} returned 204"
+  else
+    err "Health endpoint on :${PORT} returned ${HTTP_CODE} (expected 204)"
+  fi
+done
 
 ISR_SECRET=$(read_env ISR_ADMIN_SECRET)
 ISR_STATUS_CODE=$(curl -s -o /dev/null -w '%{http_code}' \

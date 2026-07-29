@@ -42,3 +42,49 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  # Second Strapi process so the droplet's second core is used. This container
+  # serves ONLY render-time API traffic (the Astro SSR origin points its
+  # STRAPI_URL at :1338); the `strapi` service above keeps the admin panel,
+  # cron scheduler, and the gateway's search/redeem/rating traffic on :1337.
+  # Publish storms then saturate this container while the admin one stays
+  # responsive.
+  #
+  # Set DATABASE_POOL_MAX=5 in ${ENV_FILE}: it applies to BOTH containers
+  # (shared env_file), so together they hold at most 10 Postgres connections —
+  # comfortably under the managed-DB 22-connection backend limit.
+  strapi-render:
+    image: ${APP_IMAGE:?APP_IMAGE is required}:${APP_IMAGE_TAG:?APP_IMAGE_TAG is required}
+    restart: unless-stopped
+    init: true
+    user: "1001:1001"
+    env_file:
+      - ${ENV_FILE:-.env.production}
+    environment:
+      NODE_ENV: production
+      # The */5 scheduler writes to the DB and must run exactly once — in the
+      # admin container. Never enable cron here.
+      CRON_ENABLED: "false"
+    ports:
+      - "127.0.0.1:${RENDER_PORT:-1338}:1337"
+      # Same rule as the admin container: APP_BIND must be the VPC private IP,
+      # never 0.0.0.0 (published ports bypass ufw). Restrict ${RENDER_PORT} to
+      # the Astro droplet's private IP via the DO Cloud Firewall.
+      - "${APP_BIND:?APP_BIND must be set to the VPC private IP in ${ENV_FILE:-.env.production} (never 0.0.0.0)}:${RENDER_PORT:-1338}:1337"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:1337/_health').then((r)=>process.exit(r.status===204?0:1)).catch(()=>process.exit(1))
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
