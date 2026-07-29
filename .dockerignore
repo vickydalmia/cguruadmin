@@ -16,12 +16,9 @@ coverage
 docs
 deploy
 wordpress
+migration
 migration.log
-migration/node_modules
-migration/dist
-migration/backups
-migration/*.log
-migration/diagnose-search-*.json
+migration-errors.log
 
 npm-debug.log*
 yarn-debug.log*
