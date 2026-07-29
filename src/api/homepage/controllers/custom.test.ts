@@ -55,13 +55,14 @@ function actionableDeal(index: number, overrides: Record<string, any> = {}) {
 }
 
 describe('homepage aggregate offer population', () => {
-  it('ships full card content without bloating compact entity and hero references', async () => {
+  it('ships full offer card content while keeping hero references compact', async () => {
     const harness = createHarness({});
 
     await harness.controller.homepageFull(harness.ctx as any);
 
     const populate = harness.findFirst.mock.calls[0]?.[0].populate;
     const couponRefs = [
+      populate.topOffers.populate.items.populate.coupon,
       populate.cgExclusive.populate.items.populate.coupon,
       populate.newlyAdded.populate.items.populate.coupon,
       populate.offersByBrand.populate.offers,
@@ -81,10 +82,6 @@ describe('homepage aggregate offer population', () => {
     const heroDeal = populate.hero.populate.products.populate.deal;
     expect(heroDeal.fields).not.toContain('content');
     expect(heroDeal.fields).not.toContain('excerpt');
-
-    const topOfferCoupon = populate.topOffers.populate.items.populate.coupon;
-    expect(topOfferCoupon.fields).not.toContain('content');
-    expect(topOfferCoupon.fields).not.toContain('excerpt');
 
     expect(populate.popularStores.populate.featuredStore.fields).not.toContain(
       'shortDescription',

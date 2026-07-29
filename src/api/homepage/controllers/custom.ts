@@ -71,13 +71,6 @@ const heroDealRef = {
   fields: DEAL_FIELDS.filter((field) => field !== 'content'),
 };
 
-// Top Offers are compact campaign tiles. Their Figma contract intentionally
-// excludes details and validity, so do not ship unused rich text for them.
-const topOfferCouponRef = {
-  ...couponRef,
-  fields: COUPON_FIELDS.filter((field) => field !== 'content'),
-};
-
 const publishedCouponRef = {
   ...couponRef,
   filters: PUBLISHED_OFFER_FILTER,
@@ -90,11 +83,6 @@ const publishedDealRef = {
 
 const publishedHeroDealRef = {
   ...heroDealRef,
-  filters: PUBLISHED_OFFER_FILTER,
-};
-
-const publishedTopOfferCouponRef = {
-  ...topOfferCouponRef,
   filters: PUBLISHED_OFFER_FILTER,
 };
 
@@ -126,7 +114,7 @@ const HOMEPAGE_POPULATE = {
   topOffers: {
     populate: {
       viewAllCta: true,
-      items: { populate: { coupon: publishedTopOfferCouponRef, banner: true } },
+      items: { populate: { coupon: publishedCouponRef, banner: true } },
     },
   },
   popularStores: {
