@@ -14,6 +14,18 @@
       "relation": "oneToOne",
       "target": "api::category.category"
     },
+    "url": {
+      "type": "string",
+      "maxLength": 500,
+      "regex": "^(?:/(?!/)\\S*|https?://[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?([.][a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+(:[0-9]{1,5})?([/?#]\\S*)?)$"
+    },
+    "icon": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": [
+        "images"
+      ]
+    },
     "links": {
       "type": "component",
       "repeatable": true,

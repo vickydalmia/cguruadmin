@@ -674,6 +674,53 @@ export interface FooterSocialLink extends Struct.ComponentSchema {
   };
 }
 
+export interface HeaderCouponNotification extends Struct.ComponentSchema {
+  collectionName: 'components_header_coupon_notifications';
+  info: {
+    displayName: 'Coupon';
+    icon: 'ticket';
+  };
+  attributes: {
+    coupon: Schema.Attribute.Relation<'oneToOne', 'api::coupon.coupon'>;
+    imageOverride: Schema.Attribute.Media<'images'>;
+    titleOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 200;
+      }>;
+  };
+}
+
+export interface HeaderNotification extends Struct.ComponentSchema {
+  collectionName: 'components_header_notifications';
+  info: {
+    displayName: 'Notification';
+    icon: 'bell';
+  };
+  attributes: {
+    coupon: Schema.Attribute.Component<'header.coupon-notification', false>;
+    productDeal: Schema.Attribute.Component<
+      'header.product-deal-notification',
+      false
+    >;
+  };
+}
+
+export interface HeaderProductDealNotification extends Struct.ComponentSchema {
+  collectionName: 'components_header_product_deal_notifications';
+  info: {
+    displayName: 'Product Deal';
+    icon: 'shoppingCart';
+  };
+  attributes: {
+    imageOverride: Schema.Attribute.Media<'images'>;
+    productDeal: Schema.Attribute.Relation<'oneToOne', 'api::deal.deal'>;
+    titleOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 200;
+      }>;
+  };
+}
+
 export interface HeaderSearchSuggestion extends Struct.ComponentSchema {
   collectionName: 'components_header_search_suggestions';
   info: {
@@ -1106,8 +1153,13 @@ export interface NavCategorySection extends Struct.ComponentSchema {
   };
   attributes: {
     category: Schema.Attribute.Relation<'oneToOne', 'api::category.category'>;
+    icon: Schema.Attribute.Media<'images'>;
     links: Schema.Attribute.Component<'nav.link', true>;
     title: Schema.Attribute.String & Schema.Attribute.Required;
+    url: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }>;
   };
 }
 
@@ -1121,6 +1173,7 @@ export interface NavLink extends Struct.ComponentSchema {
     bold: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     category: Schema.Attribute.Relation<'oneToOne', 'api::category.category'>;
     featured: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    icon: Schema.Attribute.Media<'images'>;
     label: Schema.Attribute.String;
     store: Schema.Attribute.Relation<'oneToOne', 'api::store.store'>;
     url: Schema.Attribute.String;
@@ -1441,6 +1494,9 @@ declare module '@strapi/strapi' {
       'footer.link-section': FooterLinkSection;
       'footer.partner-card': FooterPartnerCard;
       'footer.social-link': FooterSocialLink;
+      'header.coupon-notification': HeaderCouponNotification;
+      'header.notification': HeaderNotification;
+      'header.product-deal-notification': HeaderProductDealNotification;
       'header.search-suggestion': HeaderSearchSuggestion;
       'header.search-top-store': HeaderSearchTopStore;
       'home.bank-offer-item': HomeBankOfferItem;

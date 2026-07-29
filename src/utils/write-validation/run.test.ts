@@ -34,6 +34,8 @@ describe('write-validation step order', () => {
       'validateChangedFields',
       'validateHomepageImages',
       'validateHomepagePopularSearches',
+      'validateMenuCategorySections',
+      'validateMenuNotification',
       'validateDealOfTheDaySectionLimits',
       'validateEntityTopPickCoupons',
       'validateEntityOrderedCoupons',

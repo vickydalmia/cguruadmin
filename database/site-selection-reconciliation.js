@@ -6,6 +6,14 @@ const HEADER_SEARCH_SUGGESTIONS = [
   { text: "Myntra Coupons", url: "/search/?q=Myntra" },
   { text: "Today’s Deals", url: "/deal-of-the-day/" },
 ];
+const MENU_CATEGORY_DEFAULTS = {
+  top_stores_label: "Top Stores",
+  top_stores_title: "All Stores",
+  categories_label: "Categories",
+  categories_title: "All Categories",
+  categories_popular_stores_title: "Popular Stores",
+  categories_view_all_url: "/categories/",
+};
 const KINDS = ["store", "brand", "category", "bank"];
 const LEGACY_SNAPSHOT_TABLE = "site_selection_legacy_popular_searches";
 
@@ -337,6 +345,36 @@ async function backfillMenuSearch(knex, globalStores) {
   return { ready: true, stores, suggestions };
 }
 
+async function backfillMenuCategoryCopy(knex) {
+  if (!(await knex.schema.hasTable("menus"))) {
+    return { ready: false, rows: 0 };
+  }
+  for (const column of Object.keys(MENU_CATEGORY_DEFAULTS)) {
+    if (!(await knex.schema.hasColumn("menus", column))) {
+      return { ready: false, rows: 0 };
+    }
+  }
+
+  let rows = 0;
+  for (const menu of await knex("menus")
+    .select("id", ...Object.keys(MENU_CATEGORY_DEFAULTS))
+    .orderBy("id")) {
+    const update = {};
+    for (const [column, fallback] of Object.entries(
+      MENU_CATEGORY_DEFAULTS,
+    )) {
+      const value = menu[column];
+      if (value == null || String(value).trim() === "") {
+        update[column] = fallback;
+      }
+    }
+    if (Object.keys(update).length === 0) continue;
+    await knex("menus").where("id", menu.id).update(update);
+    rows += 1;
+  }
+  return { ready: true, rows };
+}
+
 async function backfillHomepagePopularSearches(knex, fallbackStores) {
   const required = [
     "homepages",
@@ -496,6 +534,7 @@ async function reconcileSiteSelectionsAfterSchemaSync(knex, logger = console) {
       ? await menuDefaultStoreIds(db, menus[0].id, globalStores)
       : globalStores.slice(0, 8);
     const menu = await backfillMenuSearch(db, globalStores);
+    const menuCopy = await backfillMenuCategoryCopy(db);
     const homepage = await backfillHomepagePopularSearches(
       db,
       fallbackStores,
@@ -506,22 +545,24 @@ async function reconcileSiteSelectionsAfterSchemaSync(knex, logger = console) {
     ) {
       await db.schema.dropTable(LEGACY_SNAPSHOT_TABLE);
     }
-    if (!menu.ready || !homepage.ready) {
+    if (!menu.ready || !menuCopy.ready || !homepage.ready) {
       logger.warn(
         "[site-selections] latest component tables are not available yet; retrying after the next schema sync",
       );
     }
-    if (menu.stores || menu.suggestions || homepage.links) {
+    if (menu.stores || menu.suggestions || menuCopy.rows || homepage.links) {
       logger.info(
         `[site-selections] added ${homepage.links} homepage relation(s), ` +
-          `${menu.stores} search store(s), and ${menu.suggestions} suggestion(s)`,
+          `${menu.stores} search store(s), ${menu.suggestions} suggestion(s), ` +
+          `and filled ${menuCopy.rows} menu copy row(s)`,
       );
     }
     return {
       homepageLinks: homepage.links,
       searchStores: menu.stores,
       searchSuggestions: menu.suggestions,
-      ready: menu.ready && homepage.ready,
+      menuCopyRows: menuCopy.rows,
+      ready: menu.ready && menuCopy.ready && homepage.ready,
     };
   };
   return knex.isTransaction ? run(knex) : knex.transaction(run);
@@ -529,6 +570,7 @@ async function reconcileSiteSelectionsAfterSchemaSync(knex, logger = console) {
 
 module.exports = {
   HEADER_SEARCH_SUGGESTIONS,
+  MENU_CATEGORY_DEFAULTS,
   reconcileSiteSelectionsAfterSchemaSync,
   resolveLegacyPopularSearch,
   routeSlug,

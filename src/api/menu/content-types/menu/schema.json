@@ -4,8 +4,8 @@
   "info": {
     "singularName": "menu",
     "pluralName": "menus",
-    "displayName": "Menu",
-    "description": "Site navigation: top stores dropdown, category sections, extra links"
+    "displayName": "Header Settings",
+    "description": "Site header navigation, search suggestions, and active notifications"
   },
   "options": {
     "draftAndPublish": false
@@ -13,12 +13,25 @@
   "attributes": {
     "title": {
       "type": "string",
-      "default": "Menu"
+      "default": "Header Settings"
+    },
+    "notification": {
+      "type": "component",
+      "component": "header.notification",
+      "repeatable": false
     },
     "topStores": {
       "type": "relation",
       "relation": "oneToMany",
       "target": "api::store.store"
+    },
+    "topStoresLabel": {
+      "type": "string",
+      "default": "Top Stores"
+    },
+    "topStoresTitle": {
+      "type": "string",
+      "default": "All Stores"
     },
     "topStoresViewAllUrl": {
       "type": "string",
@@ -35,11 +48,23 @@
       "repeatable": true,
       "component": "header.search-suggestion"
     },
+    "categoriesLabel": {
+      "type": "string",
+      "default": "Categories"
+    },
     "categoriesTitle": {
-      "type": "string"
+      "type": "string",
+      "default": "All Categories"
+    },
+    "categoriesPopularStoresTitle": {
+      "type": "string",
+      "default": "Popular Stores"
     },
     "categoriesViewAllUrl": {
-      "type": "string"
+      "type": "string",
+      "default": "/categories/",
+      "maxLength": 500,
+      "regex": "^(?:/(?!/)\\S*|https?://[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?([.][a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+(:[0-9]{1,5})?([/?#]\\S*)?)$"
     },
     "categorySections": {
       "type": "component",

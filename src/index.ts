@@ -368,6 +368,32 @@ for (const rule of HOMEPAGE_IMAGE_RULES) {
 }
 (COMPONENT_FIELD_DESCRIPTIONS['shared.seo'] ??= {}).canonicalUrl =
   'Enter only a URL or site path, for example /airport-tour-coupons/. Do not paste HTML such as <link rel="canonical" href="..." />.';
+(COMPONENT_FIELD_DESCRIPTIONS['nav.category-section'] ??= {}).category =
+  'Preferred destination. When selected, the menu links to this Category and uses its icon unless an Icon override is uploaded below.';
+COMPONENT_FIELD_DESCRIPTIONS['nav.category-section'].url =
+  'Optional custom destination used only when no Category is selected. Enter a rooted site path or full http(s) URL.';
+COMPONENT_FIELD_DESCRIPTIONS['nav.category-section'].icon =
+  'Square menu icon. Leave empty to reuse the selected Category icon; upload one when this group uses a custom URL without a Category. It renders at 24px on desktop and 20px on mobile.';
+COMPONENT_FIELD_DESCRIPTIONS['nav.category-section'].links =
+  'Ordered child links. They render below the group on desktop and in the mobile drill-down panel; upload each child Icon for the mobile design and enable Bold only for links that need emphasis.';
+(COMPONENT_FIELD_DESCRIPTIONS['nav.link'] ??= {}).icon =
+  'Optional icon override for category drill-down rows. Leave empty to reuse the linked Category icon; custom category links can upload their own square icon.';
+(COMPONENT_FIELD_DESCRIPTIONS['header.coupon-notification'] ??= {}).coupon =
+  'Select the Coupon shown in the header notification list. Leave this component empty to show no Coupon notification.';
+COMPONENT_FIELD_DESCRIPTIONS['header.coupon-notification'].titleOverride =
+  'Optional. Leave blank to use the selected Coupon title.';
+COMPONENT_FIELD_DESCRIPTIONS['header.coupon-notification'].imageOverride =
+  'Optional. Leave blank to use the selected Coupon image or merchant logo. Maximum 80 × 80 px; a square image is recommended.';
+(COMPONENT_FIELD_DESCRIPTIONS['header.product-deal-notification'] ??= {}).productDeal =
+  'Select the Product Deal shown in the header notification list. Leave this component empty to show no Product Deal notification.';
+COMPONENT_FIELD_DESCRIPTIONS['header.product-deal-notification'].titleOverride =
+  'Optional. Leave blank to use the selected Product Deal title.';
+COMPONENT_FIELD_DESCRIPTIONS['header.product-deal-notification'].imageOverride =
+  'Optional. Leave blank to use the selected Product Deal image. Maximum 80 × 80 px; a square image is recommended.';
+(COMPONENT_FIELD_DESCRIPTIONS['header.notification'] ??= {}).coupon =
+  'Optional Coupon notification. Open this group to select a Coupon and configure its title and image overrides.';
+COMPONENT_FIELD_DESCRIPTIONS['header.notification'].productDeal =
+  'Optional Product Deal notification. Open this group to select a Product Deal and configure its title and image overrides.';
 async function ensureComponentFieldDescriptions(strapi: Core.Strapi): Promise<void> {
   const service: any = strapi.plugin('content-manager').service('components');
   if (!service) return;
@@ -487,6 +513,54 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
       'Path starting with "/" or a full http(s):// address. Must not point ' +
       'back at From or close a redirect loop.',
   },
+  {
+    uid: 'api::menu.menu',
+    field: 'topStoresLabel',
+    hint:
+      'Label used by the desktop and mobile Top Stores navigation trigger and panel heading.',
+  },
+  {
+    uid: 'api::menu.menu',
+    field: 'topStoresTitle',
+    hint:
+      'Label on the All Stores control shown in both desktop and mobile store menus.',
+  },
+  {
+    uid: 'api::menu.menu',
+    field: 'topStoresViewAllUrl',
+    hint:
+      'Destination for the All Stores control. Enter a rooted site path or full http(s) URL.',
+  },
+  {
+    uid: 'api::menu.menu',
+    field: 'categoriesLabel',
+    hint:
+      'Label used by the desktop navigation trigger, desktop mega-menu heading, and mobile Categories panel.',
+  },
+  {
+    uid: 'api::menu.menu',
+    field: 'categoriesTitle',
+    hint:
+      'Label on the All Categories control shown in both desktop and mobile category menus.',
+  },
+  {
+    uid: 'api::menu.menu',
+    field: 'categoriesPopularStoresTitle',
+    hint:
+      'Heading above the first four configured Top Stores in the mobile Categories drill-down.',
+  },
+  {
+    uid: 'api::menu.menu',
+    field: 'categoriesViewAllUrl',
+    hint:
+      'Destination for the All Categories control. Enter a rooted site path or full http(s) URL.',
+  },
+  {
+    uid: 'api::menu.menu',
+    field: 'notification',
+    hint:
+      'Header notifications are managed together here. Open this section to configure the optional Coupon and Product Deal entries.',
+  },
   // Mirrors identity-validation.ts: name unique per type; slug unique across
   // all four taxonomies and off the reserved-route list.
   ...['store', 'brand', 'category', 'bank'].flatMap((name) => [
@@ -571,6 +645,16 @@ export const CONTENT_TYPE_FIELD_HINTS: Record<string, Record<string, string>> = 
 const CONTENT_TYPE_FIELD_LABELS: Record<string, Record<string, string>> = {
   'api::coupon.coupon': { publishedOn: 'Published date' },
   'api::deal.deal': { publishedOn: 'Published date' },
+  'api::menu.menu': {
+    notification: 'Notification',
+    topStoresLabel: 'Top Stores navigation label',
+    topStoresTitle: 'All Stores button label',
+    topStoresViewAllUrl: 'All Stores button URL',
+    categoriesLabel: 'Categories navigation label',
+    categoriesTitle: 'All Categories button label',
+    categoriesPopularStoresTitle: 'Mobile Popular Stores heading',
+    categoriesViewAllUrl: 'All Categories button URL',
+  },
   ...Object.fromEntries(
     ['store', 'brand', 'category', 'bank'].map((name) => [
       `api::${name}.${name}`,

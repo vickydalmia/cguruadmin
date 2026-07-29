@@ -1,0 +1,25 @@
+{
+  "collectionName": "components_header_coupon_notifications",
+  "info": {
+    "displayName": "Coupon",
+    "icon": "ticket"
+  },
+  "attributes": {
+    "coupon": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::coupon.coupon"
+    },
+    "titleOverride": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "imageOverride": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": [
+        "images"
+      ]
+    }
+  }
+}

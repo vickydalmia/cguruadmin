@@ -21,6 +21,8 @@ import {
 import { validateHomepageImages } from '../homepage-image-validation';
 import { validateHomepagePopularSearches } from '../homepage-popular-searches-validation';
 import { validateIdentity } from '../identity-validation';
+import { MENU_UID, validateMenuCategorySections } from '../menu-category-validation';
+import { validateMenuNotification } from '../menu-notification-validation';
 import { validateOfferFieldsForWrite } from '../offer-field-validation';
 import {
   isOfferLifecycleUid,
@@ -161,6 +163,20 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     applies: (uid) => uid === HOMEPAGE_UID,
     run: ({ strapi, data, documentId }) =>
       validateHomepagePopularSearches(strapi, data, documentId),
+  },
+  {
+    name: 'validateMenuCategorySections',
+    actions: CREATE_UPDATE,
+    applies: (uid) => uid === MENU_UID,
+    run: ({ strapi, data, documentId }) =>
+      validateMenuCategorySections(strapi, data, documentId),
+  },
+  {
+    name: 'validateMenuNotification',
+    actions: CREATE_UPDATE,
+    applies: (uid) => uid === MENU_UID,
+    run: ({ strapi, data, documentId }) =>
+      validateMenuNotification(strapi, data, documentId),
   },
   {
     name: 'validateDealOfTheDaySectionLimits',

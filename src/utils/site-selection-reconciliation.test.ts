@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const {
   HEADER_SEARCH_SUGGESTIONS,
+  MENU_CATEGORY_DEFAULTS,
   resolveLegacyPopularSearch,
   routeSlug,
   uniqueIds,
@@ -24,6 +25,17 @@ describe('site selection compatibility reconciliation', () => {
       { text: 'Myntra Coupons', url: '/search/?q=Myntra' },
       { text: 'Today’s Deals', url: '/deal-of-the-day/' },
     ]);
+  });
+
+  it('retains the responsive Categories menu defaults', () => {
+    expect(MENU_CATEGORY_DEFAULTS).toEqual({
+      top_stores_label: 'Top Stores',
+      top_stores_title: 'All Stores',
+      categories_label: 'Categories',
+      categories_title: 'All Categories',
+      categories_popular_stores_title: 'Popular Stores',
+      categories_view_all_url: '/categories/',
+    });
   });
 
   it('converts legacy relations and unambiguous canonical URLs', () => {

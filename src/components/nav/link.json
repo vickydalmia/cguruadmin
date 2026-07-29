@@ -21,6 +21,13 @@
       "relation": "oneToOne",
       "target": "api::category.category"
     },
+    "icon": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": [
+        "images"
+      ]
+    },
     "featured": {
       "type": "boolean",
       "default": false

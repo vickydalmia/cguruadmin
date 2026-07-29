@@ -1260,8 +1260,8 @@ export interface ApiJobJob extends Struct.CollectionTypeSchema {
 export interface ApiMenuMenu extends Struct.SingleTypeSchema {
   collectionName: 'menus';
   info: {
-    description: 'Site navigation: top stores dropdown, category sections, extra links';
-    displayName: 'Menu';
+    description: 'Site header navigation, search suggestions, and active notifications';
+    displayName: 'Header Settings';
     pluralName: 'menus';
     singularName: 'menu';
   };
@@ -1269,8 +1269,17 @@ export interface ApiMenuMenu extends Struct.SingleTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
-    categoriesTitle: Schema.Attribute.String;
-    categoriesViewAllUrl: Schema.Attribute.String;
+    categoriesLabel: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Categories'>;
+    categoriesPopularStoresTitle: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Popular Stores'>;
+    categoriesTitle: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'All Categories'>;
+    categoriesViewAllUrl: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }> &
+      Schema.Attribute.DefaultTo<'/categories/'>;
     categorySections: Schema.Attribute.Component<'nav.category-section', true>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -1279,6 +1288,7 @@ export interface ApiMenuMenu extends Struct.SingleTypeSchema {
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::menu.menu'> &
       Schema.Attribute.Private;
+    notification: Schema.Attribute.Component<'header.notification', false>;
     publishedAt: Schema.Attribute.DateTime;
     searchSuggestions: Schema.Attribute.Component<
       'header.search-suggestion',
@@ -1294,8 +1304,13 @@ export interface ApiMenuMenu extends Struct.SingleTypeSchema {
         },
         number
       >;
-    title: Schema.Attribute.String & Schema.Attribute.DefaultTo<'Menu'>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Header Settings'>;
     topStores: Schema.Attribute.Relation<'oneToMany', 'api::store.store'>;
+    topStoresLabel: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Top Stores'>;
+    topStoresTitle: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'All Stores'>;
     topStoresViewAllUrl: Schema.Attribute.String &
       Schema.Attribute.DefaultTo<'/stores/'>;
     updatedAt: Schema.Attribute.DateTime;

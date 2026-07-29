@@ -339,6 +339,13 @@ describe('site chrome aggregate population', () => {
       populate: { store: expect.any(Object) },
     });
     expect(menuCall.populate.searchSuggestions).toBe(true);
+    expect(menuCall.populate.categorySections.populate.icon).toBe(true);
+    expect(
+      menuCall.populate.categorySections.populate.links.populate.icon,
+    ).toBe(true);
+    expect(
+      menuCall.populate.categorySections.populate.category.populate.icon,
+    ).toBe(true);
     expect(response.menu.searchTopStores).toHaveLength(8);
     expect(footerCall.populate.countries).toEqual({
       populate: { flag: true },
@@ -347,6 +354,137 @@ describe('site chrome aggregate population', () => {
       populate: { icon: true },
     });
     expect(response.footer).toEqual(rows['api::footer.footer']);
+  });
+});
+
+describe('header notification aggregate', () => {
+  function notificationHarness(menu: any) {
+    const findFirst = vi.fn().mockResolvedValue(menu);
+    const sanitizeOutput = vi.fn(async (data: any) => data);
+    const controller = createHomepageController({
+      strapi: {
+        documents: vi.fn(() => ({ findFirst })),
+        contentType: vi.fn(() => ({})),
+        contentAPI: { sanitize: { output: sanitizeOutput } },
+      } as any,
+    });
+    const ctx = {
+      state: { auth: null },
+      send: vi.fn((payload: any) => payload),
+    };
+    return { controller, ctx, findFirst };
+  }
+
+  it('emits independent Coupon and Product Deal items with their overrides', async () => {
+    const couponOverride = {
+      url: '/uploads/coupon-notification.webp',
+      alternativeText: 'Coupon notification artwork',
+    };
+    const dealOverride = {
+      url: '/uploads/deal-notification.webp',
+      alternativeText: 'Deal notification artwork',
+    };
+    const harness = notificationHarness({
+      notification: {
+        coupon: {
+          titleOverride: 'Coupon saving live now',
+          imageOverride: couponOverride,
+          coupon: {
+            id: 7,
+            title: 'Original Coupon title',
+            contentStatus: 'published',
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            image: { url: '/uploads/coupon.webp' },
+          },
+        },
+        productDeal: {
+          titleOverride: 'Today only: extra savings',
+          imageOverride: dealOverride,
+          productDeal: {
+            id: 42,
+            title: 'Original Deal title',
+            contentStatus: 'published',
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            dealImage: { url: '/uploads/deal.webp' },
+          },
+        },
+      },
+    });
+
+    const response = await harness.controller.headerNotification(
+      harness.ctx as any,
+    );
+
+    expect(response).toEqual({
+      data: [
+        {
+          kind: 'coupon',
+          targetId: 7,
+          title: 'Coupon saving live now',
+          image: couponOverride,
+        },
+        {
+          kind: 'deal',
+          targetId: 42,
+          title: 'Today only: extra savings',
+          image: dealOverride,
+        },
+      ],
+    });
+    expect(harness.findFirst.mock.calls[0]?.[0].populate).toEqual(
+      expect.objectContaining({
+        notification: expect.any(Object),
+      }),
+    );
+  });
+
+  it('falls back per item and omits only the stale offer', async () => {
+    const logo = { url: '/uploads/store-logo.webp' };
+    const liveHarness = notificationHarness({
+      notification: {
+        coupon: {
+          titleOverride: ' ',
+          imageOverride: null,
+          coupon: {
+            id: 7,
+            title: 'AJIO Fashion Sale',
+            contentStatus: 'published',
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            image: null,
+            stores: [{ logo }],
+          },
+        },
+        productDeal: {
+          productDeal: {
+            id: 8,
+            title: 'Expired Product Deal',
+            contentStatus: 'published',
+            expiresAt: new Date(Date.now() - 60_000).toISOString(),
+            dealImage: { url: '/uploads/expired.webp' },
+          },
+        },
+      },
+    });
+
+    await expect(
+      liveHarness.controller.headerNotification(liveHarness.ctx as any),
+    ).resolves.toEqual({
+      data: [
+        {
+          kind: 'coupon',
+          targetId: 7,
+          title: 'AJIO Fashion Sale',
+          image: logo,
+        },
+      ],
+    });
+  });
+
+  it('returns an empty list when Header Settings do not exist', async () => {
+    const harness = notificationHarness(null);
+    await expect(
+      harness.controller.headerNotification(harness.ctx as any),
+    ).resolves.toEqual({ data: [] });
   });
 });
 

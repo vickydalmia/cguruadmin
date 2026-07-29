@@ -1,0 +1,19 @@
+{
+  "collectionName": "components_header_notifications",
+  "info": {
+    "displayName": "Notification",
+    "icon": "bell"
+  },
+  "attributes": {
+    "coupon": {
+      "type": "component",
+      "component": "header.coupon-notification",
+      "repeatable": false
+    },
+    "productDeal": {
+      "type": "component",
+      "component": "header.product-deal-notification",
+      "repeatable": false
+    }
+  }
+}

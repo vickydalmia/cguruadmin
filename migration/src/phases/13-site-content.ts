@@ -1921,6 +1921,56 @@ async function getExploreCategories(): Promise<CategoryRow[]> {
   return picked;
 }
 
+interface MenuChildCategory {
+  id: number;
+  name: string;
+}
+
+async function getMenuChildCategoriesByParent(): Promise<
+  Map<number, MenuChildCategory[]>
+> {
+  const terms = await wpQuery<{
+    term_id: number;
+    name: string;
+    parent: number;
+    choose_type: string | null;
+  }>(`
+    SELECT
+      t.term_id,
+      t.name,
+      tt.parent,
+      MAX(CASE WHEN tm.meta_key = 'choose_type' THEN tm.meta_value END) AS choose_type
+    FROM wp_terms t
+    JOIN wp_term_taxonomy tt
+      ON tt.term_id = t.term_id
+     AND tt.taxonomy = 'category'
+    LEFT JOIN wp_termmeta tm
+      ON tm.term_id = t.term_id
+     AND tm.meta_key = 'choose_type'
+    GROUP BY t.term_id, t.name, tt.parent
+    ORDER BY t.term_id
+  `);
+
+  const byParent = new Map<number, MenuChildCategory[]>();
+  for (const term of terms) {
+    if (term.choose_type !== "Category" || !term.parent) continue;
+    const [parent, child] = await Promise.all([
+      ensureTermMapping(term.parent),
+      ensureTermMapping(term.term_id),
+    ]);
+    if (parent?.table !== "categories" || child?.table !== "categories") {
+      continue;
+    }
+
+    const siblings = byParent.get(parent.id) ?? [];
+    if (!siblings.some((candidate) => candidate.id === child.id)) {
+      siblings.push({ id: child.id, name: clean(term.name) || term.name });
+      byParent.set(parent.id, siblings);
+    }
+  }
+  return byParent;
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // menu
 // ─────────────────────────────────────────────────────────────────────
@@ -1954,7 +2004,13 @@ async function seedMenu(
   const menuId = await insertRow("menus", {
     document_id: generateDocumentId("menu-singleton"),
     title: "Menu",
+    top_stores_label: "Top Stores",
+    top_stores_title: "All Stores",
     top_stores_view_all_url: "/stores/",
+    categories_label: "Categories",
+    categories_title: "All Categories",
+    categories_popular_stores_title: "Popular Stores",
+    categories_view_all_url: "/categories/",
     published_at: now,
     created_at: now,
     updated_at: now,
@@ -2035,9 +2091,12 @@ async function seedMenu(
     "category",
     "category"
   );
-  const navLinkStoreLnk = await detectLnk("components_nav_links", "store", "store");
-  const couponsStoresLnk = await detectLnk("coupons", "stores", "store");
-  const couponsCategoriesLnk = await detectLnk("coupons", "categories", "category");
+  const navLinkCategoryLnk = await detectLnk(
+    "components_nav_links",
+    "category",
+    "category"
+  );
+  const childCategoriesByParent = await getMenuChildCategoriesByParent();
 
   if (sectionTablesMissing.length > 0) {
     logger.warn(
@@ -2061,27 +2120,17 @@ async function seedMenu(
         await linkRel(sectionCategoryLnk, sectionId, category.id);
       }
 
-      // links: top stores in this category by published-coupon count
-      if (couponsStoresLnk && couponsCategoriesLnk) {
-        const stores = await pgQuery<StoreRow>(
-          `SELECT s.id, s.name
-           FROM "stores" s
-           JOIN "${couponsStoresLnk.table}" cs
-             ON cs."${couponsStoresLnk.targetCol}" = s.id
-           JOIN "${couponsCategoriesLnk.table}" cc
-             ON cc."${couponsCategoriesLnk.sourceCol}" = cs."${couponsStoresLnk.sourceCol}"
-            AND cc."${couponsCategoriesLnk.targetCol}" = $1
-           JOIN "coupons" c ON c.id = cs."${couponsStoresLnk.sourceCol}"
-             AND c.published_at IS NOT NULL
-             AND c.content_status = 'published'
-           GROUP BY s.id, s.name
-           ORDER BY COUNT(*) DESC
-           LIMIT 6`,
-          [category.id]
+      // Mobile drill-down rows are immediate child Categories, matching the
+      // shared desktop hierarchy. Their Category icons become the default;
+      // editors can upload per-link overrides from the Menu panel.
+      if (navLinkCategoryLnk) {
+        const children = (childCategoriesByParent.get(category.id) ?? []).slice(
+          0,
+          9
         );
-        for (let j = 0; j < stores.length; j++) {
+        for (let j = 0; j < children.length; j++) {
           const linkId = await insertRow("components_nav_links", {
-            label: stores[j].name,
+            label: children[j].name,
             url: null,
           });
           await addCmp(
@@ -2092,9 +2141,7 @@ async function seedMenu(
             "links",
             j + 1
           );
-          if (navLinkStoreLnk) {
-            await linkRel(navLinkStoreLnk, linkId, stores[j].id);
-          }
+          await linkRel(navLinkCategoryLnk, linkId, children[j].id);
         }
       }
       sectionCount++;

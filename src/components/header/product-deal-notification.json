@@ -1,0 +1,25 @@
+{
+  "collectionName": "components_header_product_deal_notifications",
+  "info": {
+    "displayName": "Product Deal",
+    "icon": "shoppingCart"
+  },
+  "attributes": {
+    "productDeal": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::deal.deal"
+    },
+    "titleOverride": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "imageOverride": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": [
+        "images"
+      ]
+    }
+  }
+}

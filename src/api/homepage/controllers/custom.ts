@@ -191,8 +191,9 @@ const MENU_POPULATE = {
   searchSuggestions: true,
   categorySections: {
     populate: {
+      icon: true,
       category: categoryRef,
-      links: { populate: { store: storeRef, category: categoryRef } },
+      links: { populate: { icon: true, store: storeRef, category: categoryRef } },
     },
   },
   extraItems: { populate: { store: storeRef, category: categoryRef } },
@@ -212,6 +213,89 @@ const GLOBAL_POPULATE = {
   telegramCta: true,
   newsletter: true,
 } as const;
+
+const HEADER_NOTIFICATION_POPULATE = {
+  notification: {
+    populate: {
+      coupon: {
+        populate: {
+          imageOverride: true,
+          coupon: {
+            fields: ['title', 'contentStatus', 'expiresAt'],
+            populate: {
+              image: true,
+              stores: storeRef,
+              brands: brandRef,
+              categories: categoryRef,
+              banks: bankRef,
+            },
+          },
+        },
+      },
+      productDeal: {
+        populate: {
+          imageOverride: true,
+          productDeal: {
+            fields: ['title', 'contentStatus', 'expiresAt'],
+            populate: { dealImage: true },
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+function nonBlank(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function firstCouponImage(coupon: any): any {
+  if (coupon?.image?.url) return coupon.image;
+  const candidates = [
+    ...(coupon?.stores ?? []).map((item: any) => item?.logo),
+    ...(coupon?.brands ?? []).map((item: any) => item?.logo),
+    ...(coupon?.banks ?? []).map((item: any) => item?.logo),
+    ...(coupon?.categories ?? []).map((item: any) => item?.icon),
+  ];
+  return candidates.find((media: any) => nonBlank(media?.url)) ?? null;
+}
+
+function notificationItem(
+  kind: 'coupon' | 'deal',
+  config: any,
+  now: Date,
+) {
+  const target = kind === 'coupon' ? config?.coupon : config?.productDeal;
+  if (!isLiveOffer(target, now)) return null;
+
+  const targetId = Number(target?.id);
+  const title =
+    nonBlank(config?.titleOverride) ?? nonBlank(target?.title);
+  const image =
+    config?.imageOverride?.url
+      ? config.imageOverride
+      : kind === 'coupon'
+        ? firstCouponImage(target)
+        : target?.dealImage;
+
+  if (
+    !Number.isSafeInteger(targetId) ||
+    targetId <= 0 ||
+    !title ||
+    !nonBlank(image?.url)
+  ) {
+    return null;
+  }
+
+  return { kind, targetId, title, image };
+}
+
+function headerNotificationPayload(menu: any, now = new Date()) {
+  return [
+    notificationItem('coupon', menu?.notification?.coupon, now),
+    notificationItem('deal', menu?.notification?.productDeal, now),
+  ].filter(Boolean);
+}
 
 // Homepage components reference coupons/deals directly, which bypasses the
 // contentStatus visibility filter used by the list endpoints — strip anything
@@ -430,6 +514,22 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       footer: sanitizedFooter,
       global: sanitizedGlobal,
     });
+  },
+
+  async headerNotification(ctx) {
+    const menu = await strapi.documents('api::menu.menu').findFirst({
+      fields: ['documentId'] as any,
+      populate: HEADER_NOTIFICATION_POPULATE as any,
+    });
+    if (!menu) return ctx.send({ data: [] });
+
+    const sanitizedMenu = await sanitizeOutput(
+      strapi,
+      ctx,
+      'api::menu.menu',
+      menu,
+    );
+    return ctx.send({ data: headerNotificationPayload(sanitizedMenu) });
   },
 
   async publicRouteMetadata(ctx) {
