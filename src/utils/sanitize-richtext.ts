@@ -12,6 +12,26 @@
 
 import sanitizeHtmlLib from 'sanitize-html';
 
+// couponzguru.com and every subdomain (www, beta, cms) count as internal;
+// anything else that resolves to an absolute http(s) URL is external and gets
+// rel="nofollow" added automatically — the editor has no per-link rel control
+// (TipTap always emits dofollow), so the sanitizer owns the policy. The
+// transform is a pure function of href, so sanitized output stays idempotent.
+const INTERNAL_HOST_PATTERN = /(^|\.)couponzguru\.com$/iu;
+
+function isExternalHttpHref(href: string | undefined): boolean {
+  if (!href) return false;
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    // Relative/rooted paths cannot leave the site.
+    return false;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+  return !INTERNAL_HOST_PATTERN.test(url.hostname);
+}
+
 export function cleanHtml(val: string | null | undefined): string | null {
   if (val == null) return null;
   const sanitized = sanitizeHtmlLib(val, {
@@ -31,9 +51,18 @@ export function cleanHtml(val: string | null | undefined): string | null {
     // Only safe URL schemes; drops javascript:, vbscript:, and data: URIs.
     allowedSchemes: ['http', 'https', 'mailto', 'tel'],
     allowProtocolRelative: false,
-    // Force noopener/noreferrer on links that open a new tab.
+    // Force noopener/noreferrer on every link; external links additionally
+    // get nofollow so editorial content never leaks link equity off-site.
     transformTags: {
-      a: sanitizeHtmlLib.simpleTransform('a', { rel: 'noopener noreferrer' }),
+      a: (tagName, attribs) => ({
+        tagName,
+        attribs: {
+          ...attribs,
+          rel: isExternalHttpHref(attribs.href)
+            ? 'nofollow noopener noreferrer'
+            : 'noopener noreferrer',
+        },
+      }),
     },
   }).trim();
   return sanitized.length > 0 ? sanitized : null;

@@ -510,6 +510,10 @@ for (const rule of HOMEPAGE_IMAGE_RULES) {
 }
 (COMPONENT_FIELD_DESCRIPTIONS['shared.seo'] ??= {}).canonicalUrl =
   'Enter only a URL or site path, for example /airport-tour-coupons/. Do not paste HTML such as <link rel="canonical" href="..." />.';
+COMPONENT_FIELD_DESCRIPTIONS['shared.seo'].ogImage =
+  'Share-card image shown when the page is shared on social apps. Recommended: at least 1200 × 630 px (1.91:1). Smaller images are allowed but may crop or blur in previews. Leave empty to use the site default card.';
+(COMPONENT_FIELD_DESCRIPTIONS['shared.entity-deal-page-seo'] ??= {}).ogImage =
+  'Share-card image shown when the deal page is shared on social apps. Recommended: at least 1200 × 630 px (1.91:1). Smaller images are allowed but may crop or blur in previews. Leave empty to use the site default card.';
 (COMPONENT_FIELD_DESCRIPTIONS['nav.category-section'] ??= {}).category =
   'Preferred destination. When selected, the menu links to this Category and uses its icon unless an Icon override is uploaded below.';
 COMPONENT_FIELD_DESCRIPTIONS['nav.category-section'].url =

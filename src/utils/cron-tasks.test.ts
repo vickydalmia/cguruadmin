@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const NO_CHANGES = {
@@ -24,12 +26,24 @@ vi.mock('./curated-offer-relations', () => ({
 
 import cronTasks from '../../config/cron-tasks';
 
-function strapiHarness(documents: any[] = []) {
+function strapiHarness(
+  documents: any[] = [],
+  { poolUids = ['api::coupon.coupon'] }: { poolUids?: string[] } = {},
+) {
   const update = vi.fn(async () => undefined);
   const findMany = vi.fn(async () => documents);
   return {
     strapi: {
       documents: vi.fn(() => ({ findMany, update })),
+      // Only offer types carrying a pool relation take part in the
+      // pool-exhaustion sweep.
+      contentType: vi.fn((uid: string) => ({
+        attributes: poolUids.includes(uid) ? { uniqueCouponPool: {} } : {},
+      })),
+      // The nightly job resolves database/*.js from the app root, exactly as
+      // production does — see loadUniqueCodeIntegrity in config/cron-tasks.ts.
+      dirs: { app: { root: process.cwd() } },
+      db: { connection: undefined },
       log: {
         info: vi.fn(),
         error: vi.fn(),
@@ -263,5 +277,166 @@ describe('nightly ISR consistency cron', () => {
       strapi,
       expect.objectContaining({ payload: { paths: ['/amazon/'] } }),
     );
+  });
+});
+
+describe('content lifecycle cron — exhausted unique pools', () => {
+  beforeEach(() => {
+    mocks.enqueueStandaloneIsrEvent.mockReset();
+    mocks.removeInactiveCuratedOfferRelations.mockReset();
+    mocks.removeDisplayedTopPicksFromOrdered.mockReset();
+    mocks.removeInactiveCuratedOfferRelations.mockResolvedValue(NO_CHANGES);
+    mocks.removeDisplayedTopPicksFromOrdered.mockResolvedValue(NO_CHANGES);
+  });
+
+  /** Answers each sweep separately so filter routing is actually exercised. */
+  function poolHarness(byPoolState: Record<string, any[]>) {
+    const update = vi.fn(async () => undefined);
+    const findMany = vi.fn(async ({ filters }: any) => {
+      if (!filters?.uniqueCouponPool) return [];
+      return filters.uniqueCouponPool.exhaustedAt?.$notNull
+        ? (byPoolState.drained ?? [])
+        : (byPoolState.restocked ?? []);
+    });
+    return {
+      strapi: {
+        documents: vi.fn(() => ({ findMany, update })),
+        contentType: vi.fn((uid: string) => ({
+          attributes:
+            uid === 'api::coupon.coupon' ? { uniqueCouponPool: {} } : {},
+        })),
+        log: { info: vi.fn(), error: vi.fn() },
+      } as any,
+      findMany,
+      update,
+    };
+  }
+
+  it('expires a published unique coupon once its pool runs dry', async () => {
+    const { strapi, update } = poolHarness({
+      drained: [
+        {
+          documentId: 'coupon-dry',
+          contentStatus: 'published',
+          scheduledAt: null,
+          expiresAt: '2027-01-01T00:00:00.000Z',
+          publishedOn: '2026-07-20T00:00:00.000Z',
+          couponType: 'unique',
+          uniqueCouponPool: { exhaustedAt: '2026-07-30T00:00:00.000Z' },
+        },
+      ],
+    });
+
+    await cronTasks.scheduler.task({ strapi });
+
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: 'coupon-dry',
+        data: expect.objectContaining({ contentStatus: 'expired' }),
+      }),
+    );
+  });
+
+  it('republishes an expired unique coupon once its pool is restocked', async () => {
+    const { strapi, update } = poolHarness({
+      restocked: [
+        {
+          documentId: 'coupon-refilled',
+          contentStatus: 'expired',
+          scheduledAt: null,
+          expiresAt: '2027-01-01T00:00:00.000Z',
+          publishedOn: '2026-07-20T00:00:00.000Z',
+          couponType: 'unique',
+          uniqueCouponPool: { exhaustedAt: null },
+        },
+      ],
+    });
+
+    await cronTasks.scheduler.task({ strapi });
+
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: 'coupon-refilled',
+        data: expect.objectContaining({ contentStatus: 'published' }),
+      }),
+    );
+  });
+
+  it('bounds the restock sweep by expiresAt so date-expired offers are not rescanned forever', async () => {
+    const { strapi, findMany } = poolHarness({});
+
+    await cronTasks.scheduler.task({ strapi });
+
+    const restock = findMany.mock.calls.find(
+      ([args]: any) => args.filters?.uniqueCouponPool?.exhaustedAt?.$null,
+    );
+    expect(restock?.[0].filters.$and[0].$or).toEqual([
+      { expiresAt: { $null: true } },
+      { expiresAt: { $gt: expect.any(String) } },
+    ]);
+  });
+
+  it('keeps relation conditions out of the date sweep disjunction', async () => {
+    // An OR-of-EXISTS is the shape that inflated planner cost and tripped PG
+    // JIT on public search; each sweep must stay a flat, narrow query.
+    const { strapi, findMany } = poolHarness({});
+
+    await cronTasks.scheduler.task({ strapi });
+
+    const dateSweeps = findMany.mock.calls.filter(
+      ([args]: any) => !args.filters?.uniqueCouponPool,
+    );
+    expect(dateSweeps.length).toBeGreaterThan(0);
+    for (const [args] of dateSweeps) {
+      expect(JSON.stringify(args.filters)).not.toContain('uniqueCouponPool');
+    }
+  });
+
+  it('does not sweep pools for an offer type that has no pool relation', async () => {
+    const { strapi, findMany } = poolHarness({});
+
+    await cronTasks.scheduler.task({ strapi });
+
+    const dealCalls = strapi.documents.mock.calls.filter(
+      ([uid]: any) => uid === 'api::deal.deal',
+    );
+    // Deals get the date sweep only — one call, no pool sweeps.
+    expect(dealCalls).toHaveLength(1);
+    expect(findMany.mock.calls.filter(([args]: any) => args.filters?.uniqueCouponPool))
+      .toHaveLength(2);
+  });
+});
+
+describe('cron config is loadable from the compiled layout', () => {
+  // THE BUG THIS PINS. `database/*.js` is CommonJS shared with the Knex
+  // migrations, and tsconfig has no `allowJs`, so it is never emitted into
+  // `dist/`. Production runs `dist/config/cron-tasks.js` while the helper stays
+  // at `<app>/database/…`, so a relative require resolves to a path that does
+  // not exist — and being top-level it throws at import, taking the whole cron
+  // config with it. Vitest runs this file from SOURCE, where the relative path
+  // happens to resolve, which is exactly why the test suite stayed green while
+  // the build was broken.
+  const source = readFileSync(
+    resolve(__dirname, '../../config/cron-tasks.ts'),
+    'utf8',
+  );
+  // Comments discuss the broken form on purpose; assert against code only.
+  const code = source
+    .replace(/\/\*[\s\S]*?\*\//gu, '')
+    .replace(/\/\/.*$/gmu, '');
+
+  it('never requires a database helper by relative path', () => {
+    expect(code).not.toMatch(/require\(\s*['"]\.\.\/database\//u);
+  });
+
+  it('resolves database helpers from the application root instead', () => {
+    expect(code).toContain('strapi.dirs.app.root');
+    expect(code).toMatch(/join\(\s*strapi\.dirs\.app\.root/u);
+  });
+
+  it('does not load the helper at module import time', () => {
+    // A top-level require fails the whole config module, not just the task.
+    const beforeExport = code.slice(0, code.indexOf('export default'));
+    expect(beforeExport).not.toMatch(/^\s*(?:const|let|var)\s*\{[^}]*\}\s*=\s*require\(/mu);
   });
 });

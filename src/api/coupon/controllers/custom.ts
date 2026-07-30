@@ -126,6 +126,7 @@ const DEAL_PUBLIC_FIELDS = [
   'badge',
   'content',
   'code',
+  'couponType',
   'salePrice',
   'mrp',
   'discount',
@@ -192,6 +193,7 @@ const DEAL_PUBLIC_POPULATE = {
   banks: bankRef,
   categories: categoryRef,
   brands: brandRef,
+  uniqueCouponPool: { fields: ['name'] },
 };
 
 const PRIMARY_ENTITY_RELATIONS = [
@@ -294,6 +296,24 @@ async function sanitizeDocumentQuery(
   return await strapi.contentAPI.sanitize.query(query, schema, { auth: ctx.state.auth });
 }
 
+/**
+ * A unique offer's `code` column is never the code a visitor gets — those are
+ * drawn one at a time from the pool through the redeem flow. New writes already
+ * clear it (normaliseCouponTypeFields), but rows that predate that normaliser
+ * still carry a stale shared code, and `code` is on the public field list. The
+ * UI gates on `couponType` and would not render it; this makes sure it never
+ * reaches the wire in the first place.
+ *
+ * Applied at the two sanitizers every offer response passes through, rather
+ * than at each of the ~8 call sites, so a new endpoint cannot forget it.
+ */
+function redactUniqueOfferCode(data: any): any {
+  if (Array.isArray(data)) return data.map(redactUniqueOfferCode);
+  if (!data || typeof data !== 'object') return data;
+  if (data.couponType !== 'unique' || data.code == null) return data;
+  return { ...data, code: null };
+}
+
 async function sanitizeDocumentOutput(
   strapi: Core.Strapi,
   ctx: any,
@@ -301,9 +321,11 @@ async function sanitizeDocumentOutput(
   data: any,
 ) {
   const schema = contentType(strapi, uid);
-  return (await strapi.contentAPI.sanitize.output(data, schema, {
-    auth: ctx.state.auth,
-  })) as any;
+  return redactUniqueOfferCode(
+    (await strapi.contentAPI.sanitize.output(data, schema, {
+      auth: ctx.state.auth,
+    })) as any,
+  );
 }
 
 async function sanitizePublicDocumentQuery(
@@ -324,9 +346,11 @@ async function sanitizePublicDocumentOutput(
   data: any,
 ) {
   const schema = contentType(strapi, uid);
-  return (await strapi.contentAPI.sanitize.output(data, schema, {
-    auth: undefined,
-  })) as any;
+  return redactUniqueOfferCode(
+    (await strapi.contentAPI.sanitize.output(data, schema, {
+      auth: undefined,
+    })) as any,
+  );
 }
 
 async function hydrateEntityTopPickCoupons(
@@ -774,22 +798,16 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       'contentStatus',
       'updatedAt',
     ];
-    const fields = entityType === 'coupon'
-      ? [...commonFields, 'couponType']
-      : commonFields;
+    // Both offer types can draw from a pool now, so neither branch is
+    // entity-specific any more.
+    const fields = [...commonFields, 'couponType'];
     const namedRelation = { fields: ['name'] };
-    const populate = entityType === 'coupon'
-      ? {
-          uniqueCouponPool: { fields: ['name'] },
-          stores: namedRelation,
-          brands: namedRelation,
-          banks: namedRelation,
-        }
-      : {
-          stores: namedRelation,
-          brands: namedRelation,
-          banks: namedRelation,
-        };
+    const populate = {
+      uniqueCouponPool: { fields: ['name'] },
+      stores: namedRelation,
+      brands: namedRelation,
+      banks: namedRelation,
+    };
 
     const offer = await strapi.documents(uid as any).findOne({
       documentId,
@@ -799,7 +817,10 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     } as any);
     if (!offer) return ctx.notFound('Offer not found');
 
-    return ctx.send({ data: offer });
+    // This route bypasses the sanitizers above, so apply the same redaction —
+    // the gateway refuses to expose a unique offer's `code` too, but neither
+    // side should be the only thing standing between a legacy row and the wire.
+    return ctx.send({ data: redactUniqueOfferCode(offer) });
   },
 
   async getCouponsByEntity(ctx) {

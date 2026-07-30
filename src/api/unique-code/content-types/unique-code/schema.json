@@ -37,6 +37,10 @@
       "default": 0,
       "private": true
     },
+    "claimToken": {
+      "type": "string",
+      "private": true
+    },
     "pool": {
       "type": "relation",
       "relation": "manyToOne",

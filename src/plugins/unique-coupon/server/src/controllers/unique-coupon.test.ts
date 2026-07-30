@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import uniqueCouponController, { MAX_CODES_PER_REQUEST } from './unique-coupon';
+import uniqueCouponController, {
+  MAX_CODES_PER_REQUEST,
+  normalizeActivationId,
+} from './unique-coupon';
 import { DEFAULT_CHUNK_SIZE } from '../../../../../admin/utils/parse-codes';
 
 function createHarness() {
@@ -9,7 +12,8 @@ function createHarness() {
     skipped: 0,
     total: codes.length,
   }));
-  const service = vi.fn(() => ({ importCodes }));
+  const redeemCode = vi.fn(async () => ({ success: true, code: 'PROMO-1' }));
+  const service = vi.fn(() => ({ importCodes, redeemCode }));
   const strapi = {
     plugin: vi.fn(() => ({ service })),
   } as any;
@@ -20,7 +24,12 @@ function createHarness() {
     send: vi.fn((payload: any) => payload),
   };
 
-  return { controller: uniqueCouponController({ strapi }), ctx, importCodes };
+  return {
+    controller: uniqueCouponController({ strapi }),
+    ctx,
+    importCodes,
+    redeemCode,
+  };
 }
 
 const makeCodes = (count: number) =>
@@ -63,5 +72,56 @@ describe('uploadCodes per-request cap', () => {
       imported: MAX_CODES_PER_REQUEST,
       total: MAX_CODES_PER_REQUEST,
     });
+  });
+});
+
+describe('redeem activation id', () => {
+  const uuid = 'b9d2c1a4-e5f6-4738-a1b2-c3d4e5f60718';
+  const compact = 'b9d2c1a4e5f64738a1b2c3d4e5f60718';
+
+  it('accepts both shapes the interstitial mints', () => {
+    expect(normalizeActivationId(uuid)).toBe(uuid);
+    expect(normalizeActivationId(compact)).toBe(compact);
+    expect(normalizeActivationId(` ${compact} `)).toBe(compact);
+  });
+
+  it('ignores anything it cannot trust as an activation id', () => {
+    // Dropped, never rejected: a malformed id must not cost the visitor their
+    // code, it only means this activation cannot be replayed.
+    for (const value of ['', 'not-a-uuid', 'x'.repeat(32), 42, null, undefined]) {
+      expect(normalizeActivationId(value)).toBeNull();
+    }
+  });
+
+  it('forwards a valid activation id to the service', async () => {
+    const harness = createHarness();
+    harness.ctx.request.body = { poolDocumentId: 'pool-1', activationId: uuid };
+
+    await harness.controller.redeem(harness.ctx as any);
+
+    expect(harness.redeemCode).toHaveBeenCalledWith('pool-1', {
+      activationId: uuid,
+    });
+  });
+
+  it('still redeems when no activation id is supplied', async () => {
+    const harness = createHarness();
+    harness.ctx.request.body = { poolDocumentId: 'pool-1' };
+
+    await harness.controller.redeem(harness.ctx as any);
+
+    expect(harness.redeemCode).toHaveBeenCalledWith('pool-1', {
+      activationId: null,
+    });
+  });
+
+  it('rejects a missing pool without calling the service', async () => {
+    const harness = createHarness();
+    harness.ctx.request.body = { activationId: uuid };
+
+    await harness.controller.redeem(harness.ctx as any);
+
+    expect(harness.ctx.badRequest).toHaveBeenCalled();
+    expect(harness.redeemCode).not.toHaveBeenCalled();
   });
 });

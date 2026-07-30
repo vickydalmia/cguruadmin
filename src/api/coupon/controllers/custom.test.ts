@@ -309,6 +309,46 @@ describe('private offer redeem resolver', () => {
     expect(payload.data.documentId).toBe('coupon-document-1');
   });
 
+  it('redacts a legacy shared code left on a unique Coupon', async () => {
+    // Rows predating normaliseCouponTypeFields still carry the code they had
+    // before the type flipped. It is never the code a visitor gets — those come
+    // one at a time out of the pool — so it must not reach the wire.
+    const harness = createHarness();
+    harness.ctx.params = {
+      entityType: 'coupon',
+      documentId: 'coupon-document-1',
+    } as any;
+    harness.couponFindOne.mockResolvedValue({
+      documentId: 'coupon-document-1',
+      title: 'Save 20%',
+      couponType: 'unique',
+      code: 'LEGACY-SHARED-CODE',
+      uniqueCouponPool: { documentId: 'pool-1' },
+    });
+
+    const payload = await harness.controller.getRedeemOffer(harness.ctx as any);
+
+    expect(payload.data.code).toBeNull();
+  });
+
+  it('leaves a static Coupon code untouched', async () => {
+    const harness = createHarness();
+    harness.ctx.params = {
+      entityType: 'coupon',
+      documentId: 'coupon-document-1',
+    } as any;
+    harness.couponFindOne.mockResolvedValue({
+      documentId: 'coupon-document-1',
+      title: 'Save 20%',
+      couponType: 'static',
+      code: 'SAVE20',
+    });
+
+    const payload = await harness.controller.getRedeemOffer(harness.ctx as any);
+
+    expect(payload.data.code).toBe('SAVE20');
+  });
+
   it('never guesses the entity type from the document id', async () => {
     const harness = createHarness();
     harness.ctx.params = {

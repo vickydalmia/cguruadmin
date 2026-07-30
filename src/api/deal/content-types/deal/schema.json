@@ -26,7 +26,42 @@
       "maxLength": 50000
     },
     "code": {
-      "type": "text"
+      "type": "text",
+      "conditions": {
+        "visible": {
+          "==": [
+            {
+              "var": "couponType"
+            },
+            "static"
+          ]
+        }
+      }
+    },
+    "couponType": {
+      "type": "enumeration",
+      "required": true,
+      "default": "static",
+      "enum": [
+        "static",
+        "unique"
+      ]
+    },
+    "uniqueCouponPool": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::unique-coupon-pool.unique-coupon-pool",
+      "inversedBy": "deals",
+      "conditions": {
+        "visible": {
+          "==": [
+            {
+              "var": "couponType"
+            },
+            "unique"
+          ]
+        }
+      }
     },
     "dealImage": {
       "type": "media",

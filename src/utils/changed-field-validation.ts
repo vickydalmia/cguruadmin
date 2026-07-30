@@ -19,14 +19,14 @@ type Rule = {
   compare?: (value: unknown) => unknown;
 };
 
-const ENTITY_UIDS = [
+export const ENTITY_UIDS = [
   'api::store.store',
   'api::brand.brand',
   'api::category.category',
   'api::bank.bank',
 ] as const;
 
-const SEO_UIDS = new Set([
+export const SEO_UIDS = new Set([
   ...ENTITY_UIDS,
   'api::about-page.about-page',
   'api::career-page.career-page',

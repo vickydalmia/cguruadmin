@@ -26,6 +26,36 @@ describe('computeContentStatus', () => {
       }),
     ).toBe('expired');
   });
+
+  it('an exhausted pool expires the offer whatever its dates say', () => {
+    // Every visitor reaching it would get nothing, so the dates are moot.
+    expect(computeContentStatus({ poolExhausted: true, now })).toBe('expired');
+    expect(
+      computeContentStatus({
+        expiresAt: '2026-09-01T00:00:00.000Z',
+        poolExhausted: true,
+        now,
+      }),
+    ).toBe('expired');
+    expect(
+      computeContentStatus({
+        scheduledAt: '2026-07-15T00:00:00.000Z',
+        poolExhausted: true,
+        now,
+      }),
+    ).toBe('expired');
+  });
+
+  it('a stocked pool leaves the date rules untouched', () => {
+    expect(computeContentStatus({ poolExhausted: false, now })).toBe('published');
+    expect(
+      computeContentStatus({
+        scheduledAt: '2026-07-15T00:00:00.000Z',
+        poolExhausted: false,
+        now,
+      }),
+    ).toBe('scheduled');
+  });
 });
 
 describe('publishedOnlyFilters', () => {

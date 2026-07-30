@@ -9,6 +9,9 @@ import {
   importRequestByteLength,
   parseCodesFile,
   reduceImportCompletion,
+  SAMPLE_CODES_CSV,
+  SAMPLE_CODES_EXPECTED,
+  SAMPLE_CODES_FILE_NAME,
   summariseImport,
   uploadBlocker,
 } from './parse-codes';
@@ -358,5 +361,41 @@ describe('uploadBlocker', () => {
       codes: Array.from({ length: MAX_CODES_PER_UPLOAD + 1 }, (_, i) => `C${i}`),
     };
     expect(uploadBlocker(parsed)).toContain('at most');
+  });
+});
+
+describe('downloadable sample CSV', () => {
+  // The sample is handed to editors as a template, so it has to survive the
+  // exact parser it documents. Pinning it here means a future change to header
+  // detection, quoting or delimiters cannot silently ship a sample that the
+  // importer would reject.
+  const parsed = parseCodesFile(SAMPLE_CODES_CSV);
+
+  it('parses to exactly the codes it advertises', () => {
+    expect(parsed.codes).toEqual([...SAMPLE_CODES_EXPECTED]);
+  });
+
+  it('is clean — nothing unusable, nothing duplicated', () => {
+    expect(parsed.invalid).toEqual([]);
+    expect(parsed.duplicates).toBe(0);
+  });
+
+  it('demonstrates each tolerance it claims to', () => {
+    expect(parsed.headerSkipped).toBe(true);
+    // Extra column, quoted value, padded value, and a bare value with no
+    // second column at all.
+    expect(SAMPLE_CODES_CSV).toContain('"WELCOME-G7H8I9",');
+    expect(SAMPLE_CODES_CSV).toContain('  WELCOME-J1K2L3  ,');
+    expect(SAMPLE_CODES_CSV.split('\r\n')).toContain('WELCOME-M4N5O6');
+    // A blank line in the middle, which spreadsheet exports produce.
+    expect(SAMPLE_CODES_CSV.split('\r\n')).toContain('');
+  });
+
+  it('passes the same upload gate a real file does', () => {
+    expect(uploadBlocker(parsed)).toBeNull();
+  });
+
+  it('offers a .csv file name', () => {
+    expect(SAMPLE_CODES_FILE_NAME).toMatch(/\.csv$/u);
   });
 });

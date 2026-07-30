@@ -56,6 +56,15 @@ export type SitemapEntityRow = {
   updatedAt?: string;
   offersUpdatedAt?: string;
   imageUrl?: string;
+  /**
+   * Live (published, unexpired) coupons + deals rendered on this entity page.
+   * Feeds the frontend thin-content guard: a zero-offer page is near-empty
+   * boilerplate, so the sitemap drops it and the page emits noindex until
+   * offers return. 0 means "confirmed empty" and is only published when every
+   * source query ran (OfferAggregateResult.complete); OMITTED when any count
+   * failed, so the frontend fails open and keeps the URL.
+   */
+  liveOfferCount?: number;
 };
 
 function toIsoString(value: unknown): string | undefined {
@@ -64,11 +73,14 @@ function toIsoString(value: unknown): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
+// The offer aggregate is joined on afterwards; until then rows carry no count.
+type SitemapEntityBaseRow = Omit<SitemapEntityRow, 'liveOfferCount'>;
+
 async function fetchEntities(
   strapi: Core.Strapi,
   config: EntityConfig,
-): Promise<SitemapEntityRow[]> {
-  const rows: SitemapEntityRow[] = [];
+): Promise<SitemapEntityBaseRow[]> {
+  const rows: SitemapEntityBaseRow[] = [];
   let start = 0;
 
   while (true) {
@@ -116,15 +128,32 @@ async function fetchEntities(
  * Visibility mirrors publishedOnlyFilters(): an expired or scheduled offer is
  * not rendered on the page, so it must not move the page's lastmod.
  */
-async function fetchOfferMaxUpdatedAt(
+type OfferAggregate = { lastModified?: string; liveCount: number };
+
+type OfferAggregateResult = {
+  aggregates: Map<number, OfferAggregate>;
+  /**
+   * True only when EVERY source query ran. A zero liveOfferCount is a
+   * "confirmed empty" verdict that removes the URL from the sitemap, so it may
+   * only be published when both counts actually executed — a partial aggregate
+   * must ship NO count (frontend fails open) rather than an authoritative 0
+   * that could collapse whole sitemap shards on a transient DB fault.
+   */
+  complete: boolean;
+};
+
+async function fetchOfferAggregates(
   strapi: Core.Strapi,
   config: EntityConfig,
-): Promise<Map<number, string>> {
+): Promise<OfferAggregateResult> {
   const connection = (strapi.db as any)?.connection;
-  const result = new Map<number, string>();
-  if (typeof connection !== 'function') return result;
+  const result = new Map<number, OfferAggregate>();
+  if (typeof connection !== 'function') {
+    return { aggregates: result, complete: false };
+  }
 
   const cutoff = new Date().toISOString();
+  let complete = true;
 
   for (const source of OFFER_SOURCES) {
     const linkTable = source.link(config);
@@ -139,41 +168,65 @@ async function fetchOfferMaxUpdatedAt(
         )
         .groupBy(`${linkTable}.${config.linkColumn}`)
         .select(`${linkTable}.${config.linkColumn} as entity_id`)
-        .max('o.updated_at as last_modified');
+        .max('o.updated_at as last_modified')
+        .count('o.id as live_count');
     } catch (error) {
       // A missing link table (fresh database, collection with no offers yet)
-      // must degrade to "no aggregate" rather than fail the whole feed.
+      // must degrade to "no aggregate" rather than fail the whole feed — but
+      // it also invalidates every zero for this kind (see complete above).
       strapi.log.warn(
         `[sitemap] offer aggregate skipped for ${linkTable}: ${(error as Error)?.message}`,
       );
+      complete = false;
       continue;
     }
 
     for (const row of rows) {
       const entityId = Number(row?.entity_id);
+      if (!Number.isSafeInteger(entityId)) continue;
       const lastModified = toIsoString(row?.last_modified);
-      if (!Number.isSafeInteger(entityId) || !lastModified) continue;
+      const liveCount = Number(row?.live_count);
 
-      const current = result.get(entityId);
-      if (!current || lastModified > current) result.set(entityId, lastModified);
+      const current = result.get(entityId) ?? { liveCount: 0 };
+      result.set(entityId, {
+        lastModified:
+          lastModified && (!current.lastModified || lastModified > current.lastModified)
+            ? lastModified
+            : current.lastModified,
+        liveCount:
+          current.liveCount +
+          (Number.isSafeInteger(liveCount) && liveCount > 0 ? liveCount : 0),
+      });
     }
   }
 
-  return result;
+  return { aggregates: result, complete };
 }
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   async listSitemapEntities(): Promise<SitemapEntityRow[]> {
     const perKind = await Promise.all(
       ENTITY_CONFIGS.map(async (config) => {
-        const [entities, offerMax] = await Promise.all([
+        const [entities, { aggregates, complete }] = await Promise.all([
           fetchEntities(strapi, config),
-          fetchOfferMaxUpdatedAt(strapi, config),
+          fetchOfferAggregates(strapi, config),
         ]);
 
         return entities.map((entity) => {
-          const offersUpdatedAt = offerMax.get(entity.id);
-          return offersUpdatedAt ? { ...entity, offersUpdatedAt } : entity;
+          const aggregate = aggregates.get(entity.id);
+          return {
+            ...entity,
+            ...(aggregate?.lastModified
+              ? { offersUpdatedAt: aggregate.lastModified }
+              : {}),
+            // Only a COMPLETE aggregation may publish a count: 0 is the
+            // "confirmed empty, drop from sitemap" verdict, and a partial
+            // aggregate would assert it for entities whose offers were simply
+            // never counted. Omission makes the frontend fail open.
+            ...(complete
+              ? { liveOfferCount: aggregate?.liveCount ?? 0 }
+              : {}),
+          };
         });
       }),
     );

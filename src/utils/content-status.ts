@@ -11,9 +11,24 @@ function toDate(value: DateLike): Date | null {
 export function computeContentStatus(input: {
   scheduledAt?: DateLike;
   expiresAt?: DateLike;
+  /**
+   * True when this offer draws its code from a unique pool that has run out.
+   * Such an offer is over regardless of its dates — every visitor who reaches
+   * it gets nothing.
+   *
+   * This belongs HERE rather than being written straight onto the offer,
+   * because offer-lifecycle-validation recomputes contentStatus from the dates
+   * on every human save. A status stamped anywhere else would silently revert
+   * the next time an editor touched the record.
+   */
+  poolExhausted?: boolean;
   now?: Date;
 }): ContentStatus {
   const now = input.now ?? new Date();
+  if (input.poolExhausted) {
+    return "expired";
+  }
+
   const expiresAt = toDate(input.expiresAt);
   if (expiresAt && expiresAt <= now) {
     return "expired";

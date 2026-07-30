@@ -7,14 +7,16 @@ import {
 } from './deal-of-the-day-validation';
 
 /**
- * Keeps a Coupon's `couponType` and its two type-specific fields consistent.
+ * Keeps an offer's `couponType` and its two type-specific fields consistent.
+ * Applies to BOTH offer schemas — Coupon and Product Deal — which carry the
+ * same pair of fields.
  *
- * A coupon is either `static` (one shared `code`) or `unique` (codes handed out
+ * An offer is either `static` (one shared `code`) or `unique` (codes handed out
  * from `uniqueCouponPool`). The two fields are mutually exclusive, but nothing
- * used to clear the losing one when an editor flipped the type — so a coupon
+ * used to clear the losing one when an editor flipped the type — so an offer
  * switched from unique to static kept its pool attached and kept draining it.
  *
- * The coupon schema now hides the irrelevant field in the admin via
+ * The offer schemas now hide the irrelevant field in the admin via
  * `attributes.<field>.conditions.visible` (json-logic, Strapi 5.50). Verified
  * against this exact version, both halves:
  *
@@ -45,14 +47,21 @@ import {
  * never blocks a save, so it cannot strand an editor on a legacy row.
  */
 
-const COUPON_UID = 'api::coupon.coupon';
+/**
+ * Both offer schemas carry `couponType` + `uniqueCouponPool`, so both need the
+ * same normaliser and the same "unique needs a pool" check. The field name is
+ * shared with Coupon deliberately: it describes the CODE variant, not the
+ * entity, and keeping one name lets one implementation serve both.
+ */
+const OFFER_UIDS = ['api::coupon.coupon', 'api::deal.deal'] as const;
+type OfferUid = (typeof OFFER_UIDS)[number];
 
 /**
- * True for the one content type this normaliser applies to. Exported so the
- * caller can guard without hard-coding the uid string.
+ * True for the content types this normaliser applies to. Exported so the
+ * caller can guard without hard-coding the uid strings.
  */
-export function isCouponUid(uid: unknown): boolean {
-  return uid === COUPON_UID;
+export function isCouponUid(uid: unknown): uid is OfferUid {
+  return OFFER_UIDS.includes(uid as OfferUid);
 }
 
 /**
@@ -114,9 +123,9 @@ function resultingPoolPresent(
 }
 
 /**
- * A unique coupon cannot redeem without a pool. Static coupons intentionally
+ * A unique offer cannot redeem without a pool. Static offers intentionally
  * may omit a shared code (the live UI then presents the offer without a copy
- * step). Existing unique coupons that were already poolless are grandfathered
+ * step). Existing unique offers that were already poolless are grandfathered
  * until their type/pool state is actually repaired or changed.
  *
  * STRICT ("clean as you touch"): `strict` is the last parameter and gates
@@ -130,6 +139,7 @@ function resultingPoolPresent(
  */
 export async function validateCouponTypeFields(
   strapi: Core.Strapi,
+  uid: OfferUid,
   action: string,
   data: unknown,
   documentId?: string,
@@ -150,7 +160,7 @@ export async function validateCouponTypeFields(
   let stored: Record<string, unknown> | null = null;
   if ((action === 'update' || isClone) && documentId) {
     const found: unknown = await strapi
-      .documents(COUPON_UID as any)
+      .documents(uid as any)
       .findOne({
         documentId,
         fields: ['documentId', 'couponType'] as any,
@@ -181,7 +191,7 @@ export async function validateCouponTypeFields(
   if (!strict && action === 'update' && wasAlreadyPoolless) return;
 
   const message =
-    'Choose a Unique Coupon Pool before saving a unique coupon. Without a pool, ' +
+    'Choose a Unique Coupon Pool before saving a unique offer. Without a pool, ' +
     'the redeem action can never issue a code.';
   throw new errors.ValidationError(message, {
     errors: [

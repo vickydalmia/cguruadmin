@@ -31,7 +31,12 @@ export function hasTrustedIpsConfigured(): boolean {
   return TRUSTED_IPS.length > 0;
 }
 
-function isTrustedSocket(remoteAddress: string | undefined): boolean {
+/**
+ * Exported so the unique-coupon redeem policy shares this exact bypass rather
+ * than reimplementing it — that policy previously had none, so a deployment
+ * relying on RATE_LIMIT_TRUSTED_IPS put every visitor in one redemption bucket.
+ */
+export function isTrustedSocket(remoteAddress: string | undefined): boolean {
   if (!remoteAddress || TRUSTED_IPS.length === 0) return false;
   const ip = remoteAddress.replace(/^::ffff:/, ''); // IPv4-mapped IPv6
   return TRUSTED_IPS.some((trusted) =>

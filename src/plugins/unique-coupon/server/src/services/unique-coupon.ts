@@ -16,6 +16,115 @@ const POOL_LINK_CODE_COLUMN = 'unique_code_id';
 const POOL_LINK_POOL_COLUMN = 'unique_coupon_pool_id';
 
 /**
+ * How long a claim token can still be exchanged for the code it claimed.
+ * A reload of the same activation inside this window returns the same code
+ * instead of burning another; past it the token is just history, so a leaked
+ * activation id is not a permanent read capability for a live code.
+ */
+const CLAIM_REPLAY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+const POSTGRES_UNIQUE_VIOLATION = '23505';
+
+/**
+ * Claim exactly one unused code from a pool, as a single atomic statement.
+ *
+ * `SKIP LOCKED` is what makes this concurrent: two simultaneous claimers step
+ * over each other's in-flight rows and take DIFFERENT codes instead of queuing
+ * behind one lock. Double-issuance is prevented by the `is_used = false` on the
+ * outer UPDATE, not by serializing — a row another transaction already took is
+ * no longer eligible, so the UPDATE matches nothing and we look again.
+ *
+ * The subquery is deliberately ONE `EXISTS`, never an OR-of-EXISTS: the wide
+ * form inflates the planner's cost estimate enough to trip PG JIT, which is
+ * what made public search collapse (see src/api/search/services/search-sql.ts).
+ *
+ * `ORDER BY uc.id` walks the partial index on unused rows
+ * (`unique_codes_unclaimed_idx`), so a 99%-drained pool costs the same per
+ * claim as a fresh one. Without that index this scans every spent code.
+ */
+const CLAIM_CODE_SQL = `
+  UPDATE "${UNIQUE_CODES_TABLE}"
+     SET is_used = true,
+         used_at = ?,
+         claim_token = ?,
+         version = version + 1
+   WHERE id = (
+     SELECT uc.id
+       FROM "${UNIQUE_CODES_TABLE}" uc
+      WHERE uc.is_used = false
+        AND EXISTS (
+              SELECT 1
+                FROM "${POOL_LINK_TABLE}" l
+               WHERE l."${POOL_LINK_CODE_COLUMN}" = uc.id
+                 AND l."${POOL_LINK_POOL_COLUMN}" = ?
+            )
+      ORDER BY uc.id
+      LIMIT 1
+        FOR UPDATE SKIP LOCKED
+   )
+     AND is_used = false
+  RETURNING code`;
+
+/** The code a previous request already claimed for this activation. */
+const CLAIMED_BY_TOKEN_SQL = `
+  SELECT uc.code
+    FROM "${UNIQUE_CODES_TABLE}" uc
+    JOIN "${POOL_LINK_TABLE}" l
+      ON l."${POOL_LINK_CODE_COLUMN}" = uc.id
+   WHERE uc.claim_token = ?
+     AND l."${POOL_LINK_POOL_COLUMN}" = ?
+     AND uc.used_at > ?
+   LIMIT 1`;
+
+/**
+ * Distinguishes "this pool is empty" from "every free code is momentarily
+ * locked by another claimer". Without it a burst of concurrent clicks would
+ * report a healthy pool as exhausted.
+ */
+const HAS_UNUSED_CODE_SQL = `
+  SELECT 1
+    FROM "${UNIQUE_CODES_TABLE}" uc
+   WHERE uc.is_used = false
+     AND EXISTS (
+           SELECT 1
+             FROM "${POOL_LINK_TABLE}" l
+            WHERE l."${POOL_LINK_CODE_COLUMN}" = uc.id
+              AND l."${POOL_LINK_POOL_COLUMN}" = ?
+         )
+   LIMIT 1`;
+
+/**
+ * Mark a pool drained — but only if it is STILL drained at the moment of the
+ * write.
+ *
+ * The emptiness check and this stamp are separate statements, and `importCodes`
+ * clears `exhausted_at` inside a transaction holding the pool row lock. An
+ * import committing between the two would otherwise have its restock
+ * overwritten, and the scheduler would expire offers backed by a pool that has
+ * stock — until the nightly recount undid it.
+ *
+ * Re-checking inside the UPDATE closes that: this statement blocks on the
+ * import's row lock, then re-evaluates `NOT EXISTS` against the committed
+ * codes and declines to stamp.
+ */
+const MARK_POOL_EXHAUSTED_SQL = `
+  UPDATE "${POOLS_TABLE}"
+     SET exhausted_at = ?
+   WHERE id = ?
+     AND exhausted_at IS NULL
+     AND NOT EXISTS (
+           SELECT 1
+             FROM "${UNIQUE_CODES_TABLE}" uc
+            WHERE uc.is_used = false
+              AND EXISTS (
+                    SELECT 1
+                      FROM "${POOL_LINK_TABLE}" l
+                     WHERE l."${POOL_LINK_CODE_COLUMN}" = uc.id
+                       AND l."${POOL_LINK_POOL_COLUMN}" = ?
+                  )
+         )`;
+
+/**
  * Resolve a pool's internal DB row by its documentId via raw Knex
  * so we get the numeric `id` without fragile type casts.
  */
@@ -56,85 +165,126 @@ function codesForPool(knex: any, poolId: number) {
 const uniqueCouponService = ({ strapi }: { strapi: Core.Strapi }) => ({
 
   /**
-   * Redeem one code while holding the existing pool row lock. Import and
-   * redemption use the same lock, so counters and stock cannot race. The code
-   * remains related through Strapi's unique_codes_pool_lnk table; no duplicate
-   * pool id is stored on unique_codes.
+   * Draw one code from a pool and mark it used.
+   *
+   * There is no pool-row lock here on purpose. The previous implementation
+   * took `SELECT ... FOR UPDATE` on the pool and bumped `used_codes` in the
+   * same transaction, which made every click on a pool queue behind every
+   * other click on it — correct, but one redemption at a time. Correctness now
+   * comes from the atomic conditional UPDATE in CLAIM_CODE_SQL instead, so
+   * concurrent claimers proceed in parallel and still cannot be handed the
+   * same code.
+   *
+   * `used_codes` is no longer maintained here for the same reason: it is one
+   * shared row, so writing it per redemption would reintroduce exactly the
+   * serialization this removes. It is reconciled from the code rows instead
+   * (`recountPools`), and `getPoolStats` already reports live counts.
+   *
+   * `activationId` makes a draw idempotent for one click: a reload, a bfcache
+   * restore, or a retried request replays the code that activation already
+   * claimed rather than burning another. A genuinely new click carries a new
+   * activation id and so draws a new code.
    */
-  async redeemCode(poolDocumentId: string, maxRetries = 5) {
+  async redeemCode(
+    poolDocumentId: string,
+    options: { activationId?: string | null; maxRetries?: number } = {},
+  ) {
     const knex = strapi.db.connection;
     requirePostgres(knex);
-    let retries = 0;
+    const activationId = options.activationId?.trim() || null;
+    const maxRetries = options.maxRetries ?? 5;
 
+    const pool = await resolvePool(knex, poolDocumentId);
+    if (!pool) {
+      return {
+        success: false as const,
+        error: 'POOL_NOT_FOUND',
+        message: 'Coupon pool not found',
+      };
+    }
+
+    const replay = async (): Promise<string | null> => {
+      if (!activationId) return null;
+      const cutoff = new Date(Date.now() - CLAIM_REPLAY_WINDOW_MS);
+      const found = await knex.raw(CLAIMED_BY_TOKEN_SQL, [
+        activationId,
+        pool.id,
+        cutoff,
+      ]);
+      const code = found?.rows?.[0]?.code;
+      return typeof code === 'string' ? code : null;
+    };
+
+    const replayed = await replay();
+    if (replayed) {
+      return { success: true as const, code: replayed };
+    }
+
+    // Normally the activation id, but dropped to null once we learn it belongs
+    // to a claim too old to replay — see the conflict handler below.
+    let claimToken = activationId;
+
+    let retries = 0;
     while (retries < maxRetries) {
       try {
-        const result = await knex.transaction(async (trx: any) => {
-          const poolQuery = trx(POOLS_TABLE)
-            .where({ document_id: poolDocumentId })
-            .select(['id', 'name'])
-            .first()
-            .forUpdate();
-          const pool = await poolQuery;
-          if (!pool) {
-            return {
-              success: false as const,
-              error: 'POOL_NOT_FOUND',
-              message: 'Coupon pool not found',
-            };
-          }
+        const claimed = await knex.raw(CLAIM_CODE_SQL, [
+          new Date(),
+          claimToken,
+          pool.id,
+        ]);
+        const code = claimed?.rows?.[0]?.code;
+        if (typeof code === 'string') {
+          strapi.log.info(
+            `Code redeemed from pool ${pool.name}: ${code.substring(0, 4)}***`,
+          );
+          return { success: true as const, code };
+        }
 
-          const code = await codesForPool(trx, pool.id)
-            .where('unique_code.is_used', false)
-            .select('unique_code.*')
-            .orderBy('unique_code.id', 'asc')
-            .first()
-            .forUpdate();
-
-          if (!code) {
-            return {
-              success: false as const,
-              error: 'NO_CODES_AVAILABLE',
-              message: 'All coupon codes have been redeemed',
-            };
-          }
-
-          const updated = await trx(UNIQUE_CODES_TABLE)
-            .where({ id: code.id, version: code.version })
-            .update({
-              is_used: true,
-              used_at: new Date(),
-              version: code.version + 1,
-            });
-
-          if (updated !== 1) {
-            const conflict = new Error('unique-code optimistic update conflict');
-            (conflict as any).code = 'UNIQUE_CODE_CONFLICT';
-            throw conflict;
-          }
-
-          await trx(POOLS_TABLE)
-            .where({ id: pool.id })
-            .increment('used_codes', 1);
+        // Nothing was updated. Either the pool is genuinely out of stock, or
+        // every free code is locked by a concurrent claimer this instant —
+        // only the second is worth retrying.
+        const available = await knex.raw(HAS_UNUSED_CODE_SQL, [pool.id]);
+        if (!available?.rows?.length) {
+          // Mark the pool so the scheduler can expire the offers pointing at
+          // it. This is the drained edge, not the per-redemption path, so
+          // writing the shared pool row here costs nothing in throughput. The
+          // statement re-checks emptiness itself, so a restock that lands
+          // between the probe above and this write is not clobbered.
+          await knex.raw(MARK_POOL_EXHAUSTED_SQL, [
+            new Date(),
+            pool.id,
+            pool.id,
+          ]);
 
           return {
-            success: true as const,
-            code: code.code,
-            poolName: pool.name,
+            success: false as const,
+            error: 'NO_CODES_AVAILABLE',
+            message: 'All coupon codes have been redeemed',
           };
-        });
-
-        if (result.success) {
-          strapi.log.info(
-            `Code redeemed from pool ${result.poolName}: ${result.code.substring(0, 4)}***`,
-          );
-          return { success: true as const, code: result.code };
         }
-        return result;
       } catch (error) {
-        strapi.log.error('Unique code redemption error:', error);
-        retries++;
-        if (retries < maxRetries) await this.delay(50 * retries);
+        // The partial unique index on claim_token rejected this token. Two
+        // cases, and they need opposite handling.
+        if ((error as any)?.code === POSTGRES_UNIQUE_VIOLATION) {
+          // (a) A concurrent request for the same activation won the race. A
+          // 23505 only fires against a COMMITTED row, so the winner's code is
+          // readable now and is the right answer for both callers.
+          const raced = await replay();
+          if (raced) return { success: true as const, code: raced };
+
+          // (b) The token belongs to a claim older than the replay window, so
+          // nothing can be replayed — but the index keeps rejecting it
+          // forever. Retrying with the same token would just burn every
+          // attempt and hand the visitor a 503. Drop the token and draw a
+          // fresh code: this activation is simply no longer idempotent.
+          claimToken = null;
+        } else {
+          strapi.log.error('Unique code redemption error:', error);
+        }
       }
+
+      retries++;
+      if (retries < maxRetries) await this.delay(20 * retries);
     }
 
     strapi.log.warn(`Max retries (${maxRetries}) exceeded for pool ${poolDocumentId}`);
@@ -217,6 +367,11 @@ const uniqueCouponService = ({ strapi }: { strapi: Core.Strapi }) => ({
         await trx(POOLS_TABLE)
           .where({ id: pool.id })
           .increment('total_codes', insertedRows);
+        // Restocking un-expires the offers this pool feeds; the scheduler
+        // notices on its next pass.
+        await trx(POOLS_TABLE)
+          .where({ id: pool.id })
+          .update({ exhausted_at: null });
       }
 
       return {

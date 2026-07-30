@@ -24,9 +24,23 @@ describe('cleanHtml', () => {
     expect(img ?? '').not.toContain('data:');
   });
 
-  it('forces rel="noopener noreferrer" on links', () => {
+  it('forces rel="noopener noreferrer" on links, adding nofollow when external', () => {
     expect(cleanHtml('<a href="https://a.b" target="_blank">x</a>')).toContain(
+      'rel="nofollow noopener noreferrer"'
+    );
+    // Internal absolute URLs (any couponzguru.com host) and relative paths
+    // stay followed — the editor cannot set rel, so the sanitizer's policy
+    // must never nofollow the site's own pages.
+    expect(cleanHtml('<a href="https://www.couponzguru.com/nike-coupons/">x</a>')).toContain(
       'rel="noopener noreferrer"'
+    );
+    expect(cleanHtml('<a href="/nike-coupons/">x</a>')).toContain(
+      'rel="noopener noreferrer"'
+    );
+    expect(cleanHtml('<a href="/nike-coupons/">x</a>')).not.toContain('nofollow');
+    // A lookalike host does not count as internal.
+    expect(cleanHtml('<a href="https://couponzguru.com.evil.example/">x</a>')).toContain(
+      'rel="nofollow noopener noreferrer"'
     );
   });
 

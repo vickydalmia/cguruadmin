@@ -24,6 +24,9 @@
       "type": "integer",
       "default": 0
     },
+    "exhaustedAt": {
+      "type": "datetime"
+    },
     "codes": {
       "type": "relation",
       "relation": "oneToMany",
@@ -35,6 +38,12 @@
       "type": "relation",
       "relation": "oneToMany",
       "target": "api::coupon.coupon",
+      "mappedBy": "uniqueCouponPool"
+    },
+    "deals": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::deal.deal",
       "mappedBy": "uniqueCouponPool"
     }
   }

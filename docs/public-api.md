@@ -33,7 +33,7 @@ ceiling on staleness, not a fixed delay.
 | `POST /api/{stores\|brands\|categories\|banks}/:slug/rating` | anonymous | 5 / 60s | none (never cached) |
 | `POST /api/offer-feedback/:entityType/:documentId` | anonymous | 10 / 60s | none (never cached) |
 | `GET /api/offer-redeem/:entityType/:documentId` | **bearer secret** | — | none |
-| `POST /unique-coupon/redeem` | anonymous | 5 / 60s (plugin policy) | none |
+| `POST /unique-coupon/redeem` | anonymous | 30 / 60s (plugin backstop; the ISR gateway's 10 / 60s binds first) | none |
 | `GET /unique-coupon/stats/:poolDocumentId` | **admin session** | — | none |
 | `POST /unique-coupon/upload` | **admin session** | — | none |
 
@@ -361,7 +361,9 @@ It returns `{ coupon, primaryEntity, relatedCoupons,
 relatedDeals, similarStores }` for a published Coupon. The Coupon and related
 offer field lists deliberately omit `affiliateLink`; browser activation still
 uses the private redeem resolver. Unique-pool relations expose only their name
-and Strapi relation identity, never pool codes.
+and Strapi relation identity, never pool codes. The same applies to the Deal
+aggregate: Product Deals carry `couponType` and a `uniqueCouponPool` relation
+too.
 
 The public URL uses the compact database `id`; redemption continues to use the
 Coupon's Strapi `documentId` internally.
@@ -382,8 +384,11 @@ or an unpublished offer.
 It exists because the core Coupon/Deal `findOne` routes are disabled — public
 callers must not be able to resolve an offer and drain its unique-code pool.
 It returns `{ data }` with a narrow field set (title, code, affiliate link,
-expiry, schedule, content status, plus `couponType` and the pool name for
-coupons) and named relations only.
+expiry, schedule, content status, `couponType` and the pool name) and named
+relations only. Both offer types carry the pool fields — Product Deals draw
+per-visitor codes from a unique pool exactly as Coupons do. A `code` stored on
+a unique offer is redacted to `null` on the way out, because it is a legacy
+leftover, never the code the visitor should receive.
 
 ## ISR offer route inventory
 
@@ -398,12 +403,37 @@ affiliate destination, code, or unique-pool data.
 Plugin routes, mounted under `/unique-coupon` — see
 [`src/plugins/unique-coupon/server/src`](../src/plugins/unique-coupon/server/src).
 
-`POST /unique-coupon/redeem` with `{ "poolDocumentId": "..." }` draws one
-unused code from the pool and marks it used. Anonymous, but behind a dedicated
-in-memory per-IP policy of **5 redemptions per minute**, which sets
-`Retry-After` and returns 429 on overflow. The policy reads the koa-resolved
-client IP, never raw `X-Forwarded-For`, because a spoofable header would let a
-single caller rotate identities and drain a pool.
+`POST /unique-coupon/redeem` with `{ "poolDocumentId": "...", "activationId":
+"..." }` draws one unused code from the pool and marks it used. `activationId`
+is optional and identifies ONE click; it is the id the redeem interstitial
+already mints per activation (a `crypto.randomUUID()`, with or without dashes).
+Anything that is not that shape is ignored rather than rejected — a malformed
+id must not cost the visitor their code.
+
+Passing it makes the draw **idempotent for that click**: a reload, a bfcache
+restore or a retried request replays the code that activation already claimed
+instead of consuming another. A genuinely new click carries a new activation id
+and draws a new code. The replay window is 24 hours, so a leaked activation id
+is not a permanent read capability for a live code.
+
+Concurrency is handled by an atomic conditional `UPDATE ... FOR UPDATE SKIP
+LOCKED` on the code rows, not by locking the pool. Simultaneous claimers step
+over each other's in-flight rows and take different codes, so two visitors can
+never be handed the same one, and throughput is not one-at-a-time per pool.
+Because of that, redemption deliberately does **not** maintain
+`unique_coupon_pools.used_codes` — that write targets one shared row and would
+reserialize every claimer. The counters are reconciled by `recountPools`
+(nightly cron); `GET /unique-coupon/stats/:poolDocumentId` reports live counts.
+
+Anonymous, but behind a dedicated in-memory per-IP policy of **30 redemptions
+per minute**, which sets `Retry-After` and returns 429 on overflow. That sits
+deliberately ABOVE the ISR gateway's Redis-backed 10/IP/min so the gateway's
+limiter — the one that is correct across multiple nodes — is the binding
+control; this one is a backstop for a caller that reached Strapi directly. The
+policy reads the koa-resolved client IP, never raw `X-Forwarded-For`, because a
+spoofable header would let a single caller rotate identities and drain a pool,
+and it shares the `RATE_LIMIT_TRUSTED_IPS` socket bypass with the global
+limiter.
 
 Responses are status-coded by outcome:
 
@@ -416,6 +446,23 @@ Responses are status-coded by outcome:
 Pool exhaustion is deliberately a 200 — it is a normal business outcome, not a
 server error, and consumers must branch on `success` rather than on the status
 code alone. A missing `poolDocumentId` is a 400.
+
+### Running out of codes
+
+The first request that finds a pool empty stamps `exhaustedAt` on it. The
+five-minute scheduler then flips every unique offer pointing at that pool to
+`contentStatus: "expired"`, so it stops rendering an "unlock" CTA that can no
+longer produce a code. Importing more codes clears `exhaustedAt` and the same
+sweep brings the offers back — no editor action needed either way.
+
+`exhaustedAt` feeds `computeContentStatus`, NOT the offer row directly, because
+`validateOfferLifecycle` recomputes `contentStatus` from the dates on every
+human save; a status written anywhere else would silently republish a dead
+offer the next time an editor touched it.
+
+The interstitial still redirects to the merchant when a pool is dry — the offer
+is usually usable without a code, and stranding the visitor helps nobody. Only
+a transport or 5xx failure stops the redirect.
 
 `GET /unique-coupon/stats/:poolDocumentId` (pool totals; 404 on an unknown
 pool) and `POST /unique-coupon/upload` (bulk code import, max 100,000 per

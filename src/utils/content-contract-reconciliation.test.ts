@@ -103,7 +103,7 @@ describe("post-schema content contract reconciliation", () => {
 
     await expect(
       reconcileContentContractAfterSchemaSync(knex, logger),
-    ).resolves.toEqual({ publishedOn: 2, mediaAlt: 3 });
+    ).resolves.toEqual({ publishedOn: 2, mediaAlt: 3, couponType: 0 });
     expect(rows.coupons[0].published_on).toBe("2026-01-01");
     expect(rows.coupons[1].published_on).toBe("2026-02-01");
     expect(rows.brands[0].logo_alt).toBe("Authored Nike logo");
@@ -111,7 +111,7 @@ describe("post-schema content contract reconciliation", () => {
 
     await expect(
       reconcileContentContractAfterSchemaSync(knex, logger),
-    ).resolves.toEqual({ publishedOn: 0, mediaAlt: 0 });
+    ).resolves.toEqual({ publishedOn: 0, mediaAlt: 0, couponType: 0 });
   });
 
   it("retries after schema sync creates a previously absent column", async () => {
@@ -120,13 +120,13 @@ describe("post-schema content contract reconciliation", () => {
     });
     await expect(
       reconcileContentContractAfterSchemaSync(knex),
-    ).resolves.toEqual({ publishedOn: 0, mediaAlt: 0 });
+    ).resolves.toEqual({ publishedOn: 0, mediaAlt: 0, couponType: 0 });
 
     rows.categories[0].icon_alt = null;
     columns.get("categories")?.add("icon_alt");
     await expect(
       reconcileContentContractAfterSchemaSync(knex),
-    ).resolves.toEqual({ publishedOn: 0, mediaAlt: 1 });
+    ).resolves.toEqual({ publishedOn: 0, mediaAlt: 1, couponType: 0 });
     expect(rows.categories[0].icon_alt).toBe("Travel");
   });
 
@@ -137,5 +137,48 @@ describe("post-schema content contract reconciliation", () => {
     expect(
       bootstrap.indexOf("reconcileContentContractAfterSchemaSync("),
     ).toBeLessThan(bootstrap.indexOf("initializeSearchRuntime(strapi)"));
+  });
+});
+
+describe("coupon_type backfill", () => {
+  it("fills NULL code types on existing offers without touching set ones", async () => {
+    // Deals gained `coupon_type` when unique pools were extended to them, so
+    // every pre-existing Deal row has it NULL. The public code rule is now
+    // "expose `code` only for a known code type", so leaving them NULL would
+    // silently stop every existing Deal from showing the code it has.
+    const { knex, rows } = fakeKnex({
+      coupons: [{ coupon_type: "unique", code: null }],
+      deals: [
+        { coupon_type: null, code: "SAVE20" },
+        { coupon_type: null, code: null },
+        { coupon_type: "unique", code: null },
+      ],
+    });
+
+    await expect(
+      reconcileContentContractAfterSchemaSync(knex, { info: vi.fn() }),
+    ).resolves.toMatchObject({ couponType: 2 });
+
+    expect(rows.deals.map((row) => row.coupon_type)).toEqual([
+      "static",
+      "static",
+      "unique",
+    ]);
+    expect(rows.coupons[0].coupon_type).toBe("unique");
+  });
+
+  it("is a no-op before schema sync creates the column", async () => {
+    const { knex, rows, columns } = fakeKnex({ deals: [{ code: "SAVE20" }] });
+
+    await expect(
+      reconcileContentContractAfterSchemaSync(knex, { info: vi.fn() }),
+    ).resolves.toMatchObject({ couponType: 0 });
+
+    rows.deals[0].coupon_type = null;
+    columns.get("deals")?.add("coupon_type");
+    await expect(
+      reconcileContentContractAfterSchemaSync(knex, { info: vi.fn() }),
+    ).resolves.toMatchObject({ couponType: 1 });
+    expect(rows.deals[0].coupon_type).toBe("static");
   });
 });

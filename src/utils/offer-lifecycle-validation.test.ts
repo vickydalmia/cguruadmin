@@ -12,10 +12,20 @@ const LATER_PAST = '2026-07-10T00:00:00.000Z';
 const FUTURE = '2026-08-01T00:00:00.000Z';
 const FAR_FUTURE = '2026-09-01T00:00:00.000Z';
 
-function harness(stored: unknown = null) {
+function harness(
+  stored: unknown = null,
+  { tracksUniquePool = true }: { tracksUniquePool?: boolean } = {},
+) {
   const findOne = vi.fn().mockResolvedValue(stored);
   return {
-    strapi: { documents: vi.fn(() => ({ findOne })) } as any,
+    strapi: {
+      documents: vi.fn(() => ({ findOne })),
+      // Mirrors the real schema lookup: only offers carrying a pool relation
+      // take part in the exhaustion rule.
+      contentType: vi.fn(() => ({
+        attributes: tracksUniquePool ? { uniqueCouponPool: {} } : {},
+      })),
+    } as any,
     findOne,
   };
 }
@@ -720,5 +730,75 @@ describe('offer lifecycle — fail-safes', () => {
     expect(isOfferLifecycleUid('api::coupon.coupon')).toBe(true);
     expect(isOfferLifecycleUid('api::deal.deal')).toBe(true);
     expect(isOfferLifecycleUid('api::store.store')).toBe(false);
+  });
+});
+
+describe('offer lifecycle — exhausted unique pool', () => {
+  const drainedPool = {
+    documentId: 'c1',
+    scheduledAt: null,
+    expiresAt: FAR_FUTURE,
+    publishedOn: PAST,
+    couponType: 'unique',
+    uniqueCouponPool: { exhaustedAt: '2026-07-22T00:00:00.000Z' },
+  };
+
+  it('holds an offer expired when its pool is dry, despite a future expiry', async () => {
+    // The point of routing this through computeContentStatus: an editor save
+    // recomputes contentStatus from the dates, so a status written anywhere
+    // else would silently republish a dead offer.
+    const { strapi } = harness(drainedPool);
+    const data: Record<string, unknown> = { title: 'Edited' };
+
+    await validateOfferLifecycle(strapi, 'api::coupon.coupon', 'update', data, 'c1', false, NOW);
+
+    expect(data.contentStatus).toBe('expired');
+  });
+
+  it('republishes once the pool is restocked', async () => {
+    const { strapi } = harness({
+      ...drainedPool,
+      uniqueCouponPool: { exhaustedAt: null },
+    });
+    const data: Record<string, unknown> = { title: 'Edited' };
+
+    await validateOfferLifecycle(strapi, 'api::coupon.coupon', 'update', data, 'c1', false, NOW);
+
+    expect(data.contentStatus).toBe('published');
+  });
+
+  it('ignores an exhausted pool on a static coupon', async () => {
+    const { strapi } = harness({ ...drainedPool, couponType: 'static' });
+    const data: Record<string, unknown> = { title: 'Edited' };
+
+    await validateOfferLifecycle(strapi, 'api::coupon.coupon', 'update', data, 'c1', false, NOW);
+
+    expect(data.contentStatus).toBe('published');
+  });
+
+  it('stands aside while the editor is changing the pool', async () => {
+    // Mid-repair — usually attaching a restocked pool. The stored pool is not
+    // the pool this save results in, so the scheduler settles it instead.
+    const { strapi } = harness(drainedPool);
+    const data: Record<string, unknown> = { uniqueCouponPool: 'pool-2' };
+
+    await validateOfferLifecycle(strapi, 'api::coupon.coupon', 'update', data, 'c1', false, NOW);
+
+    expect(data.contentStatus).toBe('published');
+  });
+
+  it('does not look for a pool on an offer type that has none', async () => {
+    const { strapi } = harness(
+      { documentId: 'd1', scheduledAt: null, expiresAt: FAR_FUTURE, publishedOn: PAST },
+      { tracksUniquePool: false },
+    );
+    const data: Record<string, unknown> = { title: 'Edited' };
+
+    await validateOfferLifecycle(strapi, 'api::deal.deal', 'update', data, 'd1', false, NOW);
+
+    expect(data.contentStatus).toBe('published');
+    expect(strapi.documents().findOne).toHaveBeenCalledWith(
+      expect.not.objectContaining({ populate: expect.anything() }),
+    );
   });
 });

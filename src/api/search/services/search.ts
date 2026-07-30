@@ -147,6 +147,8 @@ function mediaAlt(
 const COUPON_FIELDS = ["title", "code", "couponType", "affiliateLink"];
 const DEAL_FIELDS = [
   "title",
+  "code",
+  "couponType",
   "affiliateLink",
   "salePrice",
   "mrp",
@@ -519,17 +521,16 @@ function mapOffer(document: any, type: "coupon" | "deal") {
             logo: mapMedia(ownerMedia, ownerAlt),
           }
         : null,
-    ...(type === "coupon"
-      ? {
-          codeMode:
-            document?.couponType === "unique"
-              ? "unique"
-              : document?.couponType === "static" &&
-                  Boolean(cleanText(document?.code, 300))
-                ? "static"
-                : "none",
-        }
-      : {}),
+    // Both offer types can draw from a pool. Only the MODE ships — never a code
+    // and never a pool documentId; the redeem interstitial resolves the pool
+    // server-side.
+    codeMode:
+      document?.couponType === "unique"
+        ? "unique"
+        : document?.couponType === "static" &&
+            Boolean(cleanText(document?.code, 300))
+          ? "static"
+          : "none",
   };
 }
 

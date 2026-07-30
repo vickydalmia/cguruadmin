@@ -5,6 +5,9 @@ import {
   validateCouponTypeFields,
 } from './coupon-type-consistency';
 
+const COUPON_UID = 'api::coupon.coupon' as const;
+const DEAL_UID = 'api::deal.deal' as const;
+
 describe('normaliseCouponTypeFields', () => {
   describe('couponType absent from the payload (cron safety)', () => {
     // THE critical case. config/cron-tasks.ts runs every 5 minutes and issues
@@ -167,11 +170,13 @@ describe('normaliseCouponTypeFields', () => {
 });
 
 describe('isCouponUid', () => {
-  it('matches the coupon uid', () => {
-    expect(isCouponUid('api::coupon.coupon')).toBe(true);
+  // Both offer schemas carry couponType + uniqueCouponPool, so both need the
+  // same normaliser and the same "unique needs a pool" check.
+  it.each([[COUPON_UID], [DEAL_UID]])('matches %s', (uid) => {
+    expect(isCouponUid(uid)).toBe(true);
   });
 
-  it.each([['api::deal.deal'], ['api::store.store'], [''], [undefined], [null]])(
+  it.each([['api::store.store'], ['api::homepage.homepage'], [''], [undefined], [null]])(
     'rejects %s',
     (uid) => {
       expect(isCouponUid(uid)).toBe(false);
@@ -193,7 +198,7 @@ describe('validateCouponTypeFields', () => {
     async (action) => {
       const { strapi } = harness();
       await expect(
-        validateCouponTypeFields(strapi, action, {
+        validateCouponTypeFields(strapi, COUPON_UID, action, {
           couponType: 'unique',
           uniqueCouponPool: null,
         }),
@@ -211,13 +216,13 @@ describe('validateCouponTypeFields', () => {
   it('accepts a unique coupon with a direct or connect-patch pool', async () => {
     const { strapi } = harness();
     await expect(
-      validateCouponTypeFields(strapi, 'create', {
+      validateCouponTypeFields(strapi, COUPON_UID, 'create', {
         couponType: 'unique',
         uniqueCouponPool: { documentId: 'pool-1' },
       }),
     ).resolves.toBeUndefined();
     await expect(
-      validateCouponTypeFields(strapi, 'create', {
+      validateCouponTypeFields(strapi, COUPON_UID, 'create', {
         couponType: 'unique',
         uniqueCouponPool: { connect: [{ documentId: 'pool-1' }] },
       }),
@@ -227,7 +232,7 @@ describe('validateCouponTypeFields', () => {
   it('allows a static coupon without a code or pool', async () => {
     const { strapi } = harness();
     await expect(
-      validateCouponTypeFields(strapi, 'create', {
+      validateCouponTypeFields(strapi, COUPON_UID, 'create', {
         couponType: 'static',
         code: null,
         uniqueCouponPool: null,
@@ -243,6 +248,7 @@ describe('validateCouponTypeFields', () => {
     await expect(
       validateCouponTypeFields(
         strapi,
+        COUPON_UID,
         'update',
         { couponType: 'unique', uniqueCouponPool: null },
         'coupon-1',
@@ -258,6 +264,7 @@ describe('validateCouponTypeFields', () => {
     await expect(
       validateCouponTypeFields(
         strapi,
+        COUPON_UID,
         'update',
         {
           couponType: 'unique',
@@ -278,6 +285,7 @@ describe('validateCouponTypeFields', () => {
     await expect(
       validateCouponTypeFields(
         strapi,
+        COUPON_UID,
         'update',
         {
           title: 'Edited title',
@@ -295,7 +303,7 @@ describe('validateCouponTypeFields', () => {
       uniqueCouponPool: { documentId: 'pool-1' },
     });
     await expect(
-      validateCouponTypeFields(strapi, 'clone', {}, 'coupon-1'),
+      validateCouponTypeFields(strapi, COUPON_UID, 'clone', {}, 'coupon-1'),
     ).resolves.toBeUndefined();
     expect(findOne).toHaveBeenCalledWith(
       expect.objectContaining({ documentId: 'coupon-1' }),
@@ -310,6 +318,7 @@ describe('validateCouponTypeFields', () => {
     await expect(
       validateCouponTypeFields(
         strapi,
+        COUPON_UID,
         'clone',
         {
           uniqueCouponPool: {
@@ -327,7 +336,7 @@ describe('validateCouponTypeFields', () => {
       uniqueCouponPool: null,
     });
     await expect(
-      validateCouponTypeFields(strapi, 'clone', {}, 'coupon-1'),
+      validateCouponTypeFields(strapi, COUPON_UID, 'clone', {}, 'coupon-1'),
     ).rejects.toThrow(/Choose a Unique Coupon Pool/);
   });
 
@@ -338,6 +347,7 @@ describe('validateCouponTypeFields', () => {
     });
     await validateCouponTypeFields(
       strapi,
+      COUPON_UID,
       'update',
       { contentStatus: 'expired' },
       'coupon-1',
@@ -355,6 +365,7 @@ describe('validateCouponTypeFields', () => {
       await expect(
         validateCouponTypeFields(
           strapi,
+          COUPON_UID,
           'update',
           { title: 'Renamed' },
           'coupon-1',
@@ -374,6 +385,7 @@ describe('validateCouponTypeFields', () => {
       await expect(
         validateCouponTypeFields(
           strapi,
+          COUPON_UID,
           'update',
           { title: 'Renamed' },
           'coupon-1',
@@ -390,6 +402,7 @@ describe('validateCouponTypeFields', () => {
       await expect(
         validateCouponTypeFields(
           strapi,
+          COUPON_UID,
           'update',
           { contentStatus: 'published' },
           'coupon-1',
@@ -408,6 +421,7 @@ describe('validateCouponTypeFields', () => {
       await expect(
         validateCouponTypeFields(
           strapi,
+          COUPON_UID,
           'update',
           { title: 'Renamed' },
           'coupon-1',
@@ -422,6 +436,7 @@ describe('validateCouponTypeFields', () => {
       await expect(
         validateCouponTypeFields(
           strapi,
+          COUPON_UID,
           'update',
           { uniqueCouponPool: { connect: [{ documentId: 'pool-1' }] } },
           'coupon-1',
@@ -429,5 +444,57 @@ describe('validateCouponTypeFields', () => {
         ),
       ).resolves.toBeUndefined();
     });
+  });
+});
+
+describe('unique pools on Product Deals', () => {
+  function harness(stored: unknown = null) {
+    const documents = vi.fn(() => ({
+      findOne: vi.fn().mockResolvedValue(stored),
+    }));
+    return { strapi: { documents } as any, documents };
+  }
+
+  it('requires a pool when a Deal is saved as unique', async () => {
+    const { strapi } = harness();
+
+    await expect(
+      validateCouponTypeFields(strapi, DEAL_UID, 'create', {
+        couponType: 'unique',
+        uniqueCouponPool: null,
+      }),
+    ).rejects.toMatchObject({
+      name: 'ValidationError',
+      details: {
+        errors: [expect.objectContaining({ path: ['uniqueCouponPool'] })],
+      },
+    });
+  });
+
+  it('reads the merge base from the Deal schema, not the Coupon one', async () => {
+    // The uid used to be hard-coded, so validating a Deal would have gone
+    // looking for it among Coupons and found nothing.
+    const { strapi, documents } = harness({
+      documentId: 'deal-1',
+      couponType: 'unique',
+      uniqueCouponPool: { documentId: 'pool-1' },
+    });
+
+    await expect(
+      validateCouponTypeFields(strapi, DEAL_UID, 'update', { title: 'Edited' }, 'deal-1', true),
+    ).resolves.toBeUndefined();
+    expect(documents).toHaveBeenCalledWith(DEAL_UID);
+  });
+
+  it('clears a Deal code when it becomes unique, and the pool when it becomes static', () => {
+    // Same mutual exclusion the Coupon schema has: the admin hides the losing
+    // field, so it is omitted from the payload and the stored value survives
+    // unless something clears it.
+    expect(
+      normaliseCouponTypeFields({ couponType: 'unique', code: 'OLD' }),
+    ).toMatchObject({ code: null });
+    expect(
+      normaliseCouponTypeFields({ couponType: 'static', uniqueCouponPool: 'pool-1' }),
+    ).toMatchObject({ uniqueCouponPool: null });
   });
 });

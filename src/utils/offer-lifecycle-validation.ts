@@ -132,15 +132,43 @@ export async function validateOfferLifecycle(
   // Without it nothing can
   // be derived safely, so bail out entirely rather than derive from the
   // partial payload (see THE PARTIAL-PAYLOAD TRAP above).
+  // A unique offer whose pool has run dry is over, whatever its dates say. The
+  // pool rides along on the merge-base read rather than costing a second query.
+  const tracksUniquePool = Boolean(
+    (strapi.contentType(uid as any) as any)?.attributes?.uniqueCouponPool,
+  );
+
   let stored: Record<string, unknown> | null = null;
   if (!isFreshCreate && documentId) {
     const found: unknown = await strapi.documents(uid).findOne({
       documentId,
-      fields: ['documentId', 'scheduledAt', 'expiresAt', 'publishedOn'],
+      fields: [
+        'documentId',
+        'scheduledAt',
+        'expiresAt',
+        'publishedOn',
+        ...(tracksUniquePool ? ['couponType'] : []),
+      ] as any,
+      ...(tracksUniquePool
+        ? {
+            populate: {
+              uniqueCouponPool: { fields: ['exhaustedAt'] },
+            } as any,
+          }
+        : {}),
     });
     if (!found || typeof found !== 'object') return;
     stored = found as Record<string, unknown>;
   }
+
+  // Deliberately skipped when the payload is changing the pool: the editor is
+  // mid-repair (usually attaching a restocked pool), and the scheduler settles
+  // the real state within its next pass either way.
+  const poolExhausted =
+    tracksUniquePool &&
+    !hasField(payload, 'uniqueCouponPool') &&
+    stored?.couponType === 'unique' &&
+    Boolean((stored?.uniqueCouponPool as { exhaustedAt?: unknown } | null)?.exhaustedAt);
 
   const storedScheduledAt = stored ? stored.scheduledAt : undefined;
   const storedExpiresAt = stored ? stored.expiresAt : undefined;
@@ -253,6 +281,7 @@ export async function validateOfferLifecycle(
   const status: ContentStatus = computeContentStatus({
     scheduledAt: mergedScheduledAt as Date | string | null | undefined,
     expiresAt: mergedExpiresAt as Date | string | null | undefined,
+    poolExhausted,
     now,
   });
   payload.contentStatus = status;

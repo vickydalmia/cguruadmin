@@ -8,10 +8,27 @@ import type { Core } from '@strapi/strapi';
  */
 export const MAX_CODES_PER_REQUEST = 2000;
 
+/**
+ * Mirrors the activation id the redeem interstitial mints per click (a
+ * `crypto.randomUUID()`, with or without dashes) and validates before putting
+ * it in the URL fragment — see renderOfferRedeemHtml in
+ * cguru-ui/isr-gateway/src/offer-redeem-route.ts. Anything else is ignored
+ * rather than rejected: an unusable id must not cost the visitor their code,
+ * it just means this activation is not replayable.
+ */
+const ACTIVATION_ID_PATTERN =
+  /^(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i;
+
+export function normalizeActivationId(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return ACTIVATION_ID_PATTERN.test(trimmed) ? trimmed : null;
+}
+
 const uniqueCouponController = ({ strapi }: { strapi: Core.Strapi }) => ({
 
   async redeem(ctx) {
-    const { poolDocumentId } = ctx.request.body;
+    const { poolDocumentId, activationId } = ctx.request.body;
 
     if (!poolDocumentId) {
       return ctx.badRequest('poolDocumentId is required');
@@ -20,7 +37,9 @@ const uniqueCouponController = ({ strapi }: { strapi: Core.Strapi }) => ({
     const result = await strapi
       .plugin('unique-coupon')
       .service('unique-coupon')
-      .redeemCode(poolDocumentId);
+      .redeemCode(poolDocumentId, {
+        activationId: normalizeActivationId(activationId),
+      });
 
     if (result.success) {
       return ctx.send({ success: true, code: result.code });

@@ -29,6 +29,7 @@ import {
   validateOfferLifecycle,
 } from '../offer-lifecycle-validation';
 import { validateRedirect } from '../redirect-validation';
+import { warnUndersizedSeoOgImage } from '../seo-og-image-validation';
 import { sanitizeRichtextData } from '../sanitize-richtext';
 import { normaliseTextFields, validateTextFieldsForWrite } from '../text-field-validation';
 
@@ -138,8 +139,8 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
   {
     name: 'validateCouponTypeFields',
     applies: isCouponUid,
-    run: ({ strapi, action, data, documentId, strict }) =>
-      validateCouponTypeFields(strapi, action, data, documentId, strict),
+    run: ({ strapi, uid, action, data, documentId, strict }) =>
+      validateCouponTypeFields(strapi, uid as any, action, data, documentId, strict),
   },
   {
     // Constraints introduced on populated fields cannot live in the Strapi
@@ -148,6 +149,14 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     name: 'validateChangedFields',
     run: ({ strapi, uid, action, data, documentId, strict }) =>
       validateChangedFields(strapi, uid, action, data, documentId, strict),
+  },
+  {
+    // SOFT check (never throws): an ogImage below 1200×630 logs a warning but
+    // the save goes through — the catalogue is migrated from WordPress with
+    // arbitrary image sizes and must stay editable.
+    name: 'warnUndersizedSeoOgImage',
+    run: ({ strapi, uid, action, data }) =>
+      warnUndersizedSeoOgImage(strapi, uid, action, data),
   },
   {
     // Homepage section images must match their Figma sizes exactly — reject

@@ -8,6 +8,9 @@ const POOL_LINK_POOL_COLUMN = "unique_coupon_pool_id";
 const POOL_CODE_GUARD = "unique_codes_pool_code_unique";
 const CODE_LOOKUP_INDEX = "unique_codes_code_btree_idx";
 const POOL_LINK_LOOKUP_INDEX = "unique_codes_pool_code_lookup_idx";
+const UNCLAIMED_CODE_INDEX = "unique_codes_unclaimed_idx";
+const CLAIM_TOKEN_INDEX = "unique_codes_claim_token_idx";
+const LINK_CODE_LOOKUP_INDEX = "unique_codes_pool_lnk_code_idx";
 const LINK_GUARD_TRIGGER = "unique_codes_pool_code_link_guard_v1";
 const CODE_GUARD_TRIGGER = "unique_codes_pool_code_value_guard_v1";
 const LINK_GUARD_FUNCTION = "cguru_unique_code_link_guard_v1";
@@ -28,15 +31,50 @@ const POSTGRES_LOOKUP_INDEXES = Object.freeze([
       POOL_LINK_CODE_COLUMN,
     ]),
   }),
+  // Redemption's hot path. Without a partial index the "lowest-id unused code"
+  // scan walks every already-spent code first, so a 99%-drained pool costs
+  // ~100x a fresh one per claim — the exact moment a popular offer needs to be
+  // fast. Indexing only the unused rows keeps the cost flat as stock depletes,
+  // and the index shrinks as the pool drains.
+  Object.freeze({
+    name: UNCLAIMED_CODE_INDEX,
+    table: UNIQUE_CODES_TABLE,
+    columns: Object.freeze(["id"]),
+    where: '"is_used" = false',
+    requiredColumns: Object.freeze(["id", "is_used"]),
+  }),
+  // Backs replaying a claim to the activation that made it, and — because it is
+  // UNIQUE — makes two in-flight requests for one activation collide in the
+  // database instead of quietly claiming two codes.
+  Object.freeze({
+    name: CLAIM_TOKEN_INDEX,
+    table: UNIQUE_CODES_TABLE,
+    columns: Object.freeze(["claim_token"]),
+    unique: true,
+    where: '"claim_token" IS NOT NULL',
+  }),
+  // The EXISTS probe in the claim statement joins from the code to the link
+  // row. Strapi usually creates this FK index itself; declaring it here means
+  // the claim never degrades to a sequential scan if it did not.
+  Object.freeze({
+    name: LINK_CODE_LOOKUP_INDEX,
+    table: POOL_LINK_TABLE,
+    columns: Object.freeze([POOL_LINK_CODE_COLUMN]),
+  }),
 ]);
 
 const POSTGRES_CLIENTS = new Set(["pg", "postgres", "postgresql"]);
 
 function postgresLookupIndexSql(index) {
   const columns = index.columns.map((column) => `"${column}"`).join(", ");
+  // Not CONCURRENTLY: Strapi runs migrations, and bootstrap runs this
+  // reconciliation, inside a transaction, and PostgreSQL forbids
+  // CREATE INDEX CONCURRENTLY there. These tables are bounded (100,000 codes
+  // per import) so the build holds its write lock briefly.
   return (
-    `CREATE INDEX IF NOT EXISTS "${index.name}" ` +
-    `ON "${index.table}" (${columns})`
+    `CREATE${index.unique ? " UNIQUE" : ""} INDEX IF NOT EXISTS ` +
+    `"${index.name}" ON "${index.table}" (${columns})` +
+    (index.where ? ` WHERE ${index.where}` : "")
   );
 }
 
@@ -103,6 +141,20 @@ async function postgresGuardsExist(knex) {
   return Number(result?.rows?.[0]?.count ?? 0) === 2;
 }
 
+/**
+ * Strapi runs user migrations BEFORE schema sync, so on the pass that
+ * introduces a new attribute its column does not exist yet and the index build
+ * would abort the whole migration. Bootstrap calls this again after schema
+ * sync, which is where such an index actually gets created.
+ */
+async function indexColumnsExist(knex, index) {
+  const required = index.requiredColumns ?? index.columns;
+  const present = await Promise.all(
+    required.map((column) => knex.schema.hasColumn(index.table, column)),
+  );
+  return present.every(Boolean);
+}
+
 async function ensurePostgresLookupIndexes(knex) {
   if (!isPostgres(knex)) return false;
   const names = POSTGRES_LOOKUP_INDEXES.map((index) => index.name);
@@ -110,7 +162,7 @@ async function ensurePostgresLookupIndexes(knex) {
     `SELECT indexname
        FROM pg_indexes
       WHERE schemaname = current_schema()
-        AND indexname IN (?, ?)`,
+        AND indexname IN (${names.map(() => "?").join(", ")})`,
     names,
   );
   const existing = new Set(
@@ -119,6 +171,7 @@ async function ensurePostgresLookupIndexes(knex) {
 
   for (const index of POSTGRES_LOOKUP_INDEXES) {
     if (existing.has(index.name)) continue;
+    if (!(await indexColumnsExist(knex, index))) continue;
     await knex.raw(postgresLookupIndexSql(index));
   }
   return true;
@@ -315,7 +368,58 @@ async function removeDuplicateCodes(knex) {
   return removed;
 }
 
+/**
+ * Recompute pool counters from the code rows.
+ *
+ * Redemption deliberately no longer maintains `used_codes` inline — that write
+ * targets one shared row, so doing it per claim would reserialize every
+ * concurrent claimer and undo the SKIP LOCKED claim. The counters are display
+ * values reconciled here instead; `getPoolStats` reports live numbers for
+ * anything that needs to be exact.
+ *
+ * This also stamps `exhausted_at` for a pool that drained without anyone
+ * clicking since — redemption stamps it on the drained edge, but a pool whose
+ * last code went out and then saw no traffic would otherwise never be noticed.
+ * A pool that has never held a code is left alone: an editor mid-setup must not
+ * have their offers expired out from under them.
+ */
+/**
+ * Must match CLAIM_REPLAY_WINDOW_MS in the unique-coupon service. The two are
+ * halves of one rule: a claim token can be exchanged for its code for this
+ * long, and is released once it cannot.
+ */
+const CLAIM_REPLAY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Release claim tokens whose replay window has passed.
+ *
+ * The unique index on `claim_token` is permanent, but redemption only replays a
+ * claim for 24 hours. Without this the two disagree: an activation id older
+ * than the window can never be replayed AND can never claim again, because the
+ * index keeps rejecting it. Clearing the column reconciles them, and stops a
+ * write-once column from accumulating rows the index has to carry forever.
+ */
+async function releaseExpiredClaimTokens(knex, windowMs = CLAIM_REPLAY_WINDOW_MS) {
+  if (!(await knex.schema.hasColumn(UNIQUE_CODES_TABLE, "claim_token"))) {
+    return 0;
+  }
+  const cutoff = new Date(Date.now() - windowMs);
+  const released = await knex(UNIQUE_CODES_TABLE)
+    .whereNotNull("claim_token")
+    .where((builder) =>
+      builder.whereNull("used_at").orWhere("used_at", "<=", cutoff),
+    )
+    .update({ claim_token: null });
+  return Number(released || 0);
+}
+
 async function recountPools(knex) {
+  const previous = await knex(POOLS_TABLE).select("id", "exhausted_at");
+  const exhaustedBefore = new Map(
+    previous.map((row) => [row.id, row.exhausted_at]),
+  );
+  const now = new Date();
+
   await knex(POOLS_TABLE).update({ total_codes: 0, used_codes: 0 });
 
   const counts = await knex(`${POOL_LINK_TABLE} as pool_link`)
@@ -336,11 +440,20 @@ async function recountPools(knex) {
     .groupBy(`pool_link.${POOL_LINK_POOL_COLUMN}`);
 
   for (const row of counts) {
+    const total = Number(row.total_codes) || 0;
+    const used = Number(row.used_codes) || 0;
+    const drained = total > 0 && used >= total;
+
     await knex(POOLS_TABLE)
       .where({ id: row.pool_id })
       .update({
-        total_codes: Number(row.total_codes) || 0,
-        used_codes: Number(row.used_codes) || 0,
+        total_codes: total,
+        used_codes: used,
+        // Keep the original timestamp when it is already set, so "when did
+        // this run out" survives a reconciliation.
+        exhausted_at: drained
+          ? (exhaustedBefore.get(row.pool_id) ?? now)
+          : null,
       });
   }
 }
@@ -390,11 +503,14 @@ async function reconcileUniqueCodeIntegrityAfterSchemaSync(
 }
 
 module.exports = {
+  CLAIM_TOKEN_INDEX,
   CODE_LOOKUP_INDEX,
   CODE_GUARD_TRIGGER,
+  LINK_CODE_LOOKUP_INDEX,
   LINK_GUARD_TRIGGER,
   POOL_CODE_GUARD,
   POOL_LINK_LOOKUP_INDEX,
+  UNCLAIMED_CODE_INDEX,
   POOL_LINK_TABLE,
   POSTGRES_LOOKUP_INDEXES,
   chooseDuplicateKeeper,
@@ -402,6 +518,8 @@ module.exports = {
   installPostgresGuards,
   postgresLookupIndexSql,
   postgresGuardsExist,
+  recountPools,
+  releaseExpiredClaimTokens,
   reconcileUniqueCodeIntegrity,
   reconcileUniqueCodeIntegrityAfterSchemaSync,
 };

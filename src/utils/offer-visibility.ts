@@ -34,6 +34,10 @@ export const DEAL_FIELDS = [
   'prepaidText',
   'badge',
   'code',
+  // Load-bearing alongside `code`: the frontend exposes a code only for a
+  // KNOWN code type, so a Deal projection that omits `couponType` renders every
+  // Deal as a no-code offer.
+  'couponType',
   'salePrice',
   'mrp',
   'discount',
@@ -53,6 +57,10 @@ export const dealRef = {
     dealImage: true,
     stores: storeRef,
     brands: brandRef,
+    // Name only. The pool documentId (always emitted alongside the selected
+    // fields) is what lets the frontend render the unique-code flow; the
+    // allocated codes themselves stay behind /unique-coupon/redeem.
+    uniqueCouponPool: { fields: ['name'] },
   },
 };
 

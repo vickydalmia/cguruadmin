@@ -32,6 +32,7 @@ describe('write-validation step order', () => {
     expect(names(COLLECTED_STEPS)).toEqual([
       'validateCouponTypeFields',
       'validateChangedFields',
+      'warnUndersizedSeoOgImage',
       'validateHomepageImages',
       'validateHomepagePopularSearches',
       'validateMenuCategorySections',
@@ -116,10 +117,15 @@ describe('stepApplies', () => {
   });
 
   it('scopes uid-specific steps to their own content types', () => {
+    // Both offer schemas carry couponType + uniqueCouponPool, so both are in
+    // scope; a non-offer type is not.
     expect(stepApplies(step('validateCouponTypeFields'), 'api::coupon.coupon', 'update')).toBe(
       true,
     );
     expect(stepApplies(step('validateCouponTypeFields'), 'api::deal.deal', 'update')).toBe(
+      true,
+    );
+    expect(stepApplies(step('validateCouponTypeFields'), 'api::store.store', 'update')).toBe(
       false,
     );
 

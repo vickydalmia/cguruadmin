@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@fal-ai/client": "^1.10.1",
+    "@paralleldrive/cuid2": "^2.2.2",
     "@strapi/plugin-cloud": "5.50.0",
     "@strapi/plugin-users-permissions": "5.50.0",
     "@strapi/provider-email-amazon-ses": "5.50.0",

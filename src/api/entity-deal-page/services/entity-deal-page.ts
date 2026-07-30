@@ -101,6 +101,9 @@ const DEAL_FIELDS = [
   'badge',
   'content',
   'code',
+  // Load-bearing alongside `code`: the frontend exposes a code only for a
+  // KNOWN code type, so omitting this renders every Deal as a no-code offer.
+  'couponType',
   'salePrice',
   'mrp',
   'discount',
@@ -225,12 +228,10 @@ export function resolveEntityDealPageSeo(input: {
   if (canonical !== selfCanonical) blockers.push('canonical-not-self');
   if (input.routeConflict === true) blockers.push('route-conflict');
 
-  const media = entity?.logo ?? entity?.icon ?? null;
-  const ogImage = seo?.ogImage ?? media;
-  const mediaAlt =
-    collapseText(entity?.logoAlt)
-    ?? collapseText(entity?.iconAlt)
-    ?? displayName;
+  // Share-card image: ONLY an editor-uploaded seo.ogImage. Logos/icons are
+  // small and far off the ~1.91:1 card ratio; when absent the UI layout serves
+  // its 1200×630 site-default card instead.
+  const ogImage = seo?.ogImage ?? null;
   const metaTitle = limitText(
     collapseText(seo?.metaTitle) ?? `${displayName} Deals & Offers`,
     SEO_LIMITS.metaTitle,
@@ -258,10 +259,13 @@ export function resolveEntityDealPageSeo(input: {
       SEO_LIMITS.ogDescription,
     ),
     ogImage,
-    ogImageAlt:
-      collapseText(seo?.ogImageAlt)
-      ?? collapseText(ogImage?.alternativeText)
-      ?? mediaAlt,
+    // Alt must describe the image actually shipped: with no editor ogImage
+    // both stay null and the UI default card supplies its own alt.
+    ogImageAlt: ogImage
+      ? (collapseText(seo?.ogImageAlt)
+        ?? collapseText(ogImage?.alternativeText)
+        ?? displayName)
+      : null,
   };
 }
 
@@ -290,6 +294,9 @@ function dealPopulate() {
       fields: ['name', 'slug', 'iconAlt'],
       populate: { icon: true },
     },
+    // Name only — the pool's codes are never reachable through a content API
+    // populate; they are issued one at a time by /unique-coupon/redeem.
+    uniqueCouponPool: { fields: ['name'] },
   };
 }
 

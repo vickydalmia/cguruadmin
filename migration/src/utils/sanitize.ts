@@ -9,6 +9,23 @@
 
 import sanitizeHtmlLib from "sanitize-html";
 
+// Kept byte-in-sync with src/utils/sanitize-richtext.ts (parity pinned by its
+// test suite): external http(s) links get rel="nofollow" added automatically.
+const INTERNAL_HOST_PATTERN = /(^|\.)couponzguru\.com$/iu;
+
+function isExternalHttpHref(href: string | undefined): boolean {
+  if (!href) return false;
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    // Relative/rooted paths cannot leave the site.
+    return false;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  return !INTERNAL_HOST_PATTERN.test(url.hostname);
+}
+
 /** Trim whitespace from a string value. Returns null if the result is empty. */
 export function clean(val: string | null | undefined): string | null {
   if (val == null) return null;
@@ -42,9 +59,18 @@ export function cleanHtml(val: string | null | undefined): string | null {
     // Only safe URL schemes; drops javascript:, vbscript:, and data: URIs.
     allowedSchemes: ["http", "https", "mailto", "tel"],
     allowProtocolRelative: false,
-    // Force noopener/noreferrer on links that open a new tab.
+    // Force noopener/noreferrer on every link; external links additionally
+    // get nofollow so editorial content never leaks link equity off-site.
     transformTags: {
-      a: sanitizeHtmlLib.simpleTransform("a", { rel: "noopener noreferrer" }),
+      a: (tagName, attribs) => ({
+        tagName,
+        attribs: {
+          ...attribs,
+          rel: isExternalHttpHref(attribs.href)
+            ? "nofollow noopener noreferrer"
+            : "noopener noreferrer",
+        },
+      }),
     },
   }).trim();
   return sanitized.length > 0 ? sanitized : null;

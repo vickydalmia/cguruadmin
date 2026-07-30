@@ -1,13 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 
 const {
+  CLAIM_TOKEN_INDEX,
   CODE_GUARD_TRIGGER,
   CODE_LOOKUP_INDEX,
+  LINK_CODE_LOOKUP_INDEX,
   LINK_GUARD_TRIGGER,
   POOL_CODE_GUARD,
   POOL_LINK_LOOKUP_INDEX,
   POOL_LINK_TABLE,
   POSTGRES_LOOKUP_INDEXES,
+  UNCLAIMED_CODE_INDEX,
   chooseDuplicateKeeper,
   reconcileUniqueCodeIntegrity,
 } = require('../../database/unique-code-integrity.js');
@@ -63,12 +66,19 @@ type HarnessOptions = {
   existingIndexes?: string[];
   guardsExist?: boolean;
   missingLinkTable?: boolean;
+  /**
+   * Columns schema sync has not created yet. Strapi runs user migrations
+   * before schema sync, so an index over a brand-new attribute must be
+   * deferred rather than attempted against a column that does not exist.
+   */
+  missingColumns?: string[];
 };
 
 function createPostgresHarness({
   existingIndexes = [],
   guardsExist = false,
   missingLinkTable = false,
+  missingColumns = [],
 }: HarnessOptions = {}) {
   const tableQueries: string[] = [];
   const rawStatements: string[] = [];
@@ -98,6 +108,8 @@ function createPostgresHarness({
   knex.schema = {
     hasTable: async (table: string) =>
       !(missingLinkTable && table === POOL_LINK_TABLE),
+    hasColumn: async (_table: string, column: string) =>
+      !missingColumns.includes(column),
   };
   knex.raw = (sql: string) => {
     rawStatements.push(sql);
@@ -164,8 +176,44 @@ describe('reconcileUniqueCodeIntegrity Strapi relation schema', () => {
       guardCreated: false,
     });
     expect(
-      rawStatements.filter((sql) => sql.startsWith('CREATE INDEX')),
+      rawStatements.filter((sql) => /^CREATE (?:UNIQUE )?INDEX/u.test(sql)),
     ).toEqual([]);
+  });
+
+  it('creates the redemption hot-path indexes', async () => {
+    const { knex, rawStatements } = createPostgresHarness({ guardsExist: true });
+
+    await reconcileUniqueCodeIntegrity(knex, logger());
+    const ddl = rawStatements.join('\n');
+
+    // Partial, so a drained pool costs the same per claim as a fresh one.
+    expect(ddl).toContain(
+      `CREATE INDEX IF NOT EXISTS "${UNCLAIMED_CODE_INDEX}" ` +
+        `ON "unique_codes" ("id") WHERE "is_used" = false`,
+    );
+    // UNIQUE, so two requests for one activation collide instead of both
+    // claiming a code.
+    expect(ddl).toContain(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "${CLAIM_TOKEN_INDEX}" ` +
+        `ON "unique_codes" ("claim_token") WHERE "claim_token" IS NOT NULL`,
+    );
+    expect(ddl).toContain(LINK_CODE_LOOKUP_INDEX);
+  });
+
+  it('defers an index whose column schema sync has not created yet', async () => {
+    const { knex, rawStatements } = createPostgresHarness({
+      guardsExist: true,
+      missingColumns: ['claim_token'],
+    });
+
+    await expect(
+      reconcileUniqueCodeIntegrity(knex, logger()),
+    ).resolves.toMatchObject({ attempted: true });
+
+    const ddl = rawStatements.join('\n');
+    expect(ddl).not.toContain(CLAIM_TOKEN_INDEX);
+    // Everything whose columns do exist is still installed in the same pass.
+    expect(ddl).toContain(UNCLAIMED_CODE_INDEX);
   });
 
   it('deduplicates through the Strapi link table and installs both guards', async () => {

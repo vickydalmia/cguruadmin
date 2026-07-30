@@ -1046,6 +1046,9 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<'published'>;
+    couponType: Schema.Attribute.Enumeration<['static', 'unique']> &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'static'>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1088,6 +1091,10 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 200;
       }>;
+    uniqueCouponPool: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::unique-coupon-pool.unique-coupon-pool'
+    >;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1675,6 +1682,7 @@ export interface ApiUniqueCodeUniqueCode extends Struct.CollectionTypeSchema {
     };
   };
   attributes: {
+    claimToken: Schema.Attribute.String & Schema.Attribute.Private;
     code: Schema.Attribute.String &
       Schema.Attribute.Required &
       Schema.Attribute.Private;
@@ -1725,6 +1733,8 @@ export interface ApiUniqueCouponPoolUniqueCouponPool
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    deals: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'>;
+    exhaustedAt: Schema.Attribute.DateTime;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',

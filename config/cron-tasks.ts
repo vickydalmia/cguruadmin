@@ -1,9 +1,29 @@
+import { join } from 'node:path';
+
 import { computeContentStatus } from '../src/utils/content-status';
 import { enqueueStandaloneIsrEvent } from '../src/isr-outbox/runtime';
 import {
   removeDisplayedTopPicksFromOrdered,
   removeInactiveCuratedOfferRelations,
 } from '../src/utils/curated-offer-relations';
+
+/**
+ * Resolve from the application ROOT, not from this module's directory, and not
+ * at import time.
+ *
+ * `database/*.js` is CommonJS shared with the Knex migrations, and `tsconfig`
+ * has no `allowJs`, so those files are never emitted into `dist/`. Production
+ * runs `dist/config/cron-tasks.js` while the helper stays at
+ * `<app>/database/…`, so a relative `require('../database/…')` resolves to a
+ * path that does not exist and throws at module load — taking the whole cron
+ * config with it. `src/index.ts` resolves the same helper the same way for the
+ * same reason.
+ */
+function loadUniqueCodeIntegrity(strapi: any) {
+  return require(
+    join(strapi.dirs.app.root, 'database', 'unique-code-integrity.js'),
+  );
+}
 
 export default {
   scheduler: {
@@ -19,14 +39,26 @@ export default {
         "api::coupon.coupon",
         "api::deal.deal",
       ] as const) {
-        const docs = await strapi.documents(uid).findMany({
-          fields: [
-            "documentId",
-            "scheduledAt",
-            "expiresAt",
-            "contentStatus",
-            "publishedOn",
-          ],
+        // Only offers that can draw from a pool need the exhaustion arm.
+        const tracksUniquePool = Boolean(
+          (strapi.contentType(uid) as any)?.attributes?.uniqueCouponPool,
+        );
+
+        const fields = [
+          "documentId",
+          "scheduledAt",
+          "expiresAt",
+          "contentStatus",
+          "publishedOn",
+          ...(tracksUniquePool ? ["couponType"] : []),
+        ];
+        const poolPopulate = tracksUniquePool
+          ? { populate: { uniqueCouponPool: { fields: ["exhaustedAt"] } } }
+          : {};
+
+        const dateDriven = await strapi.documents(uid).findMany({
+          fields,
+          ...poolPopulate,
           filters: {
             $or: [
               {
@@ -41,10 +73,59 @@ export default {
           },
         });
 
+        // Deliberately SEPARATE queries rather than more `$or` arms above.
+        // Folding relation conditions into a disjunction turns it into an
+        // OR-of-EXISTS, the shape that inflated planner cost and tripped PG JIT
+        // on public search. Each of these is a flat AND over indexed columns.
+        const poolDriven = tracksUniquePool
+          ? [
+              // Pool ran dry: stop rendering an "unlock" CTA that can no longer
+              // produce a code.
+              ...(await strapi.documents(uid).findMany({
+                fields,
+                ...poolPopulate,
+                filters: {
+                  couponType: "unique",
+                  contentStatus: "published",
+                  uniqueCouponPool: { exhaustedAt: { $notNull: true } },
+                },
+              })),
+              // Pool restocked: bring the offer back without an editor having
+              // to touch each one. Bounded by expiresAt so the ever-growing
+              // set of genuinely date-expired unique offers is not re-examined
+              // every five minutes forever.
+              ...(await strapi.documents(uid).findMany({
+                fields,
+                ...poolPopulate,
+                filters: {
+                  couponType: "unique",
+                  contentStatus: "expired",
+                  uniqueCouponPool: { exhaustedAt: { $null: true } },
+                  $and: [
+                    {
+                      $or: [
+                        { expiresAt: { $null: true } },
+                        { expiresAt: { $gt: now.toISOString() } },
+                      ],
+                    },
+                  ],
+                },
+              })),
+            ]
+          : [];
+
+        const docs = [...dateDriven, ...poolDriven].filter(
+          (doc, index, all) =>
+            all.findIndex((other) => other.documentId === doc.documentId) === index,
+        );
+
         for (const doc of docs) {
           const nextStatus = computeContentStatus({
             scheduledAt: doc.scheduledAt,
             expiresAt: doc.expiresAt,
+            poolExhausted:
+              doc.couponType === "unique" &&
+              Boolean(doc.uniqueCouponPool?.exhaustedAt),
             now,
           });
           const shouldClearScheduledAt =
@@ -179,6 +260,25 @@ export default {
         affectedPaths: [] as string[],
         requiresFullRevalidation: false,
       };
+
+      // Redemption no longer maintains the pool counters inline (that write
+      // would reserialize every concurrent claimer), so they are reconciled
+      // here. This also catches a pool that drained and then saw no further
+      // clicks, which the redeem path alone would never notice.
+      try {
+        const { recountPools, releaseExpiredClaimTokens } =
+          loadUniqueCodeIntegrity(strapi);
+        await recountPools(strapi.db.connection);
+        // Stale claim tokens hold a permanent unique index the replay window
+        // will never honour again — release them so a long-abandoned
+        // activation can draw a fresh code instead of colliding.
+        await releaseExpiredClaimTokens(strapi.db.connection);
+      } catch (err: any) {
+        strapi.log.error({
+          event: 'content.nightly_pool_recount_failed',
+          error: err?.message ?? String(err),
+        });
+      }
 
       let cleanup = NO_CHANGES;
       try {

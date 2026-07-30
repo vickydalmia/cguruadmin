@@ -4,10 +4,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import uniqueCouponService from '../plugins/unique-coupon/server/src/services/unique-coupon';
 
 const {
+  CLAIM_TOKEN_INDEX,
   CODE_GUARD_TRIGGER,
   CODE_LOOKUP_INDEX,
   LINK_GUARD_TRIGGER,
   POOL_LINK_LOOKUP_INDEX,
+  UNCLAIMED_CODE_INDEX,
+  recountPools,
   reconcileUniqueCodeIntegrity,
 } = require('../../database/unique-code-integrity.js');
 
@@ -21,7 +24,9 @@ postgresDescribe('unique-code integrity PostgreSQL integration', () => {
     knex = knexFactory({
       client: 'pg',
       connection: databaseUrl,
-      pool: { min: 0, max: 2 },
+      // The redemption tests fan out real concurrent claims; a 2-connection
+      // pool would serialize them in the client and prove nothing.
+      pool: { min: 0, max: 12 },
     });
   });
 
@@ -36,7 +41,8 @@ postgresDescribe('unique-code integrity PostgreSQL integration', () => {
         "document_id" text,
         "name" text,
         "total_codes" integer NOT NULL DEFAULT 0,
-        "used_codes" integer NOT NULL DEFAULT 0
+        "used_codes" integer NOT NULL DEFAULT 0,
+        "exhausted_at" timestamptz
       );
 
       CREATE TABLE "unique_codes" (
@@ -46,6 +52,7 @@ postgresDescribe('unique-code integrity PostgreSQL integration', () => {
         "is_used" boolean NOT NULL DEFAULT false,
         "used_at" timestamptz,
         "version" integer NOT NULL DEFAULT 0,
+        "claim_token" text,
         "created_at" timestamptz,
         "updated_at" timestamptz,
         "published_at" timestamptz,
@@ -265,5 +272,200 @@ postgresDescribe('unique-code integrity PostgreSQL integration', () => {
       })
       .first();
     expect(poolIdColumn).toBeUndefined();
+  });
+
+  describe('concurrent redemption', () => {
+    const CODE_COUNT = 24;
+
+    async function seedPool(codeCount = CODE_COUNT) {
+      await knex('unique_coupon_pools').insert({
+        document_id: 'pool-doc',
+        name: 'Concurrency Pool',
+      });
+      await knex.transaction((trx) => reconcileUniqueCodeIntegrity(trx));
+
+      const strapi = {
+        db: { connection: knex },
+        log: {
+          info: () => undefined,
+          warn: () => undefined,
+          error: () => undefined,
+        },
+      } as any;
+      const service = uniqueCouponService({ strapi });
+      await service.importCodes(
+        'pool-doc',
+        Array.from({ length: codeCount }, (_, index) => `CODE-${index}`),
+      );
+      return service;
+    }
+
+    it('never hands the same code to two simultaneous claimers', async () => {
+      // The whole point of the feature. Every claim runs at once against one
+      // pool; correctness comes from the conditional UPDATE, not from queuing.
+      const service = await seedPool();
+
+      const results = await Promise.all(
+        Array.from({ length: CODE_COUNT }, () => service.redeemCode('pool-doc')),
+      );
+
+      const codes = results
+        .filter((result): result is { success: true; code: string } => result.success)
+        .map((result) => result.code);
+      expect(codes).toHaveLength(CODE_COUNT);
+      expect(new Set(codes).size).toBe(CODE_COUNT);
+
+      const used = await knex('unique_codes').where({ is_used: true }).count({
+        count: '*',
+      }).first();
+      expect(used).toMatchObject({ count: String(CODE_COUNT) });
+    });
+
+    it('reports exhaustion exactly once past the last code, never early', async () => {
+      const service = await seedPool();
+
+      const results = await Promise.all(
+        Array.from({ length: CODE_COUNT + 3 }, () =>
+          service.redeemCode('pool-doc'),
+        ),
+      );
+
+      const succeeded = results.filter((result) => result.success);
+      const exhausted = results.filter(
+        (result) => !result.success && result.error === 'NO_CODES_AVAILABLE',
+      );
+      expect(succeeded).toHaveLength(CODE_COUNT);
+      expect(exhausted).toHaveLength(3);
+      // A code locked by a concurrent claimer must never be mistaken for an
+      // empty pool.
+      expect(results.filter((result) => !result.success)).toHaveLength(3);
+    });
+
+    it('burns one code per activation no matter how often it is retried', async () => {
+      const service = await seedPool();
+      const activationId = 'b9d2c1a4e5f64738a1b2c3d4e5f60718';
+
+      const results = await Promise.all(
+        Array.from({ length: 8 }, () =>
+          service.redeemCode('pool-doc', { activationId }),
+        ),
+      );
+
+      const codes = new Set(
+        results
+          .filter((result): result is { success: true; code: string } => result.success)
+          .map((result) => result.code),
+      );
+      expect(results.every((result) => result.success)).toBe(true);
+      expect(codes.size).toBe(1);
+
+      const used = await knex('unique_codes').where({ is_used: true }).count({
+        count: '*',
+      }).first();
+      expect(used).toMatchObject({ count: '1' });
+    });
+
+    it('gives a different activation a different code', async () => {
+      const service = await seedPool();
+
+      const first = await service.redeemCode('pool-doc', {
+        activationId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      });
+      const second = await service.redeemCode('pool-doc', {
+        activationId: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      });
+      // A reload replays; a new click draws.
+      const replayed = await service.redeemCode('pool-doc', {
+        activationId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      });
+
+      expect(first).toMatchObject({ success: true });
+      expect(second).toMatchObject({ success: true });
+      expect((first as any).code).not.toBe((second as any).code);
+      expect((replayed as any).code).toBe((first as any).code);
+    });
+
+    it('marks the pool exhausted when the last code goes out', async () => {
+      const service = await seedPool(1);
+
+      await expect(service.redeemCode('pool-doc')).resolves.toMatchObject({
+        success: true,
+      });
+      // Not yet: the pool is empty but nothing has asked for a code and been
+      // refused, so the drained edge has not been reached.
+      await expect(
+        knex('unique_coupon_pools').where({ document_id: 'pool-doc' }).first(),
+      ).resolves.toMatchObject({ exhausted_at: null });
+
+      await expect(service.redeemCode('pool-doc')).resolves.toMatchObject({
+        error: 'NO_CODES_AVAILABLE',
+      });
+      const drained = await knex('unique_coupon_pools')
+        .where({ document_id: 'pool-doc' })
+        .first();
+      expect(drained.exhausted_at).toBeInstanceOf(Date);
+
+      // Restocking clears it, so the scheduler can bring the offers back.
+      await service.importCodes('pool-doc', ['REFILL']);
+      await expect(
+        knex('unique_coupon_pools').where({ document_id: 'pool-doc' }).first(),
+      ).resolves.toMatchObject({ exhausted_at: null });
+    });
+
+    it('recounts drained pools that never saw another click', async () => {
+      // Redemption stamps the drained edge, but a pool whose last code went out
+      // and then saw no traffic would otherwise never be noticed.
+      const service = await seedPool(2);
+      await service.redeemCode('pool-doc');
+      await service.redeemCode('pool-doc');
+
+      await expect(
+        knex('unique_coupon_pools').where({ document_id: 'pool-doc' }).first(),
+      ).resolves.toMatchObject({ exhausted_at: null });
+
+      await recountPools(knex);
+
+      const pool = await knex('unique_coupon_pools')
+        .where({ document_id: 'pool-doc' })
+        .first();
+      expect(pool.exhausted_at).toBeInstanceOf(Date);
+      // The counters redemption no longer maintains inline are reconciled here.
+      expect(pool).toMatchObject({ total_codes: 2, used_codes: 2 });
+    });
+
+    it('leaves a pool that has never held a code alone', async () => {
+      // An editor mid-setup must not have their offers expired out from under
+      // them before the first import lands.
+      await knex('unique_coupon_pools').insert({
+        document_id: 'empty-pool',
+        name: 'Empty',
+      });
+      await knex.transaction((trx) => reconcileUniqueCodeIntegrity(trx));
+
+      await recountPools(knex);
+
+      await expect(
+        knex('unique_coupon_pools').where({ document_id: 'empty-pool' }).first(),
+      ).resolves.toMatchObject({ exhausted_at: null, total_codes: 0 });
+    });
+
+    it('installs the partial indexes the claim depends on', async () => {
+      await seedPool(1);
+
+      const indexes = await knex('pg_indexes')
+        .whereIn('indexname', [UNCLAIMED_CODE_INDEX, CLAIM_TOKEN_INDEX])
+        .select('indexname', 'indexdef');
+      expect(new Set(indexes.map((row: any) => row.indexname))).toEqual(
+        new Set([UNCLAIMED_CODE_INDEX, CLAIM_TOKEN_INDEX]),
+      );
+      const unclaimed = indexes.find(
+        (row: any) => row.indexname === UNCLAIMED_CODE_INDEX,
+      );
+      expect(unclaimed.indexdef).toContain('WHERE (is_used = false)');
+      const claimToken = indexes.find(
+        (row: any) => row.indexname === CLAIM_TOKEN_INDEX,
+      );
+      expect(claimToken.indexdef).toContain('UNIQUE');
+    });
   });
 });

@@ -26,22 +26,40 @@
  * by the database's pool/code relation guards. If an HTTP batch fails, the
  * reducer keeps exactly that batch available for retry and clears every batch
  * the server accepted.
+ *
+ * PRESENTATION. Everything visible is a Strapi design-system primitive, so the
+ * panel inherits the admin's theme, spacing scale and dark mode instead of the
+ * bare `<input type="file">` this started as. The file input is still the real
+ * control — it is visually hidden and taken out of the tab order, with a DS
+ * Button as the single focusable way in, so the panel gains a drop zone without
+ * gaining a second invisible tab stop that does the same thing.
+ *
+ * The sample CSV is generated in the browser from SAMPLE_CODES_CSV rather than
+ * shipped as a static asset: the admin build has no public asset pipeline of
+ * its own, and the parser's own test pins that constant, so the file an editor
+ * downloads cannot drift from the importer that has to read it back.
  */
 
 import * as React from 'react';
 import { useFetchClient } from '@strapi/strapi/admin';
 import {
+  Alert,
   Box,
   Button,
   Field,
   Flex,
-  Loader,
+  ProgressBar,
+  TextButton,
   Typography,
+  VisuallyHidden,
 } from '@strapi/design-system';
+import { CloudUpload, Download, FileCsv } from '@strapi/icons';
 
 import {
   DEFAULT_CHUNK_SIZE,
   MAX_IMPORT_FILE_BYTES,
+  SAMPLE_CODES_CSV,
+  SAMPLE_CODES_FILE_NAME,
   chunkCodes,
   parseCodesFile,
   reduceImportCompletion,
@@ -54,11 +72,77 @@ import {
 const UPLOAD_PATH = '/unique-coupon/upload';
 const STATS_PATH = '/unique-coupon/stats';
 
+/**
+ * Warn while there is still time to act. An empty pool now EXPIRES every
+ * coupon that draws from it (the scheduler flips contentStatus within five
+ * minutes), so running dry silently takes offers off the site.
+ */
+const LOW_STOCK_THRESHOLD = 50;
+
 type PoolStats = {
   totalCodes: number;
   usedCodes: number;
   availableCodes: number;
 };
+
+type StockTone = {
+  text: string;
+  background: string;
+  border: string;
+  note: string | null;
+};
+
+/**
+ * An empty pool now EXPIRES every offer drawing from it, so stock is a status,
+ * not a footnote — it gets design-system colour rather than grey body text.
+ */
+function stockTone(stats: PoolStats): StockTone {
+  if (stats.availableCodes === 0) {
+    return {
+      text: 'danger600',
+      background: 'danger100',
+      border: 'danger200',
+      note: 'This pool is empty — every offer using it stays expired until you import more codes.',
+    };
+  }
+  if (stats.availableCodes <= LOW_STOCK_THRESHOLD) {
+    return {
+      text: 'warning600',
+      background: 'warning100',
+      border: 'warning200',
+      note: 'Running low — import more before it empties.',
+    };
+  }
+  return {
+    text: 'neutral700',
+    background: 'neutral100',
+    border: 'neutral200',
+    note: null,
+  };
+}
+
+/**
+ * Hand the editor a template they can fill in and upload straight back.
+ *
+ * Built from the constant the parser's own test pins, so the file an editor
+ * downloads is guaranteed to survive the importer. Generated in the browser
+ * rather than served as a static asset: the admin build has no public asset
+ * pipeline of its own, and a few hundred bytes of CSV is not worth one.
+ */
+function downloadSampleCsv() {
+  // BOM so Excel opens the file as UTF-8 instead of mangling it.
+  const blob = new Blob([`\ufeff${SAMPLE_CODES_CSV}`], {
+    type: 'text/csv;charset=utf-8',
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = SAMPLE_CODES_FILE_NAME;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
 
 type Progress = { done: number; total: number };
 
@@ -83,6 +167,7 @@ const UniqueCodeImport = ({ documentId }: { documentId?: string }) => {
   const [summary, setSummary] = React.useState<ImportSummary | null>(null);
   const [statsBefore, setStatsBefore] = React.useState<PoolStats | null>(null);
   const [statsAfter, setStatsAfter] = React.useState<PoolStats | null>(null);
+  const [isDragging, setIsDragging] = React.useState(false);
 
   const loadStats = React.useCallback(async (): Promise<PoolStats | null> => {
     if (!documentId) return null;
@@ -105,8 +190,9 @@ const UniqueCodeImport = ({ documentId }: { documentId?: string }) => {
     };
   }, [loadStats]);
 
-  const onFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  // One path for both entry points — the picker and a drop — so the size guard
+  // and the parse can never diverge between them.
+  const acceptFile = async (file: File | undefined) => {
     setSummary(null);
     setStatsAfter(null);
     setParseError(null);
@@ -130,6 +216,28 @@ const UniqueCodeImport = ({ documentId }: { documentId?: string }) => {
     } catch (error) {
       setParseError(`Could not read this file: ${errorMessage(error)}`);
     }
+  };
+
+  const busy = Boolean(progress);
+
+  const onDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDragging(false);
+    if (busy) return;
+    void acceptFile(event.dataTransfer.files?.[0]);
+  };
+
+  const onDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    // Without preventDefault the browser navigates to the dropped file.
+    event.preventDefault();
+    if (!busy) setIsDragging(true);
+  };
+
+  const clearSelection = () => {
+    setParsed(null);
+    setFileName(null);
+    setParseError(null);
+    if (inputRef.current) inputRef.current.value = '';
   };
 
   const blocker = parsed ? uploadBlocker(parsed) : null;
@@ -188,60 +296,142 @@ const UniqueCodeImport = ({ documentId }: { documentId?: string }) => {
     );
   }
 
-  return (
-    <Flex direction="column" alignItems="stretch" gap={3} width="100%">
-      <Typography variant="pi" textColor="neutral600">
-        One code per line (.txt or .csv). Extra columns are ignored; a
-        &ldquo;code&rdquo; header row is skipped automatically.
-      </Typography>
+  const tone = statsBefore ? stockTone(statsBefore) : null;
+  const dropBorder = isDragging ? 'primary600' : 'neutral200';
+  const dropBackground = isDragging ? 'primary100' : 'neutral0';
 
-      {statsBefore ? (
-        <Typography variant="pi" textColor="neutral600">
-          Pool now holds {statsBefore.totalCodes.toLocaleString()} codes (
-          {statsBefore.availableCodes.toLocaleString()} unused).
-        </Typography>
+  return (
+    <Flex direction="column" alignItems="stretch" gap={4} width="100%">
+      {statsBefore && tone ? (
+        <Box
+          padding={3}
+          hasRadius
+          background={tone.background}
+          borderColor={tone.border}
+        >
+          <Flex direction="column" alignItems="start" gap={1}>
+            <Typography variant="pi" fontWeight="bold" textColor={tone.text}>
+              {statsBefore.availableCodes.toLocaleString()} unused of{' '}
+              {statsBefore.totalCodes.toLocaleString()}
+            </Typography>
+            {tone.note ? (
+              <Typography variant="pi" textColor={tone.text}>
+                {tone.note}
+              </Typography>
+            ) : null}
+          </Flex>
+        </Box>
       ) : null}
 
       <Field.Root name="unique-code-import-file">
         <Field.Label>Code file</Field.Label>
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".txt,.csv,text/plain,text/csv"
-          onChange={onFileChange}
-          disabled={Boolean(progress)}
-        />
+        <Box
+          padding={5}
+          hasRadius
+          borderStyle="dashed"
+          borderWidth="1px"
+          borderColor={dropBorder}
+          background={dropBackground}
+          onDrop={onDrop}
+          onDragOver={onDragOver}
+          onDragLeave={() => setIsDragging(false)}
+        >
+          <Flex direction="column" alignItems="center" gap={2}>
+            <CloudUpload
+              width="2rem"
+              height="2rem"
+              fill={isDragging ? 'primary600' : 'neutral500'}
+              aria-hidden
+            />
+            <Typography variant="pi" textColor="neutral600" textAlign="center">
+              Drag a .csv or .txt file here, or
+            </Typography>
+            <Button
+              variant="secondary"
+              size="S"
+              disabled={busy}
+              onClick={() => inputRef.current?.click()}
+            >
+              Browse files
+            </Button>
+            <Typography variant="pi" textColor="neutral500" textAlign="center">
+              One code per line. Extra columns are ignored and a
+              &ldquo;code&rdquo; header row is skipped.
+            </Typography>
+          </Flex>
+
+          {/*
+            The Button above is the single focusable control, so the input is
+            taken out of the tab order — otherwise the panel has an invisible
+            second tab stop that does the same thing.
+          */}
+          <VisuallyHidden>
+            <input
+              ref={inputRef}
+              type="file"
+              tabIndex={-1}
+              accept=".txt,.csv,text/plain,text/csv"
+              onChange={(event) => void acceptFile(event.target.files?.[0])}
+              disabled={busy}
+            />
+          </VisuallyHidden>
+        </Box>
       </Field.Root>
 
-      {parseError ? (
-        <Typography variant="pi" textColor="danger600">
-          {parseError}
+      <Flex justifyContent="space-between" alignItems="center" gap={2}>
+        <TextButton startIcon={<Download />} onClick={downloadSampleCsv}>
+          Download sample CSV
+        </TextButton>
+        <Typography variant="pi" textColor="neutral500">
+          Re-uploading is safe
         </Typography>
+      </Flex>
+
+      {parseError ? (
+        <Alert
+          variant="danger"
+          title="Could not read that file"
+          closeLabel="Dismiss"
+          onClose={() => setParseError(null)}
+        >
+          {parseError}
+        </Alert>
       ) : null}
 
       {parsed ? (
-        <Box>
-          <Typography variant="pi" textColor="neutral700">
-            {fileName}: {parsed.codes.length.toLocaleString()} code
-            {parsed.codes.length === 1 ? '' : 's'} ready
-            {parsed.duplicates > 0
-              ? `, ${parsed.duplicates.toLocaleString()} duplicate${parsed.duplicates === 1 ? '' : 's'} in file`
-              : ''}
-            {parsed.invalid.length > 0
-              ? `, ${parsed.invalid.length.toLocaleString()} unusable`
-              : ''}
-            .
-          </Typography>
-          {parsed.invalid.length > 0 ? (
-            <Typography variant="pi" textColor="danger600">
-              {' '}
-              First problem on line {parsed.invalid[0]!.line} (
-              {parsed.invalid[0]!.reason === 'too-long'
-                ? 'longer than 255 characters'
-                : 'contains control characters'}
-              ).
-            </Typography>
-          ) : null}
+        <Box padding={3} hasRadius background="neutral100" borderColor="neutral200">
+          <Flex justifyContent="space-between" alignItems="center" gap={2}>
+            <Flex alignItems="center" gap={2} minWidth={0}>
+              <FileCsv width="1.5rem" height="1.5rem" fill="neutral500" aria-hidden />
+              <Flex direction="column" alignItems="start">
+                <Typography variant="pi" fontWeight="bold" textColor="neutral800">
+                  {fileName}
+                </Typography>
+                <Typography variant="pi" textColor="neutral600">
+                  {parsed.codes.length.toLocaleString()} code
+                  {parsed.codes.length === 1 ? '' : 's'} ready
+                  {parsed.duplicates > 0
+                    ? ` · ${parsed.duplicates.toLocaleString()} duplicate${parsed.duplicates === 1 ? '' : 's'} in file`
+                    : ''}
+                  {parsed.invalid.length > 0
+                    ? ` · ${parsed.invalid.length.toLocaleString()} unusable`
+                    : ''}
+                </Typography>
+                {parsed.invalid.length > 0 ? (
+                  <Typography variant="pi" textColor="danger600">
+                    First problem on line {parsed.invalid[0]!.line} (
+                    {parsed.invalid[0]!.reason === 'too-long'
+                      ? 'longer than 255 characters'
+                      : 'contains control characters'}
+                    ).
+                  </Typography>
+                ) : null}
+              </Flex>
+            </Flex>
+            {busy ? null : (
+              <TextButton onClick={clearSelection}>Remove</TextButton>
+            )}
+          </Flex>
         </Box>
       ) : null}
 
@@ -251,39 +441,50 @@ const UniqueCodeImport = ({ documentId }: { documentId?: string }) => {
         </Typography>
       ) : null}
 
-      <Typography variant="pi" textColor="warning600">
-        Codes already present in this pool are skipped safely.
-      </Typography>
+      {progress ? (
+        <Flex direction="column" alignItems="stretch" gap={2}>
+          <ProgressBar
+            value={Math.round((progress.done / Math.max(1, progress.total)) * 100)}
+          />
+          <Typography variant="pi" textColor="neutral600">
+            Uploading batch {progress.done} of {progress.total}…
+          </Typography>
+        </Flex>
+      ) : null}
 
-      <Button onClick={onUpload} disabled={!canUpload} loading={Boolean(progress)}>
-        {progress
-          ? `Uploading batch ${progress.done} of ${progress.total}…`
-          : summary?.failed && parsed
-            ? 'Retry failed batches'
-            : 'Import codes'}
+      <Button
+        startIcon={<CloudUpload />}
+        onClick={onUpload}
+        disabled={!canUpload}
+        loading={busy}
+        fullWidth
+      >
+        {summary?.failed && parsed ? 'Retry failed batches' : 'Import codes'}
       </Button>
 
-      {progress ? <Loader small>Uploading</Loader> : null}
-
       {summary ? (
-        <Box>
-          <Typography variant="pi" textColor="neutral700">
-            Imported {summary.imported.toLocaleString()} · skipped{' '}
-            {summary.skipped.toLocaleString()} · failed{' '}
-            {summary.failed.toLocaleString()}.
-          </Typography>
-          {statsAfter ? (
-            <Typography variant="pi" textColor="neutral600">
-              {' '}
-              Pool now holds {statsAfter.totalCodes.toLocaleString()} codes.
+        <Alert
+          variant={summary.failed > 0 ? 'warning' : 'success'}
+          title={summary.failed > 0 ? 'Import finished with errors' : 'Import complete'}
+          closeLabel="Dismiss"
+          onClose={() => setSummary(null)}
+        >
+          <Flex direction="column" alignItems="start" gap={1}>
+            <Typography variant="pi">
+              Imported {summary.imported.toLocaleString()} · skipped{' '}
+              {summary.skipped.toLocaleString()} · failed{' '}
+              {summary.failed.toLocaleString()}.
+              {statsAfter
+                ? ` Pool now holds ${statsAfter.totalCodes.toLocaleString()} codes.`
+                : ''}
             </Typography>
-          ) : null}
-          {summary.errors.map((message) => (
-            <Typography key={message} variant="pi" textColor="danger600">
-              {message}
-            </Typography>
-          ))}
-        </Box>
+            {summary.errors.map((message) => (
+              <Typography key={message} variant="pi" textColor="danger600">
+                {message}
+              </Typography>
+            ))}
+          </Flex>
+        </Alert>
       ) : null}
     </Flex>
   );
