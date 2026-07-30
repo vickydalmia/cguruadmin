@@ -290,7 +290,7 @@ describe('deal-of-the-day landing page scope', () => {
 });
 
 describe('managed page SEO scopes', () => {
-  it('refreshes sitemap metadata for homepage and About edits', async () => {
+  it('refreshes sitemap metadata for homepage, About, Contact and FAQ edits', async () => {
     const { computeScope } = await import('./scopes');
     const strapi = strapiWithFindOne(async () => {
       throw new Error('must not be called');
@@ -301,7 +301,30 @@ describe('managed page SEO scopes', () => {
     ).resolves.toEqual({ homepage: true, sitemap: true });
     await expect(
       computeScope(strapi, 'api::about-page.about-page', 'update', 'about-1'),
-    ).resolves.toEqual({ slugs: ['about-us'], sitemap: true });
+    ).resolves.toEqual({
+      slugs: ['about-us'],
+      sitemap: true,
+      refreshScopes: ['routes'],
+    });
+    await expect(
+      computeScope(
+        strapi,
+        'api::contact-page.contact-page',
+        'update',
+        'contact-1',
+      ),
+    ).resolves.toEqual({
+      slugs: ['contact-us'],
+      sitemap: true,
+      refreshScopes: ['routes'],
+    });
+    await expect(
+      computeScope(strapi, 'api::faq-page.faq-page', 'update', 'faq-1'),
+    ).resolves.toEqual({
+      slugs: ['faqs'],
+      sitemap: true,
+      refreshScopes: ['routes'],
+    });
   });
 
   it('refreshes the careers listing, active jobs, and sitemap metadata', async () => {
@@ -325,6 +348,7 @@ describe('managed page SEO scopes', () => {
     ).resolves.toEqual({
       slugs: ['careers', 'careers/seo-editor', 'careers/designer'],
       sitemap: true,
+      refreshScopes: ['routes'],
     });
   });
 });

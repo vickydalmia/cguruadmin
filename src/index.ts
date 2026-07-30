@@ -348,6 +348,13 @@ const COMPONENT_ENTRY_TITLES: Record<string, string> = {
   'career.jobs-section': 'heading',
   'career.life': 'imageAlt',
   'career.job-detail-copy': 'formHeading',
+  'contact.hero': 'heading',
+  'contact.contact-method': 'title',
+  'contact.topic': 'label',
+  'contact.form': 'heading',
+  'faq.category': 'title',
+  'faq.faq-item': 'question',
+  'faq.support-cta': 'heading',
   'error-page.hero': 'heading',
   'error-page.link-card': 'title',
   'error-page.explore': 'heading',
@@ -780,6 +787,7 @@ const SINGLE_TYPE_ENTRY_TITLES = [
   'api::global.global',
   'api::error-page.error-page',
   'api::career-page.career-page',
+  'api::contact-page.contact-page',
 ] as const;
 
 async function ensureSingleTypeEntryTitles(strapi: Core.Strapi): Promise<void> {

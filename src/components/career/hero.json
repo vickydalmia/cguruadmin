@@ -9,6 +9,12 @@
     "ctaUrl": { "type": "string", "maxLength": 300 },
     "locationLabel": { "type": "string", "maxLength": 120 },
     "image": { "type": "media", "multiple": false, "allowedTypes": ["images"] },
-    "imageAlt": { "type": "string", "maxLength": 180 }
+    "imageAlt": { "type": "string", "maxLength": 180 },
+    "highlights": {
+      "type": "component",
+      "repeatable": true,
+      "component": "career.hero-highlight",
+      "max": 3
+    }
   }
 }

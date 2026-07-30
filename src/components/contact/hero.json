@@ -1,0 +1,33 @@
+{
+  "collectionName": "components_contact_heroes",
+  "info": {
+    "displayName": "Contact Hero",
+    "icon": "picture",
+    "description": "Hero copy and background image for the public Contact page."
+  },
+  "attributes": {
+    "eyebrow": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "heading": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "description": {
+      "type": "text",
+      "maxLength": 420
+    },
+    "image": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": [
+        "images"
+      ]
+    },
+    "imageAlt": {
+      "type": "string",
+      "maxLength": 180
+    }
+  }
+}

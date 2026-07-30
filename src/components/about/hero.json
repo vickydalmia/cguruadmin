@@ -19,6 +19,10 @@
       "type": "text",
       "maxLength": 320
     },
+    "mobileSubheading": {
+      "type": "text",
+      "maxLength": 180
+    },
     "image": {
       "type": "media",
       "multiple": false,

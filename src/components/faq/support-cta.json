@@ -1,0 +1,31 @@
+{
+  "collectionName": "components_faq_support_ctas",
+  "info": {
+    "displayName": "FAQ Support CTA",
+    "icon": "envelop",
+    "description": "The support card shown beside the FAQ list on desktop and below it on mobile."
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "description": {
+      "type": "text",
+      "maxLength": 300
+    },
+    "mobileActionLabel": {
+      "type": "string",
+      "maxLength": 50
+    },
+    "action": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.cta"
+    }
+  }
+}

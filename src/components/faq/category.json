@@ -1,0 +1,32 @@
+{
+  "collectionName": "components_faq_categories",
+  "info": {
+    "displayName": "FAQ Category",
+    "icon": "folder",
+    "description": "A navigation category and its ordered FAQ items. The category is omitted publicly when disabled or empty."
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "title": {
+      "type": "string",
+      "required": true,
+      "maxLength": 80
+    },
+    "navigationLabel": {
+      "type": "string",
+      "maxLength": 50
+    },
+    "mobileLabel": {
+      "type": "string",
+      "maxLength": 50
+    },
+    "items": {
+      "type": "component",
+      "repeatable": true,
+      "component": "faq.faq-item"
+    }
+  }
+}

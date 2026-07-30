@@ -26,6 +26,10 @@ const ABOUT_PAGE_SLUG = 'about-us';
 const CAREER_PAGE_UID = 'api::career-page.career-page';
 const JOB_UID = 'api::job.job';
 const CAREER_PAGE_SLUG = 'careers';
+const CONTACT_PAGE_UID = 'api::contact-page.contact-page';
+const CONTACT_PAGE_SLUG = 'contact-us';
+const FAQ_PAGE_UID = 'api::faq-page.faq-page';
+const FAQ_PAGE_SLUG = 'faqs';
 // A redirect is evaluated by cguru-ui/src/middleware.ts on EVERY request,
 // before routing — it is URL resolution itself, not page content. Nothing
 // narrower than `full` is correct here: the affected URL set is not derivable
@@ -237,7 +241,14 @@ export async function computeScope(
     return { slugs: [DEAL_OF_THE_DAY_SLUG], sitemap: true };
   }
   if (uid === ABOUT_PAGE_UID) {
-    return { slugs: [ABOUT_PAGE_SLUG], sitemap: true };
+    return {
+      slugs: [ABOUT_PAGE_SLUG],
+      sitemap: true,
+      // The page path is code-owned, but its managed updatedAt/noIndex
+      // overlay is cached with the route inventory. Refresh that metadata
+      // before the gateway rebuilds the sitemap.
+      refreshScopes: ['routes'],
+    };
   }
   if (uid === CAREER_PAGE_UID) {
     const jobs: any[] = await strapi.documents(JOB_UID as any).findMany({
@@ -250,6 +261,27 @@ export async function computeScope(
         ...jobs.map((job) => `careers/${job.slug}`).filter((slug) => !slug.endsWith('/undefined')),
       ],
       sitemap: true,
+      // The page and job paths are already known, but their managed
+      // updatedAt/noIndex records share the route-inventory cache. Refresh
+      // that projection before regenerating the sitemap and HTML.
+      refreshScopes: ['routes'],
+    };
+  }
+  if (uid === CONTACT_PAGE_UID) {
+    return {
+      slugs: [CONTACT_PAGE_SLUG],
+      sitemap: true,
+      refreshScopes: ['routes'],
+    };
+  }
+  if (uid === FAQ_PAGE_UID) {
+    return {
+      slugs: [FAQ_PAGE_SLUG],
+      sitemap: true,
+      // The path is code-owned, but its managed updatedAt/noIndex overlay is
+      // read through the route cache. Refresh that metadata without widening
+      // this into a global page invalidation.
+      refreshScopes: ['routes'],
     };
   }
   // A job changes both the listing and one or more build routes. Creation,

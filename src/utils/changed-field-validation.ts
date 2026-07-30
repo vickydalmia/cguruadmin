@@ -30,7 +30,9 @@ const SEO_UIDS = new Set([
   ...ENTITY_UIDS,
   'api::about-page.about-page',
   'api::career-page.career-page',
+  'api::contact-page.contact-page',
   'api::deal-of-the-day-page.deal-of-the-day-page',
+  'api::faq-page.faq-page',
   'api::homepage.homepage',
   'api::job.job',
 ]);

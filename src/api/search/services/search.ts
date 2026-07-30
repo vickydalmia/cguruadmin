@@ -477,6 +477,7 @@ function mapEntity(document: any, config: EntityConfig) {
 function mapOffer(document: any, type: "coupon" | "deal") {
   const name = cleanText(document?.title, 300);
   if (!name) return null;
+  const documentId = cleanText(document?.documentId, 160);
 
   const owner = offerOwner(document, type);
   const ownerName = cleanText(owner?.name, 160);
@@ -488,6 +489,7 @@ function mapOffer(document: any, type: "coupon" | "deal") {
 
   return {
     id: type + ":" + String(document?.documentId ?? document?.id ?? name),
+    documentId,
     name,
     link: safeHref(document?.affiliateLink) ?? fallbackLink,
     type,
@@ -517,6 +519,17 @@ function mapOffer(document: any, type: "coupon" | "deal") {
             logo: mapMedia(ownerMedia, ownerAlt),
           }
         : null,
+    ...(type === "coupon"
+      ? {
+          codeMode:
+            document?.couponType === "unique"
+              ? "unique"
+              : document?.couponType === "static" &&
+                  Boolean(cleanText(document?.code, 300))
+                ? "static"
+                : "none",
+        }
+      : {}),
   };
 }
 

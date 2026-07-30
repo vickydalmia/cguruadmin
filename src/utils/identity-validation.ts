@@ -77,9 +77,10 @@ const KIND_BY_UID: Record<IdentityUid, IdentityKind> = {
  *
  * Derived from the actual files/namespaces — do not add speculative entries:
  *   api/, 404.astro, 500.astro, about-us.astro, banks.astro, brands.astro,
- *   careers.astro + careers/[slug].astro, categories.astro, coupon/[id].astro,
+ *   careers.astro + careers/[slug].astro, categories.astro, contact-us.astro,
+ *   coupon/[id].astro,
  *   deal/[id].astro, error-pages/[code].astro + error-pages/template.astro,
- *   redeem-unavailable.astro, robots.txt.ts, search.astro,
+ *   faqs.astro, redeem-unavailable.astro, robots.txt.ts, search.astro,
  *   sitemap_index.xml.ts + sitemap/[shard].xml.ts, stores.astro
  * (index.astro is the root and [...slug].astro is the entity catch-all itself,
  * so neither reserves a segment.)
@@ -93,9 +94,11 @@ const RESERVED_ROUTE_SEGMENTS = new Map<string, string>([
   ['brands', 'the brand listing page (src/pages/brands.astro)'],
   ['careers', 'the careers pages (src/pages/careers.astro, careers/[slug].astro)'],
   ['categories', 'the category listing page (src/pages/categories.astro)'],
+  ['contact-us', 'the Contact page (src/pages/contact-us.astro)'],
   ['coupon', 'the coupon detail pages (src/pages/coupon/[id].astro)'],
   ['deal', 'the deal detail pages (src/pages/deal/[id].astro)'],
   ['error-pages', 'the error pages (src/pages/error-pages/)'],
+  ['faqs', 'the FAQ page (src/pages/faqs.astro)'],
   ['redeem-unavailable', 'the redeem fallback page (src/pages/redeem-unavailable.astro)'],
   ['robots.txt', 'the robots.txt route (src/pages/robots.txt.ts)'],
   ['search', 'the search page (src/pages/search.astro)'],

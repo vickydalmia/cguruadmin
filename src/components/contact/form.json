@@ -1,0 +1,68 @@
+{
+  "collectionName": "components_contact_forms",
+  "info": {
+    "displayName": "Contact Form",
+    "icon": "envelop",
+    "description": "Labels, placeholders, options and response messages for the Contact form."
+  },
+  "attributes": {
+    "heading": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "nameLabel": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "namePlaceholder": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "emailLabel": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "emailPlaceholder": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "topicLabel": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "topicPlaceholder": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "topics": {
+      "type": "component",
+      "repeatable": true,
+      "component": "contact.topic",
+      "max": 12
+    },
+    "messageLabel": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "messagePlaceholder": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "submitLabel": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "pendingLabel": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "successMessage": {
+      "type": "text",
+      "maxLength": 240
+    },
+    "errorMessage": {
+      "type": "text",
+      "maxLength": 240
+    }
+  }
+}

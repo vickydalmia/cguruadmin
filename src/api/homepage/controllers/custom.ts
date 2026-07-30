@@ -434,6 +434,8 @@ const MANAGED_SINGLE_ROUTES = [
   ['api::homepage.homepage', '/'],
   ['api::about-page.about-page', '/about-us/'],
   ['api::career-page.career-page', '/careers/'],
+  ['api::contact-page.contact-page', '/contact-us/'],
+  ['api::faq-page.faq-page', '/faqs/'],
   [
     'api::deal-of-the-day-page.deal-of-the-day-page',
     '/deal-of-the-day/',

@@ -1,0 +1,56 @@
+{
+  "kind": "singleType",
+  "collectionName": "contact_pages",
+  "info": {
+    "singularName": "contact-page",
+    "pluralName": "contact-pages",
+    "displayName": "Contact Page",
+    "description": "All editable copy, contact links, form options, hero media and SEO for the public /contact-us/ page."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "default": "Contact Us"
+    },
+    "breadcrumbAriaLabel": {
+      "type": "string",
+      "default": "Breadcrumb",
+      "maxLength": 60
+    },
+    "breadcrumbItems": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.breadcrumb-item",
+      "max": 5
+    },
+    "hero": {
+      "type": "component",
+      "repeatable": false,
+      "component": "contact.hero"
+    },
+    "contactInformationHeading": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "contactMethods": {
+      "type": "component",
+      "repeatable": true,
+      "component": "contact.contact-method",
+      "max": 3
+    },
+    "form": {
+      "type": "component",
+      "repeatable": false,
+      "component": "contact.form"
+    },
+    "seo": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.seo"
+    }
+  }
+}

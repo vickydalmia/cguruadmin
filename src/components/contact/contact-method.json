@@ -1,0 +1,38 @@
+{
+  "collectionName": "components_contact_contact_methods",
+  "info": {
+    "displayName": "Contact Method",
+    "icon": "envelop",
+    "description": "One address, email, phone or website item shown above the Contact form."
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "icon": {
+      "type": "enumeration",
+      "enum": [
+        "location",
+        "email",
+        "phone",
+        "website"
+      ],
+      "default": "email"
+    },
+    "title": {
+      "type": "string",
+      "required": true,
+      "maxLength": 60
+    },
+    "value": {
+      "type": "string",
+      "required": true,
+      "maxLength": 160
+    },
+    "url": {
+      "type": "string",
+      "maxLength": 300
+    }
+  }
+}

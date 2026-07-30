@@ -1,0 +1,66 @@
+{
+  "kind": "singleType",
+  "collectionName": "faq_pages",
+  "info": {
+    "singularName": "faq-page",
+    "pluralName": "faq-pages",
+    "displayName": "FAQ Page",
+    "description": "All editable copy, categories, questions and SEO for the public /faqs/ page. Category and question order follows the order configured here."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "default": "FAQ Page"
+    },
+    "breadcrumbAriaLabel": {
+      "type": "string",
+      "default": "Breadcrumb",
+      "maxLength": 60
+    },
+    "breadcrumbItems": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.breadcrumb-item",
+      "max": 5
+    },
+    "eyebrow": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "heading": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "description": {
+      "type": "text",
+      "maxLength": 320
+    },
+    "searchPlaceholder": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "noResultsMessage": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "categories": {
+      "type": "component",
+      "repeatable": true,
+      "component": "faq.category"
+    },
+    "supportCta": {
+      "type": "component",
+      "repeatable": false,
+      "component": "faq.support-cta"
+    },
+    "seo": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.seo"
+    }
+  }
+}

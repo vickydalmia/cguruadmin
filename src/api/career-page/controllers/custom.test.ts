@@ -4,7 +4,7 @@ vi.mock('../../../utils/offer-visibility', () => ({
   sanitizeOutput: vi.fn(async (_strapi, _ctx, _uid, value) => value),
 }));
 
-import createController from './custom';
+import createController, { PAGE_POPULATE } from './custom';
 
 describe('career page aggregate controller', () => {
   const findFirst = vi.fn();
@@ -28,6 +28,10 @@ describe('career page aggregate controller', () => {
       filters: { isActive: true },
       sort: ['sortOrder:asc', 'title:asc'],
     }));
+    expect(PAGE_POPULATE.hero.populate).toEqual({
+      image: true,
+      highlights: true,
+    });
     expect(ctx.send).toHaveBeenCalledWith({
       data: {
         page: { title: 'Careers' },

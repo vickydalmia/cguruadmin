@@ -224,6 +224,8 @@ describe("public search entity boundaries", () => {
     expect(response.coupons).toHaveLength(1);
     expect(response.coupons[0]).toMatchObject({
       id: "coupon:coupon-no-code",
+      documentId: "coupon-no-code",
+      codeMode: "none",
       type: "coupon",
       name: "No-code fashion offer",
     });
@@ -667,8 +669,14 @@ describe("ranked SQL path (Postgres)", () => {
     expect(hydrateFilters).toContain('"contentStatus"');
     expect(hydrateFilters).toContain('"expiresAt"');
     expect(response.coupons).toEqual([
-      expect.objectContaining({ id: "coupon:coupon-1", type: "coupon" }),
+      expect.objectContaining({
+        id: "coupon:coupon-1",
+        documentId: "coupon-1",
+        codeMode: "static",
+        type: "coupon",
+      }),
     ]);
+    expect(response.coupons[0]).not.toHaveProperty("code");
     expect(response.coupons[0]).not.toHaveProperty("rankFields");
     expect(response.totals).toMatchObject({ coupons: 1, deals: 0 });
   });

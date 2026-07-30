@@ -2,7 +2,7 @@ import type { Core } from '@strapi/strapi';
 import { sanitizeOutput } from '../../../utils/offer-visibility';
 
 const PAGE_POPULATE = {
-  hero: { populate: { image: true } },
+  hero: { populate: { image: true, highlights: true } },
   whyJoinHeader: true,
   benefits: true,
   values: true,

@@ -1,0 +1,29 @@
+{
+  "collectionName": "components_career_hero_highlights",
+  "info": {
+    "displayName": "Career Hero Highlight",
+    "icon": "ticket"
+  },
+  "attributes": {
+    "teamLabel": {
+      "type": "string",
+      "required": true,
+      "maxLength": 40
+    },
+    "title": {
+      "type": "string",
+      "required": true,
+      "maxLength": 70
+    },
+    "openingLabel": {
+      "type": "string",
+      "required": true,
+      "maxLength": 40
+    },
+    "style": {
+      "type": "enumeration",
+      "enum": ["mint", "paper", "navy"],
+      "default": "mint"
+    }
+  }
+}

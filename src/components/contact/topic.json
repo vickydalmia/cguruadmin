@@ -1,0 +1,19 @@
+{
+  "collectionName": "components_contact_topics",
+  "info": {
+    "displayName": "Contact Topic",
+    "icon": "bulletList",
+    "description": "One selectable reason in the Contact form."
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "label": {
+      "type": "string",
+      "required": true,
+      "maxLength": 100
+    }
+  }
+}

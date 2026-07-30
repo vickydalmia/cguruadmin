@@ -63,6 +63,10 @@ export interface AboutHero extends Struct.ComponentSchema {
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 160;
       }>;
+    mobileSubheading: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 180;
+      }>;
     subheading: Schema.Attribute.Text &
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 320;
@@ -252,6 +256,13 @@ export interface CareerHero extends Struct.ComponentSchema {
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 180;
       }>;
+    highlights: Schema.Attribute.Component<'career.hero-highlight', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 3;
+        },
+        number
+      >;
     image: Schema.Attribute.Media<'images'>;
     imageAlt: Schema.Attribute.String &
       Schema.Attribute.SetMinMaxLength<{
@@ -260,6 +271,33 @@ export interface CareerHero extends Struct.ComponentSchema {
     locationLabel: Schema.Attribute.String &
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 120;
+      }>;
+  };
+}
+
+export interface CareerHeroHighlight extends Struct.ComponentSchema {
+  collectionName: 'components_career_hero_highlights';
+  info: {
+    displayName: 'Career Hero Highlight';
+    icon: 'ticket';
+  };
+  attributes: {
+    openingLabel: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    style: Schema.Attribute.Enumeration<['mint', 'paper', 'navy']> &
+      Schema.Attribute.DefaultTo<'mint'>;
+    teamLabel: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 70;
       }>;
   };
 }
@@ -468,6 +506,151 @@ export interface CareerValueCard extends Struct.ComponentSchema {
   };
 }
 
+export interface ContactContactMethod extends Struct.ComponentSchema {
+  collectionName: 'components_contact_contact_methods';
+  info: {
+    description: 'One address, email, phone or website item shown above the Contact form.';
+    displayName: 'Contact Method';
+    icon: 'envelop';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    icon: Schema.Attribute.Enumeration<
+      ['location', 'email', 'phone', 'website']
+    > &
+      Schema.Attribute.DefaultTo<'email'>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    url: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }>;
+    value: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+  };
+}
+
+export interface ContactForm extends Struct.ComponentSchema {
+  collectionName: 'components_contact_forms';
+  info: {
+    description: 'Labels, placeholders, options and response messages for the Contact form.';
+    displayName: 'Contact Form';
+    icon: 'envelop';
+  };
+  attributes: {
+    emailLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    emailPlaceholder: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    errorMessage: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 240;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    messageLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    messagePlaceholder: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+    nameLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    namePlaceholder: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    pendingLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    submitLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    successMessage: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 240;
+      }>;
+    topicLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    topicPlaceholder: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    topics: Schema.Attribute.Component<'contact.topic', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 12;
+        },
+        number
+      >;
+  };
+}
+
+export interface ContactHero extends Struct.ComponentSchema {
+  collectionName: 'components_contact_heroes';
+  info: {
+    description: 'Hero copy and background image for the public Contact page.';
+    displayName: 'Contact Hero';
+    icon: 'picture';
+  };
+  attributes: {
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 420;
+      }>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    image: Schema.Attribute.Media<'images'>;
+    imageAlt: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 180;
+      }>;
+  };
+}
+
+export interface ContactTopic extends Struct.ComponentSchema {
+  collectionName: 'components_contact_topics';
+  info: {
+    description: 'One selectable reason in the Contact form.';
+    displayName: 'Contact Topic';
+    icon: 'bulletList';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    label: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+  };
+}
+
 export interface DealDayDealsByStore extends Struct.ComponentSchema {
   collectionName: 'components_deal_day_deals_by_stores';
   info: {
@@ -593,6 +776,78 @@ export interface ErrorPageTrustBanner extends Struct.ComponentSchema {
     description: Schema.Attribute.Text;
     heading: Schema.Attribute.String;
     url: Schema.Attribute.String;
+  };
+}
+
+export interface FaqCategory extends Struct.ComponentSchema {
+  collectionName: 'components_faq_categories';
+  info: {
+    description: 'A navigation category and its ordered FAQ items. The category is omitted publicly when disabled or empty.';
+    displayName: 'FAQ Category';
+    icon: 'folder';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    items: Schema.Attribute.Component<'faq.faq-item', true>;
+    mobileLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 50;
+      }>;
+    navigationLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 50;
+      }>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+  };
+}
+
+export interface FaqFaqItem extends Struct.ComponentSchema {
+  collectionName: 'components_faq_faq_items';
+  info: {
+    description: 'One complete question and answer rendered in the public FAQ accordion.';
+    displayName: 'FAQ Item';
+    icon: 'question-circle';
+  };
+  attributes: {
+    answer: Schema.Attribute.Text &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 5000;
+      }>;
+    question: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 240;
+      }>;
+  };
+}
+
+export interface FaqSupportCta extends Struct.ComponentSchema {
+  collectionName: 'components_faq_support_ctas';
+  info: {
+    description: 'The support card shown beside the FAQ list on desktop and below it on mobile.';
+    displayName: 'FAQ Support CTA';
+    icon: 'envelop';
+  };
+  attributes: {
+    action: Schema.Attribute.Component<'shared.cta', false>;
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    mobileActionLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 50;
+      }>;
   };
 }
 
@@ -1477,10 +1732,15 @@ declare module '@strapi/strapi' {
       'about.trust': AboutTrust;
       'career.benefit-card': CareerBenefitCard;
       'career.hero': CareerHero;
+      'career.hero-highlight': CareerHeroHighlight;
       'career.job-detail-copy': CareerJobDetailCopy;
       'career.jobs-section': CareerJobsSection;
       'career.life': CareerLife;
       'career.value-card': CareerValueCard;
+      'contact.contact-method': ContactContactMethod;
+      'contact.form': ContactForm;
+      'contact.hero': ContactHero;
+      'contact.topic': ContactTopic;
       'deal-day.deals-by-store': DealDayDealsByStore;
       'deal-day.section-heading': DealDaySectionHeading;
       'deal-day.store-tab': DealDayStoreTab;
@@ -1489,6 +1749,9 @@ declare module '@strapi/strapi' {
       'error-page.hero': ErrorPageHero;
       'error-page.link-card': ErrorPageLinkCard;
       'error-page.trust-banner': ErrorPageTrustBanner;
+      'faq.category': FaqCategory;
+      'faq.faq-item': FaqFaqItem;
+      'faq.support-cta': FaqSupportCta;
       'footer.country': FooterCountry;
       'footer.google-preferred-card': FooterGooglePreferredCard;
       'footer.link-section': FooterLinkSection;

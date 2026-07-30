@@ -530,6 +530,16 @@ describe('public route metadata aggregate', () => {
         seo: { noIndex: false },
       },
       'api::career-page.career-page': null,
+      'api::contact-page.contact-page': {
+        documentId: 'contact-1',
+        updatedAt: '2026-07-25T10:00:00.000Z',
+        seo: { noIndex: false },
+      },
+      'api::faq-page.faq-page': {
+        documentId: 'faq-1',
+        updatedAt: '2026-07-24T10:00:00.000Z',
+        seo: { noIndex: false },
+      },
       'api::deal-of-the-day-page.deal-of-the-day-page': {
         documentId: 'dotd-1',
         seo: { noIndex: true },
@@ -569,6 +579,16 @@ describe('public route metadata aggregate', () => {
       {
         path: '/about-us/',
         updatedAt: '2026-07-22T10:00:00.000Z',
+        noIndex: false,
+      },
+      {
+        path: '/contact-us/',
+        updatedAt: '2026-07-25T10:00:00.000Z',
+        noIndex: false,
+      },
+      {
+        path: '/faqs/',
+        updatedAt: '2026-07-24T10:00:00.000Z',
         noIndex: false,
       },
       {
