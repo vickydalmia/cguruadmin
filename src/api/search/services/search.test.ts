@@ -440,7 +440,7 @@ describe("public search entity boundaries", () => {
     expect(dealFind?.options.status).toBe("published");
     expect(dealFind?.options.populate).toHaveProperty("stores");
     expect(dealFind?.options.populate).not.toHaveProperty("primaryStore");
-    expect(JSON.stringify(dealFind?.options.filters)).toContain("salePrice");
+    expect(JSON.stringify(dealFind?.options.filters)).not.toContain("salePrice");
     expect(JSON.stringify(dealFind?.options.filters)).not.toContain("$containsi");
   });
 });
@@ -847,14 +847,14 @@ describe("ranked SQL path (Postgres)", () => {
       "store-7",
       "store-8",
     ]);
-    // Deal hydration re-applies the full visibility (contentStatus/expiresAt
-    // plus the sale-price rule) alongside the ranked ids.
+    // Deal hydration re-applies contentStatus/expiry visibility alongside the
+    // ranked ids without excluding Deals that omit optional pricing.
     const dealHydrate = calls.find(
       (call) => call.uid === "api::deal.deal" && call.operation === "findMany",
     );
     const dealFilters = JSON.stringify(dealHydrate?.options.filters);
     expect(dealFilters).toContain('"contentStatus"');
-    expect(dealFilters).toContain('"salePrice"');
+    expect(dealFilters).not.toContain('"salePrice"');
   });
 
   it("keeps the fallback preview list full when a row maps to null", async () => {

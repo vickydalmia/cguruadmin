@@ -147,12 +147,10 @@ export const TEXT_FIELD_RULES: readonly TextFieldRule[] = [
   { uid: DEAL_UID, field: 'affiliateLink', label: 'Affiliate link', kind: 'text', requiredNonBlank: true },
   { uid: DEAL_UID, field: 'content', label: 'Content', kind: 'richtext', requiredNonBlank: true },
   { uid: DEAL_UID, field: 'offerText', label: 'Offer text', kind: 'string', requiredNonBlank: true, collapse: true },
-  // A product deal card renders a price and a strike-through MRP; without both
-  // there is no discount to show and isActionableProductDeal drops the card.
-  // `dealImage` is NOT listed: it already carries schema `required: true`
-  // (same reasoning as brand.logo in the note above).
-  { uid: DEAL_UID, field: 'salePrice', label: 'Sale price', kind: 'number', requiredNonBlank: true },
-  { uid: DEAL_UID, field: 'mrp', label: 'MRP', kind: 'number', requiredNonBlank: true },
+  // Prices are optional display data. Their non-negative validation and editor
+  // hints live in changed-field-validation.ts; they do not belong in this
+  // required/blank-field table. `dealImage` is NOT listed because it already
+  // carries schema `required: true` (same reasoning as brand.logo above).
   { uid: DEAL_UID, field: 'cashbackText', label: 'Cashback text', kind: 'string', collapse: true },
   { uid: DEAL_UID, field: 'bankOfferText', label: 'Bank offer text', kind: 'string', collapse: true },
   { uid: DEAL_UID, field: 'discount', label: 'Discount', kind: 'string', collapse: true },

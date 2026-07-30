@@ -76,18 +76,10 @@ export function hasSafeAffiliateLink(value: unknown) {
 }
 
 export function isActionableProductDeal(deal: any, now: Date) {
-  const rawPrice =
-    typeof deal?.salePrice === 'string'
-      ? deal.salePrice.replaceAll(',', '').trim()
-      : deal?.salePrice;
-  const salePrice = Number(rawPrice);
-
   return (
     isLiveOffer(deal, now) &&
     typeof deal?.dealImage?.url === 'string' &&
     deal.dealImage.url.trim().length > 0 &&
-    Number.isFinite(salePrice) &&
-    salePrice > 0 &&
     hasSafeAffiliateLink(deal?.affiliateLink)
   );
 }
@@ -138,7 +130,6 @@ export async function backfillDeals(
   const recentDeals = await strapi.documents('api::deal.deal').findMany({
     filters: {
       ...PUBLISHED_OFFER_FILTER,
-      salePrice: { $notNull: true, $gt: 0 },
       ...filters,
     },
     fields: DEAL_FIELDS,

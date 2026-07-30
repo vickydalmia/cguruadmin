@@ -46,6 +46,7 @@ import {
   appendListColumns,
   isSortableListColumn,
   pinFieldToFullRow,
+  removeEditLayoutFields,
   type EditLayout,
 } from './utils/content-manager-layout';
 import {
@@ -118,6 +119,13 @@ const HIDE_FROM_EDIT_FORM_ONLY: Record<string, string[]> = {
   'api::deal.deal': ['contentStatus', 'publishedOn', 'scheduledAt', 'expiresAt'],
 };
 
+// Hero banners are repeatable components, so their row order is already
+// controlled by drag-and-drop. Keep the legacy value in the schema/database
+// for compatibility, but remove the duplicate numeric control from the editor.
+const HIDE_FROM_COMPONENT_EDIT: Record<string, string[]> = {
+  'homepage.slider-slide': ['order'],
+};
+
 const DOCUMENT_WRITE_ACTIONS = new Set([
   'create',
   'clone',
@@ -150,14 +158,11 @@ async function hideFieldsFromContentManager(
       if (!contentType) continue;
 
       const config = await service.findConfiguration(contentType);
-      const hidden = new Set(fieldsToHide);
-
       const prevEdit = config.layouts?.edit ?? [];
       const prevList = config.layouts?.list ?? [];
 
-      const nextEdit = prevEdit
-        .map((row: any[]) => row.filter((cell) => !hidden.has(cell.name)))
-        .filter((row: any[]) => row.length > 0);
+      const nextEdit = removeEditLayoutFields(prevEdit, fieldsToHide) ?? prevEdit;
+      const hidden = new Set(fieldsToHide);
       const nextList = keepListColumns
         ? prevList
         : prevList.filter((name: string) => !hidden.has(name));
@@ -188,6 +193,33 @@ async function hideRelationsFromContentManager(strapi: Core.Strapi): Promise<voi
   await hideFieldsFromContentManager(strapi, HIDE_FROM_EDIT_FORM_ONLY, {
     keepListColumns: true,
   });
+}
+
+async function hideFieldsFromComponentManager(strapi: Core.Strapi): Promise<void> {
+  const service: any = strapi.plugin('content-manager').service('components');
+  if (!service) return;
+
+  for (const [uid, fieldsToHide] of Object.entries(HIDE_FROM_COMPONENT_EDIT)) {
+    try {
+      const component = service.findComponent(uid);
+      if (!component) continue;
+
+      const config = await service.findConfiguration(component);
+      const prevEdit = config.layouts?.edit ?? [];
+      const nextEdit = removeEditLayoutFields(prevEdit, fieldsToHide);
+      if (!nextEdit) continue;
+
+      await service.updateConfiguration(component, {
+        ...config,
+        layouts: { ...config.layouts, edit: nextEdit },
+      });
+      strapi.log.info(`[content-manager] hid fields from ${uid} component layout`);
+    } catch (err: any) {
+      strapi.log.warn(
+        `[content-manager] failed to rewrite component layout for ${uid}: ${err?.message ?? err}`,
+      );
+    }
+  }
 }
 
 // All site content is public; make sure the public role can read it so the
@@ -1637,6 +1669,7 @@ export default {
     // diagnostics only and never change result semantics or runtime mode.
     await initializeSearchRuntime(strapi);
     await hideRelationsFromContentManager(strapi);
+    await hideFieldsFromComponentManager(strapi);
     await ensurePublicReadPermissions(strapi);
     await restrictSingleTypesToSuperAdmin(strapi);
     await ensureUploadSettings(strapi);

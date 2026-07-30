@@ -543,11 +543,6 @@ function searchNeedles(query: string): SearchNeedles {
   return { variants, whereNeedles, slugNeedles };
 }
 
-// Product-deal visibility rule: only deals carrying a positive sale price
-// are product cards (mirrored by offerWhere in search-sql.ts). Shared by the
-// fallback reads and the ranked-path hydrate re-check.
-const DEAL_SALE_PRICE_FILTER = { salePrice: { $notNull: true, $gt: 0 } };
-
 type FallbackRequestCache = Map<string, Promise<any[]>>;
 
 function literalContains(value: unknown, needles: string[]): boolean {
@@ -685,9 +680,7 @@ function fallbackOffers(
           }
         : {
             status: "published",
-            filters: {
-              $and: [publishedOnlyFilters(nowIso), DEAL_SALE_PRICE_FILTER],
-            },
+            filters: publishedOnlyFilters(nowIso),
             fields: DEAL_FIELDS,
             populate: dealPopulate,
           },
@@ -1273,8 +1266,8 @@ async function offerPage(
         strapi,
         kind === "coupon" ? "api::coupon.coupon" : "api::deal.deal",
         ids,
-        // Same visibility as the ranked SQL WHERE (offerWhere): the
-        // contentStatus/expiresAt rule, plus the sale-price rule for deals.
+        // Re-apply the same contentStatus/expiresAt visibility as the ranked
+        // SQL WHERE while hydrating ranked ids.
         kind === "coupon"
           ? {
               fields: COUPON_FIELDS,
@@ -1284,9 +1277,7 @@ async function offerPage(
           : {
               fields: DEAL_FIELDS,
               populate: dealPopulate,
-              visibility: {
-                $and: [publishedOnlyFilters(nowIso), DEAL_SALE_PRICE_FILTER],
-              },
+              visibility: publishedOnlyFilters(nowIso),
             },
       );
       return documents

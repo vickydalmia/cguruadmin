@@ -39,12 +39,10 @@
     },
     "salePrice": {
       "type": "decimal",
-      "required": true,
       "min": 0
     },
     "mrp": {
       "type": "decimal",
-      "required": true,
       "min": 0
     },
     "discount": {

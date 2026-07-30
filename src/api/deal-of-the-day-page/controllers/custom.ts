@@ -8,7 +8,6 @@ import {
   dealRef,
   isActionableProductDeal,
   isLiveOffer,
-  NEWEST_FIRST,
   PUBLISHED_OFFER_FILTER,
   sanitizeOutput,
   storeRef,
@@ -49,22 +48,22 @@ const telegramDealRef = {
   fields: DEAL_FIELDS.filter((field) => field !== 'content' && field !== 'code'),
 };
 
+// These filters hide unavailable Deals without adding `sort`: a nested sort
+// would override the relation order editors set by drag-and-drop. Newest-first
+// applies only to the separate fallback query in backfillDeals.
 const publishedDealListRef = {
   ...dealRef,
   filters: PUBLISHED_OFFER_FILTER,
-  sort: NEWEST_FIRST,
 };
 
 const publishedCompactDealListRef = {
   ...compactDealRef,
   filters: PUBLISHED_OFFER_FILTER,
-  sort: NEWEST_FIRST,
 };
 
 const publishedTelegramDealListRef = {
   ...telegramDealRef,
   filters: PUBLISHED_OFFER_FILTER,
-  sort: NEWEST_FIRST,
 };
 
 const dealListSection = { populate: { viewAllCta: true, deals: publishedDealListRef } };

@@ -169,7 +169,7 @@ describe("search-sql builders", () => {
     expect(query.sql).not.toContain("similarity(");
   });
 
-  it("adds the sale-price rule and every taxonomy link for product deals", () => {
+  it("allows price-less product deals and includes every taxonomy link", () => {
     const query = offerRankedQuery(
       "deal",
       needles(["shoes"], ["shoes"]),
@@ -178,7 +178,7 @@ describe("search-sql builders", () => {
     );
 
     expect(query.sql).toContain("FROM deals o");
-    expect(query.sql).toContain("o.sale_price IS NOT NULL AND o.sale_price > 0");
+    expect(query.sql).not.toContain("o.sale_price");
     // `primaryStore` is gone — its store is carried by the stores taxonomy.
     expect(query.sql).not.toContain("deals_primary_store_lnk");
     expect(query.sql).not.toContain("translate(o.code");

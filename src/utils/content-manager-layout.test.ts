@@ -3,8 +3,37 @@ import {
   appendListColumns,
   isSortableListColumn,
   pinFieldToFullRow,
+  removeEditLayoutFields,
   type EditLayout,
 } from './content-manager-layout';
+
+describe('removeEditLayoutFields', () => {
+  it('removes hidden fields while preserving every remaining row and cell', () => {
+    const edit: EditLayout = [
+      [
+        { name: 'desktopImage', size: 6 },
+        { name: 'order', size: 6 },
+      ],
+      [{ name: 'link', size: 12 }],
+    ];
+
+    expect(removeEditLayoutFields(edit, ['order'])).toEqual([
+      [{ name: 'desktopImage', size: 6 }],
+      [{ name: 'link', size: 12 }],
+    ]);
+  });
+
+  it('drops rows that become empty and is idempotent', () => {
+    const edit: EditLayout = [
+      [{ name: 'order', size: 12 }],
+      [{ name: 'link', size: 12 }],
+    ];
+    const next = removeEditLayoutFields(edit, ['order'])!;
+
+    expect(next).toEqual([[{ name: 'link', size: 12 }]]);
+    expect(removeEditLayoutFields(next, ['order'])).toBeNull();
+  });
+});
 
 describe('isSortableListColumn', () => {
   it.each([

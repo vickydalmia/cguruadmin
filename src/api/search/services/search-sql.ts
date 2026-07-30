@@ -259,9 +259,8 @@ function relationTier(
   );
 }
 
-// Mirrors publishedOnlyFilters (content-status.ts) plus the product-deal
-// sale_price rule from productDealFilters; published_at is defensive (all
-// offer types have draftAndPublish disabled, so it is always set).
+// Mirrors publishedOnlyFilters (content-status.ts); published_at is defensive
+// (all offer types have draftAndPublish disabled, so it is always set).
 //
 // Membership is `o.id IN (direct arm UNION ALL relation arms)` rather than
 // `direct LIKE OR EXISTS(...) OR ...`: the OR-of-EXISTS shape cannot be
@@ -280,8 +279,7 @@ function offerWhere(
   bindings.push(nowIso);
   const visibility =
     "o.published_at IS NOT NULL AND o.content_status = 'published' " +
-    "AND (o.expires_at IS NULL OR o.expires_at > ?)" +
-    (kind === "deal" ? " AND o.sale_price IS NOT NULL AND o.sale_price > 0" : "");
+    "AND (o.expires_at IS NULL OR o.expires_at > ?)";
   const arms = [
     directMembershipArm(kind, needles, bindings),
     ...OFFER_RELATIONS[kind].map((relation) =>

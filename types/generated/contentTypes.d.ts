@@ -934,7 +934,6 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'> &
       Schema.Attribute.Private;
     mrp: Schema.Attribute.Decimal &
-      Schema.Attribute.Required &
       Schema.Attribute.SetMinMax<
         {
           min: 0;
@@ -945,7 +944,6 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     publishedAt: Schema.Attribute.DateTime;
     publishedOn: Schema.Attribute.DateTime;
     salePrice: Schema.Attribute.Decimal &
-      Schema.Attribute.Required &
       Schema.Attribute.SetMinMax<
         {
           min: 0;

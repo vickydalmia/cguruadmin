@@ -13,6 +13,23 @@ export type EditLayout = EditCell[][];
 /** An edit-view row is 12 columns wide (content-manager's MAX_ROW_SIZE). */
 export const MAX_ROW_SIZE = 12;
 
+/**
+ * Remove named fields from an edit layout without disturbing the order or
+ * width of any remaining field. Returns `null` when the layout is already in
+ * the requested state so bootstrap callers can avoid redundant config writes.
+ */
+export function removeEditLayoutFields(
+  edit: EditLayout,
+  names: readonly string[],
+): EditLayout | null {
+  const hidden = new Set(names);
+  const next = edit
+    .map((row) => row.filter((cell) => !hidden.has(cell.name)))
+    .filter((row) => row.length > 0);
+
+  return JSON.stringify(next) === JSON.stringify(edit) ? null : next;
+}
+
 // Mirrored from @strapi/content-manager 5.50
 // (server/src/services/utils/configuration/attributes.ts). The admin can only
 // sort by a column that is displayed, and it renders a sort control only when

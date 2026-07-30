@@ -103,35 +103,64 @@ describe('homepage aggregate offer population', () => {
     });
   });
 
-  it('filters and sorts Coupon and Deal relations with Document Service-compatible keys', async () => {
+  it('filters selected Coupon and Deal lists without overriding editor order', async () => {
     const harness = createHarness({});
 
     await harness.controller.homepageFull(harness.ctx as any);
 
     const options = harness.findFirst.mock.calls[0]?.[0];
     const populate = options.populate;
-    const publishedRelation = {
-      filters: { contentStatus: { $eq: 'published' } },
-      sort: ['publishedOn:desc', 'publishedAt:desc'],
-    };
+    const publishedFilter = { contentStatus: { $eq: 'published' } };
 
-    expect(populate.topDeals.populate.deals).toMatchObject(publishedRelation);
-    expect(populate.dealsByBrand.populate.deals).toMatchObject(publishedRelation);
-    expect(populate.exploreDeals.populate.tabs.populate.deals).toMatchObject(
-      publishedRelation,
-    );
-    expect(populate.offersByBrand.populate.offers).toMatchObject(publishedRelation);
-    expect(populate.exploreOffers.populate.tabs.populate.offers).toMatchObject(
-      publishedRelation,
-    );
+    for (const ref of [
+      populate.topDeals.populate.deals,
+      populate.dealsByBrand.populate.deals,
+      populate.exploreDeals.populate.tabs.populate.deals,
+      populate.offersByBrand.populate.offers,
+      populate.exploreOffers.populate.tabs.populate.offers,
+    ]) {
+      expect(ref.filters).toEqual(publishedFilter);
+      expect(ref).not.toHaveProperty('sort');
+      expect(ref).not.toHaveProperty('limit');
+      expect(ref).not.toHaveProperty('pagination');
+    }
+
+    // These are also editor-selected multi-relations. They do not need an
+    // offer-status filter, but their saved relation order must remain intact.
+    for (const ref of [
+      populate.popularStores.populate.stores,
+      populate.popularSearches.populate.stores,
+      populate.popularSearches.populate.brands,
+      populate.popularSearches.populate.categories,
+      populate.popularSearches.populate.banks,
+    ]) {
+      expect(ref).not.toHaveProperty('sort');
+    }
+
+    // Repeatable component rows use the same drag order and must not acquire a
+    // query-level ordering rule either.
+    for (const ref of [
+      populate.hero.populate.banners,
+      populate.hero.populate.products,
+      populate.topOffers.populate.items,
+      populate.cgExclusive.populate.items,
+      populate.exploreDeals.populate.tabs,
+      populate.exploreOffers.populate.tabs,
+      populate.newlyAdded.populate.items,
+      populate.bankOffers.populate.items,
+      populate.howItWorks.populate.steps,
+      populate.howItWorks.populate.features,
+      populate.faq.populate.items,
+    ]) {
+      expect(ref).not.toHaveProperty('sort');
+    }
+
     expect(populate.hero.populate.products.populate.deal.filters).toEqual(
-      publishedRelation.filters,
+      publishedFilter,
     );
     expect(populate.topOffers.populate.items.populate.coupon.filters).toEqual(
-      publishedRelation.filters,
+      publishedFilter,
     );
-    expect(populate.topDeals.populate.deals).not.toHaveProperty('limit');
-    expect(populate.topDeals.populate.deals).not.toHaveProperty('pagination');
   });
 
   it('removes unpublished rows and caps each list at its own +4 buffer', async () => {
@@ -207,11 +236,11 @@ describe('homepage aggregate offer population', () => {
     ]);
   });
 
-  it('fills Top Deals to its buffer with actionable Deal-schema records only', async () => {
+  it('keeps price-less Top Deals and backfills only unusable cards', async () => {
     const curated = [
       actionableDeal(1),
       actionableDeal(2, { dealImage: null }),
-      actionableDeal(3, { salePrice: 0 }),
+      actionableDeal(3, { salePrice: null, mrp: null }),
       actionableDeal(4, { affiliateLink: 'javascript:alert(1)' }),
     ];
     const fallback = [
@@ -230,6 +259,7 @@ describe('homepage aggregate offer population', () => {
       response.data.topDeals.deals.map((deal: any) => deal.documentId),
     ).toEqual([
       'offer-1',
+      'offer-3',
       'offer-5',
       'offer-6',
       'offer-7',
@@ -238,17 +268,18 @@ describe('homepage aggregate offer population', () => {
       'offer-10',
       'offer-11',
       'offer-12',
-      'offer-13',
     ]);
     expect(harness.findManyDeals).toHaveBeenCalledTimes(1);
     expect(harness.findManyDeals.mock.calls[0]?.[0]).toMatchObject({
       filters: {
         contentStatus: { $eq: 'published' },
-        salePrice: { $notNull: true, $gt: 0 },
       },
       sort: ['publishedOn:desc', 'publishedAt:desc'],
       limit: 40,
     });
+    expect(harness.findManyDeals.mock.calls[0]?.[0].filters).not.toHaveProperty(
+      'salePrice',
+    );
     expect(harness.findManyDeals.mock.calls[0]?.[0].fields).toContain('content');
     expect(harness.findManyDeals.mock.calls[0]?.[0].fields).not.toContain(
       'excerpt',

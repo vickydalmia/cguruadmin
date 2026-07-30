@@ -175,8 +175,6 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
           !offerText?.trim() ? "offerText" : null,
           !content?.trim() ? "content" : null,
           !affiliateLink?.trim() ? "affiliateLink" : null,
-          salePrice === null ? "salePrice" : null,
-          mrp === null ? "mrp" : null,
           importedDealImageId === null ? "dealImage" : null,
         ].filter(Boolean);
         if (missingRequired.length > 0) {

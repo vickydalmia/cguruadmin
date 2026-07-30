@@ -245,7 +245,8 @@ describe('public Deal detail aggregate', () => {
           id: index + 400,
           documentId: `related-deal-${index + 1}`,
           title: `Related product ${index + 1}`,
-          salePrice: 999 + index,
+          salePrice: index === 0 ? null : 999 + index,
+          mrp: index === 0 ? null : 1999 + index,
           dealImage: { url: `/uploads/related-${index + 1}.webp` },
         })),
       ]);
@@ -261,6 +262,7 @@ describe('public Deal detail aggregate', () => {
     });
     expect(payload.relatedDeals).toHaveLength(4);
     expect(payload.relatedDeals[0].documentId).toBe('related-deal-1');
+    expect(payload.relatedDeals[0].salePrice).toBeNull();
     expect(harness.dealFindMany.mock.calls[1][0].limit).toBe(40);
   });
 

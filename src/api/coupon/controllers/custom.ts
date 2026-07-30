@@ -152,16 +152,9 @@ const DEAL_PAGE_RELATED_LIMIT = 4;
 const DEAL_PAGE_RELATED_QUERY_LIMIT = 40;
 
 function isRenderableCouponPageDeal(deal: any): boolean {
-  const rawPrice =
-    typeof deal?.salePrice === 'string'
-      ? deal.salePrice.replaceAll(',', '').trim()
-      : deal?.salePrice;
-  const salePrice = Number(rawPrice);
   return (
     typeof deal?.dealImage?.url === 'string' &&
-    deal.dealImage.url.trim().length > 0 &&
-    Number.isFinite(salePrice) &&
-    salePrice > 0
+    deal.dealImage.url.trim().length > 0
   );
 }
 

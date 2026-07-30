@@ -8,7 +8,6 @@ import {
   DEAL_FIELDS,
   dealRef,
   isLiveOffer,
-  NEWEST_FIRST,
   PUBLISHED_OFFER_FILTER,
   sanitizeOutput,
   storeRef,
@@ -21,10 +20,11 @@ import {
 const BANK_FIELDS = ['name', 'slug', 'shortDescription', 'logoAlt'];
 
 // Relations in homepage components are curator-managed and therefore have no
-// database-level cardinality bound. Constrain visibility/order in the query
-// and cap the returned payload defensively below. Each section holds a +4
-// buffer over what the site renders, so a mid-cycle expiry/delete never
-// leaves a visible hole (the UI slices to its own display counts).
+// database-level cardinality bound. Constrain visibility in the query while
+// preserving the editor's relation order, then cap the returned payload
+// defensively below. Each section holds a +4 buffer over what the site renders,
+// so a mid-cycle expiry/delete never leaves a visible hole (the UI slices to
+// its own display counts).
 const MAX_LIST_ITEMS = 16;
 const TOP_DEALS_RENDER_COUNT = 6;
 const SECTION_LIST_CAPS = {
@@ -86,17 +86,16 @@ const publishedHeroDealRef = {
   filters: PUBLISHED_OFFER_FILTER,
 };
 
-// Strapi's Document Service accepts nested filters and ordering here, but it
-// rejects nested `limit`/pagination keys. The response-level cap below remains
-// the compatibility-safe cardinality guard.
+// Strapi's Document Service accepts nested ordering here, but adding `sort`
+// would override the relation order editors set by drag-and-drop. It rejects
+// nested `limit`/pagination keys, so the response-level cap below remains the
+// compatibility-safe cardinality guard.
 const publishedCouponListRef = {
   ...publishedCouponRef,
-  sort: NEWEST_FIRST,
 };
 
 const publishedDealListRef = {
   ...publishedDealRef,
-  sort: NEWEST_FIRST,
 };
 
 const bannerSlides = {

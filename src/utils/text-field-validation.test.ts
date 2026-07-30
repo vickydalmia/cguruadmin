@@ -267,6 +267,12 @@ describe('validateTextFields — required fields', () => {
     )).toEqual([['affiliateLink']]);
   });
 
+  it('allows a Deal to omit sale price and MRP', () => {
+    expect(() =>
+      validateTextFields(DEAL, 'update', { salePrice: null, mrp: null })
+    ).not.toThrow();
+  });
+
   it('requires store shortDescription and logo (rows 93/94)', () => {
     expect(problemPaths(() =>
       validateTextFields(STORE, 'update', { shortDescription: '', logo: null })

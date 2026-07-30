@@ -122,16 +122,13 @@ describe('deal-of-the-day aggregate population', () => {
     ]);
   });
 
-  it('preserves exclusive-section curation order while filtering fallback-backed relations', async () => {
+  it('preserves editor order for every selected Deal relation', async () => {
     const harness = createHarness({});
 
     await harness.controller.dealOfTheDayFull(harness.ctx as any);
 
     const populate = harness.findFirst.mock.calls[0]?.[0].populate;
-    const publishedRelation = {
-      filters: { contentStatus: { $eq: 'published' } },
-      sort: ['publishedOn:desc', 'publishedAt:desc'],
-    };
+    const publishedFilter = { contentStatus: { $eq: 'published' } };
 
     for (const ref of [
       populate.dealsByCategory.populate.tabs.populate.deals,
@@ -142,6 +139,9 @@ describe('deal-of-the-day aggregate population', () => {
       expect(ref).not.toHaveProperty('sort');
     }
 
+    expect(populate.dealsByCategory.populate.tabs).not.toHaveProperty('sort');
+    expect(populate.dealsByStore.populate.tabs).not.toHaveProperty('sort');
+
     for (const ref of [
       populate.topPicks.populate.deals,
       populate.topDeals.populate.deals,
@@ -150,7 +150,8 @@ describe('deal-of-the-day aggregate population', () => {
       populate.genZDrops.populate.deals,
       populate.telegramDeals.populate.deals,
     ]) {
-      expect(ref).toMatchObject(publishedRelation);
+      expect(ref.filters).toEqual(publishedFilter);
+      expect(ref).not.toHaveProperty('sort');
       expect(ref).not.toHaveProperty('limit');
       expect(ref).not.toHaveProperty('pagination');
     }
@@ -220,11 +221,11 @@ describe('deal-of-the-day aggregate population', () => {
     ]);
   });
 
-  it('fills Top Deals to its buffer with actionable Deal-schema records only', async () => {
+  it('keeps price-less Top Deals and backfills only unusable cards', async () => {
     const curated = [
       actionableDeal(1),
       actionableDeal(2, { dealImage: null }),
-      actionableDeal(3, { salePrice: 0 }),
+      actionableDeal(3, { salePrice: null, mrp: null }),
       actionableDeal(4, { affiliateLink: 'javascript:alert(1)' }),
     ];
     const fallback = [
@@ -242,6 +243,7 @@ describe('deal-of-the-day aggregate population', () => {
       response.data.topDeals.deals.map((deal: any) => deal.documentId),
     ).toEqual([
       'deal-1',
+      'deal-3',
       'deal-5',
       'deal-6',
       'deal-7',
@@ -250,17 +252,18 @@ describe('deal-of-the-day aggregate population', () => {
       'deal-10',
       'deal-11',
       'deal-12',
-      'deal-13',
     ]);
     expect(harness.findManyDeals).toHaveBeenCalledTimes(1);
     expect(harness.findManyDeals.mock.calls[0]?.[0]).toMatchObject({
       filters: {
         contentStatus: { $eq: 'published' },
-        salePrice: { $notNull: true, $gt: 0 },
       },
       sort: ['publishedOn:desc', 'publishedAt:desc'],
       limit: 40,
     });
+    expect(harness.findManyDeals.mock.calls[0]?.[0].filters).not.toHaveProperty(
+      'salePrice',
+    );
   });
 
   it('does not query fallback Deals when six curated Top Deals are actionable', async () => {

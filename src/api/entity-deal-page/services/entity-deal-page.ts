@@ -316,7 +316,6 @@ function liveDealFilters(
 ) {
   return {
     ...publishedOnlyFilters(now),
-    salePrice: { $gt: 0 },
     affiliateLink: { $notNull: true, $ne: '' },
     // A deal with no image can never be actionable, and this is exact.
     dealImage: { id: { $notNull: true } },
@@ -562,7 +561,7 @@ async function countActionableDeals(
     'api::deal.deal',
     {
       filters,
-      fields: ['contentStatus', 'expiresAt', 'salePrice', 'affiliateLink'],
+      fields: ['contentStatus', 'expiresAt', 'affiliateLink'],
       populate: { dealImage: { fields: ['url'] } },
       sort: [{ id: 'asc' }],
     },
@@ -866,7 +865,6 @@ async function loadSettingItems(
       filters: {
         contentStatus,
         $and: publishedAnd,
-        salePrice: { $gt: 0 },
         affiliateLink: { $notNull: true, $ne: '' },
         dealImage: { id: { $notNull: true } },
         $or: configs.map((config) => ({

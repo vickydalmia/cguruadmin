@@ -227,7 +227,8 @@ describe('entity Deal-page public read', () => {
     const deal = {
       documentId: 'deal-1',
       contentStatus: 'published',
-      salePrice: 100,
+      salePrice: null,
+      mrp: null,
       affiliateLink: 'https://example.com/go',
       dealImage: { url: '/deal.webp' },
     };
@@ -244,6 +245,9 @@ describe('entity Deal-page public read', () => {
       start: 50,
       limit: 50,
     });
+    expect(dealFindMany.mock.calls[0][0].filters).not.toHaveProperty(
+      'salePrice',
+    );
     expect(dealCount).toHaveBeenCalledTimes(1);
     expect(result?.data.pagination).toMatchObject({
       page: 2,
