@@ -414,48 +414,69 @@ async function releaseExpiredClaimTokens(knex, windowMs = CLAIM_REPLAY_WINDOW_MS
 }
 
 async function recountPools(knex) {
-  const previous = await knex(POOLS_TABLE).select("id", "exhausted_at");
-  const exhaustedBefore = new Map(
-    previous.map((row) => [row.id, row.exhausted_at]),
-  );
-  const now = new Date();
+  // One transaction, pool rows locked up front. `importCodes` takes the pool
+  // row lock (`forUpdate`) for the whole restock, so locking here means a
+  // concurrent import either committed before the aggregate below (its codes
+  // are counted) or waits until this recount commits — a snapshot taken
+  // between an import's insert and its counter bump can no longer be written
+  // back over the finished restock, resurrecting stale counters and a
+  // cleared `exhausted_at`. Import locks a single row, this locks all rows in
+  // id order: no deadlock cycle. Nests as a savepoint when the caller already
+  // holds a transaction (bootstrap does).
+  await knex.transaction(async (trx) => {
+    const previous = await trx(POOLS_TABLE)
+      .select("id", "exhausted_at")
+      .orderBy("id")
+      .forUpdate();
+    if (previous.length === 0) return;
+    const now = new Date();
 
-  await knex(POOLS_TABLE).update({ total_codes: 0, used_codes: 0 });
+    const counts = await trx(`${POOL_LINK_TABLE} as pool_link`)
+      .join(
+        `${UNIQUE_CODES_TABLE} as unique_code`,
+        "unique_code.id",
+        `pool_link.${POOL_LINK_CODE_COLUMN}`,
+      )
+      .select(`pool_link.${POOL_LINK_POOL_COLUMN} as pool_id`)
+      .whereNotNull(`pool_link.${POOL_LINK_POOL_COLUMN}`)
+      .count({ total_codes: "*" })
+      .sum({
+        used_codes: trx.raw("CASE WHEN ?? = ? THEN 1 ELSE 0 END", [
+          "unique_code.is_used",
+          true,
+        ]),
+      })
+      .groupBy(`pool_link.${POOL_LINK_POOL_COLUMN}`);
+    const countsByPool = new Map(counts.map((row) => [row.pool_id, row]));
 
-  const counts = await knex(`${POOL_LINK_TABLE} as pool_link`)
-    .join(
-      `${UNIQUE_CODES_TABLE} as unique_code`,
-      "unique_code.id",
-      `pool_link.${POOL_LINK_CODE_COLUMN}`,
-    )
-    .select(`pool_link.${POOL_LINK_POOL_COLUMN} as pool_id`)
-    .whereNotNull(`pool_link.${POOL_LINK_POOL_COLUMN}`)
-    .count({ total_codes: "*" })
-    .sum({
-      used_codes: knex.raw("CASE WHEN ?? = ? THEN 1 ELSE 0 END", [
-        "unique_code.is_used",
-        true,
-      ]),
-    })
-    .groupBy(`pool_link.${POOL_LINK_POOL_COLUMN}`);
+    for (const pool of previous) {
+      const row = countsByPool.get(pool.id);
+      if (!row) {
+        // No code rows: reset the display counters but leave `exhausted_at`
+        // untouched — a pool that has never held a code (editor mid-setup)
+        // must not be stamped, and one whose rows were deleted after draining
+        // keeps its history.
+        await trx(POOLS_TABLE)
+          .where({ id: pool.id })
+          .update({ total_codes: 0, used_codes: 0 });
+        continue;
+      }
 
-  for (const row of counts) {
-    const total = Number(row.total_codes) || 0;
-    const used = Number(row.used_codes) || 0;
-    const drained = total > 0 && used >= total;
+      const total = Number(row.total_codes) || 0;
+      const used = Number(row.used_codes) || 0;
+      const drained = total > 0 && used >= total;
 
-    await knex(POOLS_TABLE)
-      .where({ id: row.pool_id })
-      .update({
-        total_codes: total,
-        used_codes: used,
-        // Keep the original timestamp when it is already set, so "when did
-        // this run out" survives a reconciliation.
-        exhausted_at: drained
-          ? (exhaustedBefore.get(row.pool_id) ?? now)
-          : null,
-      });
-  }
+      await trx(POOLS_TABLE)
+        .where({ id: pool.id })
+        .update({
+          total_codes: total,
+          used_codes: used,
+          // Keep the original timestamp when it is already set, so "when did
+          // this run out" survives a reconciliation.
+          exhausted_at: drained ? (pool.exhausted_at ?? now) : null,
+        });
+    }
+  });
 }
 
 /**

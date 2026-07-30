@@ -160,12 +160,49 @@ async function fetchOfferAggregates(
 
     let rows: any[] = [];
     try {
-      rows = await connection(linkTable)
+      let query = connection(linkTable)
         .join(`${source.table} as o`, `${linkTable}.${source.ownerColumn}`, 'o.id')
         .where('o.content_status', 'published')
         .andWhere((builder: any) =>
           builder.whereNull('o.expires_at').orWhere('o.expires_at', '>', cutoff),
-        )
+        );
+      if (source.table === 'deals') {
+        // Deals render only inside the Trending Deals section, so an entity
+        // that hides it (showTrendingDeals === false; null/absent means
+        // visible, matching shouldShowEntityTrendingDeals in the frontend)
+        // gets no page content from its deals — they must not keep an
+        // otherwise-empty page in the sitemap.
+        query = query
+          .join(`${config.table} as entity`, `${linkTable}.${config.linkColumn}`, 'entity.id')
+          .whereRaw('entity.show_trending_deals IS DISTINCT FROM false')
+          // Card eligibility (mapProductDealCard): a deal without a usable
+          // image or affiliate destination maps to no card and puts nothing
+          // on the page. Residue the SQL cannot see (e.g. a non-empty link
+          // with an unsafe scheme) stays covered by the page's robots tag.
+          .whereRaw("btrim(coalesce(o.affiliate_link, '')) <> ''")
+          .whereExists((builder: any) =>
+            builder
+              .select(1)
+              .from('files_related_mph as mph')
+              .join('files as f', 'f.id', 'mph.file_id')
+              .whereRaw('mph.related_id = o.id')
+              .where('mph.related_type', 'api::deal.deal')
+              .where('mph.field', 'dealImage')
+              .whereRaw("coalesce(f.url, '') <> ''"),
+          );
+        if (config.kind === 'store') {
+          // Only the store rail is categorized (buildStoreTrending): a deal
+          // with no category link produces no tab there. Brand/category/bank
+          // rails are flat and take any card.
+          query = query.whereExists((builder: any) =>
+            builder
+              .select(1)
+              .from('deals_categories_lnk as deal_category')
+              .whereRaw(`deal_category.deal_id = o.id`),
+          );
+        }
+      }
+      rows = await query
         .groupBy(`${linkTable}.${config.linkColumn}`)
         .select(`${linkTable}.${config.linkColumn} as entity_id`)
         .max('o.updated_at as last_modified')

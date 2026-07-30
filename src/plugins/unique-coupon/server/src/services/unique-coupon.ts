@@ -256,6 +256,17 @@ const uniqueCouponService = ({ strapi }: { strapi: Core.Strapi }) => ({
             pool.id,
           ]);
 
+          // The pool draining and THIS activation claiming its final code are
+          // not mutually exclusive: a concurrent request for the same
+          // activation may have taken the last row after our replay() at the
+          // top missed. The 23505 handler already replays for that race; this
+          // path must too, or the winner's caller gets the code while every
+          // concurrent twin is told the pool is empty.
+          const lastCode = await replay();
+          if (lastCode) {
+            return { success: true as const, code: lastCode };
+          }
+
           return {
             success: false as const,
             error: 'NO_CODES_AVAILABLE',

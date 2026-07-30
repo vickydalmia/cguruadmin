@@ -92,6 +92,8 @@ function createPostgresHarness({
       whereIn: () => chain,
       groupBy: () => chain,
       havingRaw: () => chain,
+      orderBy: () => chain,
+      forUpdate: () => chain,
       count: () => chain,
       sum: () => chain,
       update: () => chain,
@@ -105,6 +107,9 @@ function createPostgresHarness({
 
   const knex: any = (table: string) => builder(table);
   knex.client = { config: { client: 'pg' } };
+  // Real knex objects (and transaction handles) expose .transaction; the
+  // recount wraps itself in one, nesting as a savepoint when needed.
+  knex.transaction = (fn: (trx: any) => Promise<unknown>) => fn(knex);
   knex.schema = {
     hasTable: async (table: string) =>
       !(missingLinkTable && table === POOL_LINK_TABLE),

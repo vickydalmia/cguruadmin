@@ -8,11 +8,23 @@ type SourceBehavior =
   | { rows: Array<{ entity_id: number; last_modified: string | null; live_count: number }> }
   | { fail: true };
 
-function chainable(behavior: SourceBehavior) {
+type ChainCall = { method: string; arg: unknown };
+
+function chainable(behavior: SourceBehavior, record?: ChainCall[]) {
   const chain: any = {};
-  for (const method of ['join', 'where', 'andWhere', 'groupBy', 'select', 'max']) {
-    chain[method] = () => chain;
+  for (const method of ['join', 'where', 'andWhere', 'whereRaw', 'from', 'groupBy', 'select', 'max']) {
+    chain[method] = (...args: unknown[]) => {
+      record?.push({ method, arg: args[0] });
+      return chain;
+    };
   }
+  // Exercises the subquery callback the way knex compiles it, without
+  // recording its internal calls against the outer query.
+  chain.whereExists = (callback: unknown) => {
+    record?.push({ method: 'whereExists', arg: callback });
+    if (typeof callback === 'function') callback(chainable({ rows: [] }));
+    return chain;
+  };
   // `.count()` ends the chain; knex builders are thenable, so resolve/reject
   // happens at await time exactly like the real driver.
   chain.count = () =>
@@ -22,9 +34,14 @@ function chainable(behavior: SourceBehavior) {
   return chain;
 }
 
-function fakeStrapi(sources: Record<string, SourceBehavior>): Core.Strapi {
-  const connection = (linkTable: string) =>
-    chainable(sources[linkTable] ?? { rows: [] });
+function fakeStrapi(
+  sources: Record<string, SourceBehavior>,
+  callLog?: Record<string, ChainCall[]>,
+): Core.Strapi {
+  const connection = (linkTable: string) => {
+    const record = callLog ? (callLog[linkTable] ??= []) : undefined;
+    return chainable(sources[linkTable] ?? { rows: [] }, record);
+  };
   return {
     log: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
     db: { connection },
@@ -90,5 +107,32 @@ describe('listSitemapEntities liveOfferCount', () => {
     const row = rows.find((entry) => entry.documentId === 'doc-7');
     expect(row).toBeDefined();
     expect('liveOfferCount' in row!).toBe(false);
+  });
+
+  it('applies deal card eligibility to the deals source only', async () => {
+    // Mirrors the frontend render rules: deals count only when their section
+    // is visible and they can produce a card; only the store rail is
+    // categorized. Coupons carry none of these conditions.
+    const calls: Record<string, ChainCall[]> = {};
+    await sitemapService({ strapi: fakeStrapi({}, calls) }).listSitemapEntities();
+
+    const rawClauses = (table: string) =>
+      calls[table]!.filter((call) => call.method === 'whereRaw').map((call) =>
+        String(call.arg),
+      );
+    const existsCount = (table: string) =>
+      calls[table]!.filter((call) => call.method === 'whereExists').length;
+
+    expect(rawClauses('deals_stores_lnk').join('\n')).toContain('show_trending_deals');
+    expect(rawClauses('deals_stores_lnk').join('\n')).toContain('affiliate_link');
+    // dealImage presence + (store only) category membership.
+    expect(existsCount('deals_stores_lnk')).toBe(2);
+    // Brand/category/bank rails are flat: image check only.
+    expect(existsCount('deals_brands_lnk')).toBe(1);
+    expect(existsCount('deals_categories_lnk')).toBe(1);
+    expect(existsCount('deals_banks_lnk')).toBe(1);
+
+    expect(rawClauses('coupons_stores_lnk')).toEqual([]);
+    expect(existsCount('coupons_stores_lnk')).toBe(0);
   });
 });

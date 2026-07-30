@@ -365,6 +365,31 @@ postgresDescribe('unique-code integrity PostgreSQL integration', () => {
       expect(used).toMatchObject({ count: '1' });
     });
 
+    it('replays the final code to concurrent twins of the claiming activation', async () => {
+      // Racing on the LAST code: one twin claims it, the others find the pool
+      // drained. The drained edge must recheck replay() — otherwise the
+      // losers report NO_CODES_AVAILABLE for an activation that holds a code.
+      const service = await seedPool(1);
+      const activationId = 'c0ffeec0ffeec0ffeec0ffeec0ffee11';
+
+      const results = await Promise.all(
+        Array.from({ length: 6 }, () =>
+          service.redeemCode('pool-doc', { activationId }),
+        ),
+      );
+
+      expect(results.every((result) => result.success)).toBe(true);
+      const codes = new Set(
+        results.map((result) => (result as { code?: string }).code),
+      );
+      expect(codes.size).toBe(1);
+
+      const used = await knex('unique_codes').where({ is_used: true }).count({
+        count: '*',
+      }).first();
+      expect(used).toMatchObject({ count: '1' });
+    });
+
     it('gives a different activation a different code', async () => {
       const service = await seedPool();
 
@@ -447,6 +472,61 @@ postgresDescribe('unique-code integrity PostgreSQL integration', () => {
       await expect(
         knex('unique_coupon_pools').where({ document_id: 'empty-pool' }).first(),
       ).resolves.toMatchObject({ exhausted_at: null, total_codes: 0 });
+    });
+
+    it('a restock committing mid-recount is not overwritten', async () => {
+      // The recount locks the pool rows before aggregating, so an import
+      // holding the pool row lock finishes first and its codes are counted —
+      // the recount can no longer write back a pre-restock snapshot and
+      // resurrect stale counters or a cleared exhausted_at.
+      const service = await seedPool(1);
+      await service.redeemCode('pool-doc');
+      await service.redeemCode('pool-doc'); // drained edge stamps exhausted_at
+
+      // Hold the pool row lock the way importCodes does, start the recount,
+      // then finish the restock while the recount waits on the lock.
+      const trx = await knex.transaction();
+      const pool = await trx('unique_coupon_pools')
+        .where({ document_id: 'pool-doc' })
+        .forUpdate()
+        .first();
+      const recount = recountPools(knex);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const [codeRow] = await trx('unique_codes').insert(
+        { document_id: 'refill-doc', code: 'REFILL', is_used: false },
+        ['id'],
+      );
+      await trx('unique_codes_pool_lnk').insert({
+        unique_code_id: codeRow.id,
+        unique_coupon_pool_id: pool.id,
+      });
+      await trx('unique_coupon_pools')
+        .where({ id: pool.id })
+        .update({ total_codes: 2, exhausted_at: null });
+      await trx.commit();
+      await recount;
+
+      await expect(
+        knex('unique_coupon_pools').where({ document_id: 'pool-doc' }).first(),
+      ).resolves.toMatchObject({
+        total_codes: 2,
+        used_codes: 1,
+        exhausted_at: null,
+      });
+    });
+
+    it('recounts inside a caller transaction via savepoint', async () => {
+      // Bootstrap calls recountPools with an open transaction; the internal
+      // knex.transaction must nest as a savepoint, not deadlock or escape.
+      const service = await seedPool(2);
+      await service.redeemCode('pool-doc');
+
+      await knex.transaction((trx) => recountPools(trx));
+
+      await expect(
+        knex('unique_coupon_pools').where({ document_id: 'pool-doc' }).first(),
+      ).resolves.toMatchObject({ total_codes: 2, used_codes: 1 });
     });
 
     it('installs the partial indexes the claim depends on', async () => {

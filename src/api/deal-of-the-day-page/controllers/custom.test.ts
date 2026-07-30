@@ -61,6 +61,9 @@ function actionableDeal(index: number, overrides: Record<string, any> = {}) {
 
 function benefitDeal(index: number, overrides: Record<string, any> = {}) {
   return actionableDeal(index, {
+    // Explicit because eligibility gates on it: the schema default gives every
+    // real row a couponType, and only public types render their code.
+    couponType: 'static',
     code: `SAVE${index}`,
     cashbackText: '15% Cashback',
     bankOfferText: '12% Bank OFF',
@@ -170,6 +173,7 @@ describe('deal-of-the-day aggregate population', () => {
           expired,
           ...published.map((deal) => ({
             ...deal,
+            couponType: 'static',
             code: 'SAVE20',
             cashbackText: '15% Cashback',
             bankOfferText: '12% Bank OFF',
@@ -468,6 +472,43 @@ describe('deal-of-the-day aggregate population', () => {
 
     expect(response.data.allDeals).toMatchObject({ source: 'curated', deals: [] });
     expect(harness.findManyDeals).not.toHaveBeenCalled();
+  });
+
+  it('keeps a unique-pool Deal in the Smart Stack alongside coded Deals', async () => {
+    // A unique Deal carries no static `code` — redeemability comes from its
+    // pool, exactly as the frontend's hasSmartStackBenefits accepts it.
+    const uniqueDeal = actionableDeal(1, {
+      couponType: 'unique',
+      uniqueCouponPool: { documentId: 'pool-1' },
+      cashbackText: '15% Cashback',
+      bankOfferText: '12% Bank OFF',
+    });
+    const poolLessDeal = actionableDeal(3, {
+      couponType: 'unique',
+      cashbackText: '15% Cashback',
+      bankOfferText: '12% Bank OFF',
+    });
+    // The LEGACY-SHARED shape: a Deal switched to unique that still carries
+    // its old shared code but no pool. The frontend's visibleCouponCode
+    // renders nothing for it, so the CMS must not ship or count it.
+    const legacySharedDeal = actionableDeal(4, {
+      couponType: 'unique',
+      code: 'LEGACY-SHARED',
+      cashbackText: '15% Cashback',
+      bankOfferText: '12% Bank OFF',
+    });
+    const harness = createHarness({
+      smartSavingStack: {
+        enabled: true,
+        deals: [uniqueDeal, benefitDeal(2), poolLessDeal, legacySharedDeal],
+      },
+    });
+
+    const response = await harness.controller.dealOfTheDayFull(harness.ctx as any);
+
+    expect(
+      response.data.smartSavingStack.deals.map((deal: any) => deal.documentId),
+    ).toEqual(['deal-1', 'deal-2']);
   });
 
   it('ships an empty Smart Stack when no curated deal carries all required fields', async () => {
