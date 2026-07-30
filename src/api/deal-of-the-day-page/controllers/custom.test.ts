@@ -145,7 +145,6 @@ describe('deal-of-the-day aggregate population', () => {
     for (const ref of [
       populate.topPicks.populate.deals,
       populate.topDeals.populate.deals,
-      populate.smartSavingStack.populate.deals,
       populate.trendingNow.populate.deals,
       populate.genZDrops.populate.deals,
       populate.telegramDeals.populate.deals,
@@ -155,6 +154,8 @@ describe('deal-of-the-day aggregate population', () => {
       expect(ref).not.toHaveProperty('limit');
       expect(ref).not.toHaveProperty('pagination');
     }
+    expect(populate.smartSavingStack.populate.deals).not.toHaveProperty('filters');
+    expect(populate.smartSavingStack.populate.deals).not.toHaveProperty('sort');
   });
 
   it('removes dead rows and caps each list at its own buffer', async () => {
@@ -162,7 +163,17 @@ describe('deal-of-the-day aggregate population', () => {
     const expired = { documentId: 'expired', contentStatus: 'expired' };
     const harness = createHarness({
       topPicks: { deals: [expired, ...published] },
-      smartSavingStack: { enabled: false, deals: [expired, ...published] },
+      smartSavingStack: {
+        enabled: false,
+        deals: [
+          expired,
+          ...published.map((deal) => ({
+            ...deal,
+            cashbackText: '15% Cashback',
+            bankOfferText: '12% Bank OFF',
+          })),
+        ],
+      },
       trendingNow: { deals: [expired, ...published] },
       genZDrops: { deals: [expired, ...published] },
       telegramDeals: { deals: [expired, ...published] },
@@ -187,7 +198,7 @@ describe('deal-of-the-day aggregate population', () => {
     const response = await harness.controller.dealOfTheDayFull(harness.ctx as any);
 
     expect(response.data.topPicks.deals).toHaveLength(4);
-    expect(response.data.smartSavingStack.deals).toHaveLength(6);
+    expect(response.data.smartSavingStack.deals).toHaveLength(30);
     expect(response.data.trendingNow.deals).toHaveLength(10);
     expect(response.data.genZDrops.deals).toHaveLength(6);
     expect(response.data.telegramDeals.deals).toHaveLength(6);
@@ -457,10 +468,7 @@ describe('deal-of-the-day aggregate population', () => {
     expect(harness.findManyDeals).not.toHaveBeenCalled();
   });
 
-  it('ships an empty Smart Stack when no curated or catalog deal carries both benefit texts', async () => {
-    // The live failure mode: editors curate deals without benefit texts and
-    // the whole catalog has none either — the section must degrade to an
-    // empty list (frontend shows its designed empty state), never throw.
+  it('ships an empty Smart Stack when no curated deal carries both benefit texts', async () => {
     const harness = createHarness(
       {
         smartSavingStack: {
@@ -474,7 +482,7 @@ describe('deal-of-the-day aggregate population', () => {
     const response = await harness.controller.dealOfTheDayFull(harness.ctx as any);
 
     expect(response.data.smartSavingStack.deals).toEqual([]);
-    expect(harness.findManyDeals).toHaveBeenCalledTimes(1);
+    expect(harness.findManyDeals).not.toHaveBeenCalled();
   });
 
   it('backfills sections whose enabled flag is missing (legacy entries)', async () => {
@@ -512,7 +520,7 @@ describe('deal-of-the-day aggregate population', () => {
     expect(response.data).toHaveProperty('totalDealCount');
   });
 
-  it('enforces the benefit-text rule on curated and backfilled Smart Stack deals', async () => {
+  it('preserves curated Smart Stack order and enforces the benefit-text rule', async () => {
     const harness = createHarness(
       {
         smartSavingStack: {
@@ -527,11 +535,25 @@ describe('deal-of-the-day aggregate population', () => {
 
     expect(
       response.data.smartSavingStack.deals.map((deal: any) => deal.documentId),
-    ).toEqual(['deal-1', 'deal-10', 'deal-12']);
-    expect(harness.findManyDeals.mock.calls[0]?.[0].filters).toMatchObject({
-      cashbackText: { $notNull: true, $ne: '' },
-      bankOfferText: { $notNull: true, $ne: '' },
+    ).toEqual(['deal-1']);
+    expect(harness.findManyDeals).not.toHaveBeenCalled();
+  });
+
+  it('returns every Smart Stack selection in authored order with no cap', async () => {
+    const authored = [8, 3, 11, 2, 7, 1, 9, 4].map(benefitDeal);
+    const harness = createHarness({
+      smartSavingStack: {
+        enabled: true,
+        deals: authored,
+      },
     });
+
+    const response = await harness.controller.dealOfTheDayFull(harness.ctx as any);
+
+    expect(
+      response.data.smartSavingStack.deals.map((deal: any) => deal.documentId),
+    ).toEqual(authored.map((deal) => deal.documentId));
+    expect(response.data.smartSavingStack.deals).toHaveLength(8);
   });
 
   it('attaches computed deal counts for tabs, the smart stack, and the whole catalog', async () => {

@@ -23,7 +23,8 @@
     "topStores": {
       "type": "relation",
       "relation": "oneToMany",
-      "target": "api::store.store"
+      "target": "api::store.store",
+      "max": 18
     },
     "topStoresLabel": {
       "type": "string",

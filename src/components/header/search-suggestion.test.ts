@@ -36,6 +36,7 @@ describe('header search configuration schema', () => {
     expect(menuSchema.attributes.topStores).toMatchObject({
       type: 'relation',
       target: 'api::store.store',
+      max: 18,
     });
   });
 });

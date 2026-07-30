@@ -97,6 +97,7 @@ const DEAL_FIELDS = [
   'offerText',
   'cashbackText',
   'bankOfferText',
+  'prepaidText',
   'badge',
   'content',
   'code',

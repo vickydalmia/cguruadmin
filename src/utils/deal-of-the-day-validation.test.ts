@@ -4,11 +4,36 @@ import {
   validateDealOfTheDaySectionLimits,
 } from './deal-of-the-day-validation';
 
-function strapiWithCurrent(current: any = {}) {
+function strapiWithCurrent(
+  current: any = {},
+  qualifyingDealIds: ReadonlySet<string | number> | null = null
+) {
   const findOne = vi.fn().mockResolvedValue(current);
+  const findMany = vi.fn(({ where }: any) => {
+    const clauses = where?.$or ?? [];
+    const ids = clauses.flatMap((clause: any) => clause.id?.$in ?? []);
+    const documentIds = clauses.flatMap(
+      (clause: any) => clause.documentId?.$in ?? []
+    );
+    return [...ids, ...documentIds].map((key) => ({
+      id: typeof key === 'number' ? key : undefined,
+      documentId: typeof key === 'string' ? key : undefined,
+      cashbackText:
+        qualifyingDealIds == null || qualifyingDealIds.has(key) ? '15%' : null,
+      bankOfferText:
+        qualifyingDealIds == null || qualifyingDealIds.has(key) ? '₹200' : null,
+    }));
+  });
   return {
-    strapi: { db: { query: vi.fn(() => ({ findOne })) } } as any,
+    strapi: {
+      db: {
+        query: vi.fn((uid: string) =>
+          uid === 'api::deal.deal' ? { findMany } : { findOne }
+        ),
+      },
+    } as any,
     findOne,
+    findMany,
   };
 }
 
@@ -31,14 +56,14 @@ describe('Deal of the Day section limits', () => {
     ).toBe(3);
   });
 
-  it('accepts the exact 4/6/6 authoring buffers', async () => {
+  it('accepts fixed authoring caps and an unlimited Smart Stack', async () => {
     const { strapi } = strapiWithCurrent();
 
     await expect(
       validateDealOfTheDaySectionLimits(strapi, {
         topPicks: { deals: Array.from({ length: 4 }, (_, id) => ({ id })) },
         smartSavingStack: {
-          deals: Array.from({ length: 6 }, (_, id) => ({ id: id + 10 })),
+          deals: Array.from({ length: 20 }, (_, id) => ({ id: id + 10 })),
         },
         genZDrops: {
           deals: Array.from({ length: 6 }, (_, id) => ({ id: id + 20 })),
@@ -53,9 +78,6 @@ describe('Deal of the Day section limits', () => {
     try {
       await validateDealOfTheDaySectionLimits(strapi, {
         topPicks: { deals: Array.from({ length: 5 }, (_, id) => ({ id })) },
-        smartSavingStack: {
-          deals: Array.from({ length: 7 }, (_, id) => ({ id: id + 10 })),
-        },
         genZDrops: {
           deals: Array.from({ length: 7 }, (_, id) => ({ id: id + 20 })),
         },
@@ -64,10 +86,48 @@ describe('Deal of the Day section limits', () => {
     } catch (error: any) {
       expect(error.details.errors.map((item: any) => item.path)).toEqual([
         ['topPicks', 'deals'],
-        ['smartSavingStack', 'deals'],
         ['genZDrops', 'deals'],
       ]);
     }
+  });
+
+  it('requires at least three Smart Stack Deals when enabled', async () => {
+    const { strapi } = strapiWithCurrent();
+
+    await expect(
+      validateDealOfTheDaySectionLimits(strapi, {
+        smartSavingStack: {
+          enabled: true,
+          deals: [{ id: 1 }, { id: 2 }],
+        },
+      })
+    ).rejects.toThrow(/requires at least 3 eligible Deals/);
+  });
+
+  it('counts only Smart Stack Deals with both required benefit texts', async () => {
+    const { strapi } = strapiWithCurrent({}, new Set([1, 2]));
+
+    await expect(
+      validateDealOfTheDaySectionLimits(strapi, {
+        smartSavingStack: {
+          enabled: true,
+          deals: [{ id: 1 }, { id: 2 }, { id: 3 }],
+        },
+      })
+    ).rejects.toThrow(/Add 1 more eligible Deal/);
+  });
+
+  it('allows fewer than three Smart Stack Deals when disabled', async () => {
+    const { strapi } = strapiWithCurrent();
+
+    await expect(
+      validateDealOfTheDaySectionLimits(strapi, {
+        smartSavingStack: {
+          enabled: false,
+          deals: [{ id: 1 }],
+        },
+      })
+    ).resolves.toBeUndefined();
   });
 
   it('uses stored relations when Content Manager sends a patch', async () => {

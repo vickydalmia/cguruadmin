@@ -93,6 +93,20 @@ function safelyDecode(value: string): string {
 }
 
 /**
+ * Axios leaves literal percent signs untouched while encoding spaces in the
+ * relation combobox query (for example `100%%20Whey`). Depending on the URL
+ * parser, the encoded tail can then survive in `_q` and fail an otherwise
+ * exact title match. Preserve literal percent signs, decode valid escapes, and
+ * ignore accidental leading/trailing whitespace.
+ */
+export function normalizeCuratedRelationSearch(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+
+  const escapedLiteralPercents = value.replace(/%(?![0-9a-f]{2})/gi, '%25');
+  return safelyDecode(escapedLiteralPercents).trim();
+}
+
+/**
  * Matches both Content Manager relation endpoints:
  *   /content-manager/relations/:model/:targetField
  *   /content-manager/relations/:model/:id/:targetField

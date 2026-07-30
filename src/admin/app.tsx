@@ -40,6 +40,7 @@ import PublicOfferLinkAction from './components/PublicOfferLinkAction';
 import BumpToTopAction from './components/BumpToTopAction';
 import OfferStatusTabs from './components/OfferStatusTabs';
 import PublishingPanel from './components/PublishingPanel';
+import OfferBenefitsPanel from './components/OfferBenefitsPanel';
 import EntryLinkCell from './components/EntryLinkCell';
 import UniqueCodeImport from './components/UniqueCodeImport';
 import { isLinkableCellType } from './utils/entry-link';
@@ -1194,6 +1195,7 @@ export default {
     // because scheduling is what an editor checks right before saving.
     apis.addEditViewSidePanel([
       PublishingPanel,
+      OfferBenefitsPanel,
       RelationMultiSelectPanel,
       EntityCouponLayoutPanel,
       UniqueCodeImportPanel,

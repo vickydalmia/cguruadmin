@@ -26,6 +26,7 @@ const BANK_FIELDS = ['name', 'slug', 'shortDescription', 'logoAlt'];
 // so a mid-cycle expiry/delete never leaves a visible hole (the UI slices to
 // its own display counts).
 const MAX_LIST_ITEMS = 16;
+const MAX_TOP_STORES = 18;
 const TOP_DEALS_RENDER_COUNT = 6;
 const SECTION_LIST_CAPS = {
   popularStores: 24, // site shows 24
@@ -41,6 +42,7 @@ const COUPON_FIELDS = [
   'offerText',
   'cashbackText',
   'bankOfferText',
+  'prepaidText',
   'badge',
   'code',
   'couponType',
@@ -501,7 +503,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     ]);
 
     if (sanitizedMenu?.topStores) {
-      sanitizedMenu.topStores = cap(sanitizedMenu.topStores, MAX_LIST_ITEMS);
+      sanitizedMenu.topStores = cap(sanitizedMenu.topStores, MAX_TOP_STORES);
     }
     if (sanitizedMenu?.searchTopStores) {
       sanitizedMenu.searchTopStores = cap(sanitizedMenu.searchTopStores, 8);

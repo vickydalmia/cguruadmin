@@ -134,10 +134,10 @@ export async function runCoupons(): Promise<void> {
         );
         const content = contentMedia.html;
         const title = clean(post.post_title) || post.post_title;
-        // Best-effort badge + cashback/bank texts parsed from the title
+        // Best-effort badge + cashback/bank/prepaid texts parsed from the title
         // (falling back to content); editors can correct these in the admin.
         const offerText = extractOfferText(title, content);
-        const { cashbackText, bankOfferText } = extractCashbackFields(title, content);
+        const { cashbackText, bankOfferText, prepaidText } = extractCashbackFields(title, content);
         const affiliateLink = clean(meta.link);
         const missingRequired = [
           !title.trim() ? "title" : null,
@@ -196,19 +196,20 @@ export async function runCoupons(): Promise<void> {
         // first bump, so it must not be left to a backfill.
         const result = await pgQuery<{ id: number }>(
           `INSERT INTO "coupons" (
-            "document_id", "title", "offer_text", "cashback_text", "bank_offer_text", "content",
+            "document_id", "title", "offer_text", "cashback_text", "bank_offer_text", "prepaid_text", "content",
             "code", "coupon_type", "badge",
             "affiliate_link", "expires_at", "scheduled_at", "content_status",
             "published_at", "published_on", "created_at", "updated_at", "locale",
             "created_by_id", "updated_by_id"
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
           )
           ON CONFLICT ("document_id") DO UPDATE SET
             "title" = EXCLUDED."title",
             "offer_text" = EXCLUDED."offer_text",
             "cashback_text" = EXCLUDED."cashback_text",
             "bank_offer_text" = EXCLUDED."bank_offer_text",
+            "prepaid_text" = EXCLUDED."prepaid_text",
             "content" = EXCLUDED."content",
             "code" = EXCLUDED."code",
             "coupon_type" = EXCLUDED."coupon_type",
@@ -228,6 +229,7 @@ export async function runCoupons(): Promise<void> {
             offerText,
             cashbackText,
             bankOfferText,
+            prepaidText,
             content,
             cleanCode(meta.code),
             isUnique ? "unique" : "static",

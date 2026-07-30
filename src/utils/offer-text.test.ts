@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { splitOfferWords, arrayizeOfferText } from './offer-text';
+import { splitOfferWords, arrayizeOfferText, formatBenefitText } from './offer-text';
 
 describe('splitOfferWords', () => {
   it('splits a badge string into its render words', () => {
@@ -15,11 +15,35 @@ describe('splitOfferWords', () => {
 
 describe('arrayizeOfferText', () => {
   it('converts a top-level offerText string to an array of words', () => {
-    const coupon = { title: 'x', offerText: 'UPTO 50% OFF', cashbackText: '15% Cashback' };
+    const coupon = { title: 'x', offerText: 'UPTO 50% OFF', cashbackText: '15%' };
     arrayizeOfferText(coupon);
     expect(coupon.offerText).toEqual(['UPTO', '50%', 'OFF']);
-    // Only offerText is transformed.
+    // Benefit amounts gain their wording on the way out.
     expect(coupon.cashbackText).toBe('15% Cashback');
+  });
+
+  it('appends the wording to every benefit amount', () => {
+    const deal = {
+      cashbackText: '15%',
+      bankOfferText: 'Rs. 2,000',
+      prepaidText: '$40',
+    };
+    arrayizeOfferText(deal);
+    expect(deal.cashbackText).toBe('15% Cashback');
+    expect(deal.bankOfferText).toBe('₹2000 Bank OFF');
+    expect(deal.prepaidText).toBe('$40 Prepaid OFF');
+  });
+
+  it('passes legacy full-text benefit values through unchanged', () => {
+    const coupon = {
+      cashbackText: '15% Cashback',
+      bankOfferText: 'HDFC Bank OFF',
+      prepaidText: null as string | null,
+    };
+    arrayizeOfferText(coupon);
+    expect(coupon.cashbackText).toBe('15% Cashback');
+    expect(coupon.bankOfferText).toBe('HDFC Bank OFF');
+    expect(coupon.prepaidText).toBeNull();
   });
 
   it('walks arrays and deeply-nested structures (homepage-shaped)', () => {
@@ -42,5 +66,49 @@ describe('arrayizeOfferText', () => {
     const coupon: { offerText: string | null } = { offerText: null };
     arrayizeOfferText(coupon);
     expect(coupon.offerText).toBeNull();
+  });
+
+  it('attaches computedContent to deal nodes, including nested ones', () => {
+    const payload: any = {
+      deal: { salePrice: '1299.00', mrp: 2999, discount: '56% OFF', content: '<p>x</p>' },
+      topDeals: { deals: [{ salePrice: 499 }] },
+      coupon: { title: 'no prices here' },
+    };
+    arrayizeOfferText(payload);
+    expect(payload.deal.computedContent).toBe(
+      '<p><strong>Deal Price - ₹1,299</strong></p><p>MRP - ₹2,999</p><p>Discount - 56% OFF</p>',
+    );
+    // The written content is sent alongside, untouched.
+    expect(payload.deal.content).toBe('<p>x</p>');
+    expect(payload.topDeals.deals[0].computedContent).toBe(
+      '<p><strong>Deal Price - ₹499</strong></p>',
+    );
+    // Coupons never gain the field.
+    expect('computedContent' in payload.coupon).toBe(false);
+  });
+
+  it('omits computedContent when a deal has no pricing data at all', () => {
+    const deal: any = { salePrice: null, mrp: null, discount: null };
+    arrayizeOfferText(deal);
+    expect('computedContent' in deal).toBe(false);
+  });
+});
+
+describe('formatBenefitText', () => {
+  it('normalizes an amount and appends the wording', () => {
+    expect(formatBenefitText('10%', 'Cashback')).toBe('10% Cashback');
+    expect(formatBenefitText('10 %', 'Cashback')).toBe('10% Cashback');
+    expect(formatBenefitText('Rs.100', 'Bank OFF')).toBe('₹100 Bank OFF');
+    expect(formatBenefitText('INR 2,000', 'Bank OFF')).toBe('₹2000 Bank OFF');
+    expect(formatBenefitText('₹100', 'Prepaid OFF')).toBe('₹100 Prepaid OFF');
+    expect(formatBenefitText('$40', 'Prepaid OFF')).toBe('$40 Prepaid OFF');
+  });
+
+  it('leaves non-amount (legacy) values and blanks unchanged', () => {
+    expect(formatBenefitText('15% Cashback', 'Cashback')).toBe('15% Cashback');
+    expect(formatBenefitText('Prepaid Free Shipping', 'Prepaid OFF')).toBe(
+      'Prepaid Free Shipping',
+    );
+    expect(formatBenefitText('  ', 'Cashback')).toBe('');
   });
 });

@@ -70,8 +70,9 @@ test("offerText: 'flat X% cashback' is cashback, not a FLAT discount", () => {
 
 test("cashback fields: 'Cashback Of X%' form is captured", () => {
   assert.deepEqual(extractCashbackFields("Gift Cards - Flat Cashback Of 10% In Wallet"), {
-    cashbackText: "10% Cashback",
+    cashbackText: "10%",
     bankOfferText: null,
+    prepaidText: null,
   });
 });
 
@@ -110,14 +111,14 @@ test("offerText: comma-grouped rupee amount is normalised to digits", () => {
 test("cashback fields: percentage cashback + bank off", () => {
   assert.deepEqual(
     extractCashbackFields("Extra 18% Off with 15% Cashback and 12% Bank Off"),
-    { cashbackText: "15% Cashback", bankOfferText: "12% Bank OFF" }
+    { cashbackText: "15%", bankOfferText: "12%", prepaidText: null }
   );
 });
 
 test("cashback fields: falls back to content and is case-insensitive", () => {
   assert.deepEqual(
     extractCashbackFields("15% Cashback offer", "Grab an extra 12% bank discount now"),
-    { cashbackText: "15% Cashback", bankOfferText: "12% Bank OFF" }
+    { cashbackText: "15%", bankOfferText: "12%", prepaidText: null }
   );
 });
 
@@ -125,20 +126,22 @@ test("cashback fields: a bank offer without a number is ignored (no bare 'Bank O
   assert.deepEqual(extractCashbackFields("Exclusive Bank Offer inside"), {
     cashbackText: null,
     bankOfferText: null,
+    prepaidText: null,
   });
 });
 
 test("cashback fields: percent bank with a bank name between", () => {
   assert.deepEqual(extractCashbackFields("Min 50% Off + Extra 10% HDFC Bank OFF"), {
     cashbackText: null,
-    bankOfferText: "10% Bank OFF",
+    bankOfferText: "10%",
+    prepaidText: null,
   });
 });
 
 test("cashback fields: rupee bank offer", () => {
   assert.deepEqual(
     extractCashbackFields("Up To 35% + Extra Up To Rs.2,000 Bank OFF"),
-    { cashbackText: null, bankOfferText: "₹2000 Bank OFF" }
+    { cashbackText: null, bankOfferText: "₹2000", prepaidText: null }
   );
 });
 
@@ -146,6 +149,7 @@ test("cashback fields: both null when none present", () => {
   assert.deepEqual(extractCashbackFields("Snitch Fans Sale – Extra 18% Off"), {
     cashbackText: null,
     bankOfferText: null,
+    prepaidText: null,
   });
 });
 
@@ -173,12 +177,70 @@ test("offerText: a non-discount % is not a badge", () => {
   assert.equal(extractOfferText("Mock Tests - 100% Free Exams"), null);
 });
 
+test("prepaid fields: percent prepaid off", () => {
+  assert.deepEqual(extractCashbackFields("Flat 10% + Extra 5% Prepaid Off"), {
+    cashbackText: null,
+    bankOfferText: null,
+    prepaidText: "5%",
+  });
+});
+
+test("prepaid fields: rupee prepaid discount", () => {
+  assert.deepEqual(extractCashbackFields("Get Rs.100 Prepaid Discount On Orders"), {
+    cashbackText: null,
+    bankOfferText: null,
+    prepaidText: "₹100",
+  });
+});
+
+test("prepaid fields: an amountless perk is NOT extracted (amount-only columns)", () => {
+  // "Free shipping on prepaid" has no percent/rupee amount, and the benefit
+  // columns store bare amounts only — nothing to extract.
+  assert.deepEqual(extractCashbackFields("Free Shipping On Every Prepaid Order"), {
+    cashbackText: null,
+    bankOfferText: null,
+    prepaidText: null,
+  });
+});
+
+test("prepaid fields: bare 'prepaid' without off/discount/offer extracts nothing", () => {
+  assert.deepEqual(extractCashbackFields("Pay Prepaid For Faster Delivery"), {
+    cashbackText: null,
+    bankOfferText: null,
+    prepaidText: null,
+  });
+  assert.deepEqual(extractCashbackFields("Flat 25% Off On Prepaid Hotel Bookings"), {
+    cashbackText: null,
+    bankOfferText: null,
+    prepaidText: null,
+  });
+});
+
+test("prepaid fields: '10% Prepaid Bank Off' stays a bank offer", () => {
+  assert.deepEqual(extractCashbackFields("Extra 10% Prepaid Bank Off"), {
+    cashbackText: null,
+    bankOfferText: "10%",
+    prepaidText: null,
+  });
+});
+
+test("offerText: prepaid span is stripped and never becomes the badge", () => {
+  // "Extra 5% Prepaid Off" alone must not produce "EXTRA 5% OFF".
+  assert.equal(extractOfferText("Extra 5% Prepaid Off On All Orders"), null);
+  // A real badge alongside a prepaid span keeps only the badge.
+  assert.equal(
+    extractOfferText("Flat 40% Off + Extra 5% Prepaid Off"),
+    "FLAT 40% OFF"
+  );
+});
+
 test("regex state does not leak across repeated calls", () => {
   // Guards against a module-level global regex retaining lastIndex.
   for (let i = 0; i < 3; i++) {
     assert.deepEqual(extractCashbackFields("Get 15% Cashback"), {
-      cashbackText: "15% Cashback",
+      cashbackText: "15%",
       bankOfferText: null,
+      prepaidText: null,
     });
     assert.equal(extractOfferText("Flat 20% Off"), "FLAT 20% OFF");
   }

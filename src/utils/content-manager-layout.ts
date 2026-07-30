@@ -101,3 +101,35 @@ export function appendListColumns(list: string[], columns: string[]): string[] |
   }
   return missing.length ? [...list, ...missing] : null;
 }
+
+/**
+ * Move an existing field into its own full-width row immediately after an
+ * anchor field. Missing fields stay missing.
+ */
+export function moveEditLayoutFieldAfter(
+  edit: EditLayout,
+  name: string,
+  after: string,
+): EditLayout | null {
+  const anchorRow = edit.findIndex((row) => row.some((cell) => cell.name === after));
+  const fieldRow = edit.findIndex((row) => row.some((cell) => cell.name === name));
+  if (anchorRow < 0 || fieldRow < 0) return null;
+
+  const field = edit[fieldRow]!.find((cell) => cell.name === name)!;
+  if (
+    fieldRow === anchorRow + 1 &&
+    edit[fieldRow]!.length === 1 &&
+    field.size === MAX_ROW_SIZE
+  ) {
+    return null;
+  }
+
+  const next = edit
+    .map((row) => row.filter((cell) => cell.name !== name))
+    .filter((row) => row.length > 0);
+  const nextAnchorRow = next.findIndex((row) =>
+    row.some((cell) => cell.name === after)
+  );
+  next.splice(nextAnchorRow + 1, 0, [{ ...field, size: MAX_ROW_SIZE }]);
+  return next;
+}

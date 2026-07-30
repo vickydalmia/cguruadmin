@@ -1,4 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  enqueueEntityRatingInvalidation: vi.fn(async () => undefined),
+}));
+
+vi.mock('../../../isr-outbox/entity-rating-invalidation', () => ({
+  enqueueEntityRatingInvalidation: mocks.enqueueEntityRatingInvalidation,
+}));
+
 import createController from './custom';
 
 function createHarness(result: any) {
@@ -21,6 +30,7 @@ function createHarness(result: any) {
     notFound: vi.fn((message: string) => message),
     tooManyRequests: vi.fn((message: string) => message),
   };
+  mocks.enqueueEntityRatingInvalidation.mockClear();
   return { controller: createController({ strapi }), ctx, entityService };
 }
 
@@ -45,6 +55,11 @@ describe('entity-page controller', () => {
       ratingAverage: 4.75,
       ratingCount: 12,
     });
+    expect(mocks.enqueueEntityRatingInvalidation).toHaveBeenCalledWith(
+      expect.anything(),
+      'bank',
+      'hdfc-bank',
+    );
   });
 
   it('keeps duplicate votes on the established 429 path', async () => {
@@ -60,6 +75,8 @@ describe('entity-page controller', () => {
       'You have already rated this bank.',
     );
     expect(harness.ctx.send).not.toHaveBeenCalled();
+    // A duplicate moved no aggregate, so it must not rebuild the page.
+    expect(mocks.enqueueEntityRatingInvalidation).not.toHaveBeenCalled();
   });
 
   it('loads related Stores through the entity-aware service', async () => {

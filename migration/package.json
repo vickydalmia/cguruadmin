@@ -14,6 +14,7 @@
     "fix:content-srcsets": "tsx src/fix-content-srcsets.ts",
     "backfill:offer-fields": "tsx src/backfill-offer-fields.ts",
     "backfill:entity-updated-at": "tsx src/backfill-entity-updated-at.ts",
+    "backfill:kksr-ratings": "tsx src/backfill-kksr-ratings.ts",
     "backfill:media-background-colours": "tsx src/backfill-media-background-colours.ts",
     "cleanup:legacy-fields": "tsx src/drop-legacy-fields.ts",
     "diagnose:search": "tsx src/diagnose-search.ts",

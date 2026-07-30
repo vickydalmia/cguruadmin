@@ -5,12 +5,20 @@ import {
 } from './offer-field-validation';
 
 describe('validateOfferFields', () => {
-  it('accepts values within the word limits', () => {
+  it('accepts a valid badge and bare benefit amounts', () => {
     expect(() =>
       validateOfferFields({
         offerText: 'EXTRA 18% OFF', // 3 words
-        cashbackText: '15% Cashback', // 2 words
-        bankOfferText: '12% Bank OFF', // 3 words
+        cashbackText: '15%',
+        bankOfferText: '₹2,000',
+        prepaidText: 'Rs.100',
+      })
+    ).not.toThrow();
+    expect(() =>
+      validateOfferFields({
+        cashbackText: '19.2%',
+        bankOfferText: '$40',
+        prepaidText: 'INR 500',
       })
     ).not.toThrow();
   });
@@ -21,16 +29,28 @@ describe('validateOfferFields', () => {
     );
   });
 
-  it('rejects a cashbackText with more than 2 words', () => {
-    expect(() => validateOfferFields({ cashbackText: 'Up To 15% Cashback' })).toThrow(
-      /Cashback text must be at most 2 words/
+  it('rejects benefit texts that carry wording instead of a bare amount', () => {
+    expect(() => validateOfferFields({ cashbackText: '15% Cashback' })).toThrow(
+      /Cashback text must be an amount only/
+    );
+    expect(() => validateOfferFields({ bankOfferText: '12% Bank OFF' })).toThrow(
+      /Bank offer text must be an amount only/
+    );
+    expect(() => validateOfferFields({ prepaidText: '5% Prepaid OFF' })).toThrow(
+      /Prepaid text must be an amount only/
     );
   });
 
-  it('rejects a bankOfferText with more than 3 words', () => {
-    expect(() =>
-      validateOfferFields({ bankOfferText: 'Extra 12% Bank Discount Offer' })
-    ).toThrow(/Bank offer text must be at most 3 words/);
+  it('rejects benefit values that are not amounts at all', () => {
+    expect(() => validateOfferFields({ cashbackText: 'Free Shipping' })).toThrow(
+      /Cashback text must be an amount only/
+    );
+    expect(() => validateOfferFields({ bankOfferText: '100' })).toThrow(
+      /Bank offer text must be an amount only/
+    );
+    expect(() => validateOfferFields({ prepaidText: '%' })).toThrow(
+      /Prepaid text must be an amount only/
+    );
   });
 
   it('ignores empty, null, and absent fields (partial updates)', () => {
@@ -73,6 +93,25 @@ describe('validateOfferFields', () => {
         { offerText: 'GET FLAT 50% OFF' },
       )
     ).toThrow(/Offer text/);
+  });
+
+  it('grandfathers an unchanged legacy full-text benefit value on update', () => {
+    // Rows migrated before the amount-only rule store e.g. "15% Cashback";
+    // an edit that leaves them untouched must not be blocked.
+    expect(() =>
+      validateOfferFields(
+        { cashbackText: '15% Cashback' },
+        'update',
+        { cashbackText: '15% Cashback' },
+      )
+    ).not.toThrow();
+    expect(() =>
+      validateOfferFields(
+        { cashbackText: '20% Cashback' },
+        'update',
+        { cashbackText: '15% Cashback' },
+      )
+    ).toThrow(/Cashback text must be an amount only/);
   });
 });
 
@@ -126,8 +165,8 @@ describe('validateOfferFieldsForWrite', () => {
   it('loads and validates inherited offer labels for an empty clone', async () => {
     const findOne = vi.fn().mockResolvedValue({
       offerText: 'UP TO 50%',
-      cashbackText: '15% Cashback',
-      bankOfferText: 'HDFC Bank OFF',
+      cashbackText: '15%',
+      bankOfferText: '₹2000',
     });
     const strapi: any = { documents: () => ({ findOne }) };
 
@@ -148,6 +187,7 @@ describe('validateOfferFieldsForWrite', () => {
           'offerText',
           'cashbackText',
           'bankOfferText',
+          'prepaidText',
         ],
       }),
     );
@@ -172,12 +212,12 @@ describe('validateOfferFieldsForWrite', () => {
   });
 
   it('STRICT: blocks the save on a dirty UNTOUCHED offer label', async () => {
-    // Migrated coupon whose stored bankOfferText is over the 3-word cap. The
+    // Migrated coupon whose stored bankOfferText carries legacy wording. The
     // editor only touches an unrelated field (title), so bankOfferText is not
     // in the payload — under strict it is still read from the row and rejected.
     const findOne = vi.fn().mockResolvedValue({
       offerText: 'FLAT 50% OFF',
-      cashbackText: '15% Cashback',
+      cashbackText: '15%',
       bankOfferText: 'GET EXTRA 12% BANK OFF',
     });
     const strapi: any = { documents: () => ({ findOne }) };
@@ -191,11 +231,11 @@ describe('validateOfferFieldsForWrite', () => {
         'coupon-1',
         true,
       ),
-    ).rejects.toThrow(/Bank offer text must be at most 3 words/);
+    ).rejects.toThrow(/Bank offer text must be an amount only/);
     // Strict must have read every capped field, not just the touched ones.
     expect(findOne).toHaveBeenCalledWith(
       expect.objectContaining({
-        fields: ['documentId', 'offerText', 'cashbackText', 'bankOfferText'],
+        fields: ['documentId', 'offerText', 'cashbackText', 'bankOfferText', 'prepaidText'],
       }),
     );
   });
@@ -203,7 +243,7 @@ describe('validateOfferFieldsForWrite', () => {
   it('NON-strict: the same dirty untouched label passes (cron unaffected)', async () => {
     const findOne = vi.fn().mockResolvedValue({
       offerText: 'FLAT 50% OFF',
-      cashbackText: '15% Cashback',
+      cashbackText: '15%',
       bankOfferText: 'GET EXTRA 12% BANK OFF',
     });
     const strapi: any = { documents: () => ({ findOne }) };

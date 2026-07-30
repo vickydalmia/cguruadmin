@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   curatedOfferTargetForRelationPath,
+  normalizeCuratedRelationSearch,
   registerCuratedOfferRelationQueryFilter,
   removeDisplayedTopPicksFromOrdered,
   removeInactiveCuratedOfferRelations,
@@ -8,6 +9,16 @@ import {
 } from './curated-offer-relations';
 
 describe('curated offer relation picker filtering', () => {
+  it('normalizes literal percent signs mixed with encoded spaces', () => {
+    expect(normalizeCuratedRelationSearch('100%%20Whey%20Protein')).toBe(
+      '100% Whey Protein',
+    );
+    expect(normalizeCuratedRelationSearch('  Whey Protein  ')).toBe(
+      'Whey Protein',
+    );
+    expect(normalizeCuratedRelationSearch(['Whey'])).toEqual(['Whey']);
+  });
+
   it('recognises available and existing nested component relation routes', () => {
     expect(
       curatedOfferTargetForRelationPath(

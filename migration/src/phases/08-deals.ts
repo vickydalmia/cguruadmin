@@ -140,10 +140,10 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
         );
         const content = contentMedia.html;
         const title = clean(post.post_title) || post.post_title;
-        // Best-effort badge + cashback/bank texts parsed from the title
+        // Best-effort badge + cashback/bank/prepaid texts parsed from the title
         // (falling back to content); editors can correct these in the admin.
         const offerText = extractOfferText(title, content);
-        const { cashbackText, bankOfferText } = extractCashbackFields(title, content);
+        const { cashbackText, bankOfferText, prepaidText } = extractCashbackFields(title, content);
         const affiliateLink = clean(meta.link);
         const createdAt =
           normalizeWpDate(post.post_date_gmt) ||
@@ -170,10 +170,12 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
           `[deal-image ${postIndex + 1}/${posts.length}] WordPress Deal ` +
             `${post.ID} ${importedDealImageId ? `uses file_id=${importedDealImageId}` : "has no resolvable image"}`,
         );
+        // `content` is not listed: Deal content is optional — the public API
+        // sends a pre-calculated price/MRP/discount block, and written content
+        // is only the extra "Any Other Condition" section.
         const missingRequired = [
           !title.trim() ? "title" : null,
           !offerText?.trim() ? "offerText" : null,
-          !content?.trim() ? "content" : null,
           !affiliateLink?.trim() ? "affiliateLink" : null,
           importedDealImageId === null ? "dealImage" : null,
         ].filter(Boolean);
@@ -220,19 +222,20 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
         // first bump, so it must not be left to a backfill.
         const result = await pgQuery<{ id: number }>(
           `INSERT INTO "deals" (
-            "document_id", "title", "offer_text", "cashback_text", "bank_offer_text", "content", "code",
+            "document_id", "title", "offer_text", "cashback_text", "bank_offer_text", "prepaid_text", "content", "code",
             "sale_price", "mrp", "discount",
             "badge", "affiliate_link", "expires_at", "scheduled_at", "content_status",
             "published_at", "published_on", "created_at", "updated_at", "locale",
             "created_by_id", "updated_by_id"
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
           )
           ON CONFLICT ("document_id") DO UPDATE SET
             "title" = EXCLUDED."title",
             "offer_text" = EXCLUDED."offer_text",
             "cashback_text" = EXCLUDED."cashback_text",
             "bank_offer_text" = EXCLUDED."bank_offer_text",
+            "prepaid_text" = EXCLUDED."prepaid_text",
             "code" = EXCLUDED."code",
             "sale_price" = EXCLUDED."sale_price",
             "mrp" = EXCLUDED."mrp",
@@ -254,6 +257,7 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
             offerText,
             cashbackText,
             bankOfferText,
+            prepaidText,
             content,
             cleanCode(meta.code),
             salePrice,

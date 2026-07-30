@@ -7,19 +7,21 @@ import type { SectionLabel } from './homepage-sections';
 
 export const DOTD_UID = 'api::deal-of-the-day-page.deal-of-the-day-page';
 
-// CMS buffer limits. The frontend deliberately renders half of each list so
-// expired/deleted Deals can fall away without leaving visible holes.
+// CMS authoring limits for fixed-size sections. Smart Saving Stack is
+// intentionally absent: it is an unlimited carousel and renders every
+// selected Deal in the editor's order.
 export const DOTD_SECTION_CAPS = {
   topPicks: 4, // UI renders 2
   topDeals: 10, // UI renders 6
   perCategoryTab: 10, // UI renders up to 6 per tab
   perStoreTab: 10, // UI renders up to 6 per tab
-  smartSavingStack: 6, // UI renders 3
   trendingNow: 10, // UI renders up to 6
   genZDrops: 6, // UI renders 3
   telegramDeals: 6, // UI renders 3
   allDeals: 24, // UI shows 9 initially, remainder behind load-more
 } as const;
+
+export const DOTD_SMART_STACK_MINIMUM = 3;
 
 export const DOTD_SECTION_LABELS: SectionLabel[] = [
   {
@@ -79,9 +81,9 @@ export const DOTD_SECTION_LABELS: SectionLabel[] = [
     label: '5 · Smart Saving Stack',
     description:
       'Only deals with BOTH Cashback Text and Bank Offer Text filled appear here — ' +
-      'deals missing either text are dropped from the page. Remaining slots auto-fill ' +
-      'from recent deals that carry both texts. Add up to 6; the site shows 3 and keeps ' +
-      'the other 3 buffered in case a Deal expires or is removed.',
+      'deals missing either text are dropped from the page. Select at least 3 Deals. ' +
+      'There is no maximum: the site shows every valid selected Deal as a carousel, ' +
+      'in the same order configured here.',
   },
   {
     attr: 'trendingNow',

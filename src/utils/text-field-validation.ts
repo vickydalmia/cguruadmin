@@ -139,13 +139,18 @@ export const TEXT_FIELD_RULES: readonly TextFieldRule[] = [
   { uid: COUPON_UID, field: 'offerText', label: 'Offer text', kind: 'string', requiredNonBlank: true, collapse: true },
   { uid: COUPON_UID, field: 'cashbackText', label: 'Cashback text', kind: 'string', collapse: true },
   { uid: COUPON_UID, field: 'bankOfferText', label: 'Bank offer text', kind: 'string', collapse: true },
+  { uid: COUPON_UID, field: 'prepaidText', label: 'Prepaid text', kind: 'string', collapse: true },
   { uid: COUPON_UID, field: 'code', label: 'Code', kind: 'string' },
 
   // --- Deal ---------------------------------------------------------------
   { uid: DEAL_UID, field: 'title', label: 'Title', kind: 'string', requiredNonBlank: true, collapse: true },
   // Row 82 — same reasoning as the coupon link.
   { uid: DEAL_UID, field: 'affiliateLink', label: 'Affiliate link', kind: 'text', requiredNonBlank: true },
-  { uid: DEAL_UID, field: 'content', label: 'Content', kind: 'richtext', requiredNonBlank: true },
+  // Deal `content` carries no row here on purpose: it is OPTIONAL (the public
+  // API always sends a pre-calculated price/MRP/discount block — see
+  // src/utils/deal-computed-content.ts — and written content is only the extra
+  // "Any Other Condition" section), and an optional richtext rule would
+  // enforce nothing. Its editor hint lives in VALIDATOR_MIRROR_HINTS.
   { uid: DEAL_UID, field: 'offerText', label: 'Offer text', kind: 'string', requiredNonBlank: true, collapse: true },
   // Prices are optional display data. Their non-negative validation and editor
   // hints live in changed-field-validation.ts; they do not belong in this
@@ -153,6 +158,7 @@ export const TEXT_FIELD_RULES: readonly TextFieldRule[] = [
   // carries schema `required: true` (same reasoning as brand.logo above).
   { uid: DEAL_UID, field: 'cashbackText', label: 'Cashback text', kind: 'string', collapse: true },
   { uid: DEAL_UID, field: 'bankOfferText', label: 'Bank offer text', kind: 'string', collapse: true },
+  { uid: DEAL_UID, field: 'prepaidText', label: 'Prepaid text', kind: 'string', collapse: true },
   { uid: DEAL_UID, field: 'discount', label: 'Discount', kind: 'string', collapse: true },
   { uid: DEAL_UID, field: 'code', label: 'Code', kind: 'text' },
 

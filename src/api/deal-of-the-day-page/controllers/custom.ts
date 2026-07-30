@@ -18,12 +18,11 @@ import {
 // homepage-full contract. Deal-schema records only — Coupon records never
 // enter any section on this page.
 
-// Each API list keeps a CMS-authored buffer over what the site renders so a
-// mid-cycle expiry/delete never leaves a visible hole. The same caps are also
-// enforced on writes by validateDealOfTheDaySectionLimits.
+// Fixed-size API lists keep CMS-authored buffers over what the site renders.
+// Smart Saving Stack is the exception: every curated Deal is returned in the
+// editor's order for its unlimited carousel.
 const TOP_DEALS_RENDER_COUNT = 6;
 const TAB_RENDER_COUNT = 6;
-const SMART_STACK_BUFFER_TARGET = SECTION_CAPS.smartSavingStack;
 
 const DEAL_FIELDS = dealRef.fields;
 
@@ -70,6 +69,9 @@ const dealListSection = { populate: { viewAllCta: true, deals: publishedDealList
 const compactDealListSection = {
   populate: { viewAllCta: true, deals: publishedCompactDealListRef },
 };
+const orderedDealListSection = {
+  populate: { viewAllCta: true, deals: dealRef },
+};
 
 const DOTD_POPULATE = {
   seo: { populate: { ogImage: true } },
@@ -104,7 +106,9 @@ const DOTD_POPULATE = {
       },
     },
   },
-  smartSavingStack: dealListSection,
+  // Do not filter or sort the nested relation: either can destroy Strapi's
+  // authored relation ordering. Visibility and benefit rules run afterward.
+  smartSavingStack: orderedDealListSection,
   trendingNow: dealListSection,
   genZDrops: compactDealListSection,
   // No viewAllCta populate: deal-day.telegram-deals has no such field.
@@ -116,6 +120,14 @@ const DEAL_LIST_SECTIONS = [
   'topPicks',
   'topDeals',
   'smartSavingStack',
+  'trendingNow',
+  'genZDrops',
+  'telegramDeals',
+] as const;
+
+const CAPPED_DEAL_LIST_SECTIONS = [
+  'topPicks',
+  'topDeals',
   'trendingNow',
   'genZDrops',
   'telegramDeals',
@@ -144,6 +156,9 @@ function dropDeadOffers(page: any) {
     const section = page[key];
     if (section?.deals) {
       section.deals = section.deals.filter(live);
+      if (key === 'smartSavingStack') {
+        section.deals = section.deals.filter(hasBenefitTexts);
+      }
     }
   }
   if (page.dealsByCategory?.tabs) {
@@ -169,7 +184,7 @@ function dropDeadOffers(page: any) {
 function capCuratedLists(page: any) {
   if (!page) return page;
 
-  for (const key of DEAL_LIST_SECTIONS) {
+  for (const key of CAPPED_DEAL_LIST_SECTIONS) {
     const section = page[key];
     if (section?.deals) {
       section.deals = cap(section.deals, SECTION_CAPS[key]);
@@ -273,16 +288,6 @@ async function fillDerivedSections(
           });
         }),
     );
-  }
-
-  if (sectionActive(page?.smartSavingStack)) {
-    await backfillDeals(strapi, ctx, page.smartSavingStack, {
-      filters: BENEFIT_TEXT_FILTER,
-      renderCount: SMART_STACK_BUFFER_TARGET,
-      capLimit: SECTION_CAPS.smartSavingStack,
-      now,
-      accept: hasBenefitTexts,
-    });
   }
 
   return page;

@@ -315,7 +315,9 @@ describe('site chrome aggregate population', () => {
     const rows: Record<string, any> = {
       'api::menu.menu': {
         documentId: 'menu-1',
-        topStores: [],
+        topStores: Array.from({ length: 20 }, (_, index) => ({
+          documentId: `top-store-${index}`,
+        })),
         searchTopStores: Array.from({ length: 10 }, (_, index) => ({
           store: { documentId: `store-${index}` },
         })),
@@ -375,6 +377,7 @@ describe('site chrome aggregate population', () => {
       menuCall.populate.categorySections.populate.category.populate.icon,
     ).toBe(true);
     expect(response.menu.searchTopStores).toHaveLength(8);
+    expect(response.menu.topStores).toHaveLength(18);
     expect(footerCall.populate.countries).toEqual({
       populate: { flag: true },
     });

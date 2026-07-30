@@ -23,7 +23,6 @@
     },
     "content": {
       "type": "richtext",
-      "required": true,
       "maxLength": 50000
     },
     "code": {
@@ -65,6 +64,9 @@
     "bankOfferText": {
       "type": "string"
     },
+    "prepaidText": {
+      "type": "string"
+    },
     "affiliateLink": {
       "type": "text",
       "required": true,
@@ -88,6 +90,16 @@
         "scheduled",
         "expired"
       ]
+    },
+    "workedCount": {
+      "type": "integer",
+      "default": 0,
+      "min": 0
+    },
+    "failedCount": {
+      "type": "integer",
+      "default": 0,
+      "min": 0
     },
     "stores": {
       "type": "relation",

@@ -31,6 +31,7 @@ ceiling on staleness, not a fixed delay.
 | `GET /api/{stores\|brands\|categories\|banks}/:slug/{coupons\|deals}` | anonymous | 60 / 60s | 60s |
 | `GET /api/{stores\|brands\|categories\|banks}/:slug/related-stores` | anonymous | — | 60s |
 | `POST /api/{stores\|brands\|categories\|banks}/:slug/rating` | anonymous | 5 / 60s | none (never cached) |
+| `POST /api/offer-feedback/:entityType/:documentId` | anonymous | 10 / 60s | none (never cached) |
 | `GET /api/offer-redeem/:entityType/:documentId` | **bearer secret** | — | none |
 | `POST /unique-coupon/redeem` | anonymous | 5 / 60s (plugin policy) | none |
 | `GET /unique-coupon/stats/:poolDocumentId` | **admin session** | — | none |
@@ -329,6 +330,29 @@ Anonymous, and never cached — every vote must reach the controller. Guards:
 Success returns `{ ok: true, ratingAverage, ratingCount }`. A non-integer or
 out-of-range `value` is a 400; an unknown slug is a 404. These aggregates are
 what the high-rated fallback in `related-stores` sorts on.
+
+## Offer feedback
+
+`POST /api/offer-feedback/:entityType/:documentId` with a JSON body
+`{ "result": "worked" | "failed" }`. `entityType` is `coupon` or `deal` and
+`documentId` is the offer's Strapi `documentId`.
+
+Anonymous, and never cached — every vote must reach the controller. Guards:
+
+- 10 requests per minute per IP (`global::rate-limit`).
+- One vote per client per offer, enforced by a
+  `UNIQUE(entity_type, entity_document_id, ip_hash)` constraint on the
+  `offer_feedback_votes` table. A repeat vote returns **429** with an
+  "already left feedback" message.
+- The voter's IP is never stored raw: it is salted with the app key and stored
+  as a SHA-256 hash.
+
+Success returns `{ ok: true, workedCount, failedCount }`. An unknown entity
+type, invalid document id, or a `result` other than `worked`/`failed` is a
+400; an unknown offer is a 404. Counters are bumped with raw Knex — no
+document-service write, so a vote never enqueues ISR page regeneration; the
+denormalized `workedCount`/`failedCount` surface on the detail-page
+aggregates (`coupon-page`, `deal-page`) on their next rebuild.
 
 ## Coupon detail aggregate
 

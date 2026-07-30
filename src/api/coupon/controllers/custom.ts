@@ -103,6 +103,7 @@ const COUPON_PUBLIC_FIELDS = [
   'offerText',
   'cashbackText',
   'bankOfferText',
+  'prepaidText',
   'badge',
   'content',
   'code',
@@ -121,6 +122,7 @@ const DEAL_PUBLIC_FIELDS = [
   'offerText',
   'cashbackText',
   'bankOfferText',
+  'prepaidText',
   'badge',
   'content',
   'code',
@@ -136,12 +138,18 @@ const DEAL_PUBLIC_FIELDS = [
   'publishedAt',
   'publishedOn',
 ];
-const COUPON_PAGE_FIELDS = COUPON_PUBLIC_FIELDS.filter(
-  (field) => field !== 'affiliateLink',
-);
-const DEAL_PAGE_FIELDS = DEAL_PUBLIC_FIELDS.filter(
-  (field) => field !== 'affiliateLink',
-);
+// Feedback counters ride only on the detail-page payloads; card/list payloads
+// (PUBLIC_FIELDS, RELATED_*) stay unchanged.
+const COUPON_PAGE_FIELDS = [
+  ...COUPON_PUBLIC_FIELDS.filter((field) => field !== 'affiliateLink'),
+  'workedCount',
+  'failedCount',
+];
+const DEAL_PAGE_FIELDS = [
+  ...DEAL_PUBLIC_FIELDS.filter((field) => field !== 'affiliateLink'),
+  'workedCount',
+  'failedCount',
+];
 const RELATED_DEAL_PAGE_FIELDS = DEAL_PUBLIC_FIELDS.filter(
   (field) => field !== 'affiliateLink',
 );

@@ -2017,11 +2017,11 @@ async function seedMenu(
     locale: null,
   });
 
-  // ── topStores relation (same list as popularStores, max 15) ──
+  // ── topStores relation (same list as popularStores, max 18) ──
   let topStoreCount = 0;
   const topStoresLnk = await detectLnk("menus", "top_stores", "store");
   if (topStoresLnk) {
-    const topStores = curatedStores.slice(0, 15);
+    const topStores = curatedStores.slice(0, 18);
     for (let i = 0; i < topStores.length; i++) {
       await linkRel(topStoresLnk, menuId, topStores[i].id, i + 1);
       topStoreCount++;

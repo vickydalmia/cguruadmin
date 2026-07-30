@@ -45,6 +45,7 @@ import {
 import {
   appendListColumns,
   isSortableListColumn,
+  moveEditLayoutFieldAfter,
   pinFieldToFullRow,
   removeEditLayoutFields,
   type EditLayout,
@@ -53,12 +54,14 @@ import {
   changedFieldHints,
   changedFieldSeoHints,
 } from './utils/changed-field-validation';
-import { WORD_LIMITS } from './utils/offer-field-validation';
+import { WORD_LIMITS, BENEFIT_TEXT_FIELDS } from './utils/offer-field-validation';
+import { benefitFieldHint } from './utils/offer-word-limits';
 import { textFieldHints } from './utils/text-field-validation';
 // Every write validator now runs through this one pipeline, which reports all
 // of their problems in a single error instead of the first one it hits.
 import { runWriteValidation } from './utils/write-validation/run';
 import {
+  CURATED_OFFER_RELATIONS,
   registerCuratedOfferRelationQueryFilter,
   removeInactiveCuratedOfferRelations,
 } from './utils/curated-offer-relations';
@@ -70,7 +73,6 @@ import {
   ENTITY_COUPON_LAYOUT_ACTION,
   ENTITY_COUPON_LAYOUT_ACTION_ATTRIBUTES,
 } from './api/entity-coupon-layout/services/entity-coupon-layout';
-
 const HIDE_FROM_EDIT: Record<string, string[]> = {
   'api::deal.deal': ['stores', 'brands', 'categories', 'banks'],
   'api::coupon.coupon': ['stores', 'brands', 'categories', 'banks'],
@@ -107,16 +109,28 @@ const HIDE_FROM_EDIT: Record<string, string[]> = {
   ],
 };
 
-// The offer lifecycle fields are edited ONLY in the Publishing side panel
+// Fields edited ONLY in a side panel, never in the main form. The offer
+// lifecycle fields live in the Publishing panel
 // (src/admin/components/PublishingPanel.tsx), which presents them as a derived
-// status badge plus "goes live" / "ends" choices. Leaving them in the main form
-// too would give an editor two controls for one value — including a
+// status badge plus "goes live" / "ends" choices — leaving them in the main
+// form too would give an editor two controls for one value, including a
 // contentStatus dropdown that looks editable but is overwritten on every save.
-// Unlike HIDE_FROM_EDIT these stay in the LIST layout: they are exactly the
-// columns editors sort and filter offers by.
+// The three benefit labels live in the Offer benefits panel
+// (src/admin/components/OfferBenefitsPanel.tsx) so they read as one group.
+// Unlike HIDE_FROM_EDIT these stay in the LIST layout: lifecycle fields are
+// exactly the columns editors sort and filter offers by.
+const OFFER_PANEL_ONLY_FIELDS = [
+  'contentStatus',
+  'publishedOn',
+  'scheduledAt',
+  'expiresAt',
+  'cashbackText',
+  'bankOfferText',
+  'prepaidText',
+];
 const HIDE_FROM_EDIT_FORM_ONLY: Record<string, string[]> = {
-  'api::coupon.coupon': ['contentStatus', 'publishedOn', 'scheduledAt', 'expiresAt'],
-  'api::deal.deal': ['contentStatus', 'publishedOn', 'scheduledAt', 'expiresAt'],
+  'api::coupon.coupon': OFFER_PANEL_ONLY_FIELDS,
+  'api::deal.deal': OFFER_PANEL_ONLY_FIELDS,
 };
 
 // Hero banners are repeatable components, so their row order is already
@@ -395,6 +409,93 @@ async function ensureComponentEntryTitles(strapi: Core.Strapi): Promise<void> {
   }
 }
 
+// Native relation search reads mainField from the SOURCE component relation
+// metadata. Pin curated Homepage and Deal-of-the-Day offer relations to title;
+// otherwise Strapi falls back to searching numeric IDs.
+async function ensureCuratedRelationSearchFields(
+  strapi: Core.Strapi
+): Promise<void> {
+  const service: any = strapi.plugin('content-manager').service('components');
+  if (!service) return;
+
+  const fieldsByComponent = new Map<string, Set<string>>();
+  for (const relation of CURATED_OFFER_RELATIONS) {
+    if (
+      !relation.sourceUid.startsWith('home.') &&
+      !relation.sourceUid.startsWith('deal-day.')
+    ) {
+      continue;
+    }
+    const fields = fieldsByComponent.get(relation.sourceUid) ?? new Set<string>();
+    fields.add(relation.field);
+    fieldsByComponent.set(relation.sourceUid, fields);
+  }
+
+  for (const [uid, fields] of fieldsByComponent) {
+    try {
+      const component = service.findComponent(uid);
+      if (!component) continue;
+      const config = await service.findConfiguration(component);
+      const metadatas = { ...(config.metadatas ?? {}) };
+      let changed = false;
+
+      for (const field of fields) {
+        const previous = metadatas[field] ?? {};
+        if (previous.edit?.mainField === 'title') continue;
+        metadatas[field] = {
+          ...previous,
+          edit: { ...(previous.edit ?? {}), mainField: 'title' },
+        };
+        changed = true;
+      }
+      if (!changed) continue;
+
+      await service.updateConfiguration(component, { ...config, metadatas });
+      strapi.log.info(
+        `[content-manager] title search enabled for curated relations in ${uid}`
+      );
+    } catch (err: any) {
+      strapi.log.warn(
+        `[content-manager] curated relation search for ${uid} failed: ${err?.message ?? err}`
+      );
+    }
+  }
+}
+
+// Category Section already has an icon field, but its persisted layout placed
+// it below the large repeatable Links editor. Keep the same field and move it
+// directly below Category so the override is discoverable.
+async function ensureNavigationIconPlacement(
+  strapi: Core.Strapi
+): Promise<void> {
+  const service: any = strapi.plugin('content-manager').service('components');
+  if (!service) return;
+
+  try {
+    const component = service.findComponent('nav.category-section');
+    if (!component) return;
+    const config = await service.findConfiguration(component);
+    const edit = moveEditLayoutFieldAfter(
+      config.layouts?.edit ?? [],
+      'icon',
+      'category',
+    );
+    if (!edit) return;
+
+    await service.updateConfiguration(component, {
+      ...config,
+      layouts: { ...config.layouts, edit },
+    });
+    strapi.log.info(
+      '[content-manager] navigation Category icon placed below Category'
+    );
+  } catch (err: any) {
+    strapi.log.warn(
+      `[content-manager] navigation icon placement failed: ${err?.message ?? err}`
+    );
+  }
+}
+
 // Field help text pinned into the Content Manager on every boot. Homepage
 // image guidance is derived from HOMEPAGE_IMAGE_RULES so the enforced size and
 // instruction cannot drift; other business-input guidance is declared here.
@@ -480,13 +581,19 @@ async function ensureComponentFieldDescriptions(strapi: Core.Strapi): Promise<vo
 // in step when that validator changes. hint-coverage.test.ts asserts the
 // derived tables stay fully wired.
 
-// Word caps are DERIVED from WORD_LIMITS in offer-field-validation.ts (the same
-// table the validator enforces), so the number in the hint can never drift from
-// the number in the rule.
-const OFFER_WORD_CAP_HINTS = WORD_LIMITS.map(({ field, max }) => ({
-  field,
-  hint: `Up to ${max} word${max === 1 ? '' : 's'} — fills a fixed card slot.`,
-}));
+// DERIVED from the same tables the validator enforces (offer-word-limits.ts
+// via offer-field-validation.ts), so the hint can never drift from the rule:
+// word caps for offerText, amount-only for the three benefit texts.
+const OFFER_WORD_CAP_HINTS = [
+  ...WORD_LIMITS.map(({ field, max }) => ({
+    field,
+    hint: `Up to ${max} word${max === 1 ? '' : 's'} — fills a fixed card slot.`,
+  })),
+  ...BENEFIT_TEXT_FIELDS.map(({ field, suffix }) => ({
+    field,
+    hint: benefitFieldHint(suffix),
+  })),
+];
 
 const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }> = [
   ...['api::coupon.coupon', 'api::deal.deal'].flatMap((uid) => [
@@ -519,6 +626,17 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
         'the status: re-dating an expired offer leaves it expired.',
     },
   ]),
+  // Deal content is optional: the site always renders a pre-calculated
+  // Deal Price / MRP / Discount block (src/utils/deal-computed-content.ts);
+  // anything written here is shown after it as "Any Other Condition".
+  {
+    uid: 'api::deal.deal',
+    field: 'content',
+    hint:
+      'Optional. The site automatically shows Deal Price (bold), MRP and ' +
+      'Discount from the pricing fields — anything written here appears ' +
+      'after them under "Any Other Condition".',
+  },
   // Mirrors coupon-type-consistency.ts: code and uniqueCouponPool are mutually
   // exclusive, keyed off couponType.
   {
@@ -1682,6 +1800,8 @@ export default {
     await restrictSingleTypesToSuperAdmin(strapi);
     await ensureUploadSettings(strapi);
     await ensureComponentEntryTitles(strapi);
+    await ensureCuratedRelationSearchFields(strapi);
+    await ensureNavigationIconPlacement(strapi);
     await ensureComponentFieldDescriptions(strapi);
     await ensureFieldDescriptions(strapi);
     await ensureSingleTypeEntryTitles(strapi);

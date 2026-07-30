@@ -1,13 +1,14 @@
 /**
  * Heuristic extraction of the offer badge (`offerText`) and the cashback /
- * bank-offer texts (`cashbackText`, `bankOfferText`) from a coupon/deal's
- * free-text title and content. Best-effort only — titles are human-written, so
- * callers should treat the result as a backfill default that editors can
- * correct in the admin.
+ * bank-offer / prepaid texts (`cashbackText`, `bankOfferText`, `prepaidText`)
+ * from a coupon/deal's free-text title and content. Best-effort only — titles
+ * are human-written, so callers should treat the result as a backfill default
+ * that editors can correct in the admin.
  *
  * Scanning order is title first, then content; the first confident match wins
- * for the badge. Cashback/bank spans are stripped before the badge is computed
- * so e.g. "10% Bank OFF" is never mistaken for the main "10% OFF" badge.
+ * for the badge. Cashback/bank/prepaid spans are stripped before the badge is
+ * computed so e.g. "10% Bank OFF" is never mistaken for the main "10% OFF"
+ * badge.
  *
  * Tuned against the real catalog: recognises UPTO/FLAT/EXTRA/MIN qualifiers,
  * ₹ and $ amounts, and "save X%"; requires an off/discount/save/qualifier
@@ -72,19 +73,32 @@ const CASHBACK_ONE = new RegExp(String.raw`(${PCT})\s*%\s*cash\s?back`, "i");
 const CASHBACK_TWO = new RegExp(String.raw`cash\s?back\s+of\s+(${PCT})\s*%`, "i");
 const BANK_PCT_ONE = new RegExp(String.raw`(${PCT})\s*%\s*${BANK_TAIL}`, "i");
 const BANK_RUPEE_ONE = new RegExp(String.raw`${CUR}\s*([\d,]+)\s*${BANK_TAIL}`, "i");
+// Prepaid must be confirmed by off/discount/offer immediately after the word,
+// so "10% Prepaid Bank Off" stays a bank offer and a bare "prepaid order"
+// extracts nothing. No collision with BANK_TAIL, which requires "bank".
+const PREPAID_TAIL = String.raw`prepaid\s*(?:off|discount|offer)`;
+const PREPAID_PCT_ONE = new RegExp(String.raw`(${PCT})\s*%\s*${PREPAID_TAIL}`, "i");
+const PREPAID_RUPEE_ONE = new RegExp(String.raw`${CUR}\s*([\d,]+)\s*${PREPAID_TAIL}`, "i");
 
+// The benefit columns store the BARE AMOUNT only ("15%", "₹2000") — the public
+// API appends the wording ("Cashback" / "Bank OFF" / "Prepaid OFF") on the way
+// out (cguruadmin/src/utils/offer-text.ts), and the write validator rejects
+// anything but an amount. An amountless perk ("Free Shipping On Prepaid
+// Orders") therefore cannot be represented and is not extracted.
 export interface CashbackFields {
-  /** e.g. "15% Cashback", or null when none found. */
+  /** e.g. "15%", or null when none found. */
   cashbackText: string | null;
-  /** e.g. "12% Bank OFF" / "₹2000 Bank OFF", or null when none found. */
+  /** e.g. "12%" / "₹2000", or null when none found. */
   bankOfferText: string | null;
+  /** e.g. "5%" / "₹100", or null when none found. */
+  prepaidText: string | null;
 }
 
 /**
- * Extract the cashback text and the bank-offer text, scanning title then
- * content. Each is the first confident match, or null. Bank offers require a
- * number (percent or rupee amount) — a bare "Bank Offer" is intentionally
- * ignored.
+ * Extract the cashback, bank-offer and prepaid amounts, scanning title then
+ * content. Each is the first confident match, or null. All three require a
+ * number (percent or rupee amount) — a bare "Bank Offer" or "prepaid" is
+ * intentionally ignored.
  */
 export function extractCashbackFields(
   title: string | null | undefined,
@@ -92,35 +106,47 @@ export function extractCashbackFields(
 ): CashbackFields {
   let cashbackText: string | null = null;
   let bankOfferText: string | null = null;
+  let prepaidText: string | null = null;
 
   for (const text of [toPlain(title), toPlain(content)]) {
     if (!text) continue;
     if (!cashbackText) {
       const m = text.match(CASHBACK_ONE) ?? text.match(CASHBACK_TWO);
-      if (m) cashbackText = `${m[1]}% Cashback`;
+      if (m) cashbackText = `${m[1]}%`;
     }
     if (!bankOfferText) {
       const pct = text.match(BANK_PCT_ONE);
       if (pct) {
-        bankOfferText = `${pct[1]}% Bank OFF`;
+        bankOfferText = `${pct[1]}%`;
       } else {
         const rupee = text.match(BANK_RUPEE_ONE);
-        if (rupee) bankOfferText = `₹${digits(rupee[1])} Bank OFF`;
+        if (rupee) bankOfferText = `₹${digits(rupee[1])}`;
+      }
+    }
+    if (!prepaidText) {
+      const pct = text.match(PREPAID_PCT_ONE);
+      if (pct) {
+        prepaidText = `${pct[1]}%`;
+      } else {
+        const rupee = text.match(PREPAID_RUPEE_ONE);
+        if (rupee) prepaidText = `₹${digits(rupee[1])}`;
       }
     }
   }
 
-  return { cashbackText, bankOfferText };
+  return { cashbackText, bankOfferText, prepaidText };
 }
 
 // ── Offer badge ───────────────────────────────────────────────────────
-/** Remove cashback/bank spans so they can't leak into the main badge. */
+/** Remove cashback/bank/prepaid spans so they can't leak into the main badge. */
 function stripCashbackSpans(text: string): string {
   return text
     .replace(new RegExp(CASHBACK_ONE.source, "gi"), " ")
     .replace(new RegExp(CASHBACK_TWO.source, "gi"), " ")
     .replace(new RegExp(BANK_PCT_ONE.source, "gi"), " ")
-    .replace(new RegExp(BANK_RUPEE_ONE.source, "gi"), " ");
+    .replace(new RegExp(BANK_RUPEE_ONE.source, "gi"), " ")
+    .replace(new RegExp(PREPAID_PCT_ONE.source, "gi"), " ")
+    .replace(new RegExp(PREPAID_RUPEE_ONE.source, "gi"), " ");
 }
 
 /**

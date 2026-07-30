@@ -1,6 +1,7 @@
 import type { Core } from '@strapi/strapi';
 import {
   curatedOfferTargetForRelationPath,
+  normalizeCuratedRelationSearch,
   runWithCuratedOfferRelationFilter,
 } from '../utils/curated-offer-relations';
 
@@ -18,6 +19,12 @@ export default (
 
     const targetUid = curatedOfferTargetForRelationPath(ctx.path);
     if (!targetUid) return next();
+
+    if (ctx.request?.query && '_q' in ctx.request.query) {
+      ctx.request.query._q = normalizeCuratedRelationSearch(
+        ctx.request.query._q,
+      );
+    }
 
     return runWithCuratedOfferRelationFilter(targetUid, next);
   };

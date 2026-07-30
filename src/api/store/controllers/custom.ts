@@ -1,5 +1,6 @@
 import type { Core } from '@strapi/strapi';
 import crypto from 'crypto';
+import { enqueueEntityRatingInvalidation } from '../../../isr-outbox/entity-rating-invalidation';
 import { isEntityPageType } from '../services/entity-page';
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
@@ -67,6 +68,10 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     if (result.alreadyVoted) {
       return ctx.tooManyRequests(`You have already rated this ${entityType}.`);
     }
+
+    // Only a counted vote moved the aggregate, so only a counted vote rebuilds
+    // the page. Duplicates return above and leave the cached HTML correct.
+    await enqueueEntityRatingInvalidation(strapi, entityType, slug);
 
     return ctx.send({
       ok: true,

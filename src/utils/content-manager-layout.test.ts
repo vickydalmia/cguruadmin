@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   appendListColumns,
   isSortableListColumn,
+  moveEditLayoutFieldAfter,
   pinFieldToFullRow,
   removeEditLayoutFields,
   type EditLayout,
@@ -162,5 +163,43 @@ describe('appendListColumns', () => {
       'name',
       'ratingCount',
     ]);
+  });
+});
+
+describe('moveEditLayoutFieldAfter', () => {
+  it('moves the icon above a large links editor and preserves the URL field', () => {
+    const edit: EditLayout = [
+      [
+        { name: 'title', size: 6 },
+        { name: 'category', size: 6 },
+      ],
+      [{ name: 'links', size: 12 }],
+      [
+        { name: 'url', size: 6 },
+        { name: 'icon', size: 6 },
+      ],
+    ];
+
+    const next = moveEditLayoutFieldAfter(edit, 'icon', 'category')!;
+    expect(next).toEqual([
+      [
+        { name: 'title', size: 6 },
+        { name: 'category', size: 6 },
+      ],
+      [{ name: 'icon', size: 12 }],
+      [{ name: 'links', size: 12 }],
+      [{ name: 'url', size: 6 }],
+    ]);
+    expect(moveEditLayoutFieldAfter(next, 'icon', 'category')).toBeNull();
+  });
+
+  it('does not add an absent field', () => {
+    expect(
+      moveEditLayoutFieldAfter(
+        [[{ name: 'category', size: 12 }]],
+        'icon',
+        'category',
+      ),
+    ).toBeNull();
   });
 });

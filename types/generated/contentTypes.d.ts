@@ -918,6 +918,14 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     expiresAt: Schema.Attribute.DateTime;
+    failedCount: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 0;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<0>;
     image: Schema.Attribute.Media<'images'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
@@ -926,6 +934,7 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Private;
     offerText: Schema.Attribute.String & Schema.Attribute.Required;
+    prepaidText: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
     publishedOn: Schema.Attribute.DateTime;
     scheduledAt: Schema.Attribute.DateTime;
@@ -942,6 +951,14 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    workedCount: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 0;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<0>;
   };
 }
 
@@ -1021,7 +1038,6 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     >;
     code: Schema.Attribute.Text;
     content: Schema.Attribute.RichText &
-      Schema.Attribute.Required &
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 50000;
       }>;
@@ -1036,6 +1052,14 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     dealImage: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
     discount: Schema.Attribute.String;
     expiresAt: Schema.Attribute.DateTime;
+    failedCount: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 0;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<0>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'> &
       Schema.Attribute.Private;
@@ -1047,6 +1071,7 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
         number
       >;
     offerText: Schema.Attribute.String & Schema.Attribute.Required;
+    prepaidText: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
     publishedOn: Schema.Attribute.DateTime;
     salePrice: Schema.Attribute.Decimal &
@@ -1066,6 +1091,14 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    workedCount: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 0;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<0>;
   };
 }
 
@@ -1477,7 +1510,13 @@ export interface ApiMenuMenu extends Struct.SingleTypeSchema {
       >;
     title: Schema.Attribute.String &
       Schema.Attribute.DefaultTo<'Header Settings'>;
-    topStores: Schema.Attribute.Relation<'oneToMany', 'api::store.store'>;
+    topStores: Schema.Attribute.Relation<'oneToMany', 'api::store.store'> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 18;
+        },
+        number
+      >;
     topStoresLabel: Schema.Attribute.String &
       Schema.Attribute.DefaultTo<'Top Stores'>;
     topStoresTitle: Schema.Attribute.String &

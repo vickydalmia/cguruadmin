@@ -82,6 +82,9 @@
     "bankOfferText": {
       "type": "string"
     },
+    "prepaidText": {
+      "type": "string"
+    },
     "image": {
       "type": "media",
       "multiple": false,
@@ -112,6 +115,16 @@
         "scheduled",
         "expired"
       ]
+    },
+    "workedCount": {
+      "type": "integer",
+      "default": 0,
+      "min": 0
+    },
+    "failedCount": {
+      "type": "integer",
+      "default": 0,
+      "min": 0
     },
     "stores": {
       "type": "relation",

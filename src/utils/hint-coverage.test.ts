@@ -113,6 +113,7 @@ describe('index.ts merged hint map', () => {
         [uid, 'offerText'],
         [uid, 'cashbackText'],
         [uid, 'bankOfferText'],
+        [uid, 'prepaidText'],
         [uid, 'scheduledAt'],
         [uid, 'expiresAt'],
         [uid, 'publishedOn'],
