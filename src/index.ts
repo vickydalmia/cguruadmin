@@ -410,8 +410,9 @@ async function ensureComponentEntryTitles(strapi: Core.Strapi): Promise<void> {
 }
 
 // Native relation search reads mainField from the SOURCE component relation
-// metadata. Pin curated Homepage and Deal-of-the-Day offer relations to title;
-// otherwise Strapi falls back to searching numeric IDs.
+// metadata. Pin curated Homepage, Deal-of-the-Day, and header-notification
+// offer relations to title; otherwise Strapi falls back to searching numeric
+// IDs.
 async function ensureCuratedRelationSearchFields(
   strapi: Core.Strapi
 ): Promise<void> {
@@ -422,7 +423,8 @@ async function ensureCuratedRelationSearchFields(
   for (const relation of CURATED_OFFER_RELATIONS) {
     if (
       !relation.sourceUid.startsWith('home.') &&
-      !relation.sourceUid.startsWith('deal-day.')
+      !relation.sourceUid.startsWith('deal-day.') &&
+      !relation.sourceUid.startsWith('header.')
     ) {
       continue;
     }

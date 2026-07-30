@@ -27,6 +27,16 @@ describe('curated offer relation picker filtering', () => {
     ).toBe('api::deal.deal');
     expect(
       curatedOfferTargetForRelationPath(
+        '/content-manager/relations/header.coupon-notification/12/coupon',
+      ),
+    ).toBe('api::coupon.coupon');
+    expect(
+      curatedOfferTargetForRelationPath(
+        '/content-manager/relations/header.product-deal-notification/productDeal',
+      ),
+    ).toBe('api::deal.deal');
+    expect(
+      curatedOfferTargetForRelationPath(
         '/content-manager/relations/home.explore-offer-tab/42/offers',
       ),
     ).toBe('api::coupon.coupon');

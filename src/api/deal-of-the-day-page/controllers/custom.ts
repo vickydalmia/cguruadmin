@@ -26,9 +26,10 @@ const TAB_RENDER_COUNT = 6;
 
 const DEAL_FIELDS = dealRef.fields;
 
-// Smart-stack cards only render when both benefit texts exist; enforce the
-// same rule in queries so backfill never surfaces a card missing its strip.
+// Smart-stack cards only render when their code and both benefit texts exist;
+// enforce the same rule in queries so counts never include an ineligible card.
 const BENEFIT_TEXT_FILTER = {
+  code: { $notNull: true, $ne: '' },
   cashbackText: { $notNull: true, $ne: '' },
   bankOfferText: { $notNull: true, $ne: '' },
 } as const;
@@ -133,7 +134,9 @@ const CAPPED_DEAL_LIST_SECTIONS = [
   'telegramDeals',
 ] as const;
 
-const hasBenefitTexts = (deal: any) =>
+const hasSmartStackFields = (deal: any) =>
+  typeof deal?.code === 'string' &&
+  deal.code.trim().length > 0 &&
   typeof deal?.cashbackText === 'string' &&
   deal.cashbackText.trim().length > 0 &&
   typeof deal?.bankOfferText === 'string' &&
@@ -157,7 +160,7 @@ function dropDeadOffers(page: any) {
     if (section?.deals) {
       section.deals = section.deals.filter(live);
       if (key === 'smartSavingStack') {
-        section.deals = section.deals.filter(hasBenefitTexts);
+        section.deals = section.deals.filter(hasSmartStackFields);
       }
     }
   }

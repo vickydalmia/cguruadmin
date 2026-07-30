@@ -18,6 +18,8 @@ function strapiWithCurrent(
     return [...ids, ...documentIds].map((key) => ({
       id: typeof key === 'number' ? key : undefined,
       documentId: typeof key === 'string' ? key : undefined,
+      code:
+        qualifyingDealIds == null || qualifyingDealIds.has(key) ? 'SAVE20' : null,
       cashbackText:
         qualifyingDealIds == null || qualifyingDealIds.has(key) ? '15%' : null,
       bankOfferText:
@@ -104,7 +106,7 @@ describe('Deal of the Day section limits', () => {
     ).rejects.toThrow(/requires at least 3 eligible Deals/);
   });
 
-  it('counts only Smart Stack Deals with both required benefit texts', async () => {
+  it('counts only Smart Stack Deals with code and both required benefit texts', async () => {
     const { strapi } = strapiWithCurrent({}, new Set([1, 2]));
 
     await expect(

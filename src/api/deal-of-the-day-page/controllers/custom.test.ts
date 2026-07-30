@@ -61,6 +61,7 @@ function actionableDeal(index: number, overrides: Record<string, any> = {}) {
 
 function benefitDeal(index: number, overrides: Record<string, any> = {}) {
   return actionableDeal(index, {
+    code: `SAVE${index}`,
     cashbackText: '15% Cashback',
     bankOfferText: '12% Bank OFF',
     ...overrides,
@@ -169,6 +170,7 @@ describe('deal-of-the-day aggregate population', () => {
           expired,
           ...published.map((deal) => ({
             ...deal,
+            code: 'SAVE20',
             cashbackText: '15% Cashback',
             bankOfferText: '12% Bank OFF',
           })),
@@ -468,7 +470,7 @@ describe('deal-of-the-day aggregate population', () => {
     expect(harness.findManyDeals).not.toHaveBeenCalled();
   });
 
-  it('ships an empty Smart Stack when no curated deal carries both benefit texts', async () => {
+  it('ships an empty Smart Stack when no curated deal carries all required fields', async () => {
     const harness = createHarness(
       {
         smartSavingStack: {
@@ -520,7 +522,7 @@ describe('deal-of-the-day aggregate population', () => {
     expect(response.data).toHaveProperty('totalDealCount');
   });
 
-  it('preserves curated Smart Stack order and enforces the benefit-text rule', async () => {
+  it('preserves curated Smart Stack order and enforces the required-field rule', async () => {
     const harness = createHarness(
       {
         smartSavingStack: {

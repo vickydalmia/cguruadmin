@@ -40,6 +40,16 @@ export const CURATED_OFFER_RELATIONS: readonly CuratedOfferRelation[] = [
   { sourceUid: 'deal-day.section-heading', field: 'deals', targetUid: 'api::deal.deal' },
   { sourceUid: 'deal-day.store-tab', field: 'deals', targetUid: 'api::deal.deal' },
   { sourceUid: 'deal-day.telegram-deals', field: 'deals', targetUid: 'api::deal.deal' },
+  {
+    sourceUid: 'header.coupon-notification',
+    field: 'coupon',
+    targetUid: 'api::coupon.coupon',
+  },
+  {
+    sourceUid: 'header.product-deal-notification',
+    field: 'productDeal',
+    targetUid: 'api::deal.deal',
+  },
   { sourceUid: 'api::store.store', field: 'topPickCoupons', targetUid: 'api::coupon.coupon' },
   { sourceUid: 'api::store.store', field: 'orderedCoupons', targetUid: 'api::coupon.coupon' },
   { sourceUid: 'api::brand.brand', field: 'topPickCoupons', targetUid: 'api::coupon.coupon' },
@@ -77,6 +87,7 @@ const ENTITY_KIND_BY_UID: Readonly<Record<string, IdentityKind>> = {
 function curatedSourcePath(sourceUid: string, row: any): string | null {
   if (sourceUid.startsWith('home.')) return '/';
   if (sourceUid.startsWith('deal-day.')) return '/deal-of-the-day/';
+  if (sourceUid.startsWith('header.')) return '/';
 
   const kind = ENTITY_KIND_BY_UID[sourceUid];
   if (!kind) return null;

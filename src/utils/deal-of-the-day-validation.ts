@@ -132,10 +132,12 @@ async function qualifyingSmartStackDealCount(
 
   const deals = await strapi.db.query(DEAL_UID).findMany({
     where,
-    select: ['id', 'documentId', 'cashbackText', 'bankOfferText'],
+    select: ['id', 'documentId', 'code', 'cashbackText', 'bankOfferText'],
   });
   return deals.filter(
     (deal: any) =>
+      typeof deal?.code === 'string' &&
+      deal.code.trim().length > 0 &&
       typeof deal?.cashbackText === 'string' &&
       deal.cashbackText.trim().length > 0 &&
       typeof deal?.bankOfferText === 'string' &&
@@ -209,7 +211,7 @@ export async function validateDealOfTheDaySectionLimits(
           path: ['smartSavingStack', 'deals'],
           message:
             `Smart Saving Stack requires at least ${DOTD_SMART_STACK_MINIMUM} eligible Deals ` +
-            `with both Cashback Text and Bank Offer Text when enabled. ` +
+            `with Code, Cashback Text, and Bank Offer Text when enabled. ` +
             `Add ${DOTD_SMART_STACK_MINIMUM - count} more ` +
             `eligible Deal${DOTD_SMART_STACK_MINIMUM - count === 1 ? '' : 's'}.`,
         });
