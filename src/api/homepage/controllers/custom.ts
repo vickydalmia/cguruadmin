@@ -277,10 +277,19 @@ function notificationItem(
   return { kind, targetId, title, image };
 }
 
+function notificationRows(value: unknown): any[] {
+  if (Array.isArray(value)) return value;
+  return value && typeof value === 'object' ? [value] : [];
+}
+
 function headerNotificationPayload(menu: any, now = new Date()) {
   return [
-    notificationItem('coupon', menu?.notification?.coupon, now),
-    notificationItem('deal', menu?.notification?.productDeal, now),
+    ...notificationRows(menu?.notification?.coupon).map((config) =>
+      notificationItem('coupon', config, now),
+    ),
+    ...notificationRows(menu?.notification?.productDeal).map((config) =>
+      notificationItem('deal', config, now),
+    ),
   ].filter(Boolean);
 }
 

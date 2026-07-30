@@ -952,10 +952,10 @@ export interface HeaderNotification extends Struct.ComponentSchema {
     icon: 'bell';
   };
   attributes: {
-    coupon: Schema.Attribute.Component<'header.coupon-notification', false>;
+    coupon: Schema.Attribute.Component<'header.coupon-notification', true>;
     productDeal: Schema.Attribute.Component<
       'header.product-deal-notification',
-      false
+      true
     >;
   };
 }

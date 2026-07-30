@@ -29,17 +29,19 @@ function harness({
 }
 
 describe('menu notification validation', () => {
-  it('accepts independent Coupon and Product Deal selections', async () => {
+  it('accepts multiple independent Coupon and Product Deal rows', async () => {
     const { strapi } = harness();
     await expect(
       validateMenuNotification(strapi, {
         notification: {
-          coupon: {
-            coupon: { connect: [{ documentId: 'coupon-1' }] },
-          },
-          productDeal: {
-            productDeal: { connect: [{ documentId: 'deal-1' }] },
-          },
+          coupon: [
+            { coupon: { connect: [{ documentId: 'coupon-1' }] } },
+            { coupon: { connect: [{ documentId: 'coupon-2' }] } },
+          ],
+          productDeal: [
+            { productDeal: { connect: [{ documentId: 'deal-1' }] } },
+            { productDeal: { connect: [{ documentId: 'deal-2' }] } },
+          ],
         },
       }),
     ).resolves.toBeUndefined();
@@ -49,22 +51,26 @@ describe('menu notification validation', () => {
     const { strapi } = harness();
     const error = await validateMenuNotification(strapi, {
       notification: {
-        coupon: {
-          coupon: null,
-          titleOverride: 'Weekend Coupon',
-        },
-        productDeal: {
-          productDeal: null,
-          titleOverride: 'Laptop Deal',
-        },
+        coupon: [
+          {
+            coupon: null,
+            titleOverride: 'Weekend Coupon',
+          },
+        ],
+        productDeal: [
+          {
+            productDeal: null,
+            titleOverride: 'Laptop Deal',
+          },
+        ],
       },
     }).catch((value) => value);
 
     expect(
       error.details.errors.map((entry: any) => entry.path.join('.')),
     ).toEqual([
-      'notification.coupon.coupon',
-      'notification.productDeal.productDeal',
+      'notification.coupon.0.coupon',
+      'notification.productDeal.0.productDeal',
     ]);
   });
 
@@ -75,10 +81,12 @@ describe('menu notification validation', () => {
     await expect(
       validateMenuNotification(accepted.strapi, {
         notification: {
-          coupon: {
-            coupon: { documentId: 'coupon-1' },
-            imageOverride: { id: 8 },
-          },
+          coupon: [
+            {
+              coupon: { documentId: 'coupon-1' },
+              imageOverride: { id: 8 },
+            },
+          ],
         },
       }),
     ).resolves.toBeUndefined();
@@ -88,14 +96,16 @@ describe('menu notification validation', () => {
     });
     const error = await validateMenuNotification(rejected.strapi, {
       notification: {
-        productDeal: {
-          productDeal: { documentId: 'deal-1' },
-          imageOverride: { id: 9 },
-        },
+        productDeal: [
+          {
+            productDeal: { documentId: 'deal-1' },
+            imageOverride: { id: 9 },
+          },
+        ],
       },
     }).catch((value) => value);
     expect(error.details.errors[0]).toMatchObject({
-      path: ['notification', 'productDeal', 'imageOverride'],
+      path: ['notification', 'productDeal', 0, 'imageOverride'],
       message: expect.stringContaining(
         '"deal.webp" is 81×80 px',
       ),
@@ -107,11 +117,13 @@ describe('menu notification validation', () => {
       stored: {
         notification: {
           id: 1,
-          coupon: {
-            id: 2,
-            coupon: { documentId: 'coupon-1' },
-            imageOverride: { id: 7 },
-          },
+          coupon: [
+            {
+              id: 2,
+              coupon: { documentId: 'coupon-1' },
+              imageOverride: { id: 7 },
+            },
+          ],
         },
       },
       files: [{ id: 7, name: 'stored.webp', width: 80, height: 80 }],
@@ -123,10 +135,12 @@ describe('menu notification validation', () => {
         {
           notification: {
             id: 1,
-            coupon: {
-              id: 2,
-              titleOverride: 'Updated title',
-            },
+            coupon: [
+              {
+                id: 2,
+                titleOverride: 'Updated title',
+              },
+            ],
           },
         },
         'menu-1',

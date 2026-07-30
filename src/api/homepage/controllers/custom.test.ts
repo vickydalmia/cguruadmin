@@ -403,7 +403,7 @@ describe('header notification aggregate', () => {
     return { controller, ctx, findFirst };
   }
 
-  it('emits independent Coupon and Product Deal items with their overrides', async () => {
+  it('emits every repeatable Coupon and Product Deal row with per-item overrides', async () => {
     const couponOverride = {
       url: '/uploads/coupon-notification.webp',
       alternativeText: 'Coupon notification artwork',
@@ -414,28 +414,50 @@ describe('header notification aggregate', () => {
     };
     const harness = notificationHarness({
       notification: {
-        coupon: {
-          titleOverride: 'Coupon saving live now',
-          imageOverride: couponOverride,
-          coupon: {
-            id: 7,
-            title: 'Original Coupon title',
-            contentStatus: 'published',
-            expiresAt: new Date(Date.now() + 60_000).toISOString(),
-            image: { url: '/uploads/coupon.webp' },
+        coupon: [
+          {
+            titleOverride: 'Coupon saving live now',
+            imageOverride: couponOverride,
+            coupon: {
+              id: 7,
+              title: 'Original Coupon title',
+              contentStatus: 'published',
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              image: { url: '/uploads/coupon.webp' },
+            },
           },
-        },
-        productDeal: {
-          titleOverride: 'Today only: extra savings',
-          imageOverride: dealOverride,
-          productDeal: {
-            id: 42,
-            title: 'Original Deal title',
-            contentStatus: 'published',
-            expiresAt: new Date(Date.now() + 60_000).toISOString(),
-            dealImage: { url: '/uploads/deal.webp' },
+          {
+            coupon: {
+              id: 8,
+              title: 'Second Coupon title',
+              contentStatus: 'published',
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              image: { url: '/uploads/coupon-2.webp' },
+            },
           },
-        },
+        ],
+        productDeal: [
+          {
+            titleOverride: 'Today only: extra savings',
+            imageOverride: dealOverride,
+            productDeal: {
+              id: 42,
+              title: 'Original Deal title',
+              contentStatus: 'published',
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              dealImage: { url: '/uploads/deal.webp' },
+            },
+          },
+          {
+            productDeal: {
+              id: 43,
+              title: 'Second Deal title',
+              contentStatus: 'published',
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              dealImage: { url: '/uploads/deal-2.webp' },
+            },
+          },
+        ],
       },
     });
 
@@ -452,10 +474,22 @@ describe('header notification aggregate', () => {
           image: couponOverride,
         },
         {
+          kind: 'coupon',
+          targetId: 8,
+          title: 'Second Coupon title',
+          image: { url: '/uploads/coupon-2.webp' },
+        },
+        {
           kind: 'deal',
           targetId: 42,
           title: 'Today only: extra savings',
           image: dealOverride,
+        },
+        {
+          kind: 'deal',
+          targetId: 43,
+          title: 'Second Deal title',
+          image: { url: '/uploads/deal-2.webp' },
         },
       ],
     });
@@ -470,27 +504,31 @@ describe('header notification aggregate', () => {
     const logo = { url: '/uploads/store-logo.webp' };
     const liveHarness = notificationHarness({
       notification: {
-        coupon: {
-          titleOverride: ' ',
-          imageOverride: null,
-          coupon: {
-            id: 7,
-            title: 'AJIO Fashion Sale',
-            contentStatus: 'published',
-            expiresAt: new Date(Date.now() + 60_000).toISOString(),
-            image: null,
-            stores: [{ logo }],
+        coupon: [
+          {
+            titleOverride: ' ',
+            imageOverride: null,
+            coupon: {
+              id: 7,
+              title: 'AJIO Fashion Sale',
+              contentStatus: 'published',
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              image: null,
+              stores: [{ logo }],
+            },
           },
-        },
-        productDeal: {
-          productDeal: {
-            id: 8,
-            title: 'Expired Product Deal',
-            contentStatus: 'published',
-            expiresAt: new Date(Date.now() - 60_000).toISOString(),
-            dealImage: { url: '/uploads/expired.webp' },
+        ],
+        productDeal: [
+          {
+            productDeal: {
+              id: 8,
+              title: 'Expired Product Deal',
+              contentStatus: 'published',
+              expiresAt: new Date(Date.now() - 60_000).toISOString(),
+              dealImage: { url: '/uploads/expired.webp' },
+            },
           },
-        },
+        ],
       },
     });
 

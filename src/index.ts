@@ -418,21 +418,21 @@ COMPONENT_FIELD_DESCRIPTIONS['nav.category-section'].links =
 (COMPONENT_FIELD_DESCRIPTIONS['nav.link'] ??= {}).icon =
   'Optional icon override for category drill-down rows. Leave empty to reuse the linked Category icon; custom category links can upload their own square icon.';
 (COMPONENT_FIELD_DESCRIPTIONS['header.coupon-notification'] ??= {}).coupon =
-  'Select the Coupon shown in the header notification list. Leave this component empty to show no Coupon notification.';
+  'Select the Coupon shown in this header notification row.';
 COMPONENT_FIELD_DESCRIPTIONS['header.coupon-notification'].titleOverride =
   'Optional. Leave blank to use the selected Coupon title.';
 COMPONENT_FIELD_DESCRIPTIONS['header.coupon-notification'].imageOverride =
   'Optional. Leave blank to use the selected Coupon image or merchant logo. Maximum 80 × 80 px; a square image is recommended.';
 (COMPONENT_FIELD_DESCRIPTIONS['header.product-deal-notification'] ??= {}).productDeal =
-  'Select the Product Deal shown in the header notification list. Leave this component empty to show no Product Deal notification.';
+  'Select the Product Deal shown in this header notification row.';
 COMPONENT_FIELD_DESCRIPTIONS['header.product-deal-notification'].titleOverride =
   'Optional. Leave blank to use the selected Product Deal title.';
 COMPONENT_FIELD_DESCRIPTIONS['header.product-deal-notification'].imageOverride =
   'Optional. Leave blank to use the selected Product Deal image. Maximum 80 × 80 px; a square image is recommended.';
 (COMPONENT_FIELD_DESCRIPTIONS['header.notification'] ??= {}).coupon =
-  'Optional Coupon notification. Open this group to select a Coupon and configure its title and image overrides.';
+  'Coupon notifications. Add one row per Coupon; each row can configure its own title and image overrides.';
 COMPONENT_FIELD_DESCRIPTIONS['header.notification'].productDeal =
-  'Optional Product Deal notification. Open this group to select a Product Deal and configure its title and image overrides.';
+  'Product Deal notifications. Add one row per Product Deal; each row can configure its own title and image overrides.';
 async function ensureComponentFieldDescriptions(strapi: Core.Strapi): Promise<void> {
   const service: any = strapi.plugin('content-manager').service('components');
   if (!service) return;
@@ -598,7 +598,7 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
     uid: 'api::menu.menu',
     field: 'notification',
     hint:
-      'Header notifications are managed together here. Open this section to configure the optional Coupon and Product Deal entries.',
+      'Header notifications are managed together here. Add as many Coupon and Product Deal rows as needed.',
   },
   // Mirrors identity-validation.ts: name unique per type; slug unique across
   // all four taxonomies and off the reserved-route list.

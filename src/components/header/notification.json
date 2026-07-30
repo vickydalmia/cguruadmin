@@ -8,12 +8,12 @@
     "coupon": {
       "type": "component",
       "component": "header.coupon-notification",
-      "repeatable": false
+      "repeatable": true
     },
     "productDeal": {
       "type": "component",
       "component": "header.product-deal-notification",
-      "repeatable": false
+      "repeatable": true
     }
   }
 }

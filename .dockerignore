@@ -16,7 +16,15 @@ coverage
 docs
 deploy
 wordpress
-migration
+# The Strapi sanitizer parity test imports the migration sanitizer. Keep only
+# that source file in the build context so production tests remain meaningful
+# without copying the full migration workspace into the image.
+migration/*
+!migration/src
+migration/src/*
+!migration/src/utils
+migration/src/utils/*
+!migration/src/utils/sanitize.ts
 migration.log
 migration-errors.log
 

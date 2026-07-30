@@ -40,26 +40,30 @@ function resultingRelation(incoming: unknown, stored: unknown): RelationEntry | 
     : null;
 }
 
-function componentRow(
+function componentRows(value: unknown): Record<string, unknown>[] {
+  const values = Array.isArray(value) ? value : [value];
+  return values.filter(
+    (entry): entry is Record<string, unknown> =>
+      Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry),
+  );
+}
+
+function componentId(row: Record<string, unknown>): string | null {
+  const id = row.id;
+  return typeof id === 'number' || typeof id === 'string'
+    ? String(id)
+    : null;
+}
+
+function storedComponentRow(
   incoming: Record<string, unknown>,
-  stored: Record<string, unknown> | null,
-  field: string,
-): {
-  incoming: Record<string, unknown> | null;
-  stored: Record<string, unknown> | null;
-} {
-  const incomingValue = incoming[field];
-  const storedValue = stored?.[field];
-  return {
-    incoming:
-      incomingValue && typeof incomingValue === 'object'
-        ? (incomingValue as Record<string, unknown>)
-        : null,
-    stored:
-      storedValue && typeof storedValue === 'object'
-        ? (storedValue as Record<string, unknown>)
-        : null,
-  };
+  storedRows: Record<string, unknown>[],
+): Record<string, unknown> | null {
+  const incomingId = componentId(incoming);
+  if (incomingId === null) return null;
+  return (
+    storedRows.find((stored) => componentId(stored) === incomingId) ?? null
+  );
 }
 
 function effectiveField(
@@ -93,9 +97,9 @@ function mediaId(incoming: unknown, stored: unknown): number | null {
 }
 
 /**
- * Header Settings can publish two independent items at once: one Coupon and
- * one Product Deal. Each component owns its relation plus title/image
- * overrides, matching the Homepage component pattern.
+ * Header Settings can publish any number of Coupon and Product Deal rows.
+ * Each repeatable component owns its relation plus title/image overrides,
+ * matching the Homepage component pattern.
  *
  * A component with override content must also select its related offer. Image
  * overrides are intentionally tiny because the public UI renders them as a
@@ -152,45 +156,62 @@ export async function validateMenuNotification(
   const imageChecks: Array<{
     field: string;
     fileId: number;
-    path: string[];
+    path: (string | number)[];
     label: string;
   }> = [];
 
   for (const definition of touched) {
-    const row = componentRow(
-      incomingNotification,
-      storedNotification,
-      definition.field,
+    const incomingRows = componentRows(
+      incomingNotification[definition.field],
     );
-    if (!row.incoming) continue;
+    const storedRows = componentRows(
+      storedNotification?.[definition.field],
+    );
 
-    const relation = resultingRelation(
-      row.incoming[definition.relation],
-      row.stored?.[definition.relation],
-    );
-    const title = effectiveField(row.incoming, row.stored, 'titleOverride');
-    const assignedImageId = mediaId(
-      row.incoming.imageOverride,
-      row.stored?.imageOverride,
-    );
-    const hasOverride =
-      (typeof title === 'string' && title.trim().length > 0) ||
-      assignedImageId !== null;
+    for (const [index, incomingRow] of incomingRows.entries()) {
+      const storedRow = storedComponentRow(incomingRow, storedRows);
+      const relation = resultingRelation(
+        incomingRow[definition.relation],
+        storedRow?.[definition.relation],
+      );
+      const title = effectiveField(
+        incomingRow,
+        storedRow,
+        'titleOverride',
+      );
+      const assignedImageId = mediaId(
+        incomingRow.imageOverride,
+        storedRow?.imageOverride,
+      );
+      const hasOverride =
+        (typeof title === 'string' && title.trim().length > 0) ||
+        assignedImageId !== null;
 
-    if (!relation && hasOverride) {
-      problems.push({
-        path: ['notification', definition.field, definition.relation],
-        message:
-          `Select the ${definition.label} before adding notification overrides.`,
-      });
-    }
-    if (assignedImageId !== null) {
-      imageChecks.push({
-        field: definition.field,
-        fileId: assignedImageId,
-        path: ['notification', definition.field, 'imageOverride'],
-        label: definition.label,
-      });
+      if (!relation && hasOverride) {
+        problems.push({
+          path: [
+            'notification',
+            definition.field,
+            index,
+            definition.relation,
+          ],
+          message:
+            `Select the ${definition.label} before adding notification overrides.`,
+        });
+      }
+      if (assignedImageId !== null) {
+        imageChecks.push({
+          field: definition.field,
+          fileId: assignedImageId,
+          path: [
+            'notification',
+            definition.field,
+            index,
+            'imageOverride',
+          ],
+          label: definition.label,
+        });
+      }
     }
   }
 
