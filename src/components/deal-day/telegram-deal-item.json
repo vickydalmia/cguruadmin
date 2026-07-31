@@ -1,0 +1,20 @@
+{
+  "collectionName": "components_deal_day_telegram_deal_items",
+  "info": {
+    "displayName": "Deal Day Telegram Deal Item",
+    "icon": "paperPlane"
+  },
+  "attributes": {
+    "deal": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::deal.deal"
+    },
+    "titleOverride": {
+      "type": "string"
+    },
+    "linkOverride": {
+      "type": "string"
+    }
+  }
+}

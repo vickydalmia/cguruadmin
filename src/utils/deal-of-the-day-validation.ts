@@ -143,6 +143,43 @@ async function qualifyingSmartStackDealCount(
   ).length;
 }
 
+const HTTP_URL_PATTERN = /^https?:\/\/[^\s]+$/iu;
+
+/**
+ * Telegram items wrap a Deal with a per-section unlock destination. The
+ * override is optional — an empty value deliberately falls back to the Deal's
+ * affiliate link — but a value that IS entered must be a complete http(s) URL,
+ * because the frontend drops anything unsafe and would silently fall back,
+ * hiding the editor's mistake. The item cap is enforced here too: the schema
+ * `max` guards the admin form, and this guards every other write path.
+ */
+function collectTelegramItemProblems(data: any, problems: Problem[]): void {
+  const items = data?.telegramDeals?.items;
+  if (!Array.isArray(items)) return;
+
+  if (items.length > DOTD_SECTION_CAPS.telegramDeals) {
+    problems.push({
+      path: ['telegramDeals', 'items'],
+      message:
+        `Telegram Exclusive accepts at most ${DOTD_SECTION_CAPS.telegramDeals} Deals ` +
+        `(the site shows 3, the rest are buffered for expiry). ` +
+        `Remove ${items.length - DOTD_SECTION_CAPS.telegramDeals}.`,
+    });
+  }
+
+  items.forEach((item: any, index: number) => {
+    const override = item?.linkOverride;
+    if (typeof override !== 'string' || override.trim() === '') return;
+    if (HTTP_URL_PATTERN.test(override.trim())) return;
+    problems.push({
+      path: ['telegramDeals', 'items', String(index), 'linkOverride'],
+      message:
+        'Telegram link must be a complete http(s) URL without spaces. ' +
+        'Leave it empty to use the deal’s affiliate link.',
+    });
+  });
+}
+
 export async function validateDealOfTheDaySectionLimits(
   strapi: Core.Strapi,
   data: any
@@ -155,18 +192,27 @@ export async function validateDealOfTheDaySectionLimits(
     data,
     'smartSavingStack'
   );
-  if (!touchedLimited.length && !smartStackTouched) return;
+  const telegramTouched = Object.prototype.hasOwnProperty.call(
+    data,
+    'telegramDeals'
+  );
+  if (!touchedLimited.length && !smartStackTouched && !telegramTouched) return;
 
   const touchedSections = [
     ...touchedLimited.map(([section]) => section),
     ...(smartStackTouched ? ['smartSavingStack'] : []),
   ];
 
-  const current = await strapi.db.query(DOTD_UID).findOne({
-    populate: Object.fromEntries(
-      touchedSections.map((section) => [section, { populate: ['deals'] }])
-    ) as any,
-  });
+  // Only relation-backed sections need the stored row to resolve a partial
+  // relation command. Telegram items arrive as a complete component list, so
+  // a telegram-only write skips the query entirely.
+  const current = touchedSections.length
+    ? await strapi.db.query(DOTD_UID).findOne({
+        populate: Object.fromEntries(
+          touchedSections.map((section) => [section, { populate: ['deals'] }])
+        ) as any,
+      })
+    : null;
   const problems: Problem[] = [];
 
   for (const [section, max, label, detail] of touchedLimited) {
@@ -216,6 +262,8 @@ export async function validateDealOfTheDaySectionLimits(
       }
     }
   }
+
+  collectTelegramItemProblems(data, problems);
 
   if (!problems.length) return;
   throw new errors.ValidationError(

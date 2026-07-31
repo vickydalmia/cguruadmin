@@ -1,4 +1,5 @@
 export interface IsrOutboxConfig {
+  enabled: boolean;
   gatewayUrl: string;
   adminSecret: string;
   pollMs: number;
@@ -10,6 +11,14 @@ export interface IsrOutboxConfig {
   retentionDays: number;
   maxPaths: number;
   maxPayloadBytes: number;
+}
+
+function booleanEnv(name: string, fallback: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) return fallback;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  throw new Error(`${name} must be true or false`);
 }
 
 function integerEnv(
@@ -50,6 +59,14 @@ export function readOutboxPayloadBounds(): IsrOutboxPayloadBounds {
 }
 
 export function readIsrOutboxConfig(): IsrOutboxConfig {
+  // CRON_ENABLED already identifies the single write/coordination process in
+  // the two-container deployment. Inherit it when the dedicated switch is
+  // absent so an existing host Compose file still disables delivery on
+  // strapi-render as soon as the new image boots. The explicit switch wins and
+  // supports deployments that intentionally separate cron from outbox work.
+  const enabled = process.env.ISR_OUTBOX_DISPATCHER_ENABLED?.trim()
+    ? booleanEnv('ISR_OUTBOX_DISPATCHER_ENABLED', true)
+    : booleanEnv('CRON_ENABLED', true);
   const rawGatewayUrl =
     process.env.ISR_GATEWAY_URL?.trim().replace(/\/+$/, '') ?? '';
   let gatewayUrl = '';
@@ -85,6 +102,7 @@ export function readIsrOutboxConfig(): IsrOutboxConfig {
     );
   }
   return {
+    enabled,
     gatewayUrl,
     adminSecret,
     pollMs: integerEnv('ISR_OUTBOX_POLL_MS', 2_000, 250, 60_000),

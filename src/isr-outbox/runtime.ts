@@ -13,6 +13,14 @@ export const MINIMUM_PRODUCTION_ADMIN_SECRET_LENGTH = 16;
 
 export function startIsrOutbox(strapi: Core.Strapi): void {
   const config = readIsrOutboxConfig();
+  if (!config.enabled) {
+    logIsrOutbox(strapi, 'info', 'isr.outbox.dispatcher_disabled', {
+      reason: process.env.ISR_OUTBOX_DISPATCHER_ENABLED?.trim()
+        ? 'ISR_OUTBOX_DISPATCHER_ENABLED=false'
+        : 'CRON_ENABLED=false fallback',
+    });
+    return;
+  }
   if (!config.gatewayUrl || !config.adminSecret) {
     const message =
       'ISR_GATEWAY_URL and ISR_ADMIN_SECRET are required for ISR outbox delivery';

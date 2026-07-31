@@ -8,6 +8,7 @@ describe('ISR outbox configuration', () => {
     vi.stubEnv('ISR_OUTBOX_REQUEST_TIMEOUT_MS', '');
     vi.stubEnv('ISR_OUTBOX_LEASE_MS', '');
     const config = readIsrOutboxConfig();
+    expect(config.enabled).toBe(true);
     expect(config.requestTimeoutMs).toBe(90_000);
     expect(config.leaseMs).toBe(120_000);
     expect(config.maxPaths).toBe(5_000);
@@ -23,6 +24,28 @@ describe('ISR outbox configuration', () => {
   it('validates the gateway URL', () => {
     vi.stubEnv('ISR_GATEWAY_URL', 'redis://gateway');
     expect(() => readIsrOutboxConfig()).toThrow(/HTTP\(S\)/);
+  });
+
+  it('allows the dispatcher to be disabled explicitly', () => {
+    vi.stubEnv('ISR_OUTBOX_DISPATCHER_ENABLED', 'false');
+    expect(readIsrOutboxConfig().enabled).toBe(false);
+  });
+
+  it('inherits the existing single-process cron role when no override exists', () => {
+    vi.stubEnv('CRON_ENABLED', 'false');
+    vi.stubEnv('ISR_OUTBOX_DISPATCHER_ENABLED', '');
+    expect(readIsrOutboxConfig().enabled).toBe(false);
+  });
+
+  it('allows delivery to be separated explicitly from the cron role', () => {
+    vi.stubEnv('CRON_ENABLED', 'false');
+    vi.stubEnv('ISR_OUTBOX_DISPATCHER_ENABLED', 'true');
+    expect(readIsrOutboxConfig().enabled).toBe(true);
+  });
+
+  it('rejects ambiguous dispatcher switches', () => {
+    vi.stubEnv('ISR_OUTBOX_DISPATCHER_ENABLED', 'off');
+    expect(() => readIsrOutboxConfig()).toThrow(/must be true or false/);
   });
 
   // The production Docker image builds with NODE_ENV=production and runs the

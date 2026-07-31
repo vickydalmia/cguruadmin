@@ -346,6 +346,7 @@ const COMPONENT_ENTRY_TITLES: Record<string, string> = {
   'deal-day.deals-by-store': 'heading',
   'deal-day.store-tab': 'labelOverride',
   'deal-day.telegram-deals': 'heading',
+  'deal-day.telegram-deal-item': 'titleOverride',
   'deal-day.section-heading': 'heading',
   'shared.cta': 'label',
   'shared.telegram-cta': 'heading',
@@ -535,6 +536,12 @@ COMPONENT_FIELD_DESCRIPTIONS['shared.seo'].ogImage =
   'Share-card image shown when the deal page is shared on social apps. Recommended: at least 1200 × 630 px (1.91:1). Smaller images are allowed but may crop or blur in previews. Leave empty to use the site default card.';
 (COMPONENT_FIELD_DESCRIPTIONS['homepage.slider-slide'] ??= {}).link =
   'Optional banner destination. Use /path/ for a CouponzGuru page or a full http(s) URL. CouponzGuru links open in this tab and remain followed; external links open in a new tab with nofollow. Leave empty for a non-clickable banner.';
+(COMPONENT_FIELD_DESCRIPTIONS['deal-day.telegram-deal-item'] ??= {}).deal =
+  'The Product Deal shown as a locked Telegram card. Its promo code is never sent to the site for this section.';
+COMPONENT_FIELD_DESCRIPTIONS['deal-day.telegram-deal-item'].linkOverride =
+  'Optional. Telegram post URL for this deal — used only by this section. Leave empty to send visitors to the deal’s affiliate link. Enter a full http(s) URL.';
+COMPONENT_FIELD_DESCRIPTIONS['deal-day.telegram-deal-item'].titleOverride =
+  'Optional. Leave blank to use the selected Deal title.';
 (COMPONENT_FIELD_DESCRIPTIONS['nav.category-section'] ??= {}).category =
   'Preferred destination. When selected, the menu links to this Category and uses its icon unless an Icon override is uploaded below.';
 COMPONENT_FIELD_DESCRIPTIONS['nav.category-section'].url =
@@ -1051,6 +1058,7 @@ const OVERRIDE_FILLS: Array<{
   { componentUid: 'home.explore-offer-tab', overrideField: 'labelOverride', relationField: 'category', relationLabel: 'name' },
   { componentUid: 'home.bank-offer-item', overrideField: 'subtitle', relationField: 'bank', relationLabel: 'shortDescription' },
   { componentUid: 'deal-day.store-tab', overrideField: 'labelOverride', relationField: 'store', relationLabel: 'name' },
+  { componentUid: 'deal-day.telegram-deal-item', overrideField: 'titleOverride', relationField: 'deal', relationLabel: 'title' },
 ];
 
 async function fillHomepageOverrides(strapi: Core.Strapi): Promise<void> {

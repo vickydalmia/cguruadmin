@@ -257,9 +257,11 @@ CORS_ORIGINS=
 STRAPI_ADMIN_PUBLIC_SITE_URL=https://www.couponzguru.com
 
 # Persistent-ISR transactional outbox
-# The dispatcher safely retries while the gateway is unavailable.
+# The dispatcher safely retries while the gateway is unavailable. Enable it on
+# the admin process only; docker.compose.yml disables it on strapi-render.
 ISR_GATEWAY_URL=http://<FRONTEND_PRIVATE_IP>:3010
 ISR_ADMIN_SECRET=<SHARED_ISR_SECRET>
+ISR_OUTBOX_DISPATCHER_ENABLED=true
 ISR_OUTBOX_POLL_MS=2000
 ISR_OUTBOX_BATCH_SIZE=25
 ISR_OUTBOX_REQUEST_TIMEOUT_MS=90000
@@ -367,6 +369,7 @@ normal deployments.
 | --- | --- | --- |
 | `ISR_GATEWAY_URL` | Required | Private Fastify origin receiving durable content invalidations. |
 | `ISR_ADMIN_SECRET` | Required | Shared bearer secret for outbox delivery and protected ISR/search operations. It must exactly match Fastify. |
+| `ISR_OUTBOX_DISPATCHER_ENABLED` | Optional | Starts the durable delivery loop. When omitted, it inherits `CRON_ENABLED`, preserving the existing single-process role on older host Compose files. Keep it enabled on exactly one production process; current Compose also forces `false` on `strapi-render`, while content writes on either process may continue inserting rows into the shared table. |
 | `ISR_OUTBOX_POLL_MS` | Optional | Time between outbox dispatcher polls. |
 | `ISR_OUTBOX_BATCH_SIZE` | Optional | Maximum rows leased in one dispatcher poll. |
 | `ISR_OUTBOX_REQUEST_TIMEOUT_MS` | Optional | HTTP timeout for one delivery attempt to Fastify. Defaults to 90 seconds. |
@@ -452,9 +455,12 @@ The script validates Compose, pulls the image, replaces the Strapi container,
 waits for its health check, verifies `/_health`, and prints the final service
 state.
 
-Database migrations run during Strapi startup. The ISR outbox migration
-`database/migrations/2026.07.24T00.00.00.create-isr-outbox.js` must complete
-before production content writes resume.
+Database migrations run during Strapi startup. The ISR outbox creation
+migration and the legacy optional-path reconciliation migration must complete
+before production content writes resume. The reconciliation changes only the
+payload of matching pending/processing legacy rows; it preserves their lease,
+attempt counter, and next-attempt schedule so a rolling deploy cannot steal
+work from the previous container.
 
 ## 9. Verify the deployment
 
@@ -603,7 +609,10 @@ Alert on:
 - any `isr.outbox.invalid` quarantined row;
 - a stalled or failing dispatcher reported by `/api/isr/status`;
 - rows remaining undelivered beyond the normal retry window;
-- more than one active cron scheduler.
+- more than one active cron scheduler;
+- more than one `isr.outbox.dispatcher_started` process. The render container
+  should instead log `isr.outbox.dispatcher_disabled` with
+  `ISR_OUTBOX_DISPATCHER_ENABLED=false` once during bootstrap.
 
 `/api/isr/status` exposes `dispatcher.lastProgressAt`, which advances after each
 delivered, retried, lease-lost, or quarantined event. Stall detection uses that

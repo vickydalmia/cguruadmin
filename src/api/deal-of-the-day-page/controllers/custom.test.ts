@@ -106,9 +106,13 @@ describe('deal-of-the-day aggregate population', () => {
 
     // Telegram-exclusive deals are join-gated: no rich text, and the promo
     // code never leaves the API. The component also has no viewAllCta field.
-    expect(populate.telegramDeals.populate.deals.fields).not.toContain('content');
-    expect(populate.telegramDeals.populate.deals.fields).not.toContain('code');
+    // Each Deal is wrapped in an item component carrying the per-section
+    // unlock override, so the deal ref sits one level deeper.
+    const telegramDealRef = populate.telegramDeals.populate.items.populate.deal;
+    expect(telegramDealRef.fields).not.toContain('content');
+    expect(telegramDealRef.fields).not.toContain('code');
     expect(populate.telegramDeals.populate).not.toHaveProperty('viewAllCta');
+    expect(populate.telegramDeals.populate).not.toHaveProperty('deals');
 
     // `iconAlt` rides along with the icon so the site can label it — the
     // category counterpart of logoAlt on store/brand/bank.
@@ -149,7 +153,8 @@ describe('deal-of-the-day aggregate population', () => {
       populate.topDeals.populate.deals,
       populate.trendingNow.populate.deals,
       populate.genZDrops.populate.deals,
-      populate.telegramDeals.populate.deals,
+      // Wrapped one level deeper by the telegram item component.
+      populate.telegramDeals.populate.items.populate.deal,
     ]) {
       expect(ref.filters).toEqual(publishedFilter);
       expect(ref).not.toHaveProperty('sort');
@@ -180,7 +185,14 @@ describe('deal-of-the-day aggregate population', () => {
       },
       trendingNow: { deals: [expired, ...published] },
       genZDrops: { deals: [expired, ...published] },
-      telegramDeals: { deals: [expired, ...published] },
+      telegramDeals: {
+        items: [
+          { deal: expired, linkOverride: 'https://t.me/cg/expired' },
+          // A dangling item (deal deleted or unpublished) must not survive.
+          { deal: null, linkOverride: 'https://t.me/cg/orphan' },
+          ...published.map((deal: any) => ({ deal, linkOverride: null })),
+        ],
+      },
       // enabled:false pins the raw drop/cap path — backfill (tested separately)
       // would replace these bare curated records as non-actionable.
       dealsByCategory: {
@@ -205,7 +217,10 @@ describe('deal-of-the-day aggregate population', () => {
     expect(response.data.smartSavingStack.deals).toHaveLength(30);
     expect(response.data.trendingNow.deals).toHaveLength(10);
     expect(response.data.genZDrops.deals).toHaveLength(6);
-    expect(response.data.telegramDeals.deals).toHaveLength(6);
+    expect(response.data.telegramDeals.items).toHaveLength(6);
+    expect(
+      response.data.telegramDeals.items.every((item: any) => item.deal),
+    ).toBe(true);
     expect(response.data.dealsByCategory.tabs).toHaveLength(1);
     expect(response.data.dealsByCategory.tabs[0].deals).toHaveLength(10);
     expect(response.data.dealsByStore.tabs).toHaveLength(1);

@@ -36,6 +36,29 @@ describe('startIsrOutbox', () => {
     expect(() => startIsrOutbox(strapi)).toThrow(/are required/);
   });
 
+  it('does not require delivery credentials on a dispatcher-disabled process', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('ISR_OUTBOX_DISPATCHER_ENABLED', 'false');
+    vi.stubEnv('ISR_GATEWAY_URL', '');
+    vi.stubEnv('ISR_ADMIN_SECRET', '');
+    expect(() => startIsrOutbox(strapi)).not.toThrow();
+    expect(strapi.log.info).toHaveBeenCalledWith(
+      expect.stringContaining('ISR_OUTBOX_DISPATCHER_ENABLED=false'),
+    );
+  });
+
+  it('reports when the existing render-process cron role disables delivery', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('CRON_ENABLED', 'false');
+    vi.stubEnv('ISR_OUTBOX_DISPATCHER_ENABLED', '');
+    vi.stubEnv('ISR_GATEWAY_URL', '');
+    vi.stubEnv('ISR_ADMIN_SECRET', '');
+    expect(() => startIsrOutbox(strapi)).not.toThrow();
+    expect(strapi.log.info).toHaveBeenCalledWith(
+      expect.stringContaining('CRON_ENABLED=false fallback'),
+    );
+  });
+
   it('rejects a weak production admin secret at boot', () => {
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('ISR_GATEWAY_URL', 'http://gateway:3010');

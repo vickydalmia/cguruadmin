@@ -139,8 +139,8 @@ export const ADMIN_RELATION_SEARCH_FIELDS = [
     mainField: 'title',
   },
   {
-    sourceUid: 'deal-day.telegram-deals',
-    field: 'deals',
+    sourceUid: 'deal-day.telegram-deal-item',
+    field: 'deal',
     targetUid: 'api::deal.deal',
     mainField: 'title',
   },

@@ -699,6 +699,19 @@ export interface DealDayStoreTab extends Struct.ComponentSchema {
   };
 }
 
+export interface DealDayTelegramDealItem extends Struct.ComponentSchema {
+  collectionName: 'components_deal_day_telegram_deal_items';
+  info: {
+    displayName: 'Deal Day Telegram Deal Item';
+    icon: 'paperPlane';
+  };
+  attributes: {
+    deal: Schema.Attribute.Relation<'oneToOne', 'api::deal.deal'>;
+    linkOverride: Schema.Attribute.String;
+    titleOverride: Schema.Attribute.String;
+  };
+}
+
 export interface DealDayTelegramDeals extends Struct.ComponentSchema {
   collectionName: 'components_deal_day_telegram_deals';
   info: {
@@ -707,10 +720,16 @@ export interface DealDayTelegramDeals extends Struct.ComponentSchema {
   };
   attributes: {
     ctaLabel: Schema.Attribute.String;
-    deals: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'>;
     description: Schema.Attribute.Text;
     enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     heading: Schema.Attribute.String;
+    items: Schema.Attribute.Component<'deal-day.telegram-deal-item', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 6;
+        },
+        number
+      >;
   };
 }
 
@@ -1747,6 +1766,7 @@ declare module '@strapi/strapi' {
       'deal-day.deals-by-store': DealDayDealsByStore;
       'deal-day.section-heading': DealDaySectionHeading;
       'deal-day.store-tab': DealDayStoreTab;
+      'deal-day.telegram-deal-item': DealDayTelegramDealItem;
       'deal-day.telegram-deals': DealDayTelegramDeals;
       'error-page.explore': ErrorPageExplore;
       'error-page.hero': ErrorPageHero;

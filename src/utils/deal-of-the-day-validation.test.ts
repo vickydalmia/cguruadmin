@@ -166,6 +166,65 @@ describe('Deal of the Day section limits', () => {
     ).rejects.toThrow(/Top Picks accepts at most 4/);
   });
 
+  it('accepts telegram items with a valid or empty link override', async () => {
+    const { strapi, findOne } = strapiWithCurrent();
+
+    await validateDealOfTheDaySectionLimits(strapi, {
+      telegramDeals: {
+        items: [
+          { deal: { id: 1 }, linkOverride: 'https://t.me/couponzguru/42' },
+          // Empty deliberately falls back to the deal's affiliate link.
+          { deal: { id: 2 }, linkOverride: '' },
+          { deal: { id: 3 }, linkOverride: null },
+          { deal: { id: 4 } },
+        ],
+      },
+    });
+
+    // Component lists arrive complete, so no stored row is needed.
+    expect(findOne).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed telegram link override with an indexed path', async () => {
+    const { strapi } = strapiWithCurrent();
+
+    for (const bad of ['t.me/couponzguru', 'javascript:alert(1)', 'https://t.me/a b']) {
+      await expect(
+        validateDealOfTheDaySectionLimits(strapi, {
+          telegramDeals: { items: [{ deal: { id: 1 }, linkOverride: bad }] },
+        })
+      ).rejects.toThrow(/Telegram link must be a complete http\(s\) URL/);
+    }
+
+    await validateDealOfTheDaySectionLimits(strapi, {
+      telegramDeals: {
+        items: [
+          { deal: { id: 1 }, linkOverride: 'https://t.me/ok' },
+          { deal: { id: 2 }, linkOverride: 'not-a-url' },
+        ],
+      },
+    }).catch((error: any) => {
+      expect(error.details.errors[0].path).toEqual([
+        'telegramDeals',
+        'items',
+        '1',
+        'linkOverride',
+      ]);
+    });
+  });
+
+  it('rejects more than six telegram items', async () => {
+    const { strapi } = strapiWithCurrent();
+
+    await expect(
+      validateDealOfTheDaySectionLimits(strapi, {
+        telegramDeals: {
+          items: Array.from({ length: 7 }, (_, id) => ({ deal: { id: id + 1 } })),
+        },
+      })
+    ).rejects.toThrow(/Telegram Exclusive accepts at most 6 Deals/);
+  });
+
   it('skips the database read for unrelated partial updates', async () => {
     const { strapi, findOne } = strapiWithCurrent();
 

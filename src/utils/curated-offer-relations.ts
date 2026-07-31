@@ -39,7 +39,7 @@ export const CURATED_OFFER_RELATIONS: readonly CuratedOfferRelation[] = [
   { sourceUid: 'home.explore-tab', field: 'deals', targetUid: 'api::deal.deal' },
   { sourceUid: 'deal-day.section-heading', field: 'deals', targetUid: 'api::deal.deal' },
   { sourceUid: 'deal-day.store-tab', field: 'deals', targetUid: 'api::deal.deal' },
-  { sourceUid: 'deal-day.telegram-deals', field: 'deals', targetUid: 'api::deal.deal' },
+  { sourceUid: 'deal-day.telegram-deal-item', field: 'deal', targetUid: 'api::deal.deal' },
   {
     sourceUid: 'header.coupon-notification',
     field: 'coupon',

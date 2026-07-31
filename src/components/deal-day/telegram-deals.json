@@ -18,10 +18,11 @@
     "ctaLabel": {
       "type": "string"
     },
-    "deals": {
-      "type": "relation",
-      "relation": "oneToMany",
-      "target": "api::deal.deal"
+    "items": {
+      "type": "component",
+      "component": "deal-day.telegram-deal-item",
+      "repeatable": true,
+      "max": 6
     }
   }
 }

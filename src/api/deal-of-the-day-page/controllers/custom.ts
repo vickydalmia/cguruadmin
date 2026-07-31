@@ -113,18 +113,25 @@ const DOTD_POPULATE = {
   smartSavingStack: orderedDealListSection,
   trendingNow: dealListSection,
   genZDrops: compactDealListSection,
-  // No viewAllCta populate: deal-day.telegram-deals has no such field.
-  telegramDeals: { populate: { deals: publishedTelegramDealListRef } },
+  // No viewAllCta populate: deal-day.telegram-deals has no such field. Items
+  // wrap each Deal so editors can override the unlock destination for THIS
+  // section only (linkOverride) without touching the Deal's affiliateLink,
+  // which every other rail still uses. Component scalars need no populate.
+  telegramDeals: {
+    populate: { items: { populate: { deal: publishedTelegramDealListRef } } },
+  },
   allDeals: { populate: { viewAllCta: true, deals: dealRef } },
 } as const;
 
+// Sections shaped as `{ deals: Deal[] }`. telegramDeals is deliberately absent:
+// it carries `items: [{ deal, linkOverride, titleOverride }]` instead, and is
+// filtered and capped explicitly below.
 const DEAL_LIST_SECTIONS = [
   'topPicks',
   'topDeals',
   'smartSavingStack',
   'trendingNow',
   'genZDrops',
-  'telegramDeals',
 ] as const;
 
 const CAPPED_DEAL_LIST_SECTIONS = [
@@ -132,7 +139,6 @@ const CAPPED_DEAL_LIST_SECTIONS = [
   'topDeals',
   'trendingNow',
   'genZDrops',
-  'telegramDeals',
 ] as const;
 
 const hasSmartStackFields = (deal: any) =>
@@ -163,6 +169,14 @@ function dropDeadOffers(page: any) {
       }
     }
   }
+  // Telegram items are wrappers: drop the whole item when its Deal is missing
+  // (deleted or filtered out as unpublished) or no longer live, so an item can
+  // never render as a card without a Deal behind it.
+  if (page.telegramDeals?.items) {
+    page.telegramDeals.items = page.telegramDeals.items.filter(
+      (item: any) => item?.deal && live(item.deal),
+    );
+  }
   if (page.dealsByCategory?.tabs) {
     page.dealsByCategory.tabs = page.dealsByCategory.tabs.filter(
       (tab: any) => tab?.category,
@@ -191,6 +205,12 @@ function capCuratedLists(page: any) {
     if (section?.deals) {
       section.deals = cap(section.deals, SECTION_CAPS[key]);
     }
+  }
+  if (page.telegramDeals?.items) {
+    page.telegramDeals.items = cap(
+      page.telegramDeals.items,
+      SECTION_CAPS.telegramDeals,
+    );
   }
   if (page.dealsByCategory?.tabs) {
     for (const tab of page.dealsByCategory.tabs) {
