@@ -101,11 +101,16 @@ const ENTITY_TYPES: Array<[uid: string, kind: IdentityKind]> = [
   ['api::bank.bank', 'bank'],
 ];
 
-export async function offerRelationSlugs(
+type OfferRelationScope = {
+  slugs: string[];
+  optionalSlugs: string[];
+};
+
+export async function offerRelationScope(
   strapi: Core.Strapi,
   uid: 'api::coupon.coupon' | 'api::deal.deal',
   documentId: string,
-): Promise<string[] | null> {
+): Promise<OfferRelationScope | null> {
   const doc: any = await strapi.documents(uid).findOne({
     documentId,
     populate: {
@@ -169,9 +174,11 @@ export async function offerRelationSlugs(
     }
   }
   for (const slug of entitySlugs) slugs.add(slug);
-  for (const slug of entityDealSlugs) slugs.add(slug);
 
-  return [...slugs];
+  return {
+    slugs: [...slugs],
+    optionalSlugs: [...entityDealSlugs],
+  };
 }
 
 /**
@@ -191,10 +198,17 @@ export async function preDeleteScope(
     refreshScopes: ['routes'],
   });
   try {
-    const slugs = await offerRelationSlugs(strapi, uid as any, documentId);
-    return slugs
+    const relationScope = await offerRelationScope(
+      strapi,
+      uid as any,
+      documentId,
+    );
+    return relationScope
       ? {
-          slugs: withDealLandingSlug(uid, slugs),
+          slugs: withDealLandingSlug(uid, relationScope.slugs),
+          ...(relationScope.optionalSlugs.length > 0
+            ? { optionalSlugs: relationScope.optionalSlugs }
+            : {}),
           homepage: true,
           sitemap: true,
           refreshScopes: ['routes'],
@@ -307,11 +321,20 @@ export async function computeScope(
       return { full: true, refreshScopes: ['routes'] };
     }
     if (!documentId) return { full: true, refreshScopes: ['routes'] };
-    const slugs = await offerRelationSlugs(strapi, uid as any, documentId);
-    if (slugs === null) return { full: true, refreshScopes: ['routes'] };
+    const relationScope = await offerRelationScope(
+      strapi,
+      uid as any,
+      documentId,
+    );
+    if (relationScope === null) {
+      return { full: true, refreshScopes: ['routes'] };
+    }
     // An offer with no entity relations only shows via curation surfaces.
     return {
-      slugs: withDealLandingSlug(uid, slugs),
+      slugs: withDealLandingSlug(uid, relationScope.slugs),
+      ...(relationScope.optionalSlugs.length > 0
+        ? { optionalSlugs: relationScope.optionalSlugs }
+        : {}),
       homepage: true,
       sitemap: true,
       refreshScopes: ['routes'],
@@ -337,15 +360,15 @@ export async function computeScope(
     // one page. `sitemap` stays because indexingEnabled decides whether the
     // generated route appears in a shard at all.
     if (action === 'update' && isEntityDealPageSeoOnlyChange(data)) {
-      return { slugs: [dealSlug], sitemap: true };
+      return { optionalSlugs: [dealSlug], sitemap: true };
     }
 
     // The deal landing page bakes store pill labels/logos and category tab
     // names/icons into its HTML — same reason entity edits carry homepage.
     const slugs =
       kind === 'store' || kind === 'category'
-        ? [...new Set([slug, dealSlug, DEAL_OF_THE_DAY_SLUG])]
-        : [slug, dealSlug];
+        ? [...new Set([slug, DEAL_OF_THE_DAY_SLUG])]
+        : [slug];
     const identityChanged =
       data
       && typeof data === 'object'
@@ -355,6 +378,7 @@ export async function computeScope(
       );
     return {
       slugs,
+      optionalSlugs: [dealSlug],
       homepage: true,
       sitemap: true,
       ...(identityChanged ? { refreshScopes: ['routes'] } : {}),

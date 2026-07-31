@@ -105,7 +105,8 @@ describe('deal-of-the-day landing page scope', () => {
     await expect(
       computeScope(strapi, 'api::deal.deal', 'update', 'doc1'),
     ).resolves.toEqual({
-      slugs: ['deal/42', 'amazon', 'amazon-india-deals', 'deal-of-the-day'],
+      slugs: ['deal/42', 'amazon', 'deal-of-the-day'],
+      optionalSlugs: ['amazon-india-deals'],
       homepage: true,
       sitemap: true,
       refreshScopes: ['routes'],
@@ -238,10 +239,9 @@ describe('deal-of-the-day landing page scope', () => {
         'deal/88',
         'samsung',
         'hdfc',
-        'samsung-mobile-deals',
-        'hdfc-bank-deals',
         'deal-of-the-day',
       ],
+      optionalSlugs: ['samsung-mobile-deals', 'hdfc-bank-deals'],
       homepage: true,
       sitemap: true,
       refreshScopes: ['routes'],
@@ -281,7 +281,8 @@ describe('deal-of-the-day landing page scope', () => {
     await expect(
       preDeleteScope(strapi, 'api::deal.deal', 'doc1', 'update'),
     ).resolves.toEqual({
-      slugs: ['deal/42', 'amazon', 'amazon-india-deals', 'deal-of-the-day'],
+      slugs: ['deal/42', 'amazon', 'deal-of-the-day'],
+      optionalSlugs: ['amazon-india-deals'],
       homepage: true,
       sitemap: true,
       refreshScopes: ['routes'],
@@ -367,7 +368,10 @@ describe('entity Deal-page SEO scope', () => {
       computeScope(strapi, 'api::store.store', 'update', 'store-1', {
         entityDealPageSeo: { indexingEnabled: true },
       }),
-    ).resolves.toEqual({ slugs: ['amazon-india-deals'], sitemap: true });
+    ).resolves.toEqual({
+      optionalSlugs: ['amazon-india-deals'],
+      sitemap: true,
+    });
   });
 
   it('keeps the broad scope for any other entity write', async () => {
@@ -375,7 +379,8 @@ describe('entity Deal-page SEO scope', () => {
     const strapi = strapiWithFindOne(entityDoc);
 
     const broad = {
-      slugs: ['amazon', 'amazon-india-deals', 'deal-of-the-day'],
+      slugs: ['amazon', 'deal-of-the-day'],
+      optionalSlugs: ['amazon-india-deals'],
       homepage: true,
       sitemap: true,
     };
@@ -464,7 +469,8 @@ describe('entity edits baked into the deal landing page', () => {
     await expect(
       computeScope(strapi, 'api::store.store', 'update', 'doc1'),
     ).resolves.toEqual({
-      slugs: ['amazon', 'amazon-india-deals', 'deal-of-the-day'],
+      slugs: ['amazon', 'deal-of-the-day'],
+      optionalSlugs: ['amazon-india-deals'],
       homepage: true,
       sitemap: true,
     });
@@ -476,7 +482,8 @@ describe('entity edits baked into the deal landing page', () => {
     await expect(
       computeScope(strapiCat, 'api::category.category', 'update', 'doc1'),
     ).resolves.toEqual({
-      slugs: ['electronics', 'consumer-electronics-deals', 'deal-of-the-day'],
+      slugs: ['electronics', 'deal-of-the-day'],
+      optionalSlugs: ['consumer-electronics-deals'],
       homepage: true,
       sitemap: true,
     });
@@ -491,7 +498,8 @@ describe('entity edits baked into the deal landing page', () => {
     await expect(
       computeScope(strapi, 'api::bank.bank', 'update', 'doc1'),
     ).resolves.toEqual({
-      slugs: ['hdfc', 'hdfc-bank-deals'],
+      slugs: ['hdfc'],
+      optionalSlugs: ['hdfc-bank-deals'],
       homepage: true,
       sitemap: true,
     });

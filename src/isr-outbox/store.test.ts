@@ -9,14 +9,16 @@ describe('ISR outbox payload validation', () => {
   it('accepts the existing wire protocol', () => {
     expect(
       parseIsrOutboxPayload({
-        paths: ['/amazon/'],
+        paths: ['/amazon/', '/amazon-deals/'],
+        optionalPaths: ['/amazon-deals/'],
         scopes: ['routes'],
         offerInvalidations: [
           { entityType: 'coupon', documentId: 'coupon-1' },
         ],
       }),
     ).toEqual({
-      paths: ['/amazon/'],
+      paths: ['/amazon/', '/amazon-deals/'],
+      optionalPaths: ['/amazon-deals/'],
       scopes: ['routes'],
       offerInvalidations: [
         { entityType: 'coupon', documentId: 'coupon-1' },
@@ -30,6 +32,10 @@ describe('ISR outbox payload validation', () => {
     {},
     { all: false },
     { paths: [null] },
+    {
+      paths: ['/amazon/'],
+      optionalPaths: ['/amazon-deals/'],
+    },
     { offerInvalidations: [{ entityType: 'deal' }] },
   ])('rejects a structurally invalid durable payload: %j', (payload) => {
     expect(() => parseIsrOutboxPayload(payload)).toThrow();

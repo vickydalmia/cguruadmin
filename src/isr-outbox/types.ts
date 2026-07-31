@@ -4,6 +4,11 @@ export interface ScopeRequest {
   /** Refresh route-derived responses such as sitemap and route inventory. */
   sitemap?: boolean;
   slugs?: string[];
+  /**
+   * Conditionally generated routes that should be invalidated when admitted,
+   * but whose authoritative absence is successful convergence.
+   */
+  optionalSlugs?: string[];
   refreshScopes?: string[];
 }
 
@@ -17,6 +22,8 @@ export interface OfferInvalidation {
 export interface IsrOutboxPayload {
   all?: true;
   paths?: string[];
+  /** A normalized subset of paths whose absence must not fail delivery. */
+  optionalPaths?: string[];
   scopes?: string[];
   offerInvalidations?: OfferInvalidation[];
 }

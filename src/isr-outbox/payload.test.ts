@@ -48,6 +48,36 @@ describe('createOutboxPayload', () => {
     expect(payload.scopes).toEqual(['sitemap', 'routes']);
   });
 
+  it('includes optional routes in paths while preserving their absence policy', () => {
+    const payload = createOutboxPayload({
+      slugs: ['ugreen'],
+      optionalSlugs: ['ugreen-deals', '/ugreen-deals/'],
+      homepage: true,
+      sitemap: true,
+      refreshScopes: ['routes'],
+    });
+
+    expect(payload).toEqual({
+      paths: [
+        '/',
+        '/sitemap_index.xml',
+        '/ugreen/',
+        '/ugreen-deals/',
+      ],
+      optionalPaths: ['/ugreen-deals/'],
+      scopes: ['sitemap', 'routes'],
+    });
+  });
+
+  it('makes required status win when a slug is also marked optional', () => {
+    expect(
+      createOutboxPayload({
+        slugs: ['summer-deals'],
+        optionalSlugs: ['/summer-deals/'],
+      }),
+    ).toEqual({ paths: ['/summer-deals/'] });
+  });
+
   it('marks global invalidation with route and redirect refresh scopes', () => {
     expect(
       createOutboxPayload({
@@ -134,14 +164,23 @@ describe('mergeScope', () => {
   it('unions before and after relation pages', () => {
     expect(
       mergeScope(
-        { homepage: true, slugs: ['old-store'] },
-        { sitemap: true, slugs: ['new-store', 'old-store'] },
+        {
+          homepage: true,
+          slugs: ['old-store'],
+          optionalSlugs: ['old-store-deals', '/promoted-route/'],
+        },
+        {
+          sitemap: true,
+          slugs: ['new-store', 'old-store', 'promoted-route'],
+          optionalSlugs: ['new-store-deals'],
+        },
       ),
     ).toEqual({
       full: false,
       homepage: true,
       sitemap: true,
-      slugs: ['old-store', 'new-store'],
+      slugs: ['old-store', 'new-store', 'promoted-route'],
+      optionalSlugs: ['old-store-deals', 'new-store-deals'],
     });
   });
 

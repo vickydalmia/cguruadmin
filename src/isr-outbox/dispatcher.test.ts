@@ -156,7 +156,13 @@ describe('deliverOutboxEvent', () => {
   it('sends the stable event key and accepts a 202 response', async () => {
     const fetchImpl = vi.fn(async () => new Response('{}', { status: 202 }));
     await deliverOutboxEvent(
-      event,
+      {
+        ...event,
+        payload: {
+          paths: ['/amazon/', '/amazon-deals/'],
+          optionalPaths: ['/amazon-deals/'],
+        },
+      },
       {
         gatewayUrl: 'http://gateway.test',
         adminSecret: 'secret',
@@ -173,7 +179,8 @@ describe('deliverOutboxEvent', () => {
     });
     expect(JSON.parse(String((init as RequestInit).body))).toEqual({
       eventKey: 'stable-key',
-      paths: ['/amazon/'],
+      paths: ['/amazon/', '/amazon-deals/'],
+      optionalPaths: ['/amazon-deals/'],
     });
   });
 

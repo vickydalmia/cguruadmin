@@ -38,7 +38,15 @@ export function parseIsrOutboxPayload(value: unknown): IsrOutboxPayload {
     throw new Error('payload.all must be true when present');
   }
   const paths = stringArray(input.paths, 'payload.paths');
+  const optionalPaths = stringArray(
+    input.optionalPaths,
+    'payload.optionalPaths',
+  );
   const scopes = stringArray(input.scopes, 'payload.scopes');
+  const pathSet = new Set(paths ?? []);
+  if (optionalPaths?.some((path) => !pathSet.has(path))) {
+    throw new Error('payload.optionalPaths must be a subset of payload.paths');
+  }
   let offerInvalidations: IsrOutboxPayload['offerInvalidations'];
   if (input.offerInvalidations !== undefined) {
     if (!Array.isArray(input.offerInvalidations)) {
@@ -65,6 +73,7 @@ export function parseIsrOutboxPayload(value: unknown): IsrOutboxPayload {
   const payload: IsrOutboxPayload = {
     ...(input.all === true ? { all: true as const } : {}),
     ...(paths?.length ? { paths } : {}),
+    ...(optionalPaths?.length ? { optionalPaths } : {}),
     ...(scopes?.length ? { scopes } : {}),
     ...(offerInvalidations?.length ? { offerInvalidations } : {}),
   };

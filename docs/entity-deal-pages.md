@@ -276,6 +276,19 @@ active redirect occupy the same URL. Examples:
 If legacy data already contains a conflict, the generated page remains
 `noindex`, and the authored entity route takes precedence at runtime.
 
+## ISR invalidation behavior
+
+Generated entity Deal URLs are conditional routes: they exist only while at
+least one actionable live Deal is related to the entity and no route conflict
+blocks the generated path. Strapi therefore includes these URLs in the durable
+outbox payload's `paths` and marks them in the `optionalPaths` subset.
+
+The ISR gateway refreshes route inventory before resolving absence. A generated
+URL that is live or pending is invalidated normally; one that is authoritatively
+absent is returned in `removedPaths` and the outbox event can complete. Normal
+entity URLs and all other required paths remain strict—an unknown required path
+stays in `skippedPaths` and is retried.
+
 ## Future admin settings screen
 
 Build the screen from `GET /entity-deal-page/pages`; do not query and merge

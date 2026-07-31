@@ -533,6 +533,12 @@ order by id;
 Do not manually recreate outbox rows. Their stable event keys provide
 idempotent delivery and the dispatcher retries them automatically.
 
+Targeted payloads may include `optionalPaths`, always as a subset of `paths`.
+These are conditionally generated entity Deal pages. The gateway still
+invalidates them when admitted, but after refreshing route inventory it treats
+their authoritative absence as successful convergence. Missing required paths
+remain delivery failures.
+
 ## 11. Functional verification
 
 Verify:

@@ -38,6 +38,16 @@ export function mergeScope(
   after: ScopeRequest | null | undefined,
 ): ScopeRequest | null {
   if (!before && !after) return null;
+  const slugs = [
+    ...new Set([...(before?.slugs ?? []), ...(after?.slugs ?? [])]),
+  ];
+  const requiredPaths = new Set(slugs.map(normalizePath));
+  const optionalSlugs = [
+    ...new Set([
+      ...(before?.optionalSlugs ?? []),
+      ...(after?.optionalSlugs ?? []),
+    ]),
+  ].filter((slug) => !requiredPaths.has(normalizePath(slug)));
   const refreshScopes = [
     ...new Set([
       ...(before?.refreshScopes ?? []),
@@ -48,9 +58,8 @@ export function mergeScope(
     full: Boolean(before?.full || after?.full),
     homepage: Boolean(before?.homepage || after?.homepage),
     sitemap: Boolean(before?.sitemap || after?.sitemap),
-    slugs: [
-      ...new Set([...(before?.slugs ?? []), ...(after?.slugs ?? [])]),
-    ],
+    slugs,
+    ...(optionalSlugs.length > 0 ? { optionalSlugs } : {}),
     ...(refreshScopes.length > 0 ? { refreshScopes } : {}),
   };
 }
@@ -78,13 +87,22 @@ export function createOutboxPayload(
     };
   }
 
-  const paths = new Set<string>();
-  if (scope.homepage) paths.add('/');
-  if (scope.sitemap) paths.add(SITEMAP_INDEX_PATH);
-  for (const slug of scope.slugs ?? []) paths.add(normalizePath(slug));
+  const requiredPaths = new Set<string>();
+  if (scope.homepage) requiredPaths.add('/');
+  if (scope.sitemap) requiredPaths.add(SITEMAP_INDEX_PATH);
+  for (const slug of scope.slugs ?? []) requiredPaths.add(normalizePath(slug));
+  const optionalPaths = new Set(
+    (scope.optionalSlugs ?? [])
+      .map(normalizePath)
+      .filter((path) => !requiredPaths.has(path)),
+  );
+  const paths = new Set([...requiredPaths, ...optionalPaths]);
 
   return {
     ...(paths.size > 0 ? { paths: [...paths] } : {}),
+    ...(optionalPaths.size > 0
+      ? { optionalPaths: [...optionalPaths] }
+      : {}),
     ...(
       scope.sitemap || scope.refreshScopes?.length
         ? {
@@ -143,6 +161,9 @@ export function outboxPayloadSummary(payload: IsrOutboxPayload) {
     pathCount: payload.paths?.length ?? 0,
     pathSample: payload.paths?.slice(0, 100) ?? [],
     pathsTruncated: (payload.paths?.length ?? 0) > 100,
+    optionalPathCount: payload.optionalPaths?.length ?? 0,
+    optionalPathSample: payload.optionalPaths?.slice(0, 100) ?? [],
+    optionalPathsTruncated: (payload.optionalPaths?.length ?? 0) > 100,
     scopes: payload.scopes ?? [],
     offerInvalidationCount: payload.offerInvalidations?.length ?? 0,
   };
