@@ -10,7 +10,7 @@
  */
 export const HOMEPAGE_SEED_LIMITS = {
   heroProducts: 4, // site shows 4 — no buffer by design
-  popularStores: 24, // list stores, +1 featured on top — no buffer by design
+  popularStores: 31, // list stores, +1 featured on top — no buffer by design
   topOffers: 8, // site shows 4
   topDeals: 10, // site shows 6
   cgExclusive: 8, // site shows 4

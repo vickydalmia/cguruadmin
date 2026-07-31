@@ -1,3 +1,5 @@
+import { errors } from '@strapi/utils';
+
 import { isTrustedSocket } from '../../../../../middlewares/rate-limit';
 
 /**
@@ -31,40 +33,48 @@ function cleanup() {
   }
 }
 
-export default (_config: unknown, { strapi: _strapi }: { strapi: any }) => {
-  return async (ctx: any, next: () => Promise<void>) => {
-    // Same bypass as the global limiter (src/middlewares/rate-limit.ts), and
-    // for the same reason: matched on the raw TCP socket, which cannot be
-    // spoofed, unlike the koa-resolved IP. Without it a deployment that relies
-    // on RATE_LIMIT_TRUSTED_IPS rather than TRUST_PROXY puts every visitor in
-    // one bucket, and the whole site shares a single redemption allowance.
-    if (isTrustedSocket(ctx.req?.socket?.remoteAddress)) {
-      return next();
-    }
+/**
+ * Strapi policies are handlers, not Koa middleware factories. They receive
+ * `(policyContext, routeConfig, { strapi })` and must return true/undefined to
+ * allow the controller. Returning a middleware function is interpreted as a
+ * failed policy and produces a 403 before redemption reaches the controller.
+ */
+export default (
+  ctx: any,
+  _config: unknown,
+  { strapi: _strapi }: { strapi: any }
+) => {
+  // Same bypass as the global limiter (src/middlewares/rate-limit.ts), and
+  // for the same reason: matched on the raw TCP socket, which cannot be
+  // spoofed, unlike the koa-resolved IP. Without it a deployment that relies
+  // on RATE_LIMIT_TRUSTED_IPS rather than TRUST_PROXY puts every visitor in
+  // one bucket, and the whole site shares a single redemption allowance.
+  if (isTrustedSocket(ctx.req?.socket?.remoteAddress)) {
+    return true;
+  }
 
-    cleanup();
+  cleanup();
 
-    // Use the koa-resolved client IP (honors TRUST_PROXY / X-Forwarded-For per
-    // config/server.ts). Do NOT read raw X-Forwarded-For — it is
-    // client-spoofable and lets an attacker rotate the header to bypass the
-    // limit and drain a coupon pool.
-    const ip: string = ctx.request.ip || 'unknown';
+  // Use the koa-resolved client IP (honors TRUST_PROXY / X-Forwarded-For per
+  // config/server.ts). Do NOT read raw X-Forwarded-For — it is
+  // client-spoofable and lets an attacker rotate the header to bypass the
+  // limit and drain a coupon pool.
+  const ip: string = ctx.request.ip || 'unknown';
 
-    const now = Date.now();
-    const entry = requestCounts.get(ip);
+  const now = Date.now();
+  const entry = requestCounts.get(ip);
 
-    if (!entry || now > entry.resetAt) {
-      requestCounts.set(ip, { count: 1, resetAt: now + WINDOW_MS });
-      return next();
-    }
+  if (!entry || now > entry.resetAt) {
+    requestCounts.set(ip, { count: 1, resetAt: now + WINDOW_MS });
+    return true;
+  }
 
-    if (entry.count >= MAX_REQUESTS) {
-      const retryAfterSec = Math.ceil((entry.resetAt - now) / 1000);
-      ctx.set('Retry-After', String(retryAfterSec));
-      return ctx.tooManyRequests('Rate limit exceeded. Try again later.');
-    }
+  if (entry.count >= MAX_REQUESTS) {
+    const retryAfterSec = Math.ceil((entry.resetAt - now) / 1000);
+    ctx.set('Retry-After', String(retryAfterSec));
+    throw new errors.RateLimitError('Rate limit exceeded. Try again later.');
+  }
 
-    entry.count++;
-    return next();
-  };
+  entry.count++;
+  return true;
 };

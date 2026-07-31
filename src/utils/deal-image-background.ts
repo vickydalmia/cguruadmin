@@ -2,7 +2,7 @@ import { ApiError, createFalClient } from '@fal-ai/client';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import sharp from 'sharp';
+import sharp, { type Metadata } from 'sharp';
 
 export const DEAL_IMAGE_PROCESSOR_VERSION = 'fal-bria-rmbg-2.0-v1';
 export const DEAL_IMAGE_FAL_ENDPOINT = 'fal-ai/bria/background/remove';
@@ -192,7 +192,7 @@ const safeFileStem = (fileName: string): string => {
 async function alphaStats(
   input: Buffer,
 ): Promise<{ meaningful: boolean; width: number; height: number }> {
-  let metadata: sharp.Metadata;
+  let metadata: Metadata;
   try {
     metadata = await sharp(input, { animated: false }).metadata();
   } catch (cause) {
@@ -224,7 +224,7 @@ async function alphaStats(
 export async function validateTransparentDealPng(
   input: Buffer,
 ): Promise<{ width: number; height: number }> {
-  let metadata: sharp.Metadata;
+  let metadata: Metadata;
   try {
     metadata = await sharp(input, { animated: false }).metadata();
   } catch (cause) {

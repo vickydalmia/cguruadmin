@@ -29,7 +29,7 @@ const MAX_LIST_ITEMS = 16;
 const MAX_TOP_STORES = 18;
 const TOP_DEALS_RENDER_COUNT = 6;
 const SECTION_LIST_CAPS = {
-  popularStores: 24, // site shows 24
+  popularStores: 31, // site shows 31
   topDeals: 10, // site shows 6
   dealsByBrand: 10, // legacy fallback, mirrors topDeals
   offersByBrand: 7, // site shows 3
@@ -431,9 +431,22 @@ async function attachOfferCounts(strapi: Core.Strapi, homepage: any) {
 
   const stores = [section.featuredStore, ...(section.stores ?? [])].filter(Boolean);
   const uniqueIds = [...new Set(stores.map((s: any) => s.documentId))] as string[];
-  const counts = await Promise.all(
-    uniqueIds.map(async (id) => [id, await countOffersForStore(strapi, id)] as const),
-  );
+  // Two counts per store, so an unbounded Promise.all here scales the burst
+  // with the section cap (31 + featured = 64 statements). The pool is 5-10
+  // connections shared with the admin, cron, redeem and outbox paths, so a
+  // single homepage cache miss could otherwise starve them. Batching keeps
+  // the burst flat as the cap grows; results and order are unchanged.
+  const counts: (readonly [string, number])[] = [];
+  const BATCH = 4; // 4 stores in flight = 8 concurrent count statements
+  for (let index = 0; index < uniqueIds.length; index += BATCH) {
+    counts.push(
+      ...(await Promise.all(
+        uniqueIds
+          .slice(index, index + BATCH)
+          .map(async (id) => [id, await countOffersForStore(strapi, id)] as const),
+      )),
+    );
+  }
   const byId = new Map(counts);
   for (const store of stores) {
     store.offerCount = byId.get(store.documentId) ?? 0;

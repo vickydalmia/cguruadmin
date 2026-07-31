@@ -6,7 +6,7 @@ import {
 
 function strapiWithCurrent(
   current: any = {},
-  qualifyingDealIds: ReadonlySet<string | number> | null = null
+  qualifyingBenefitDealIds: ReadonlySet<string | number> | null = null
 ) {
   const findOne = vi.fn().mockResolvedValue(current);
   const findMany = vi.fn(({ where }: any) => {
@@ -18,12 +18,19 @@ function strapiWithCurrent(
     return [...ids, ...documentIds].map((key) => ({
       id: typeof key === 'number' ? key : undefined,
       documentId: typeof key === 'string' ? key : undefined,
-      code:
-        qualifyingDealIds == null || qualifyingDealIds.has(key) ? 'SAVE20' : null,
+      // Deliberately no code: Smart Stack eligibility is based only on the two
+      // benefit texts.
+      code: null,
       cashbackText:
-        qualifyingDealIds == null || qualifyingDealIds.has(key) ? '15%' : null,
+        qualifyingBenefitDealIds == null ||
+        qualifyingBenefitDealIds.has(key)
+          ? '15%'
+          : null,
       bankOfferText:
-        qualifyingDealIds == null || qualifyingDealIds.has(key) ? '₹200' : null,
+        qualifyingBenefitDealIds == null ||
+        qualifyingBenefitDealIds.has(key)
+          ? '₹200'
+          : null,
     }));
   });
   return {
@@ -106,7 +113,20 @@ describe('Deal of the Day section limits', () => {
     ).rejects.toThrow(/requires at least 3 eligible Deals/);
   });
 
-  it('counts only Smart Stack Deals with code and both required benefit texts', async () => {
+  it('counts no-code Smart Stack Deals when both benefit texts exist', async () => {
+    const { strapi } = strapiWithCurrent();
+
+    await expect(
+      validateDealOfTheDaySectionLimits(strapi, {
+        smartSavingStack: {
+          enabled: true,
+          deals: [{ id: 1 }, { id: 2 }, { id: 3 }],
+        },
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it('counts only Smart Stack Deals with both required benefit texts', async () => {
     const { strapi } = strapiWithCurrent({}, new Set([1, 2]));
 
     await expect(

@@ -423,7 +423,22 @@ async function recountPools(knex) {
   // cleared `exhausted_at`. Import locks a single row, this locks all rows in
   // id order: no deadlock cycle. Nests as a savepoint when the caller already
   // holds a transaction (bootstrap does).
+  // True when the caller already holds a transaction (bootstrap), making the
+  // block below a savepoint rather than a real transaction.
+  const nestedInCallerTransaction = Boolean(knex.isTransaction);
   await knex.transaction(async (trx) => {
+    // Bound the nightly cron path so the recount can never hold (or wait on)
+    // every pool lock indefinitely — e.g. behind a wedged import. On timeout
+    // the statement errors, the cron logs it, and the next night retries.
+    // Skipped when nested: SET LOCAL lasts to the END of the top-level
+    // transaction (a released savepoint does not revert it), so applying it
+    // here would silently impose these limits on the rest of the caller's
+    // bootstrap transaction.
+    if (!nestedInCallerTransaction) {
+      await trx.raw(
+        "SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '60s'",
+      );
+    }
     const previous = await trx(POOLS_TABLE)
       .select("id", "exhausted_at")
       .orderBy("id")

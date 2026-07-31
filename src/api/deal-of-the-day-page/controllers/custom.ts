@@ -26,32 +26,13 @@ const TAB_RENDER_COUNT = 6;
 
 const DEAL_FIELDS = dealRef.fields;
 
-// Matches PUBLIC_CODE_COUPON_TYPES in the frontend (coupon-code.ts): the only
-// code types whose code is rendered in public HTML.
-const PUBLIC_CODE_COUPON_TYPES = ['static', 'dynamic'];
-
-// Smart-stack cards only render when they are redeemable and both benefit
-// texts exist; enforce the same rule in queries so counts never include an
-// ineligible card. "Redeemable" covers both shapes — one shared code, or a
-// unique pool issuing one per visitor — mirroring hasSmartStackBenefits in
-// the frontend (all-deals-source.ts): a unique Deal carries no static `code`,
-// so filtering on the column alone would exclude every one of them.
+// Smart-stack cards require both benefit texts. Code availability is not an
+// eligibility rule: a Deal with no public code still belongs in the stack.
+// Keep this identical to hasSmartStackBenefits in the frontend so the API
+// count and rendered list cannot disagree.
 const BENEFIT_TEXT_FILTER = {
   cashbackText: { $notNull: true, $ne: '' },
   bankOfferText: { $notNull: true, $ne: '' },
-  $or: [
-    {
-      // A code only renders for publicly supported code types — a unique (or
-      // unknown) type with a stale legacy code shows nothing, so it must not
-      // count either.
-      couponType: { $in: PUBLIC_CODE_COUPON_TYPES },
-      code: { $notNull: true, $ne: '' },
-    },
-    {
-      couponType: { $eq: 'unique' },
-      uniqueCouponPool: { documentId: { $notNull: true } },
-    },
-  ],
 } as const;
 
 // Gen-Z and Telegram cards render without an expandable details row, so keep
@@ -154,21 +135,7 @@ const CAPPED_DEAL_LIST_SECTIONS = [
   'telegramDeals',
 ] as const;
 
-// Mirrors the frontend's hasSmartStackBenefits: redeemable via a publicly
-// renderable code OR a unique pool, plus both benefit texts. The code branch
-// gates on the same allow-list as the frontend's visibleCouponCode — a
-// unique/unknown type carrying a stale legacy code renders no code there, so
-// it must not qualify here either.
-const hasSmartStackRedeemable = (deal: any) =>
-  (PUBLIC_CODE_COUPON_TYPES.includes(deal?.couponType) &&
-    typeof deal?.code === 'string' &&
-    deal.code.trim().length > 0) ||
-  (deal?.couponType === 'unique' &&
-    typeof deal?.uniqueCouponPool?.documentId === 'string' &&
-    deal.uniqueCouponPool.documentId.trim().length > 0);
-
 const hasSmartStackFields = (deal: any) =>
-  hasSmartStackRedeemable(deal) &&
   typeof deal?.cashbackText === 'string' &&
   deal.cashbackText.trim().length > 0 &&
   typeof deal?.bankOfferText === 'string' &&

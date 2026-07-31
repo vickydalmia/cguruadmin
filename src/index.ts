@@ -51,6 +51,10 @@ import {
   type EditLayout,
 } from './utils/content-manager-layout';
 import {
+  applyAdminRelationSearchFields,
+  groupAdminRelationSearchFields,
+} from './utils/content-manager-relation-search';
+import {
   changedFieldHints,
   changedFieldSeoHints,
 } from './utils/changed-field-validation';
@@ -61,7 +65,6 @@ import { textFieldHints } from './utils/text-field-validation';
 // of their problems in a single error instead of the first one it hits.
 import { runWriteValidation } from './utils/write-validation/run';
 import {
-  CURATED_OFFER_RELATIONS,
   registerCuratedOfferRelationQueryFilter,
   removeInactiveCuratedOfferRelations,
 } from './utils/curated-offer-relations';
@@ -410,55 +413,69 @@ async function ensureComponentEntryTitles(strapi: Core.Strapi): Promise<void> {
 }
 
 // Native relation search reads mainField from the SOURCE component relation
-// metadata. Pin curated Homepage, Deal-of-the-Day, and header-notification
-// offer relations to title; otherwise Strapi falls back to searching numeric
-// IDs.
-async function ensureCuratedRelationSearchFields(
+// metadata. This configuration is strictly for Content Manager: it changes
+// which visible text Admin searches and never touches public query filters,
+// relation data, or ISR.
+async function ensureAdminRelationSearchFields(
   strapi: Core.Strapi
 ): Promise<void> {
   const service: any = strapi.plugin('content-manager').service('components');
   if (!service) return;
 
-  const fieldsByComponent = new Map<string, Set<string>>();
-  for (const relation of CURATED_OFFER_RELATIONS) {
-    if (
-      !relation.sourceUid.startsWith('home.') &&
-      !relation.sourceUid.startsWith('deal-day.') &&
-      !relation.sourceUid.startsWith('header.')
-    ) {
-      continue;
-    }
-    const fields = fieldsByComponent.get(relation.sourceUid) ?? new Set<string>();
-    fields.add(relation.field);
-    fieldsByComponent.set(relation.sourceUid, fields);
-  }
-
-  for (const [uid, fields] of fieldsByComponent) {
+  for (const [uid, fields] of groupAdminRelationSearchFields()) {
     try {
       const component = service.findComponent(uid);
       if (!component) continue;
+
+      const validFields = fields.filter((field) => {
+        const attribute =
+          (strapi.components as any)?.[uid]?.attributes?.[field.field];
+        if (
+          attribute?.type !== 'relation' ||
+          attribute?.target !== field.targetUid
+        ) {
+          strapi.log.warn(
+            `[content-manager] admin relation search skipped: `
+            + `${uid}.${field.field} is not a relation to ${field.targetUid}`
+          );
+          return false;
+        }
+
+        let target: any = null;
+        try {
+          target = strapi.contentType(field.targetUid as any);
+        } catch {
+          target = null;
+        }
+        if (!target?.attributes?.[field.mainField]) {
+          strapi.log.warn(
+            `[content-manager] admin relation search skipped: `
+            + `${field.targetUid} has no field "${field.mainField}"`
+          );
+          return false;
+        }
+        return true;
+      });
+      if (validFields.length === 0) continue;
+
       const config = await service.findConfiguration(component);
-      const metadatas = { ...(config.metadatas ?? {}) };
-      let changed = false;
+      const update = applyAdminRelationSearchFields(
+        config.metadatas,
+        validFields,
+      );
+      if (!update) continue;
 
-      for (const field of fields) {
-        const previous = metadatas[field] ?? {};
-        if (previous.edit?.mainField === 'title') continue;
-        metadatas[field] = {
-          ...previous,
-          edit: { ...(previous.edit ?? {}), mainField: 'title' },
-        };
-        changed = true;
-      }
-      if (!changed) continue;
-
-      await service.updateConfiguration(component, { ...config, metadatas });
+      await service.updateConfiguration(component, {
+        ...config,
+        metadatas: update.metadatas,
+      });
       strapi.log.info(
-        `[content-manager] title search enabled for curated relations in ${uid}`
+        `[content-manager] admin relation search configured for ${uid}: `
+        + update.changedFields.join(', ')
       );
     } catch (err: any) {
       strapi.log.warn(
-        `[content-manager] curated relation search for ${uid} failed: ${err?.message ?? err}`
+        `[content-manager] admin relation search for ${uid} failed: ${err?.message ?? err}`
       );
     }
   }
@@ -514,6 +531,8 @@ COMPONENT_FIELD_DESCRIPTIONS['shared.seo'].ogImage =
   'Share-card image shown when the page is shared on social apps. Recommended: at least 1200 × 630 px (1.91:1). Smaller images are allowed but may crop or blur in previews. Leave empty to use the site default card.';
 (COMPONENT_FIELD_DESCRIPTIONS['shared.entity-deal-page-seo'] ??= {}).ogImage =
   'Share-card image shown when the deal page is shared on social apps. Recommended: at least 1200 × 630 px (1.91:1). Smaller images are allowed but may crop or blur in previews. Leave empty to use the site default card.';
+(COMPONENT_FIELD_DESCRIPTIONS['homepage.slider-slide'] ??= {}).link =
+  'Optional banner destination. Use /path/ for a CouponzGuru page or a full http(s) URL. CouponzGuru links open in this tab and remain followed; external links open in a new tab with nofollow. Leave empty for a non-clickable banner.';
 (COMPONENT_FIELD_DESCRIPTIONS['nav.category-section'] ??= {}).category =
   'Preferred destination. When selected, the menu links to this Category and uses its icon unless an Icon override is uploaded below.';
 COMPONENT_FIELD_DESCRIPTIONS['nav.category-section'].url =
@@ -1806,7 +1825,7 @@ export default {
     await restrictSingleTypesToSuperAdmin(strapi);
     await ensureUploadSettings(strapi);
     await ensureComponentEntryTitles(strapi);
-    await ensureCuratedRelationSearchFields(strapi);
+    await ensureAdminRelationSearchFields(strapi);
     await ensureNavigationIconPlacement(strapi);
     await ensureComponentFieldDescriptions(strapi);
     await ensureFieldDescriptions(strapi);

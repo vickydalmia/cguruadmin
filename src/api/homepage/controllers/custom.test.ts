@@ -167,7 +167,9 @@ describe('homepage aggregate offer population', () => {
     const published = Array.from({ length: 30 }, (_, index) => publishedOffer(index));
     const expired = { documentId: 'expired', contentStatus: 'expired' };
     const harness = createHarness({
-      popularStores: { stores: Array.from({ length: 30 }, (_, i) => ({ documentId: `store-${i}` })) },
+      popularStores: {
+        stores: Array.from({ length: 40 }, (_, i) => ({ documentId: `store-${i}` })),
+      },
       // enabled:false pins the raw drop/cap path — backfill (tested separately)
       // would replace these bare curated records as non-actionable.
       topDeals: { enabled: false, deals: [expired, ...published] },
@@ -178,7 +180,7 @@ describe('homepage aggregate offer population', () => {
 
     const response = await harness.controller.homepageFull(harness.ctx as any);
 
-    expect(response.data.popularStores.stores).toHaveLength(24);
+    expect(response.data.popularStores.stores).toHaveLength(31);
     expect(response.data.topDeals.deals).toHaveLength(10);
     expect(response.data.offersByBrand.offers).toHaveLength(7);
     expect(response.data.exploreDeals.tabs[0].deals).toHaveLength(10);

@@ -13,9 +13,11 @@ async function loadPolicy(trustedIps?: string) {
   } else {
     process.env.RATE_LIMIT_TRUSTED_IPS = trustedIps;
   }
-  const factory = (await import('./rate-limit')).default;
-  return factory(undefined, { strapi: {} as any });
+  return (await import('./rate-limit')).default;
 }
+
+const invokePolicy = (policy: Awaited<ReturnType<typeof loadPolicy>>, ctx: any) =>
+  policy(ctx, {}, { strapi: {} as any });
 
 function createCtx(
   ip: string,
@@ -25,7 +27,6 @@ function createCtx(
     request: { ip },
     req: { socket: { remoteAddress: socketAddress } },
     set: vi.fn(),
-    tooManyRequests: vi.fn(() => 'rate-limited'),
   } as any;
 }
 
@@ -54,26 +55,23 @@ describe('unique-coupon redeem rate limit', () => {
     // allowance, and shared-NAT visitors would collect 429s the interstitial
     // renders as "code currently unavailable".
     const policy = await loadPolicy();
-    const next = vi.fn(async () => undefined);
 
     for (let attempt = 0; attempt < 10; attempt += 1) {
-      await policy(createCtx('203.0.113.5'), next);
+      expect(invokePolicy(policy, createCtx('203.0.113.5'))).toBe(true);
     }
-
-    expect(next).toHaveBeenCalledTimes(10);
   });
 
   it('eventually refuses a caller that bypassed the gateway', async () => {
     const policy = await loadPolicy();
-    const next = vi.fn(async () => undefined);
     const ctx = createCtx('203.0.113.6');
 
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      await policy(createCtx('203.0.113.6'), next);
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      expect(invokePolicy(policy, createCtx('203.0.113.6'))).toBe(true);
     }
-    const result = await policy(ctx, next);
 
-    expect(result).toBe('rate-limited');
+    expect(() => invokePolicy(policy, ctx)).toThrowError(
+      expect.objectContaining({ name: 'RateLimitError' }),
+    );
     expect(ctx.set).toHaveBeenCalledWith('Retry-After', expect.any(String));
   });
 
@@ -82,32 +80,38 @@ describe('unique-coupon redeem rate limit', () => {
     // TRUST_PROXY puts every visitor in one bucket and the whole site shares a
     // single redemption allowance.
     const policy = await loadPolicy(TRUSTED_IP);
-    const next = vi.fn(async () => undefined);
 
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      await policy(createCtx('203.0.113.7', { socketAddress: TRUSTED_IP }), next);
+      expect(
+        invokePolicy(
+          policy,
+          createCtx('203.0.113.7', { socketAddress: TRUSTED_IP }),
+        ),
+      ).toBe(true);
     }
-
-    expect(next).toHaveBeenCalledTimes(100);
   });
 
   it('matches the trust on the socket, not on the spoofable resolved IP', async () => {
     const policy = await loadPolicy(TRUSTED_IP);
-    const next = vi.fn(async () => undefined);
 
     // A public client claiming to be the VPC via X-Forwarded-For resolves to
     // the trusted IP but connects from its own socket.
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      await policy(
-        createCtx(TRUSTED_IP, { socketAddress: '203.0.113.8' }),
-        next,
-      );
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      expect(
+        invokePolicy(
+          policy,
+          createCtx(TRUSTED_IP, { socketAddress: '203.0.113.8' }),
+        ),
+      ).toBe(true);
     }
-    const result = await policy(
-      createCtx(TRUSTED_IP, { socketAddress: '203.0.113.8' }),
-      next,
-    );
 
-    expect(result).toBe('rate-limited');
+    expect(() =>
+      invokePolicy(
+        policy,
+        createCtx(TRUSTED_IP, { socketAddress: '203.0.113.8' }),
+      ),
+    ).toThrowError(
+      expect.objectContaining({ name: 'RateLimitError' }),
+    );
   });
 });

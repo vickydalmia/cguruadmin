@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import sharp from 'sharp';
+import sharp, { type FormatEnum, type Metadata } from 'sharp';
 import { IMAGE_BREAKPOINTS, IMAGE_OPTIMIZATION as OPT } from '../../constants/image';
 import { slugify } from '../../constants/slugify';
 import { calculateImageBackgroundColour } from '../../utils/image-background-colour';
@@ -139,7 +139,7 @@ export default (plugin: any) => {
       );
     }
 
-    let meta: sharp.Metadata;
+    let meta: Metadata;
     try {
       meta = await sharp(file.filepath).metadata();
     } catch {
@@ -161,7 +161,9 @@ export default (plugin: any) => {
       return attachDealImageMetadata(file, file.filepath);
     }
 
-    const outFormat = (toWebp ? 'webp' : format) as keyof sharp.FormatEnum;
+    // 'avif' is a valid toFormat target but lives outside FormatEnum's keys
+    // in sharp 0.35's typings, hence the widened union.
+    const outFormat = (toWebp ? 'webp' : format) as 'avif' | keyof FormatEnum;
     const outPath = path.join(
       file.tmpWorkingDirectory ?? os.tmpdir(),
       `optimized-${file.hash}`
@@ -390,7 +392,11 @@ export default (plugin: any) => {
     if (await base.isResizableImage(file)) return true;
     if (!file.filepath) return false;
     try {
-      const { format } = await sharp(file.filepath).metadata();
+      // Widened: sharp 0.35's Metadata.format union omits the heif/avif
+      // values it actually reports for AVIF sources.
+      const format = (await sharp(file.filepath).metadata()).format as
+        | string
+        | undefined;
       return format === 'heif' || format === 'avif';
     } catch {
       return false;
