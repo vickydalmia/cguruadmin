@@ -1,9 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildEntityPopularSearches,
-  popularSearchLeaderboardsChanged,
   purgeEntityPopularSearchCatalog,
-  readPopularSearchFallbackLeaderboards,
 } from './entity-popular-searches';
 
 const relation = (documentId: string, name = documentId, slug = documentId) => ({
@@ -189,7 +187,7 @@ describe('entity Popular Searches aggregate', () => {
     expect(calls['api::deal.deal']).toHaveBeenCalledTimes(1);
   });
 
-  it('purges the shared catalog and bypasses it for transaction-visible reads', async () => {
+  it('serves repeat reads from the shared catalog until purged', async () => {
     const source = relation('store-source', 'Store', 'store');
     const { strapi, calls } = harness(
       'api::store.store',
@@ -199,25 +197,12 @@ describe('entity Popular Searches aggregate', () => {
     );
 
     await buildEntityPopularSearches(strapi, 'store', 'store');
-    await readPopularSearchFallbackLeaderboards(strapi, vi.fn());
-    expect(calls['api::coupon.coupon']).toHaveBeenCalledTimes(2);
+    await buildEntityPopularSearches(strapi, 'store', 'store');
+    // Second read is a cache hit — the catalogue scan ran exactly once.
+    expect(calls['api::coupon.coupon']).toHaveBeenCalledTimes(1);
 
     purgeEntityPopularSearchCatalog();
     await buildEntityPopularSearches(strapi, 'store', 'store');
-    expect(calls['api::coupon.coupon']).toHaveBeenCalledTimes(3);
-  });
-
-  it('compares only visible top-ten leaderboard order and accepts the active transaction marker', async () => {
-    const { strapi } = harness('unused', null, [], []);
-    const trx = vi.fn();
-    const board = await readPopularSearchFallbackLeaderboards(strapi, trx);
-    expect(popularSearchLeaderboardsChanged(board, board)).toBe(false);
-    expect(popularSearchLeaderboardsChanged(board, {
-      ...board,
-      store: ['changed'],
-    })).toBe(true);
-    await expect(
-      readPopularSearchFallbackLeaderboards(strapi, {}),
-    ).rejects.toThrow(/active write transaction/u);
+    expect(calls['api::coupon.coupon']).toHaveBeenCalledTimes(2);
   });
 });

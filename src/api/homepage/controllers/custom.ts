@@ -56,7 +56,6 @@ const bankRef = { fields: BANK_FIELDS, populate: { logo: true } };
 const couponRef = {
   fields: COUPON_FIELDS,
   populate: {
-    image: true,
     stores: storeRef,
     brands: brandRef,
     // The pool documentId (always emitted alongside the selected fields) is
@@ -212,7 +211,6 @@ const HEADER_NOTIFICATION_POPULATE = {
           coupon: {
             fields: ['title', 'contentStatus', 'expiresAt'],
             populate: {
-              image: true,
               stores: storeRef,
               brands: brandRef,
               categories: categoryRef,
@@ -238,8 +236,7 @@ function nonBlank(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-function firstCouponImage(coupon: any): any {
-  if (coupon?.image?.url) return coupon.image;
+function firstCouponEntityImage(coupon: any): any {
   const candidates = [
     ...(coupon?.stores ?? []).map((item: any) => item?.logo),
     ...(coupon?.brands ?? []).map((item: any) => item?.logo),
@@ -264,7 +261,7 @@ function notificationItem(
     config?.imageOverride?.url
       ? config.imageOverride
       : kind === 'coupon'
-        ? firstCouponImage(target)
+        ? firstCouponEntityImage(target)
         : target?.dealImage;
 
   if (

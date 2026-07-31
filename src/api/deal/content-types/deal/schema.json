@@ -78,6 +78,17 @@
     "discount": {
       "type": "string"
     },
+    "discountPrefix": {
+      "type": "enumeration",
+      "enum": [
+        "flat",
+        "upTo",
+        "extra",
+        "min",
+        "under",
+        "below"
+      ]
+    },
     "badge": {
       "type": "enumeration",
       "enum": [

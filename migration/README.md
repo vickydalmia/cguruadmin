@@ -284,7 +284,8 @@ For each coupon:
 - Strips WordPress shortcodes from content
 - Resolves `coupon_type` ("static" or "unique") from ACF meta
 - Wires taxonomy relationships (store, brand, category, bank) via link tables, respecting Yoast primary term
-- Links featured image, unique coupon pool, and SEO component
+- Links the unique coupon pool and SEO component; Coupon records do not own a
+  featured image
 - Rewrites content-embedded images (see **Content-embedded images** below)
 
 #### Content-embedded images
@@ -616,7 +617,8 @@ The other three — `fix:markdown-richtext`, `backfill:offer-fields` and `cleanu
 
 ### Media Linking
 
-When a phase needs to attach media to an entity (e.g., store logo, coupon image), it:
+When a phase needs to attach media to an entity or presentation component
+(e.g., a store logo or homepage Coupon banner), it:
 
 1. Resolves the WP attachment ID or URL via `resolveMediaRef()` → Strapi `file_id`
 2. Inserts a row into `files_related_mph` with the entity type, entity ID, and field name

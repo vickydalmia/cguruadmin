@@ -38,6 +38,7 @@ describe('write-validation step order', () => {
       'validateMenuCategorySections',
       'validateMenuNotification',
       'validateDealOfTheDaySectionLimits',
+      'validateContentManagerOfferStore',
       'validateEntityTopPickCoupons',
       'validateEntityOrderedCoupons',
       'validateOfferFieldsForWrite',
@@ -142,6 +143,21 @@ describe('stepApplies', () => {
     expect(stepApplies(step('validateOfferFieldsForWrite'), 'api::store.store', 'update')).toBe(
       false,
     );
+
+    expect(
+      stepApplies(
+        step('validateContentManagerOfferStore'),
+        'api::coupon.coupon',
+        'clone',
+      ),
+    ).toBe(true);
+    expect(
+      stepApplies(
+        step('validateContentManagerOfferStore'),
+        'api::store.store',
+        'update',
+      ),
+    ).toBe(false);
   });
 
   it('runs the unguarded steps for every content type', () => {

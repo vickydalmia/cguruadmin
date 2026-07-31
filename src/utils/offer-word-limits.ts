@@ -13,10 +13,10 @@ export const WORD_LIMITS: Array<{ field: string; label: string; max: number }> =
   { field: 'offerText', label: 'Offer text', max: 3 },
 ];
 
-// The three benefit texts store ONLY an amount — a percent ("10%") or a
-// currency amount ("₹100" / "Rs.100" / "$40"). The public API appends the
-// suffix on the way out (see src/utils/offer-text.ts), so editors never type
-// the wording and it can never be misspelled or duplicated.
+// Deal discount and the three benefit texts store ONLY an amount — a percent
+// ("10%") or a currency amount ("₹100" / "Rs.100" / "$40"). The public API
+// appends the controlled wording on the way out (see src/utils/offer-text.ts),
+// so editors never type it and it can never be misspelled or duplicated.
 export const BENEFIT_TEXT_FIELDS: Array<{
   field: string;
   label: string;
@@ -28,7 +28,11 @@ export const BENEFIT_TEXT_FIELDS: Array<{
 ];
 
 export function benefitFieldHint(suffix: string): string {
-  return `Amount only — e.g. 10% or ₹100. “${suffix}” is appended automatically on the site.`;
+  return `Amount only — e.g. 10%, ₹100 or $40. “${suffix}” is appended automatically on the site.`;
+}
+
+export function offerAmountFieldHint(appendedText: string): string {
+  return `Amount only — e.g. 10%, ₹100 or $40. “${appendedText}” is assembled automatically on the site.`;
 }
 
 // "10%" / "19.2%" — a percent needs a number before the sign.
@@ -38,7 +42,7 @@ const PERCENT_AMOUNT = /^\d{1,3}(?:\.\d+)?\s*%$/;
 const CURRENCY_AMOUNT = /^(?:₹|rs\.?|inr|\$)\s*\d[\d,]*$/i;
 
 /** True when the value is a bare amount: "10%", "₹100", "Rs.100", "$40". */
-export function isBenefitAmount(value: string): boolean {
+export function isOfferAmount(value: string): boolean {
   const trimmed = value.trim();
   return PERCENT_AMOUNT.test(trimmed) || CURRENCY_AMOUNT.test(trimmed);
 }
@@ -49,7 +53,7 @@ export function isBenefitAmount(value: string): boolean {
  * unchanged when it is not a bare amount (legacy full-text values pass
  * through untouched).
  */
-export function normalizeBenefitAmount(value: string): string {
+export function normalizeOfferAmount(value: string): string {
   const trimmed = value.trim();
   const pct = trimmed.match(PERCENT_AMOUNT);
   if (pct) return trimmed.replace(/\s+/g, '');
@@ -60,3 +64,8 @@ export function normalizeBenefitAmount(value: string): string {
   }
   return trimmed;
 }
+
+// Compatibility aliases for existing callers. New shared discount/benefit
+// code should use the offer-oriented names above.
+export const isBenefitAmount = isOfferAmount;
+export const normalizeBenefitAmount = normalizeOfferAmount;

@@ -484,7 +484,6 @@ describe('entity Coupon population', () => {
         stores: { slug: 'amazon-coupons' },
       },
       populate: {
-        image: true,
         stores: expect.any(Object),
         banks: expect.any(Object),
         categories: expect.any(Object),

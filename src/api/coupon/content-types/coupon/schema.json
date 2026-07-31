@@ -85,13 +85,6 @@
     "prepaidText": {
       "type": "string"
     },
-    "image": {
-      "type": "media",
-      "multiple": false,
-      "allowedTypes": [
-        "images"
-      ]
-    },
     "affiliateLink": {
       "type": "text",
       "required": true,

@@ -24,14 +24,11 @@ import {
 } from './isr-outbox/runtime';
 import { runContentTransaction } from './isr-outbox/transaction';
 import {
-  affectsPopularSearchInventory,
   entityPublicIdentityChanged,
   isPopularSearchEntityUid,
 } from './isr-outbox/popular-search-invalidation';
 import {
-  popularSearchLeaderboardsChanged,
   purgeEntityPopularSearchCatalog,
-  readPopularSearchFallbackLeaderboards,
 } from './api/store/services/entity-popular-searches';
 import type {
   OfferInvalidation,
@@ -59,7 +56,10 @@ import {
   changedFieldSeoHints,
 } from './utils/changed-field-validation';
 import { WORD_LIMITS, BENEFIT_TEXT_FIELDS } from './utils/offer-field-validation';
-import { benefitFieldHint } from './utils/offer-word-limits';
+import {
+  benefitFieldHint,
+  offerAmountFieldHint,
+} from './utils/offer-word-limits';
 import { textFieldHints } from './utils/text-field-validation';
 // Every write validator now runs through this one pipeline, which reports all
 // of their problems in a single error instead of the first one it hits.
@@ -120,6 +120,8 @@ const HIDE_FROM_EDIT: Record<string, string[]> = {
 // contentStatus dropdown that looks editable but is overwritten on every save.
 // The three benefit labels live in the Offer benefits panel
 // (src/admin/components/OfferBenefitsPanel.tsx) so they read as one group.
+// Product Deal discount prefix/amount live there too: the panel owns their
+// paired validation and final-label preview.
 // Unlike HIDE_FROM_EDIT these stay in the LIST layout: lifecycle fields are
 // exactly the columns editors sort and filter offers by.
 const OFFER_PANEL_ONLY_FIELDS = [
@@ -133,7 +135,7 @@ const OFFER_PANEL_ONLY_FIELDS = [
 ];
 const HIDE_FROM_EDIT_FORM_ONLY: Record<string, string[]> = {
   'api::coupon.coupon': OFFER_PANEL_ONLY_FIELDS,
-  'api::deal.deal': OFFER_PANEL_ONLY_FIELDS,
+  'api::deal.deal': [...OFFER_PANEL_ONLY_FIELDS, 'discountPrefix', 'discount'],
 };
 
 // Hero banners are repeatable components, so their row order is already
@@ -548,7 +550,7 @@ COMPONENT_FIELD_DESCRIPTIONS['nav.category-section'].links =
 COMPONENT_FIELD_DESCRIPTIONS['header.coupon-notification'].titleOverride =
   'Optional. Leave blank to use the selected Coupon title.';
 COMPONENT_FIELD_DESCRIPTIONS['header.coupon-notification'].imageOverride =
-  'Optional. Leave blank to use the selected Coupon image or merchant logo. Maximum 80 × 80 px; a square image is recommended.';
+  'Optional. Leave blank to use the selected Coupon’s related Store, Brand, Bank, or Category media. Maximum 80 × 80 px; a square image is recommended.';
 (COMPONENT_FIELD_DESCRIPTIONS['header.product-deal-notification'] ??= {}).productDeal =
   'Select the Product Deal shown in this header notification row.';
 COMPONENT_FIELD_DESCRIPTIONS['header.product-deal-notification'].titleOverride =
@@ -621,7 +623,20 @@ const OFFER_BENEFIT_HINTS = BENEFIT_TEXT_FIELDS.map(({ field, suffix }) => ({
 const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }> = [
   ...[
     { uid: 'api::coupon.coupon', hints: [...OFFER_WORD_CAP_HINTS, ...OFFER_BENEFIT_HINTS] },
-    { uid: 'api::deal.deal', hints: OFFER_BENEFIT_HINTS },
+    {
+      uid: 'api::deal.deal',
+      hints: [
+        ...OFFER_BENEFIT_HINTS,
+        {
+          field: 'discount',
+          hint: offerAmountFieldHint('the selected prefix and OFF'),
+        },
+        {
+          field: 'discountPrefix',
+          hint: 'Required when a discount amount is entered.',
+        },
+      ],
+    },
   ].flatMap(({ uid, hints }) => [
     ...hints.map(({ field, hint }) => ({ uid, field, hint })),
     // Mirrors offer-lifecycle-validation.ts: past dates rejected, scheduledAt
@@ -1475,24 +1490,6 @@ export default {
           }
         }
 
-        const comparePopularSearchLeaderboards =
-          affectsPopularSearchInventory(
-            context.uid,
-            context.action,
-            context.params?.data,
-          );
-        let popularSearchLeaderboardsBefore = null;
-        if (comparePopularSearchLeaderboards) {
-          try {
-            popularSearchLeaderboardsBefore =
-              await readPopularSearchFallbackLeaderboards(strapi);
-          } catch (err: any) {
-            strapi.log.warn(
-              `[popular-searches] pre-write leaderboard unavailable: ${err?.message ?? err}`,
-            );
-          }
-        }
-
         return await runContentTransaction(
           strapi,
           () => next(),
@@ -1570,32 +1567,13 @@ export default {
               }
             }
 
-            if (
-              comparePopularSearchLeaderboards &&
-              popularSearchLeaderboardsBefore
-            ) {
-              try {
-                // The required trx argument prevents this post-write read from
-                // regressing to a fresh pool connection while the write still
-                // holds relation locks.
-                const after = await readPopularSearchFallbackLeaderboards(
-                  strapi,
-                  trx,
-                );
-                if (
-                  popularSearchLeaderboardsChanged(
-                    popularSearchLeaderboardsBefore,
-                    after,
-                  )
-                ) {
-                  scope = mergeScope(scope, { full: true });
-                }
-              } catch (err: any) {
-                strapi.log.warn(
-                  `[popular-searches] post-write leaderboard unavailable: ${err?.message ?? err}`,
-                );
-              }
-            }
+            // Popular-search leaderboard change detection was removed here by
+            // deliberate product decision: it cost two full live-catalogue
+            // scans per qualifying offer write (one inside this transaction)
+            // solely to broadcast {full:true} when the global top-10 fallback
+            // shifted. Sparse pages' borrowed rail may now drift until the
+            // nightly unconditional {all:true} consistency event re-renders
+            // everything (config/cron-tasks.ts) — an accepted ≤24h bound.
 
             if (
               scope &&
@@ -1747,7 +1725,8 @@ export default {
     if (!hasTrustedIpsConfigured()) {
       strapi.log.warn(
         '[rate-limit] RATE_LIMIT_TRUSTED_IPS is empty — ISR renders share the '
-        + "public per-IP budget. Set it to the Astro origin's private IP.",
+        + 'public per-IP budget and signed ISR cache-bypass requests will be '
+        + "rejected. Set it to the Astro origin's private IP.",
       );
     }
 

@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { hasAuthorizedIsrCacheBypass } from '../utils/isr-cache-bypass';
 
 /**
  * In-process TTL response cache for expensive public GET aggregate endpoints
@@ -87,6 +88,16 @@ export default (
   return async (ctx: any, next: () => Promise<void>) => {
     if (ctx.method !== 'GET') {
       return next();
+    }
+
+    // The admin and render Strapi containers have independent in-memory
+    // stores. An editor save can purge only the admin process, so a durable
+    // ISR render presents a signed credential and reads authoritative data
+    // without poisoning or consuming the render process's normal cache.
+    if (hasAuthorizedIsrCacheBypass(ctx)) {
+      await next();
+      ctx.set('X-Cache', 'BYPASS');
+      return;
     }
 
     const key = cacheKey(ctx);

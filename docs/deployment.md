@@ -290,7 +290,7 @@ chmod 600 /opt/couponzguru/.env.production
 | `PORT` | Managed | Strapi container port, normally `1337`. |
 | `APP_PORT` | Optional | Host-side port mapped to container port `1337`; defaults to `1337`. |
 | `APP_BIND` | Required | CMS host VPC/private address for the additional private publish. Never use `0.0.0.0`. |
-| `RATE_LIMIT_TRUSTED_IPS` | Required for warming | Comma-separated exact socket IPs or prefixes allowed to bypass CMS per-IP limits. Use the frontend private source IP. |
+| `RATE_LIMIT_TRUSTED_IPS` | Required for warming and fresh ISR reads | Comma-separated exact socket IPs or prefixes allowed to bypass CMS per-IP limits and present the signed ISR response-cache credential. Use the frontend private source IP. |
 | `PUBLIC_URL` | Required | External HTTPS CMS/admin origin used by Strapi-generated URLs. |
 | `TRUST_PROXY` | Required behind a proxy | Enables Koa proxy awareness when Nginx or another trusted proxy terminates HTTPS. |
 | `TRANSFER_REMOTE_ENABLED` | Optional | Enables Strapi remote transfer. Keep `false` unless a controlled transfer is in progress. |

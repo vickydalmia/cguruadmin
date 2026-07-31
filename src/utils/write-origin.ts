@@ -31,3 +31,23 @@ import type { Core } from '@strapi/strapi';
 export function isHumanWrite(strapi: Core.Strapi): boolean {
   return Boolean(strapi?.requestContext?.get());
 }
+
+/**
+ * True only for writes made through the Content Manager collection-type API.
+ *
+ * This is intentionally narrower than `isHumanWrite`: custom admin routes,
+ * authenticated integrations, and public APIs also have a request context but
+ * must keep the database's many-to-many Store compatibility. Koa exposes the
+ * matched request at `ctx.path`; `request.path` is accepted as a defensive
+ * fallback for focused tests and future Strapi context-shape changes.
+ */
+export function isContentManagerWrite(strapi: Core.Strapi): boolean {
+  const context = strapi?.requestContext?.get?.() as
+    | { path?: unknown; request?: { path?: unknown } }
+    | undefined;
+  const path = context?.path ?? context?.request?.path;
+  return (
+    typeof path === 'string' &&
+    path.startsWith('/content-manager/collection-types/')
+  );
+}

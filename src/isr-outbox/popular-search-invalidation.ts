@@ -1,8 +1,3 @@
-const OFFER_UIDS = new Set([
-  'api::coupon.coupon',
-  'api::deal.deal',
-]);
-
 const ENTITY_UIDS = new Set([
   'api::store.store',
   'api::brand.brand',
@@ -10,28 +5,11 @@ const ENTITY_UIDS = new Set([
   'api::bank.bank',
 ]);
 
-const POPULAR_SEARCH_OFFER_FIELDS = new Set([
-  'stores',
-  'brands',
-  'categories',
-  'banks',
-  'contentStatus',
-  'scheduledAt',
-  'expiresAt',
-]);
-
-export function affectsPopularSearchInventory(
-  uid: string,
-  action: string,
-  data: unknown,
-): boolean {
-  if (!OFFER_UIDS.has(uid)) return false;
-  if (action !== 'update') return true;
-  if (!data || typeof data !== 'object') return false;
-  return Object.keys(data).some((field) =>
-    POPULAR_SEARCH_OFFER_FIELDS.has(field),
-  );
-}
+// affectsPopularSearchInventory was removed with the middleware's leaderboard
+// change detection — offer writes no longer trigger any popular-search work.
+// The identity helpers below remain: an entity rename/reslug still broadens
+// its ISR event to {full:true} because the old name/slug is baked into HTML
+// site-wide (rails, navigation, interlinks).
 
 export function isPopularSearchEntityUid(uid: string): boolean {
   return ENTITY_UIDS.has(uid);

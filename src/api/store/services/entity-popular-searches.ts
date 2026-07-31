@@ -341,40 +341,9 @@ export async function buildEntityPopularSearches(
   });
 }
 
-/**
- * The visible global top ten determines which entities can be appended when a
- * related group is short. Passing the active write transaction is mandatory
- * for post-write reads: Document Service joins it through Strapi's ambient
- * transaction context and therefore sees the just-written membership without
- * taking a second pool connection.
- */
-export async function readPopularSearchFallbackLeaderboards(
-  strapi: Core.Strapi,
-  activeWriteTransaction?: any,
-): Promise<Record<EntityPageType, string[]>> {
-  if (
-    activeWriteTransaction !== undefined &&
-    typeof activeWriteTransaction !== 'function'
-  ) {
-    throw new Error('Popular-search leaderboard requires the active write transaction');
-  }
-  // The post-write read runs inside the active content transaction and must
-  // observe its uncommitted relation changes. Never publish that snapshot into
-  // the public request cache.
-  const catalog = activeWriteTransaction
-    ? await readFreshCatalog(strapi)
-    : await readCachedCatalog(strapi);
-  return Object.fromEntries(
-    ENTITY_POPULAR_SEARCH_ORDER.map((kind) => [
-      kind,
-      catalog.global[kind].map((item) => item.documentId),
-    ]),
-  ) as Record<EntityPageType, string[]>;
-}
-
-export function popularSearchLeaderboardsChanged(
-  before: Record<EntityPageType, string[]> | null,
-  after: Record<EntityPageType, string[]> | null,
-): boolean {
-  return Boolean(before && after && JSON.stringify(before) !== JSON.stringify(after));
-}
+// NOTE: the write-path leaderboard surface (readPopularSearchFallbackLeaderboards,
+// popularSearchLeaderboardsChanged) was removed together with the
+// document-middleware change detection: keeping the global top-10 perfectly
+// fresh in cached HTML cost two full catalogue scans per offer write. The rail
+// still renders from the cached catalog above; sparse pages' borrowed global
+// list self-heals via the nightly unconditional {all:true} consistency event.

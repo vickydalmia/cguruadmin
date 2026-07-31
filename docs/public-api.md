@@ -8,8 +8,16 @@ routes are the entire public read surface for offers.
 Guards are configured per route, not globally. `global::rate-limit` is a
 per-IP sliding window on the koa-resolved client IP (honours `TRUST_PROXY`);
 `global::cache` is a per-process TTL response cache that sets `X-Cache:
-HIT`/`MISS` and is purged immediately whenever content changes, so the TTL is a
-ceiling on staleness, not a fixed delay.
+HIT`/`MISS`. Content changes purge the writing process immediately. A durable
+Astro ISR render carries a short-lived HMAC-signed internal credential because
+the separate `strapi-render` process has its own Map; after verification, that
+one request skips cache lookup/insertion and returns `X-Cache: BYPASS`. Missing
+or invalid credentials retain normal caching and cannot force a database read.
+The credential is additionally honoured only when the raw TCP socket address is
+loopback or in the `RATE_LIMIT_TRUSTED_IPS` allowlist (the UI droplet's VPC
+private IP) — the socket address, unlike `X-Forwarded-For`, cannot be spoofed,
+so a token that somehow leaked outside the VPC is unusable. The public Nginx
+listener also strips this reserved header before proxying anything to Strapi.
 
 | Route | Auth | Rate limit | Cache |
 |---|---|---|---|
@@ -303,7 +311,8 @@ Super Admin contract explicitly enables one and every SEO blocker passes.
   handling.
 
 All of them filter to published, unexpired content; scheduled and expired rows
-are never emitted.
+are never emitted. Coupon objects do not carry an `image` field; clients derive
+presentation media from the populated Store, Brand, Bank, or Category relation.
 
 ## Related stores
 
@@ -363,7 +372,8 @@ offer field lists deliberately omit `affiliateLink`; browser activation still
 uses the private redeem resolver. Unique-pool relations expose only their name
 and Strapi relation identity, never pool codes. The same applies to the Deal
 aggregate: Product Deals carry `couponType` and a `uniqueCouponPool` relation
-too.
+too. Coupon and related-Coupon objects do not expose Coupon-owned media; their
+populated entity relations provide logos/icons for presentation.
 
 The public URL uses the compact database `id`; redemption continues to use the
 Coupon's Strapi `documentId` internally.

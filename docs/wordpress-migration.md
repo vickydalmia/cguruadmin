@@ -575,6 +575,10 @@ which handles display-formatted Indian prices that a naive parse would silently
 truncate. Deal media tries the deal-image meta first and falls back to the
 generic image meta, always landing on the `dealImage` schema field.
 
+Coupon records do not own media. Legacy WordPress Coupon art is resolved only
+when Phase 13 seeds presentation-specific homepage component fields such as
+Top Offers `banner`, CG Exclusive `bannerOverride`, and Fresh Drops `cardImage`.
+
 Taxonomy wiring differs slightly. Coupons insert the Yoast primary term first (so
 it lands at order 1) then the remaining terms, with a per-target-table order
 counter. Deals do the same but additionally track which target ids they have
@@ -691,8 +695,9 @@ and therefore lands at order 1. Every link insert goes through `insertLink` with
 
 One table for all media links, keyed by file id, owner id, owner Strapi UID, the
 schema field name, and an order. The composite unique index created in phase 00
-is what makes its conflict clause work. Field names in use: `logo` (stores,
-brands, banks), `icon` (categories), `image` (coupons), `dealImage` (deals).
+is what makes its conflict clause work. Entity field names in use include
+`logo` (stores, brands, banks), `icon` (categories), and `dealImage` (deals);
+Coupon-related homepage components own their separate banner/card media fields.
 
 ### Components — `{entity}_cmps`
 

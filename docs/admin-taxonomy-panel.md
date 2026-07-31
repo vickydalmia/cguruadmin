@@ -31,8 +31,10 @@ seeded new entries with the model name (`store`) as their slug.
 
 ### Solution
 
-1. Replace the relation widgets with **side panels** that render a compact
-   search + checkbox + selected-list UI, with pagination and infinite scroll.
+1. Replace the relation widgets with **side panels** that render compact
+   searchable candidate controls plus a selected list, with pagination and
+   infinite scroll. Store is a single-choice radio; the other taxonomies stay
+   multi-select checkboxes.
 2. **Hide the default relation widgets** for the fields those panels own, so
    nothing is duplicated and the main form stays clean.
 3. Replace the four problem field types globally in the admin `register()` hook,
@@ -135,11 +137,12 @@ type RelationConfig = {
 };
 ```
 
-The first three members are all the Taxonomies panel uses. The last four exist
-for the Top Pick Coupons panel (§4) and are what let both panels share one
-`RelationSection` implementation. Adding another taxonomy to deals is one entry;
-adding another *content type* to the Taxonomies panel is one more top-level key
-in `RELATION_CONFIG` — but adding a differently-shaped panel is not, as §4 shows.
+The Coupon and Deal Store entries set `minSelections: 1` and
+`maxSelections: 1`. Their sibling Brand, Category, and Bank entries omit both
+and remain unrestricted multi-selects. The other optional members support
+bounded or scoped uses of the shared relation-section implementation. Adding
+another taxonomy to deals is one entry; adding another *content type* to the
+Taxonomies panel is one more top-level key in `RELATION_CONFIG`.
 
 ### Form state is a diff, not a list
 
@@ -180,8 +183,9 @@ re-render it.
   and trimmed; changing the query resets the accumulated pages. More pages load
   through an `IntersectionObserver` on a sentinel at the bottom of the fixed-
   height scroll box, rooted on that box rather than the document.
-- **Toggling.** Every checkbox click and every remove-button click goes through
-  one handler that paints optimistically, then rewrites the form diff:
+- **Toggling multi-select relations.** Every Brand, Category, and Bank checkbox
+  click and every remove-button click goes through one handler that paints
+  optimistically, then rewrites the form diff:
 
   | Server state | Action | `connect` | `disconnect` |
   |---|---|---|---|
@@ -192,9 +196,34 @@ re-render it.
 
   Clicking an item an even number of times always leaves a clean diff. That
   four-branch idempotency is what makes the panel feel predictable.
+- **Choosing a Store.** Store candidates render as a radio group. Choosing a
+  Store rebuilds the complete relation diff from the intended one-item result,
+  so replacing a persisted Store sends the old disconnect and new connect in
+  the same save. The radio remains disabled until an existing record's stored
+  relations have loaded; this prevents a fast click from replacing an unknown
+  baseline with an incomplete diff.
 - **Failure mode.** Both fetches log to the console under `[taxonomy-panel]` and
   leave the section empty rather than throwing; a superseded fetch is dropped via
   a cancellation flag rather than writing stale state.
+
+### Coupon and Deal Store contract
+
+The schemas and document API deliberately keep `stores` as `manyToMany`. Public
+responses therefore still return a Store array, migrations and integrations may
+still write arrays, and no existing relation is rewritten in bulk. The stricter
+rule belongs only to Coupon and Deal editing through Content Manager: the
+resulting selection must contain exactly one Store.
+
+New entries begin with a visible “Select exactly one Store” notice. Once one is
+selected, its remove button is disabled; choosing another Store performs an
+atomic replacement. Brand, Category, and Bank behavior is unchanged.
+
+A legacy entry with several Stores displays every current Store plus a cleanup
+warning. Merely opening it does not write a form change and never silently
+truncates the relation. An editor may remove Stores while more than one remains,
+or choose any Store radio to reduce the relation immediately to that Store. The
+next Content Manager save is rejected until exactly one remains, even if the
+editor changed only an unrelated field.
 
 ---
 
@@ -283,6 +312,22 @@ runs on every start and `updateConfiguration` is a database write. Failures are
 logged as warnings, never thrown: a cosmetic layout tweak must not stop the
 server from booting.
 
+### Content Manager-only Store validation
+
+`validateContentManagerOfferStore` is registered in the collected write-
+validation pipeline for Coupon and Deal create, update, and clone actions. It
+first confirms that the active Koa request is a Content Manager collection-type
+route; background jobs, migrations, custom routes, and public/API integrations
+return without a query or restriction.
+
+For updates and clones it loads the stored (or clone-source) `stores` relation,
+then resolves direct arrays, `{ set }`, and `{ connect, disconnect }` payloads
+to the resulting relation set. A count other than one raises the shared
+validation error at path `stores`, so the Validation problems panel points the
+editor to the Store section. Loading the stored relation even when `stores` is
+absent is intentional: it makes legacy cleanup mandatory on the record's next
+admin save without modifying untouched data.
+
 ### The rest of bootstrap
 
 The search/index integrity checks plus layout hiding are part of the awaited
@@ -344,21 +389,27 @@ computes durable ISR invalidation scopes. `destroy` stops the outbox dispatcher.
    Coupons".
 3. **Default widgets are gone.** The four taxonomy inputs (and `topPickCoupons`)
    must not appear in the main form.
-4. **Round-trip.** Select an item, save, reload — it persists. Remove it, save,
-   reload — it is gone.
-5. **Idempotency.** Select then deselect then save: no change server-side.
-6. **Debounce and pagination.** With DevTools open, type quickly in a search box
+4. **Store round-trip.** Select one Store, save, reload — it persists. Choose a
+   different Store, save, reload — only the replacement persists. The final
+   Store's remove button stays disabled.
+5. **Legacy cleanup.** Open a record with multiple Stores: all remain visible
+   and no diff is emitted on open. Remove until one remains, or choose one
+   radio, then save and reload. An unrelated save before cleanup is rejected at
+   `stores`.
+6. **Multi-select idempotency.** Select then deselect a Brand, Category, or Bank
+   and save: no change server-side.
+7. **Debounce and pagination.** With DevTools open, type quickly in a search box
    (requests coalesce, not one per keystroke) and scroll a >30-option list to the
    bottom (a `page=2` request fires).
-7. **Race safety.** Throttle the network, open an existing entry, and toggle
+8. **Race safety.** Throttle the network, open an existing entry, and toggle
    while the initial relations fetch is still in flight — the toggle survives.
-8. **Create flow.** On a new deal or coupon the Taxonomies panel works with no
+9. **Create flow.** On a new deal or coupon the Taxonomies panel works with no
    `documentId`. On a new store the Top Pick panel shows the "save first" notice.
-9. **Scope and cap.** On a store, the Top Pick list contains only that store's
+10. **Scope and cap.** On a store, the Top Pick list contains only that store's
    published coupons, and a fifth selection is refused.
-10. **Validation panel.** Save a homepage with a wrong-sized image: the panel
+11. **Validation panel.** Save a homepage with a wrong-sized image: the panel
     lists the section path and the exact required pixel dimensions.
-11. **Field replacements.** A richtext field opens as a WYSIWYG, a datetime
+12. **Field replacements.** A richtext field opens as a WYSIWYG, a datetime
     picker offers 5-minute steps, a boolean asks for confirmation, and a new
     store's slug starts empty rather than reading `store`.
 

@@ -129,6 +129,7 @@ const DEAL_PUBLIC_FIELDS = [
   'salePrice',
   'mrp',
   'discount',
+  'discountPrefix',
   'affiliateLink',
   'expiresAt',
   'contentStatus',
@@ -178,7 +179,6 @@ const categoryRef = { fields: ['name', 'slug', 'iconAlt'], populate: { icon: tru
 // pool NAME only — its `codes` relation is never referenced, so redeemable
 // unique codes can never be harvested through this endpoint.
 const COUPON_PUBLIC_POPULATE = {
-  image: true,
   stores: storeRef,
   banks: bankRef,
   categories: categoryRef,

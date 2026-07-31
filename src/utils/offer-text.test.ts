@@ -58,6 +58,27 @@ describe('arrayizeOfferText', () => {
     expect(payload.topOffers.items[0].coupon.offerText).toEqual(['EXTRA', '18%', 'OFF']);
   });
 
+  it('formats Deal discount and strips its CMS-only prefix', () => {
+    const payload: any = {
+      deal: {
+        salePrice: 1299,
+        discount: 'Rs. 2,000',
+        discountPrefix: 'upTo',
+      },
+    };
+    arrayizeOfferText(payload);
+    expect(payload.deal.discount).toBe('Up To ₹2000 OFF');
+    expect(payload.deal.discountPrefix).toBeUndefined();
+    expect(payload.deal.computedContent).toContain('Discount - Up To ₹2000 OFF');
+  });
+
+  it('preserves an unconverted legacy Deal discount while stripping the prefix field', () => {
+    const deal: any = { discount: 'Buy one get one', discountPrefix: null };
+    arrayizeOfferText(deal);
+    expect(deal.discount).toBe('Buy one get one');
+    expect(deal.discountPrefix).toBeUndefined();
+  });
+
   it('leaves null / absent offerText untouched', () => {
     const coupon: { offerText: string | null } = { offerText: null };
     arrayizeOfferText(coupon);

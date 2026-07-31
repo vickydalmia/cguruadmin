@@ -106,6 +106,7 @@ const DEAL_FIELDS = [
   'salePrice',
   'mrp',
   'discount',
+  'discountPrefix',
   'affiliateLink',
   'expiresAt',
   'contentStatus',

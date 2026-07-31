@@ -6,11 +6,9 @@ import {
   getPoolMappingByName,
   getUserMapping,
 } from "../utils/id-maps.js";
-import { resolveMediaRef } from "../utils/media-resolver.js";
 import {
   generateDocumentId,
   getEntityIdByDocumentId,
-  replaceMedia,
   replaceContentMedia,
 } from "../utils/strapi-insert.js";
 import { replaceOfferTaxonomyRelations } from "../utils/offer-relations.js";
@@ -272,16 +270,6 @@ export async function runCoupons(): Promise<void> {
           primaryTermId,
         });
 
-        // Replace field media so a changed/cleared WP image cannot leave a
-        // stale active relation on an in-place re-import.
-        const imageId = await resolveMediaRef(meta.image);
-        await replaceMedia(
-          imageId ?? null,
-          entityId,
-          "api::coupon.coupon",
-          "image",
-        );
-
         await replaceContentMedia(
           contentMedia.fileIds,
           entityId,
@@ -359,7 +347,7 @@ async function getPostMetaBulk(postIds: number[]): Promise<Map<number, PostMeta>
        FROM wp_postmeta
        WHERE post_id IN (${placeholders})
        AND meta_key IN (
-         'code', 'link', 'popular_coupon', 'image',
+         'code', 'link', 'popular_coupon',
          'is_deal', 'unique_coupon', 'unique_coupon_name',
          '_action_manager_date', '_expiration-date', '_expiration-date-status', 'expiration-date',
          '_edit_last'

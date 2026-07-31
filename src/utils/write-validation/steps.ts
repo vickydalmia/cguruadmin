@@ -2,6 +2,10 @@ import type { Core } from '@strapi/strapi';
 
 import { validateChangedFields } from '../changed-field-validation';
 import {
+  isOfferStoreUid,
+  validateContentManagerOfferStore,
+} from '../content-manager-offer-store-validation';
+import {
   isCouponUid,
   normaliseCouponTypeFields,
   validateCouponTypeFields,
@@ -192,6 +196,20 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     actions: CREATE_UPDATE,
     applies: (uid) => uid === DOTD_UID,
     run: ({ strapi, data }) => validateDealOfTheDaySectionLimits(strapi, data),
+  },
+  {
+    name: 'validateContentManagerOfferStore',
+    applies: isOfferStoreUid,
+    run: ({ strapi, uid, action, data, documentId }) =>
+      isOfferStoreUid(uid)
+        ? validateContentManagerOfferStore(
+            strapi,
+            uid,
+            action,
+            data,
+            documentId,
+          )
+        : undefined,
   },
   {
     name: 'validateEntityTopPickCoupons',

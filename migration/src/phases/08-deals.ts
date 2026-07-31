@@ -36,6 +36,7 @@ import {
   allowsPartialDeals,
   type PhaseOutcome,
 } from "../utils/phase-outcome.js";
+import { parseLegacyDealDiscount } from "../../../src/utils/deal-discount.js";
 
 export async function runDeals(): Promise<void | PhaseOutcome> {
   logger.info("=== Phase 8: Deals Migration ===");
@@ -155,6 +156,10 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
 
         const salePrice = parseDecimal(meta.deal_sale_price);
         const mrp = parseDecimal(meta.deal_mrp);
+        const legacyDiscount = clean(meta.deal_discount);
+        const standardizedDiscount = parseLegacyDealDiscount(legacyDiscount);
+        const discount = standardizedDiscount?.discount ?? legacyDiscount;
+        const discountPrefix = standardizedDiscount?.discountPrefix ?? null;
         logger.info(
           `[deal-image ${postIndex + 1}/${posts.length}] resolving WordPress ` +
             `Deal ${post.ID} (${post.post_title})`,
@@ -221,12 +226,12 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
         const result = await pgQuery<{ id: number }>(
           `INSERT INTO "deals" (
             "document_id", "title", "cashback_text", "bank_offer_text", "prepaid_text", "content", "code",
-            "sale_price", "mrp", "discount",
+            "sale_price", "mrp", "discount", "discount_prefix",
             "badge", "affiliate_link", "expires_at", "scheduled_at", "content_status",
             "published_at", "published_on", "created_at", "updated_at", "locale",
             "created_by_id", "updated_by_id"
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
           )
           ON CONFLICT ("document_id") DO UPDATE SET
             "title" = EXCLUDED."title",
@@ -237,6 +242,7 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
             "sale_price" = EXCLUDED."sale_price",
             "mrp" = EXCLUDED."mrp",
             "discount" = EXCLUDED."discount",
+            "discount_prefix" = EXCLUDED."discount_prefix",
             "content" = EXCLUDED."content",
             "badge" = COALESCE(EXCLUDED."badge", "deals"."badge"),
             "affiliate_link" = EXCLUDED."affiliate_link",
@@ -258,7 +264,8 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
             cleanCode(meta.code),
             salePrice,
             mrp,
-            clean(meta.deal_discount),
+            discount,
+            discountPrefix,
             isAcfTrue(meta.popular_coupon) ? "Recommended" : null,
             affiliateLink,
             expiresAt,

@@ -16,6 +16,7 @@ import {
 import { clean } from "../utils/sanitize.js";
 import { logger } from "../utils/logger.js";
 import { HEADER_SEARCH_SUGGESTIONS } from "../utils/site-selection-defaults.js";
+import { migrationRegistryRows } from "../utils/migration-registry.js";
 
 /**
  * Phase 13 — Site Content
@@ -932,11 +933,9 @@ interface CategoryRow {
   slug: string;
 }
 
-/** Coupon plus its image file — required-image item slots reuse the coupon's
- *  own art so sections render and homepage saves are never blocked; editors
- *  can replace with Figma-sized art later (existing files are grandfathered
- *  by the size validator). */
-type CouponWithImage = { couponId: number; imageFileId: number };
+/** Coupon plus legacy WordPress art used only to seed presentation-specific
+ *  homepage media. Coupons themselves no longer own an image field. */
+type CouponWithPresentationImage = { couponId: number; imageFileId: number };
 
 interface HomepageData {
   banners: Banner[];
@@ -946,16 +945,16 @@ interface HomepageData {
   popularStores: StoreRow[];
   popularFeaturedLnk: Lnk | null;
   popularStoresLnk: Lnk | null;
-  topOfferCoupons: CouponWithImage[];
+  topOfferCoupons: CouponWithPresentationImage[];
   topOfferCouponLnk: Lnk | null;
   topDealIds: number[];
   dealListDealsLnk: Lnk | null;
-  exclusiveCoupons: CouponWithImage[];
+  exclusiveCoupons: CouponWithPresentationImage[];
   exclusiveCouponLnk: Lnk | null;
   exploreOfferTabs: Array<{ category: CategoryRow; couponIds: number[] }>;
   exploreOfferTabCategoryLnk: Lnk | null;
   exploreOfferTabOffersLnk: Lnk | null;
-  newlyAddedCoupons: CouponWithImage[];
+  newlyAddedCoupons: CouponWithPresentationImage[];
   cardItemCouponLnk: Lnk | null;
   brandOfferIds: number[];
   offerListOffersLnk: Lnk | null;
@@ -963,31 +962,81 @@ interface HomepageData {
   bankItemBankLnk: Lnk | null;
 }
 
-/** Newest published coupons that HAVE an image, with the image's file id.
- *  extraJoin/extraWhere refine the pool (category membership, brand link). */
-async function newestCouponsWithImage(
+function couponSourcePostId(sourceKey: string): number | null {
+  const match = /^coupon:(\d+)$/.exec(sourceKey);
+  if (!match) return null;
+  const postId = Number(match[1]);
+  return Number.isSafeInteger(postId) && postId > 0 ? postId : null;
+}
+
+async function wordpressCouponImageRefs(
+  postIds: readonly number[],
+): Promise<Map<number, string>> {
+  const refs = new Map<number, string>();
+  const batchSize = 500;
+  for (let start = 0; start < postIds.length; start += batchSize) {
+    const batch = postIds.slice(start, start + batchSize);
+    const placeholders = batch.map(() => "?").join(",");
+    const rows = await wpQuery<{ post_id: number; meta_value: string }>(
+      `SELECT post_id, meta_value
+       FROM wp_postmeta
+       WHERE post_id IN (${placeholders})
+         AND meta_key = 'image'`,
+      [...batch],
+    );
+    for (const row of rows) {
+      if (String(row.meta_value ?? "").trim()) {
+        refs.set(row.post_id, row.meta_value);
+      }
+    }
+  }
+  return refs;
+}
+
+/** Newest published migrated Coupons with legacy WordPress art. The art is
+ *  resolved directly into the required homepage component field; it is never
+ *  attached to the Coupon record. extraJoin/extraWhere refine the pool. */
+async function newestCouponsWithPresentationImage(
   limit: number,
   extraJoin = "",
   extraWhere = "",
   params: unknown[] = []
-): Promise<CouponWithImage[]> {
-  const rows = await pgQuery<{ id: number; file_id: number }>(
-    `SELECT c.id, MIN(m.file_id) AS file_id
+): Promise<CouponWithPresentationImage[]> {
+  const rows = await pgQuery<{ id: number; document_id: string }>(
+    `SELECT c.id, c.document_id
      FROM "coupons" c
-     JOIN "files_related_mph" m
-       ON m.related_id = c.id
-      AND m.related_type = 'api::coupon.coupon'
-      AND m.field = 'image'
      ${extraJoin}
      WHERE c.published_at IS NOT NULL
        AND c.content_status = 'published'
        ${extraWhere}
-     GROUP BY c.id, c.published_at
-     ORDER BY c.published_at DESC
-     LIMIT ${Number(limit)}`,
+     GROUP BY c.id, c.document_id, c.published_at
+     ORDER BY c.published_at DESC`,
     params
   );
-  return rows.map((r) => ({ couponId: r.id, imageFileId: r.file_id }));
+
+  const registry = await migrationRegistryRows("coupons");
+  const postIdByDocumentId = new Map<string, number>();
+  for (const entry of registry) {
+    const postId = couponSourcePostId(entry.source_key);
+    if (postId) postIdByDocumentId.set(entry.document_id, postId);
+  }
+
+  const postIds = rows.flatMap((row) => {
+    const postId = postIdByDocumentId.get(row.document_id);
+    return postId ? [postId] : [];
+  });
+  const refs = await wordpressCouponImageRefs(postIds);
+  const resolved: CouponWithPresentationImage[] = [];
+  for (const row of rows) {
+    const postId = postIdByDocumentId.get(row.document_id);
+    const ref = postId ? refs.get(postId) : undefined;
+    if (!ref) continue;
+    const imageFileId = await resolveMediaRef(ref);
+    if (!imageFileId) continue;
+    resolved.push({ couponId: row.id, imageFileId });
+    if (resolved.length >= limit) break;
+  }
+  return resolved;
 }
 
 async function categoryIdBySlug(slug: string): Promise<number | null> {
@@ -1055,13 +1104,15 @@ async function gatherHomepageData(
      LIMIT ${HOMEPAGE_SEED_LIMITS.heroProducts}`
   );
 
-  // ── topOffers: newest published coupons (image required by the schema,
-  //    so only coupons with art qualify — 97% of the catalog) ──
-  let topOfferCoupons: CouponWithImage[] = [];
-  if (hasTable("coupons") && hasTable("files_related_mph")) {
-    topOfferCoupons = await newestCouponsWithImage(HOMEPAGE_SEED_LIMITS.topOffers);
+  // ── topOffers: newest published migrated Coupons with legacy art for the
+  //    component's required presentation banner. ──
+  let topOfferCoupons: CouponWithPresentationImage[] = [];
+  if (hasTable("coupons")) {
+    topOfferCoupons = await newestCouponsWithPresentationImage(
+      HOMEPAGE_SEED_LIMITS.topOffers,
+    );
   } else {
-    logger.warn("coupons/files tables not found — topOffers section will be empty");
+    logger.warn("coupons table not found — topOffers section will be empty");
   }
 
   // ── topDeals: newest published deals from the Deals Of The Day
@@ -1098,11 +1149,11 @@ async function gatherHomepageData(
 
   // ── cgExclusive: newest coupons from the Exclusive Coupons category;
   //    newlyAdded: newest coupons of any kind. Counts come from
-  //    HOMEPAGE_SEED_LIMITS. Both slots require an image, reused from the
-  //    coupon. ──
-  let exclusiveCoupons: CouponWithImage[] = [];
-  let newlyAddedCoupons: CouponWithImage[] = [];
-  if (hasTable("coupons") && hasTable("files_related_mph")) {
+  //    HOMEPAGE_SEED_LIMITS. Both slots resolve their own presentation art
+  //    directly from the legacy WordPress source. ──
+  let exclusiveCoupons: CouponWithPresentationImage[] = [];
+  let newlyAddedCoupons: CouponWithPresentationImage[] = [];
+  if (hasTable("coupons")) {
     const couponsCategoriesLnkForExclusive = await detectLnk(
       "coupons",
       "categories",
@@ -1110,7 +1161,7 @@ async function gatherHomepageData(
     );
     const exclusiveCategoryId = await categoryIdBySlug("exclusive-coupons");
     if (couponsCategoriesLnkForExclusive && exclusiveCategoryId != null) {
-      exclusiveCoupons = await newestCouponsWithImage(
+      exclusiveCoupons = await newestCouponsWithPresentationImage(
         HOMEPAGE_SEED_LIMITS.cgExclusive,
         `JOIN "${couponsCategoriesLnkForExclusive.table}" cat
            ON cat."${couponsCategoriesLnkForExclusive.sourceCol}" = c.id
@@ -1125,10 +1176,12 @@ async function gatherHomepageData(
       );
     }
 
-    newlyAddedCoupons = await newestCouponsWithImage(HOMEPAGE_SEED_LIMITS.newlyAdded);
+    newlyAddedCoupons = await newestCouponsWithPresentationImage(
+      HOMEPAGE_SEED_LIMITS.newlyAdded,
+    );
   } else {
     logger.warn(
-      "coupons/files tables not found — cgExclusive/newlyAdded sections will be skipped"
+      "coupons table not found — cgExclusive/newlyAdded sections will be skipped"
     );
   }
 
@@ -1363,8 +1416,8 @@ async function buildHomepageTree(
     counts.push("hero(skipped)");
   }
 
-  // ── topOffers: newest coupons, each item reusing the coupon's image as the
-  //    banner (schema requires one; editors can swap in 584×354 art later) ──
+  // ── topOffers: newest Coupons, each item seeded with legacy WordPress art
+  //    as its own banner (editors can swap in 584×354 art later). ──
   if (
     missingTables(
       "components_home_top_offers",
@@ -1397,7 +1450,7 @@ async function buildHomepageTree(
   } else if (missingTables("components_home_top_offers").length === 0) {
     const id = await insertRow("components_home_top_offers", { enabled: false });
     await addCmp("homepages_cmps", homepageId, id, "home.top-offers", "topOffers", 1);
-    skip("topOffers: no coupons with images or item tables missing — section disabled");
+    skip("topOffers: no Coupons with legacy presentation art or item tables missing — section disabled");
     counts.push("topOffers(disabled)");
   } else {
     skip("components_home_top_offers missing — topOffers skipped");
@@ -1473,7 +1526,7 @@ async function buildHomepageTree(
         i + 1
       );
       await linkRel(data.exclusiveCouponLnk, itemId, offer.couponId);
-      // bannerOverride is validator-required (768×370) — reuse the coupon art.
+      // Seed the component-owned 768×370 presentation override directly.
       await linkMedia(offer.imageFileId, itemId, "home.exclusive-item", "bannerOverride");
     }
     counts.push(`cgExclusive(${data.exclusiveCoupons.length} items)`);
@@ -1524,7 +1577,7 @@ async function buildHomepageTree(
 
   // ── newlyAdded (Fresh Drops) ──
   if (data.newlyAddedCoupons.length === 0) {
-    if (logSkips) logger.info("newlyAdded: 0 coupons with images — section skipped");
+    if (logSkips) logger.info("newlyAdded: 0 Coupons with legacy presentation art — section skipped");
     counts.push("newlyAdded(skipped: 0 coupons)");
   } else if (
     missingTables(
@@ -1548,7 +1601,7 @@ async function buildHomepageTree(
         i + 1
       );
       await linkRel(data.cardItemCouponLnk, itemId, offer.couponId);
-      // cardImage is schema-required (354×646) — reuse the coupon art.
+      // Seed the component-owned required 354×646 presentation image directly.
       await linkMedia(offer.imageFileId, itemId, "home.coupon-card-item", "cardImage");
     }
     counts.push(`newlyAdded(${data.newlyAddedCoupons.length} items)`);

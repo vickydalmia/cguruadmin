@@ -1,26 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
-  affectsPopularSearchInventory,
   entityPublicIdentityChanged,
+  isPopularSearchEntityUid,
 } from './popular-search-invalidation';
 
 describe('Popular Searches ISR decisions', () => {
-  it('keeps ordinary offer content edits targeted', () => {
-    expect(
-      affectsPopularSearchInventory('api::coupon.coupon', 'update', {
-        title: 'New copy',
-      }),
-    ).toBe(false);
-    expect(
-      affectsPopularSearchInventory('api::deal.deal', 'update', {
-        brands: { connect: ['brand-1'] },
-      }),
-    ).toBe(true);
-    expect(
-      affectsPopularSearchInventory('api::coupon.coupon', 'update', {
-        contentStatus: 'expired',
-      }),
-    ).toBe(true);
+  it('recognises exactly the four entity-page UIDs', () => {
+    expect(isPopularSearchEntityUid('api::store.store')).toBe(true);
+    expect(isPopularSearchEntityUid('api::brand.brand')).toBe(true);
+    expect(isPopularSearchEntityUid('api::category.category')).toBe(true);
+    expect(isPopularSearchEntityUid('api::bank.bank')).toBe(true);
+    expect(isPopularSearchEntityUid('api::coupon.coupon')).toBe(false);
+    expect(isPopularSearchEntityUid('api::deal.deal')).toBe(false);
   });
 
   it('globally refreshes only actual entity name or slug changes', () => {
@@ -36,5 +27,8 @@ describe('Popular Searches ISR decisions', () => {
         { name: 'Amazon India', slug: 'amazon' },
       ),
     ).toBe(true);
+    expect(entityPublicIdentityChanged(null, { name: 'A', slug: 'a' })).toBe(
+      false,
+    );
   });
 });

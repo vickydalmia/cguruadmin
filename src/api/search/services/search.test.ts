@@ -14,6 +14,8 @@ function searchService() {
     code: null,
     couponType: "static",
     affiliateLink: "https://track.example.com/coupon",
+    // A stale pre-migration property must never become public search media.
+    image: { url: "https://cdn.example.com/legacy-coupon.webp" },
     stores: [{ name: "Fashion Store", slug: "fashion-store-coupons" }],
   };
   const deal = {
@@ -22,7 +24,8 @@ function searchService() {
     affiliateLink: "https://track.example.com/shoes",
     salePrice: 1299,
     mrp: null,
-    discount: "40% off",
+    discount: "40%",
+    discountPrefix: "upTo",
     expiresAt: "2026-12-31T00:00:00.000Z",
     dealImage: {
       url: "https://cdn.example.com/shoes.webp",
@@ -159,7 +162,94 @@ function categoryAltService() {
   return createSearchService({ strapi: strapi as any });
 }
 
+function identityMediaService() {
+  const coupon = {
+    documentId: "identity-coupon",
+    title: "Identity coupon",
+    couponType: "static",
+    affiliateLink: "https://track.example.com/identity",
+    // Owner (first relation) has no media; the brand supplies the artwork.
+    stores: [{ name: "Logo-less Store", slug: "logo-less-coupons" }],
+    brands: [
+      {
+        name: "Brandco",
+        slug: "brandco-coupons",
+        logoAlt: "Brandco logo",
+        logo: { url: "https://cdn.example.com/brandco.webp", width: 64, height: 64 },
+      },
+    ],
+  };
+  const bankCategoryCoupon = {
+    documentId: "bank-category-coupon",
+    title: "Identity bank offer",
+    couponType: "static",
+    affiliateLink: "https://track.example.com/bank",
+    banks: [
+      {
+        name: "Identity Bank",
+        slug: "identity-bank-coupons",
+        logoAlt: "Identity Bank logo",
+        logo: { url: "https://cdn.example.com/bank.webp", width: 64, height: 64 },
+      },
+    ],
+    categories: [
+      {
+        name: "Identity Category",
+        slug: "identity-category-coupons",
+        iconAlt: "Identity Category icon",
+        icon: { url: "https://cdn.example.com/cat.webp", width: 64, height: 64 },
+      },
+    ],
+  };
+  const strapi = {
+    documents(uid: string) {
+      return {
+        async findMany() {
+          return uid === "api::coupon.coupon" ? [coupon, bankCategoryCoupon] : [];
+        },
+        async count() {
+          return uid === "api::coupon.coupon" ? 2 : 0;
+        },
+      };
+    },
+  };
+  configureSearchRuntime(strapi as any);
+  return createSearchService({ strapi: strapi as any });
+}
+
 describe("public search entity boundaries", () => {
+  it("falls back to the first media-bearing relation and pins bank-before-category owner precedence", async () => {
+    const service = identityMediaService();
+    const response = await service.search({
+      query: "identity",
+      mode: "group",
+      group: "coupons",
+      page: 1,
+      pageSize: 20,
+    });
+
+    // Media-less owner keeps attribution; artwork falls back to the brand.
+    const brandFallback = response.coupons.find(
+      (item: any) => item.documentId === "identity-coupon",
+    );
+    expect(brandFallback.subtitle).toBe("Logo-less Store");
+    expect(brandFallback.media).toMatchObject({
+      src: "https://cdn.example.com/brandco.webp",
+      alt: "Brandco logo",
+    });
+
+    // Owner precedence is Store → Brand → Bank → Category: a bank outranks
+    // a category for attribution and media.
+    const bankOwned = response.coupons.find(
+      (item: any) => item.documentId === "bank-category-coupon",
+    );
+    expect(bankOwned.subtitle).toBe("Identity Bank");
+    expect(bankOwned.media).toMatchObject({
+      src: "https://cdn.example.com/bank.webp",
+      alt: "Identity Bank logo",
+    });
+  });
+
   it("preserves category iconAlt in entity and category-owned offer media", async () => {
     const service = categoryAltService();
     const categoryResponse = await service.search({
@@ -228,11 +318,13 @@ describe("public search entity boundaries", () => {
       codeMode: "none",
       type: "coupon",
       name: "No-code fashion offer",
+      media: null,
     });
     const couponFind = calls.find(
       (call) => call.uid === "api::coupon.coupon" && call.operation === "findMany",
     );
     expect(JSON.stringify(couponFind?.options.filters)).not.toContain("couponType");
+    expect(couponFind?.options.populate).not.toHaveProperty("image");
   });
 
   it("returns a product Deal without requiring MRP and includes owner metadata", async () => {
@@ -251,6 +343,7 @@ describe("public search entity boundaries", () => {
       type: "deal",
       price: "1299",
       originalPrice: null,
+      discount: "Up To 40% OFF",
       expiresAt: "2026-12-31T00:00:00.000Z",
       owner: {
         name: "Shoe Store",
@@ -265,6 +358,8 @@ describe("public search entity boundaries", () => {
     );
     expect(JSON.stringify(dealFind?.options.filters)).not.toContain('"mrp"');
     expect(dealFind?.options.fields).toContain("expiresAt");
+    expect(dealFind?.options.fields).toContain("discountPrefix");
+    expect(response.deals[0]).not.toHaveProperty("discountPrefix");
   });
 
   it("splits media formats into a WebP srcset and an additive AVIF srcset", async () => {

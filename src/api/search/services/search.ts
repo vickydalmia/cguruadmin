@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Core } from "@strapi/strapi";
 import { normaliseImageBackgroundColour } from "../../../constants/image-background";
 import { publishedOnlyFilters } from "../../../utils/content-status";
+import { formatDealDiscount } from "../../../utils/deal-discount";
 import {
   asciiFold,
   entityCountQuery,
@@ -118,7 +119,7 @@ const relationRef = (mediaField: "logo" | "icon" = "logo") => ({
 const relations = Object.fromEntries(
   ENTITIES.map((config) => [config.key, relationRef(config.mediaField)]),
 ) as Record<EntityConfig["key"], ReturnType<typeof relationRef>>;
-const couponPopulate = { ...relations, image: true };
+const couponPopulate = relations;
 const dealPopulate = {
   ...relations,
   dealImage: true,
@@ -153,6 +154,7 @@ const DEAL_FIELDS = [
   "salePrice",
   "mrp",
   "discount",
+  "discountPrefix",
   "expiresAt",
 ];
 
@@ -319,8 +321,8 @@ function relatedEntities(document: any): any[] {
   return [
     ...(Array.isArray(document?.stores) ? document.stores : []),
     ...(Array.isArray(document?.brands) ? document.brands : []),
-    ...(Array.isArray(document?.categories) ? document.categories : []),
     ...(Array.isArray(document?.banks) ? document.banks : []),
+    ...(Array.isArray(document?.categories) ? document.categories : []),
   ];
 }
 
@@ -328,6 +330,23 @@ function relatedEntities(document: any): any[] {
 // owner the same way: the first related taxonomy entity.
 function offerOwner(document: any, _source: "coupon" | "deal") {
   return relatedEntities(document)[0] ?? null;
+}
+
+// Coupon cards mirror the site's identity-media rule: the first related
+// entity carrying a logo or icon supplies the artwork, even when the owning
+// (first) relation has neither. Attribution (name/subtitle/link) stays with
+// the owner.
+function couponIdentityMedia(document: any): { media: any; alt: string | null } | null {
+  for (const relation of relatedEntities(document)) {
+    const media = relation?.logo ?? relation?.icon ?? null;
+    if (!media) continue;
+    const field = relation?.logo ? "logo" : "icon";
+    return {
+      media,
+      alt: mediaAlt(relation, field, cleanText(relation?.name, 160)),
+    };
+  }
+  return null;
 }
 
 // Naive substring matching misses plural/singular variants — "Mobiles" must
@@ -484,10 +503,10 @@ function mapOffer(document: any, type: "coupon" | "deal") {
   const owner = offerOwner(document, type);
   const ownerName = cleanText(owner?.name, 160);
   const fallbackLink = safeEntityHref(owner?.slug) ?? "/stores/";
-  const sourceMedia = type === "deal" ? document?.dealImage : document?.image;
   const ownerMedia = owner?.logo ?? owner?.icon ?? null;
   const ownerMediaField = owner?.icon ? "icon" : "logo";
   const ownerAlt = mediaAlt(owner, ownerMediaField, ownerName);
+  const identity = type === "coupon" ? couponIdentityMedia(document) : null;
 
   return {
     id: type + ":" + String(document?.documentId ?? document?.id ?? name),
@@ -498,12 +517,12 @@ function mapOffer(document: any, type: "coupon" | "deal") {
     subtitle: ownerName,
     storeName: ownerName,
     // Product-deal cards must never disguise a store logo as product media.
-    // The deal schema owns dealImage; an incomplete record stays image-less so
-    // the UI can use its accessible text fallback instead of showing the wrong
-    // visual. Coupon cards continue to prefer the owning store logo.
+    // Coupon records no longer own media, so their search result draws from
+    // the first related entity carrying a logo/icon (site identity-media
+    // rule) and otherwise keeps the accessible text fallback.
     media: mapMedia(
-      type === "coupon" ? (ownerMedia ?? sourceMedia) : sourceMedia,
-      type === "coupon" ? (ownerAlt ?? ownerName ?? name) : name,
+      type === "coupon" ? (identity?.media ?? null) : document?.dealImage,
+      type === "coupon" ? (identity?.alt ?? ownerName ?? name) : name,
     ),
     price:
       type === "deal" && document?.salePrice != null
@@ -511,7 +530,13 @@ function mapOffer(document: any, type: "coupon" | "deal") {
         : null,
     originalPrice:
       type === "deal" && document?.mrp != null ? String(document.mrp) : null,
-    discount: type === "deal" ? cleanText(document?.discount, 80) : null,
+    discount:
+      type === "deal"
+        ? cleanText(
+            formatDealDiscount(document?.discount, document?.discountPrefix),
+            80,
+          )
+        : null,
     expiresAt:
       type === "deal" ? cleanText(document?.expiresAt, 80) : null,
     owner:

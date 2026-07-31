@@ -7,11 +7,13 @@ import { unstable_useContentManagerContext } from '@strapi/content-manager/strap
 import * as React from 'react';
 import {
   Box,
+  Button,
   Checkbox,
   Divider,
   Flex,
   IconButton,
   Loader,
+  Radio,
   TextInput,
   Typography,
 } from '@strapi/design-system';
@@ -55,6 +57,13 @@ import {
   pendingRequiredFields,
   type PendingField,
 } from './utils/pending-required';
+import {
+  getRelationDocumentId,
+  isRelationFormValue,
+  singleRelationChange,
+  toRelationCommand,
+  type RelationCandidate as Candidate,
+} from './utils/single-relation';
 
 type RelationConfig = {
   field: string;
@@ -70,75 +79,39 @@ type RelationConfig = {
 
 const RELATION_CONFIG: Record<string, RelationConfig[]> = {
   'api::deal.deal': [
-    { field: 'stores', target: 'api::store.store', label: 'Stores' },
+    {
+      field: 'stores',
+      target: 'api::store.store',
+      label: 'Store',
+      minSelections: 1,
+      maxSelections: 1,
+    },
     { field: 'brands', target: 'api::brand.brand', label: 'Brands' },
     { field: 'categories', target: 'api::category.category', label: 'Categories' },
     { field: 'banks', target: 'api::bank.bank', label: 'Banks' },
   ],
   'api::coupon.coupon': [
-    { field: 'stores', target: 'api::store.store', label: 'Stores' },
+    {
+      field: 'stores',
+      target: 'api::store.store',
+      label: 'Store',
+      minSelections: 1,
+      maxSelections: 1,
+    },
     { field: 'brands', target: 'api::brand.brand', label: 'Brands' },
     { field: 'categories', target: 'api::category.category', label: 'Categories' },
     { field: 'banks', target: 'api::bank.bank', label: 'Banks' },
   ],
 };
 
-type Candidate = { id: number; documentId: string; name: string };
-type RelationCommand = Candidate & {
-  apiData: {
-    id: number;
-    documentId: string;
-    locale: string | null;
-    isTemporary?: boolean;
-    position?:
-      | { before: string; status: 'published'; locale: null }
-      | { end: true };
-  };
-};
-type RelationFormValue = {
-  connect?: RelationCommand[];
-  disconnect?: RelationCommand[];
-};
-
 const PAGE_SIZE = 30;
-
-const isRelationFormValue = (value: unknown): value is RelationFormValue =>
-  Boolean(
-    value &&
-      typeof value === 'object' &&
-      !Array.isArray(value) &&
-      ('connect' in value || 'disconnect' in value)
-  );
-
-const getRelationDocumentId = (relation: any): string | undefined =>
-  relation?.apiData?.documentId ?? relation?.documentId;
-
-const toRelationCommand = (
-  candidate: Candidate,
-  options: {
-    isTemporary?: boolean;
-    position?:
-      | { before: string; status: 'published'; locale: null }
-      | { end: true };
-  } = {}
-): RelationCommand => ({
-  id: candidate.id,
-  documentId: candidate.documentId,
-  name: candidate.name,
-  apiData: {
-    id: candidate.id,
-    documentId: candidate.documentId,
-    locale: null,
-    ...(options.isTemporary ? { isTemporary: true } : {}),
-    ...(options.position ? { position: options.position } : {}),
-  },
-});
 
 function SelectedRelationRow({
   candidate,
   index,
   count,
   reorderable,
+  removeDisabled,
   onDrop,
   onMove,
   onRemove,
@@ -147,6 +120,7 @@ function SelectedRelationRow({
   index: number;
   count: number;
   reorderable: boolean;
+  removeDisabled: boolean;
   onDrop: (draggedDocumentId: string, targetDocumentId: string) => void;
   onMove: (fromIndex: number, toIndex: number) => void;
   onRemove: (candidate: Candidate) => void;
@@ -253,6 +227,7 @@ function SelectedRelationRow({
             label={`Remove ${candidate.name}`}
             variant="ghost"
             size="S"
+            disabled={removeDisabled}
             onClick={() => onRemove(candidate)}
             style={{ flexShrink: 0 }}
           >
@@ -297,13 +272,25 @@ function RelationSection({
   );
   const onChangeForm = useForm('RelationSection', (state) => state.onChange);
 
+  const relationLoadKey = `${documentId ?? 'new'}:${config.field}`;
   const [selectedList, setSelectedList] = React.useState<Candidate[]>([]);
+  const [loadedRelationKey, setLoadedRelationKey] = React.useState<string | null>(
+    documentId ? null : relationLoadKey,
+  );
+  const selectedRelationsReady = loadedRelationKey === relationLoadKey;
+  // A failed relations load must not silently disable the panel for the whole
+  // session — surface it and let the editor retry without a full page reload.
+  const [relationLoadError, setRelationLoadError] = React.useState(false);
+  const [relationLoadAttempt, setRelationLoadAttempt] = React.useState(0);
   const persistedDocumentIdsRef = React.useRef<Set<string> | null>(
     documentId ? null : new Set(),
   );
   React.useEffect(() => {
     persistedDocumentIdsRef.current = documentId ? null : new Set();
-  }, [documentId, config.field]);
+    setLoadedRelationKey(documentId ? null : relationLoadKey);
+    setSelectedList([]);
+    setRelationLoadError(false);
+  }, [documentId, config.field, relationLoadKey]);
 
   const formValueRef = React.useRef(formValue);
   React.useEffect(() => {
@@ -317,6 +304,11 @@ function RelationSection({
           .map((value: any) => value?.documentId)
           .filter((value): value is string => typeof value === 'string'),
       );
+      // Existing entries still wait for the dedicated paginated relations
+      // endpoint below. The document payload can contain only a partial
+      // relation preview; treating it as the baseline could omit a legacy
+      // Store from the atomic disconnect set.
+      if (!documentId) setLoadedRelationKey(relationLoadKey);
       if (formValue.length === 0) {
         setSelectedList([]);
         return;
@@ -362,11 +354,12 @@ function RelationSection({
         return next;
       });
     }
-  }, [formValue]);
+  }, [formValue, documentId, relationLoadKey]);
 
   React.useEffect(() => {
     if (!deferred || !documentId) return;
     let cancelled = false;
+    setRelationLoadError(false);
     const run = async () => {
       try {
         const all: Candidate[] = [];
@@ -390,6 +383,7 @@ function RelationSection({
         persistedDocumentIdsRef.current = new Set(
           all.map((relation) => relation.documentId),
         );
+        setLoadedRelationKey(relationLoadKey);
         setSelectedList(() => {
           const latest = formValueRef.current;
           if (!isRelationFormValue(latest)) return all;
@@ -418,13 +412,14 @@ function RelationSection({
         });
       } catch (err) {
         console.error(`[taxonomy-panel] Failed to load selected ${config.field}`, err);
+        if (!cancelled) setRelationLoadError(true);
       }
     };
     run();
     return () => {
       cancelled = true;
     };
-  }, [deferred, documentId, model, config.field, get]);
+  }, [deferred, documentId, model, config.field, get, relationLoadKey, relationLoadAttempt]);
 
   const selectedDocIds = React.useMemo(
     () => new Set(selectedList.map((s) => s.documentId)),
@@ -518,6 +513,29 @@ function RelationSection({
     get,
   ]);
 
+  const isSingleChoice =
+    config.minSelections === 1 && config.maxSelections === 1;
+
+  const applySingleRelationChange = (
+    change:
+      | { type: 'select'; candidate: Candidate }
+      | { type: 'remove'; candidate: Candidate },
+  ) => {
+    const persistedDocumentIds = persistedDocumentIdsRef.current;
+    if (!selectedRelationsReady || !persistedDocumentIds) return;
+
+    const result = singleRelationChange({
+      change,
+      selected: selectedList,
+      persistedDocumentIds,
+      formValue: isRelationFormValue(formValue) ? formValue : {},
+    });
+    if (!result) return;
+
+    setSelectedList(result.selected);
+    onChangeForm(config.field, result.formValue);
+  };
+
   const toggle = (c: Candidate) => {
     const exists = selectedList.some((s) => s.documentId === c.documentId);
     if (
@@ -595,6 +613,14 @@ function RelationSection({
     });
   };
 
+  const removeSelection = (candidate: Candidate) => {
+    if (isSingleChoice) {
+      applySingleRelationChange({ type: 'remove', candidate });
+      return;
+    }
+    toggle(candidate);
+  };
+
   const moveSelection = (fromIndex: number, toIndex: number) => {
     if (
       !config.reorderable ||
@@ -646,6 +672,8 @@ function RelationSection({
         banks: 'Bank',
       }[config.scopeRelationField]
     : null;
+  const hasLegacySingleChoiceSelection =
+    isSingleChoice && selectedList.length > 1;
 
   React.useEffect(() => {
     const el = sentinelRef.current;
@@ -670,6 +698,53 @@ function RelationSection({
           {config.maxSelections != null ? `/${config.maxSelections}` : ''})
         </Typography>
       </Flex>
+
+      {relationLoadError && !selectedRelationsReady ? (
+        <Box
+          hasRadius
+          background="danger100"
+          borderColor="danger200"
+          padding={2}
+          marginBottom={2}
+        >
+          <Flex direction="column" alignItems="flex-start" gap={1}>
+            <Typography variant="pi" textColor="danger600">
+              Could not load the saved {config.label}. The controls stay
+              disabled so a save cannot run against an incomplete selection.
+            </Typography>
+            <Button
+              variant="danger-light"
+              size="S"
+              onClick={() => setRelationLoadAttempt((attempt) => attempt + 1)}
+            >
+              Retry
+            </Button>
+          </Flex>
+        </Box>
+      ) : null}
+
+      {hasLegacySingleChoiceSelection ? (
+        <Box
+          hasRadius
+          background="warning100"
+          borderColor="warning200"
+          padding={2}
+          marginBottom={2}
+        >
+          <Typography variant="pi" textColor="warning600">
+            This legacy entry has {selectedList.length} Stores. Choose one
+            Store below, or remove Stores until one remains, before saving.
+          </Typography>
+        </Box>
+      ) : null}
+
+      {isSingleChoice && selectedRelationsReady && selectedList.length === 0 ? (
+        <Box paddingBottom={2} width="100%">
+          <Typography variant="pi" textColor="danger600">
+            Select exactly one Store before saving.
+          </Typography>
+        </Box>
+      ) : null}
 
       {scopeEntityLabel && documentId ? (
         <Box paddingBottom={3} width="100%">
@@ -699,9 +774,14 @@ function RelationSection({
                 index={index}
                 count={selectedList.length}
                 reorderable={Boolean(config.reorderable)}
+                removeDisabled={
+                  isSingleChoice &&
+                  (!selectedRelationsReady ||
+                    selectedList.length <= (config.minSelections ?? 0))
+                }
                 onDrop={dropSelection}
                 onMove={moveSelection}
-                onRemove={toggle}
+                onRemove={removeSelection}
               />
             ))}
           </Flex>
@@ -737,19 +817,53 @@ function RelationSection({
             width="100%"
             style={{ maxHeight: 220, overflowY: 'auto', boxSizing: 'border-box' }}
           >
-            {candidates.map((c) => (
-              <Box key={c.documentId} paddingBottom={1}>
-                <Checkbox
-                  checked={selectedDocIds.has(c.documentId)}
-                  disabled={
-                    !selectedDocIds.has(c.documentId) && atSelectionLimit
+            {isSingleChoice ? (
+              <Radio.Group
+                name={`${config.field}-single-selection`}
+                value={
+                  selectedList.length === 1
+                    ? selectedList[0]?.documentId
+                    : undefined
+                }
+                onValueChange={(documentId: string) => {
+                  const candidate = candidates.find(
+                    (item) => item.documentId === documentId,
+                  );
+                  if (candidate) {
+                    applySingleRelationChange({
+                      type: 'select',
+                      candidate,
+                    });
                   }
-                  onCheckedChange={() => toggle(c)}
-                >
-                  {c.name}
-                </Checkbox>
-              </Box>
-            ))}
+                }}
+              >
+                <Flex direction="column" alignItems="stretch" gap={1}>
+                  {candidates.map((candidate) => (
+                    <Radio.Item
+                      key={candidate.documentId}
+                      value={candidate.documentId}
+                      disabled={!selectedRelationsReady}
+                    >
+                      {candidate.name}
+                    </Radio.Item>
+                  ))}
+                </Flex>
+              </Radio.Group>
+            ) : (
+              candidates.map((c) => (
+                <Box key={c.documentId} paddingBottom={1}>
+                  <Checkbox
+                    checked={selectedDocIds.has(c.documentId)}
+                    disabled={
+                      !selectedDocIds.has(c.documentId) && atSelectionLimit
+                    }
+                    onCheckedChange={() => toggle(c)}
+                  >
+                    {c.name}
+                  </Checkbox>
+                </Box>
+              ))
+            )}
 
             {initialLoaded && candidates.length === 0 ? (
               <Typography variant="pi" textColor="neutral500">

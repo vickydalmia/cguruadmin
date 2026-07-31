@@ -23,6 +23,95 @@ describe('validateOfferFields', () => {
     ).not.toThrow();
   });
 
+  it('accepts the shared amount syntax for a paired Deal discount', () => {
+    for (const discount of ['10%', '₹100', 'Rs.100', 'INR 500', '$40']) {
+      expect(() =>
+        validateOfferFields(
+          { discount, discountPrefix: 'flat' },
+          'create',
+          null,
+          false,
+          'api::deal.deal',
+        ),
+      ).not.toThrow();
+    }
+  });
+
+  it('rejects invalid or incomplete Deal discount pairs', () => {
+    expect(() =>
+      validateOfferFields(
+        { discount: '50% OFF', discountPrefix: 'flat' },
+        'create',
+        null,
+        false,
+        'api::deal.deal',
+      ),
+    ).toThrow(/Discount must be an amount only/);
+    expect(() =>
+      validateOfferFields(
+        { discount: '50%' },
+        'create',
+        null,
+        false,
+        'api::deal.deal',
+      ),
+    ).toThrow(/Discount prefix is required/);
+    expect(() =>
+      validateOfferFields(
+        { discountPrefix: 'flat' },
+        'create',
+        null,
+        false,
+        'api::deal.deal',
+      ),
+    ).toThrow(/Discount amount is required/);
+    expect(() =>
+      validateOfferFields(
+        { discount: '50%', discountPrefix: 'maximum' },
+        'create',
+        null,
+        false,
+        'api::deal.deal',
+      ),
+    ).toThrow(/not supported/);
+  });
+
+  it('grandfathers unchanged legacy Deal copy only for non-strict writes', () => {
+    const legacy = { discount: 'Buy one get one', discountPrefix: null };
+    expect(() =>
+      validateOfferFields(
+        legacy,
+        'update',
+        legacy,
+        false,
+        'api::deal.deal',
+      ),
+    ).not.toThrow();
+    expect(() =>
+      validateOfferFields(
+        legacy,
+        'update',
+        legacy,
+        true,
+        'api::deal.deal',
+      ),
+    ).toThrow(/Discount/);
+  });
+
+  it('rejects a prefix-only non-strict update against a stored non-amount discount', () => {
+    // Grandfathering the amount rule must cover the whole pair: pairing a new
+    // prefix with the stored legacy copy would persist a forbidden state.
+    expect(() =>
+      validateOfferFields(
+        { discount: 'Buy one get one', discountPrefix: 'flat' },
+        'update',
+        { discount: 'Buy one get one', discountPrefix: null },
+        false,
+        'api::deal.deal',
+      ),
+    ).toThrow(/Discount must be an amount only/);
+  });
+
   it('rejects an offerText with more than 3 words', () => {
     expect(() => validateOfferFields({ offerText: 'GET FLAT 50% OFF NOW' })).toThrow(
       /Offer text must be at most 3 words/
@@ -147,7 +236,7 @@ describe('validateOfferFieldsForWrite', () => {
       strapi,
       'api::deal.deal',
       'create',
-      { discount: 'UP TO 50%' },
+      { discount: '50%', discountPrefix: 'upTo' },
       undefined,
       false,
     );
@@ -166,6 +255,8 @@ describe('validateOfferFieldsForWrite', () => {
     const findOne = vi.fn().mockResolvedValue({
       cashbackText: '15%',
       bankOfferText: '₹2000',
+      discount: '50%',
+      discountPrefix: 'upTo',
     });
     const strapi: any = { documents: () => ({ findOne }) };
 
@@ -186,9 +277,34 @@ describe('validateOfferFieldsForWrite', () => {
           'cashbackText',
           'bankOfferText',
           'prepaidText',
+          'discount',
+          'discountPrefix',
         ],
       }),
     );
+  });
+
+  it('loads both Deal discount fields for a partial pair update', async () => {
+    const findOne = vi.fn().mockResolvedValue({
+      discount: '50%',
+      discountPrefix: 'flat',
+    });
+    const strapi: any = { documents: () => ({ findOne }) };
+
+    await expect(
+      validateOfferFieldsForWrite(
+        strapi,
+        'api::deal.deal',
+        'update',
+        { discountPrefix: 'upTo' },
+        'deal-1',
+        false,
+      ),
+    ).resolves.toBeUndefined();
+    expect(findOne).toHaveBeenCalledWith({
+      documentId: 'deal-1',
+      fields: ['documentId', 'discountPrefix', 'discount'],
+    });
   });
 
   it('does not read or validate the removed Product Deal offerText field', async () => {

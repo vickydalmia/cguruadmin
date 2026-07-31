@@ -1,5 +1,6 @@
 import type { Core } from '@strapi/strapi';
 import { createId } from '@paralleldrive/cuid2';
+import type { Knex } from 'knex';
 
 interface PoolRow {
   id: number;
@@ -129,7 +130,7 @@ const MARK_POOL_EXHAUSTED_SQL = `
  * so we get the numeric `id` without fragile type casts.
  */
 async function resolvePool(
-  knex: ReturnType<Core.Strapi['db']['connection']>,
+  knex: Knex,
   poolDocumentId: string,
   columns: (keyof PoolRow)[] = ['id', 'name'],
 ): Promise<Pick<PoolRow, (typeof columns)[number]> | undefined> {

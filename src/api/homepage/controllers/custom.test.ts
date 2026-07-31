@@ -428,7 +428,6 @@ describe('header notification aggregate', () => {
               title: 'Original Coupon title',
               contentStatus: 'published',
               expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              image: { url: '/uploads/coupon.webp' },
             },
           },
           {
@@ -437,7 +436,7 @@ describe('header notification aggregate', () => {
               title: 'Second Coupon title',
               contentStatus: 'published',
               expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              image: { url: '/uploads/coupon-2.webp' },
+              brands: [{ logo: { url: '/uploads/brand-logo.webp' } }],
             },
           },
         ],
@@ -482,7 +481,7 @@ describe('header notification aggregate', () => {
           kind: 'coupon',
           targetId: 8,
           title: 'Second Coupon title',
-          image: { url: '/uploads/coupon-2.webp' },
+          image: { url: '/uploads/brand-logo.webp' },
         },
         {
           kind: 'deal',
@@ -518,7 +517,6 @@ describe('header notification aggregate', () => {
               title: 'AJIO Fashion Sale',
               contentStatus: 'published',
               expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              image: null,
               stores: [{ logo }],
             },
           },

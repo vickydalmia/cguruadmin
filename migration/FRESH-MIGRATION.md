@@ -150,7 +150,7 @@ To repair an already-migrated database without a full re-run, use
 - [ ] `GET <strapi-url>/api/search?q=<known store>` returns grouped results.
 - [ ] Admin: log in, open Homepage, **save once** — proves component caps and
       image validation pass on the seeded data.
-- [ ] Spot-check a store page and a coupon image URL (CDN base correct).
+- [ ] Spot-check a store page and a Coupon homepage banner URL (CDN base correct).
 
 ## 5. After migration
 

@@ -12,10 +12,11 @@
 
 import {
   BENEFIT_TEXT_FIELDS,
-  isBenefitAmount,
-  normalizeBenefitAmount,
+  isOfferAmount,
+  normalizeOfferAmount,
 } from './offer-word-limits';
 import { buildDealComputedContent } from './deal-computed-content';
+import { formatDealDiscount } from './deal-discount';
 
 /** Split a stored offerText string ("EXTRA 18% OFF") into its render words. */
 export function splitOfferWords(value: string): string[] {
@@ -35,8 +36,8 @@ const BENEFIT_SUFFIX: Record<string, string> = Object.fromEntries(
 export function formatBenefitText(value: string, suffix: string): string {
   const trimmed = value.trim();
   if (!trimmed) return trimmed;
-  if (!isBenefitAmount(trimmed)) return trimmed;
-  return `${normalizeBenefitAmount(trimmed)} ${suffix}`;
+  if (!isOfferAmount(trimmed)) return trimmed;
+  return `${normalizeOfferAmount(trimmed)} ${suffix}`;
 }
 
 // A node carrying any of the Deal pricing scalars is a Deal payload — no other
@@ -59,11 +60,12 @@ export function arrayizeOfferText<T>(node: T): T {
     return node;
   }
   if (node && typeof node === 'object') {
-    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    const record = node as Record<string, unknown>;
+    for (const [key, value] of Object.entries(record)) {
       if (key === 'offerText' && typeof value === 'string') {
-        (node as Record<string, unknown>)[key] = splitOfferWords(value);
+        record[key] = splitOfferWords(value);
       } else if (BENEFIT_SUFFIX[key] && typeof value === 'string') {
-        (node as Record<string, unknown>)[key] = formatBenefitText(
+        record[key] = formatBenefitText(
           value,
           BENEFIT_SUFFIX[key],
         );
@@ -71,9 +73,14 @@ export function arrayizeOfferText<T>(node: T): T {
         arrayizeOfferText(value);
       }
     }
-    if (DEAL_PRICE_KEYS.some((key) => key in (node as object))) {
-      const computed = buildDealComputedContent(node as Record<string, unknown>);
-      if (computed) (node as Record<string, unknown>).computedContent = computed;
+    if ('discountPrefix' in record) {
+      const formatted = formatDealDiscount(record.discount, record.discountPrefix);
+      if (formatted !== null) record.discount = formatted;
+      delete record.discountPrefix;
+    }
+    if (DEAL_PRICE_KEYS.some((key) => key in record)) {
+      const computed = buildDealComputedContent(record);
+      if (computed) record.computedContent = computed;
     }
   }
   return node;

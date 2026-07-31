@@ -926,7 +926,6 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
         number
       > &
       Schema.Attribute.DefaultTo<0>;
-    image: Schema.Attribute.Media<'images'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -1054,6 +1053,9 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     dealImage: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
     discount: Schema.Attribute.String;
+    discountPrefix: Schema.Attribute.Enumeration<
+      ['flat', 'upTo', 'extra', 'min', 'under', 'below']
+    >;
     expiresAt: Schema.Attribute.DateTime;
     failedCount: Schema.Attribute.Integer &
       Schema.Attribute.SetMinMax<

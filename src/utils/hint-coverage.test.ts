@@ -118,6 +118,8 @@ describe('index.ts merged hint map', () => {
         [uid, 'expiresAt'],
         [uid, 'publishedOn'],
       ]),
+      ['api::deal.deal', 'discount'],
+      ['api::deal.deal', 'discountPrefix'],
       ['api::coupon.coupon', 'code'],
       ['api::coupon.coupon', 'uniqueCouponPool'],
       ['api::redirect.redirect', 'from'],

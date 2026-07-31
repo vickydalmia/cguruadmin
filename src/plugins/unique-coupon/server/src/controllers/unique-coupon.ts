@@ -25,9 +25,17 @@ export function normalizeActivationId(value: unknown): string | null {
   return ACTIVATION_ID_PATTERN.test(trimmed) ? trimmed : null;
 }
 
+type UniqueCouponContext = {
+  request: { body: Record<string, unknown> };
+  params: Record<string, string>;
+  badRequest: (message: string) => unknown;
+  notFound: (message: string) => unknown;
+  send: (body: unknown, status?: number) => unknown;
+};
+
 const uniqueCouponController = ({ strapi }: { strapi: Core.Strapi }) => ({
 
-  async redeem(ctx) {
+  async redeem(ctx: UniqueCouponContext) {
     const { poolDocumentId, activationId } = ctx.request.body;
 
     if (!poolDocumentId) {
@@ -52,7 +60,7 @@ const uniqueCouponController = ({ strapi }: { strapi: Core.Strapi }) => ({
     return ctx.send({ success: false, error: result.error, message: result.message }, 503);
   },
 
-  async uploadCodes(ctx) {
+  async uploadCodes(ctx: UniqueCouponContext) {
     const { poolDocumentId, codes } = ctx.request.body;
 
     if (
@@ -114,7 +122,7 @@ const uniqueCouponController = ({ strapi }: { strapi: Core.Strapi }) => ({
     }
   },
 
-  async getStats(ctx) {
+  async getStats(ctx: UniqueCouponContext) {
     const { poolDocumentId } = ctx.params;
 
     const stats = await strapi
