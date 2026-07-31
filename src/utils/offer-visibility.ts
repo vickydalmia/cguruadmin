@@ -28,7 +28,6 @@ export const BRAND_FIELDS = ['name', 'slug', 'logoAlt'];
 export const DEAL_FIELDS = [
   'title',
   'content',
-  'offerText',
   'cashbackText',
   'bankOfferText',
   'prepaidText',

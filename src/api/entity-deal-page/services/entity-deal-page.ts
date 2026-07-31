@@ -94,7 +94,6 @@ const SEO_FIELDS = [
 ] as const;
 const DEAL_FIELDS = [
   'title',
-  'offerText',
   'cashbackText',
   'bankOfferText',
   'prepaidText',

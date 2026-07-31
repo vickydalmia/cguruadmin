@@ -20,7 +20,7 @@ import {
 import { rewriteContentMedia } from "../utils/content-media.js";
 import { clean, cleanCode } from "../utils/sanitize.js";
 import { cleanDealContent } from "../utils/deal-content.js";
-import { extractOfferText, extractCashbackFields } from "../utils/offer-extract.js";
+import { extractCashbackFields } from "../utils/offer-extract.js";
 import {
   normalizeWpDate,
   normalizeWpLocalDate,
@@ -140,9 +140,8 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
         );
         const content = contentMedia.html;
         const title = clean(post.post_title) || post.post_title;
-        // Best-effort badge + cashback/bank/prepaid texts parsed from the title
+        // Best-effort cashback/bank/prepaid texts parsed from the title
         // (falling back to content); editors can correct these in the admin.
-        const offerText = extractOfferText(title, content);
         const { cashbackText, bankOfferText, prepaidText } = extractCashbackFields(title, content);
         const affiliateLink = clean(meta.link);
         const createdAt =
@@ -175,7 +174,6 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
         // is only the extra "Any Other Condition" section.
         const missingRequired = [
           !title.trim() ? "title" : null,
-          !offerText?.trim() ? "offerText" : null,
           !affiliateLink?.trim() ? "affiliateLink" : null,
           importedDealImageId === null ? "dealImage" : null,
         ].filter(Boolean);
@@ -222,17 +220,16 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
         // first bump, so it must not be left to a backfill.
         const result = await pgQuery<{ id: number }>(
           `INSERT INTO "deals" (
-            "document_id", "title", "offer_text", "cashback_text", "bank_offer_text", "prepaid_text", "content", "code",
+            "document_id", "title", "cashback_text", "bank_offer_text", "prepaid_text", "content", "code",
             "sale_price", "mrp", "discount",
             "badge", "affiliate_link", "expires_at", "scheduled_at", "content_status",
             "published_at", "published_on", "created_at", "updated_at", "locale",
             "created_by_id", "updated_by_id"
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
           )
           ON CONFLICT ("document_id") DO UPDATE SET
             "title" = EXCLUDED."title",
-            "offer_text" = EXCLUDED."offer_text",
             "cashback_text" = EXCLUDED."cashback_text",
             "bank_offer_text" = EXCLUDED."bank_offer_text",
             "prepaid_text" = EXCLUDED."prepaid_text",
@@ -254,7 +251,6 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
           [
             documentId,
             title,
-            offerText,
             cashbackText,
             bankOfferText,
             prepaidText,

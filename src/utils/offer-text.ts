@@ -1,7 +1,7 @@
-// `offerText` is stored as a short text string ("EXTRA 18% OFF") for easy admin
-// editing, but the offer cards render it as separate words — a small qualifier,
-// a big value, and "OFF". So the public API splits it into an array of words on
-// the way out.
+// Coupon `offerText` is stored as a short text string ("EXTRA 18% OFF") for
+// easy admin editing, but Coupon cards render it as separate words — a small
+// qualifier, a big value, and "OFF". The public API splits it into an array of
+// words on the way out. Product Deals use `discount` instead.
 //
 // The three benefit texts (`cashbackText`/`bankOfferText`/`prepaidText`) are
 // stored as a BARE AMOUNT ("10%", "₹100" — enforced by
@@ -45,8 +45,8 @@ const DEAL_PRICE_KEYS = ['salePrice', 'mrp', 'discount'];
 
 /**
  * Recursively transform every offer text field in an API response: `offerText`
- * strings become arrays of words (so a coupon/deal card can render each word in
- * its own slot), each benefit text gains its wording suffix, and every Deal
+ * strings become arrays of words (so a Coupon card can render each word in its
+ * own slot), each benefit text gains its wording suffix, and every Deal
  * node gains `computedContent` — the pre-calculated Deal Price / MRP /
  * Discount template the UI renders ahead of the written content. Handles both
  * flat listings and the deeply-nested homepage payload (coupons/deals live

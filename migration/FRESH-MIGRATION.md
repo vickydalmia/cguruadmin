@@ -179,7 +179,7 @@ target and exits non-zero.
 | `yarn fix:markdown-richtext` | Repair markdown artifacts left by the old admin editor |
 | `yarn fix:cache-headers` | Stamp immutable `Cache-Control` on already-uploaded S3 objects |
 | `yarn fix:content-srcsets` | Rebuild rich-text `<img>` srcsets from the current `files.formats` |
-| `yarn backfill:offer-fields` | Fill `badge` / `offerText` / `cashbackText` / `bankOfferText` on offers migrated before those fields existed |
+| `yarn backfill:offer-fields` | Fill `badge`, Coupon `offerText`, and Coupon/Deal benefit texts on offers migrated before those fields existed |
 | `yarn backfill:entity-updated-at` | Repair store/brand/category/bank timestamps on an already-migrated database — the same derivation phase 12a runs, for when a full `migrate:fresh` is not wanted |
 | `yarn cleanup:legacy-fields` | Drop the columns, component rows and tables left orphaned by removed features |
 
@@ -234,12 +234,13 @@ yarn fix:content-srcsets --apply --yes-i-mean-<pg-host>
 
 ### Backfill the newer offer fields
 
-For databases migrated **before** `badge` / `offerText` / `cashbackText` /
-`bankOfferText` existed. It is **fill-only** — every field is written only
+For databases migrated **before** `badge` / `cashbackText` / `bankOfferText`
+existed (and before Coupon `offerText` existed). It is **fill-only** — every field is written only
 where it is currently NULL, so editor edits and re-runs are never clobbered —
 and it uses the same extractor as phases 07/08, so backfilled values match a
-fresh run. Deploy the new schema and **boot Strapi once first** so it creates
-the nullable columns; the script only fills them, and warns-and-skips per
+fresh run. Deal `offerText` is intentionally absent; Deal promotion copy is
+the editor-owned `discount` value. Deploy the new schema and **boot Strapi once
+first** so it creates the nullable columns; the script only fills them, and warns-and-skips per
 table if a column is missing. Run it **before** `cleanup:legacy-fields`, which
 drops the `is_popular` column that the `badge` backfill reads:
 

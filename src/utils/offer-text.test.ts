@@ -46,19 +46,15 @@ describe('arrayizeOfferText', () => {
     expect(coupon.prepaidText).toBeNull();
   });
 
-  it('walks arrays and deeply-nested structures (homepage-shaped)', () => {
+  it('walks arrays and deeply-nested Coupon structures', () => {
     const payload = {
       hero: {
-        products: [
-          { deal: { offerText: 'FLAT ₹625 OFF' } },
-          { deal: { offerText: '40% OFF' } },
-        ],
+        products: [{ deal: { discount: 'FLAT ₹625 OFF' } }],
       },
       topOffers: { items: [{ coupon: { offerText: 'EXTRA 18% OFF' } }] },
     };
     arrayizeOfferText(payload);
-    expect(payload.hero.products[0].deal.offerText).toEqual(['FLAT', '₹625', 'OFF']);
-    expect(payload.hero.products[1].deal.offerText).toEqual(['40%', 'OFF']);
+    expect(payload.hero.products[0].deal.offerText).toBeUndefined();
     expect(payload.topOffers.items[0].coupon.offerText).toEqual(['EXTRA', '18%', 'OFF']);
   });
 

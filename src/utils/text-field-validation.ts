@@ -151,7 +151,6 @@ export const TEXT_FIELD_RULES: readonly TextFieldRule[] = [
   // src/utils/deal-computed-content.ts — and written content is only the extra
   // "Any Other Condition" section), and an optional richtext rule would
   // enforce nothing. Its editor hint lives in VALIDATOR_MIRROR_HINTS.
-  { uid: DEAL_UID, field: 'offerText', label: 'Offer text', kind: 'string', requiredNonBlank: true, collapse: true },
   // Prices are optional display data. Their non-negative validation and editor
   // hints live in changed-field-validation.ts; they do not belong in this
   // required/blank-field table. `dealImage` is NOT listed because it already

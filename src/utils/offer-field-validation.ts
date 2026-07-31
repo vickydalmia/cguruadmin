@@ -9,7 +9,8 @@ import { errors } from '@strapi/utils';
 // Two kinds of rule, both driven by the browser-safe tables in
 // offer-word-limits.ts (shared with the Offer benefits admin panel, so hints
 // can never drift from enforcement):
-//   - offerText: free text capped by word count.
+//   - Coupon offerText: free text capped by word count. Product Deals do not
+//     carry this field; their promotional label is `discount`.
 //   - cashbackText / bankOfferText / prepaidText: a BARE AMOUNT only ("10%",
 //     "₹100", "Rs.100", "$40"). The public API appends the wording
 //     ("Cashback" / "Bank OFF" / "Prepaid OFF") on the way out — see
@@ -49,6 +50,14 @@ const FIELD_RULES: FieldRule[] = [
   })),
 ];
 
+const DEAL_UID = 'api::deal.deal';
+
+function fieldRulesForUid(uid?: string): FieldRule[] {
+  return uid === DEAL_UID
+    ? FIELD_RULES.filter(({ field }) => field !== 'offerText')
+    : FIELD_RULES;
+}
+
 /**
  * Validate the offer/cashback/bank/prepaid text fields on a coupon or deal
  * payload. Only validates fields actually present on the payload (partial
@@ -66,12 +75,13 @@ export function validateOfferFields(
   action = 'create',
   stored: any = null,
   strict = false,
+  uid?: string,
 ): void {
   if (!data || typeof data !== 'object') return;
 
   const problems: Array<{ path: string[]; message: string }> = [];
 
-  for (const { field, problem } of FIELD_RULES) {
+  for (const { field, problem } of fieldRulesForUid(uid)) {
     const value = data[field];
     if (typeof value !== 'string' || value.trim() === '') continue;
     const message = problem(value);
@@ -124,7 +134,8 @@ export async function validateOfferFieldsForWrite(
 ): Promise<void> {
   if (!data || typeof data !== 'object') return;
   const isClone = action === 'clone';
-  const touched = FIELD_RULES.filter(({ field }) =>
+  const applicableRules = fieldRulesForUid(uid);
+  const touched = applicableRules.filter(({ field }) =>
     Object.prototype.hasOwnProperty.call(data, field),
   );
   // Non-strict (the cron path): a partial write touching no validated label
@@ -138,7 +149,7 @@ export async function validateOfferFieldsForWrite(
     // Strict and clone both check the FULL record, so they need every
     // validated field pulled from the stored row; a non-strict update only
     // needs the touched ones for its grandfather comparison.
-    const fields = isClone || strict ? FIELD_RULES : touched;
+    const fields = isClone || strict ? applicableRules : touched;
     stored = await strapi.documents(uid as any).findOne({
       documentId,
       fields: [
@@ -154,5 +165,5 @@ export async function validateOfferFieldsForWrite(
     (isClone || strict) && stored && typeof stored === 'object'
       ? { ...stored, ...data }
       : data;
-  validateOfferFields(effective, action, stored, strict);
+  validateOfferFields(effective, action, stored, strict, uid);
 }

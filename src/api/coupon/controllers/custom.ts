@@ -119,7 +119,6 @@ const COUPON_PUBLIC_FIELDS = [
 ];
 const DEAL_PUBLIC_FIELDS = [
   'title',
-  'offerText',
   'cashbackText',
   'bankOfferText',
   'prepaidText',

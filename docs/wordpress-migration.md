@@ -140,7 +140,7 @@ dry-run by default and requires `--apply --yes-i-mean-<target>` to write; see
 | Path | npm script | Role |
 |---|---|---|
 | [`src/backfill-entity-updated-at.ts`](../migration/src/backfill-entity-updated-at.ts) | `backfill:entity-updated-at` | Repair store/brand/category/bank timestamps on an already-migrated database, without a full `migrate:fresh`. Also runs inside the phase loop as 12a |
-| [`src/backfill-offer-fields.ts`](../migration/src/backfill-offer-fields.ts) | `backfill:offer-fields` | Fill `badge` and the extracted offer/cashback/bank texts; `--reextract` re-derives existing values |
+| [`src/backfill-offer-fields.ts`](../migration/src/backfill-offer-fields.ts) | `backfill:offer-fields` | Fill `badge`, Coupon offer text, and Coupon/Deal benefit texts; `--reextract` re-derives existing values |
 | [`src/drop-legacy-fields.ts`](../migration/src/drop-legacy-fields.ts) | `cleanup:legacy-fields` | Drop superseded columns/tables and their leftover rows |
 | [`src/fix-cache-headers.ts`](../migration/src/fix-cache-headers.ts) | `fix:cache-headers` | Rewrite `Cache-Control` metadata on existing S3 objects |
 | [`src/fix-content-srcsets.ts`](../migration/src/fix-content-srcsets.ts) | `fix:content-srcsets` | Rebuild `<img>` srcsets inside richtext columns |
@@ -551,18 +551,18 @@ Shared behavior:
   `cleanDealContent`, which rejects legacy scratch values (bare prices, coupon
   codes, structurally empty HTML) so a deal never renders an empty Show Details
   disclosure.
-- **Offer text** — `offerText`, `cashbackText`, and `bankOfferText` are extracted
-  heuristically from the title and content by
-  [`offer-extract.ts`](../migration/src/utils/offer-extract.ts). This is a
-  best-effort backfill default that editors can correct; cashback and bank spans
-  are removed before the badge is computed so a bank discount is never mistaken
-  for the headline offer.
+- **Offer text** — Coupons receive an extracted `offerText`; both Coupons and
+  Deals receive extracted `cashbackText`, `bankOfferText`, and `prepaidText`.
+  [`offer-extract.ts`](../migration/src/utils/offer-extract.ts) derives these
+  best-effort defaults from title/content. Product Deal promotion copy comes
+  only from its WordPress `deal_discount` value mapped to `discount`.
 - **`badge`** is set to `Recommended` when the WordPress popular-coupon meta is
   set. (There is no `is_popular` column; that mapping moved to the badge.)
 - **Author** resolves through the user id map, or stays null when the author was
   never migrated.
 - **Both inserts upsert.** On a `document_id` conflict they refresh the extracted
-  text fields and content — and for deals, the price columns — rather than doing
+  benefit text fields and content — and for Coupons, `offerText`; Deals refresh
+  the price columns — rather than doing
   nothing. Re-running a content phase therefore *improves* existing rows when the
   extraction logic changes, while leaving editor-owned fields untouched. See §9.
 - **Inventory reconciliation** removes only registry-owned rows that are no

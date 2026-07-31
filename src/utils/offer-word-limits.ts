@@ -7,7 +7,8 @@
 // Kept free of server-only imports on purpose: the admin panel bundles this
 // file for the browser, where `@strapi/utils` (node:stream) cannot load.
 
-// The offer badge is a short free-text label capped by word count.
+// The Coupon offer badge is a short free-text label capped by word count.
+// Product Deals use `discount` as their sole promotional label.
 export const WORD_LIMITS: Array<{ field: string; label: string; max: number }> = [
   { field: 'offerText', label: 'Offer text', max: 3 },
 ];

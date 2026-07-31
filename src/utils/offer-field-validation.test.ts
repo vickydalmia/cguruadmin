@@ -147,7 +147,7 @@ describe('validateOfferFieldsForWrite', () => {
       strapi,
       'api::deal.deal',
       'create',
-      { offerText: 'UP TO 50%' },
+      { discount: 'UP TO 50%' },
       undefined,
       false,
     );
@@ -164,7 +164,6 @@ describe('validateOfferFieldsForWrite', () => {
 
   it('loads and validates inherited offer labels for an empty clone', async () => {
     const findOne = vi.fn().mockResolvedValue({
-      offerText: 'UP TO 50%',
       cashbackText: '15%',
       bankOfferText: '₹2000',
     });
@@ -184,13 +183,29 @@ describe('validateOfferFieldsForWrite', () => {
       expect.objectContaining({
         fields: [
           'documentId',
-          'offerText',
           'cashbackText',
           'bankOfferText',
           'prepaidText',
         ],
       }),
     );
+  });
+
+  it('does not read or validate the removed Product Deal offerText field', async () => {
+    const findOne = vi.fn();
+    const strapi: any = { documents: () => ({ findOne }) };
+
+    await expect(
+      validateOfferFieldsForWrite(
+        strapi,
+        'api::deal.deal',
+        'update',
+        { offerText: 'LEGACY VALUE WITH TOO MANY WORDS' },
+        'deal-1',
+        false,
+      ),
+    ).resolves.toBeUndefined();
+    expect(findOne).not.toHaveBeenCalled();
   });
 
   it('does not grandfather an over-limit label into a new clone', async () => {

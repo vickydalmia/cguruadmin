@@ -1073,7 +1073,6 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
         },
         number
       >;
-    offerText: Schema.Attribute.String & Schema.Attribute.Required;
     prepaidText: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
     publishedOn: Schema.Attribute.DateTime;

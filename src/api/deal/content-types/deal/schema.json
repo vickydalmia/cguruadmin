@@ -17,10 +17,6 @@
       "required": true,
       "maxLength": 200
     },
-    "offerText": {
-      "type": "string",
-      "required": true
-    },
     "content": {
       "type": "richtext",
       "maxLength": 50000

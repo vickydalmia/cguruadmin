@@ -607,22 +607,23 @@ async function ensureComponentFieldDescriptions(strapi: Core.Strapi): Promise<vo
 // derived tables stay fully wired.
 
 // DERIVED from the same tables the validator enforces (offer-word-limits.ts
-// via offer-field-validation.ts), so the hint can never drift from the rule:
-// word caps for offerText, amount-only for the three benefit texts.
-const OFFER_WORD_CAP_HINTS = [
-  ...WORD_LIMITS.map(({ field, max }) => ({
-    field,
-    hint: `Up to ${max} word${max === 1 ? '' : 's'} — fills a fixed card slot.`,
-  })),
-  ...BENEFIT_TEXT_FIELDS.map(({ field, suffix }) => ({
-    field,
-    hint: benefitFieldHint(suffix),
-  })),
-];
+// via offer-field-validation.ts), so the hint can never drift from the rule.
+// offerText belongs only to Coupons; both offer types carry benefit fields.
+const OFFER_WORD_CAP_HINTS = WORD_LIMITS.map(({ field, max }) => ({
+  field,
+  hint: `Up to ${max} word${max === 1 ? '' : 's'} — fills a fixed card slot.`,
+}));
+const OFFER_BENEFIT_HINTS = BENEFIT_TEXT_FIELDS.map(({ field, suffix }) => ({
+  field,
+  hint: benefitFieldHint(suffix),
+}));
 
 const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }> = [
-  ...['api::coupon.coupon', 'api::deal.deal'].flatMap((uid) => [
-    ...OFFER_WORD_CAP_HINTS.map(({ field, hint }) => ({ uid, field, hint })),
+  ...[
+    { uid: 'api::coupon.coupon', hints: [...OFFER_WORD_CAP_HINTS, ...OFFER_BENEFIT_HINTS] },
+    { uid: 'api::deal.deal', hints: OFFER_BENEFIT_HINTS },
+  ].flatMap(({ uid, hints }) => [
+    ...hints.map(({ field, hint }) => ({ uid, field, hint })),
     // Mirrors offer-lifecycle-validation.ts: past dates rejected, scheduledAt
     // must precede expiresAt, contentStatus derived from these two dates.
     {

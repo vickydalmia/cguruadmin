@@ -109,8 +109,8 @@ describe('index.ts merged hint map', () => {
     // coupon-type-consistency, redirect-validation and identity-validation.
     // Removing one from the table breaks this list.
     const expected: Array<[string, string]> = [
+      ['api::coupon.coupon', 'offerText'],
       ...['api::coupon.coupon', 'api::deal.deal'].flatMap((uid): Array<[string, string]> => [
-        [uid, 'offerText'],
         [uid, 'cashbackText'],
         [uid, 'bankOfferText'],
         [uid, 'prepaidText'],

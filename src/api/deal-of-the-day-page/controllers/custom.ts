@@ -389,7 +389,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     await fillDerivedSections(strapi, ctx, sanitized, curatedSelections);
     capCuratedLists(sanitized);
     await attachDealCounts(strapi, sanitized);
-    // Nested deal cards: emit offerText as an array of words.
+    // Decorate Deal benefit labels and attach computed pricing content.
     arrayizeOfferText(sanitized);
 
     return ctx.send({ data: sanitized });

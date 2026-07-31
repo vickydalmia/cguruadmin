@@ -3,7 +3,7 @@
  * these fields existed. Populates, on an ALREADY-migrated database:
  *
  *   - `badge`           ← 'Recommended' where the legacy `is_popular` is true
- *   - `offer_text`      ← extracted from title (falling back to content)
+ *   - Coupon `offer_text` ← extracted from title (falling back to content)
  *   - `cashback_text`   ← extracted amount, e.g. "15%"
  *   - `bank_offer_text` ← extracted amount, e.g. "12%" / "₹2000"
  *   - `prepaid_text`    ← extracted amount, e.g. "5%" / "₹100"
@@ -13,11 +13,12 @@
  *
  * Fill-only: every field is written ONLY where it is currently NULL, so editor
  * edits and re-runs are never clobbered (idempotent). Uses the same extraction
- * as phases 07/08 (utils/offer-extract) so backfilled values match a fresh run.
+ * as phases 07/08 (utils/offer-extract) so benefit values match a fresh run;
+ * offer_text applies only to Coupon phase 07.
  *
  * PREREQUISITE: deploy the new schema and boot Strapi ONCE first — Strapi adds
- * the new nullable columns (badge/offer_text/cashback_text/bank_offer_text/
- * prepaid_text) on boot; this script only fills them. Run this BEFORE drop-legacy-fields (that
+ * the new nullable columns (badge plus the benefit columns, and Coupon
+ * offer_text) on boot; this script only fills them. Run this BEFORE drop-legacy-fields (that
  * script removes `is_popular`, which the badge backfill reads).
  *
  * Targets whatever PG_CONNECTION_STRING resolves to (the DEPLOYED database).
@@ -70,12 +71,19 @@ async function backfillBadge(table: string, apply: boolean): Promise<void> {
   logger.info(`${table}: ${count} row(s) ${apply ? "updated" : "would change"} — badge ← 'Recommended'`);
 }
 
-// offer_text / cashback_text / bank_offer_text / prepaid_text ← extracted per
-// row. reextract=true re-derives ALL rows (clears the four columns first, so it
-// also removes now-invalid values) — use it to re-apply improved extraction
-// logic.
+// Coupon offer_text plus the three benefit texts are extracted per row. Deals
+// carry only the benefit texts; their promotion copy belongs to `discount`.
+// reextract=true clears and re-derives only the columns applicable to the
+// table.
 async function backfillTexts(table: string, apply: boolean, reextract: boolean): Promise<void> {
-  for (const col of ["offer_text", "cashback_text", "bank_offer_text", "prepaid_text"]) {
+  const includeOfferText = table === "coupons";
+  const columns = [
+    ...(includeOfferText ? ["offer_text"] : []),
+    "cashback_text",
+    "bank_offer_text",
+    "prepaid_text",
+  ];
+  for (const col of columns) {
     if (!(await columnExists(table, col))) {
       logger.warn(`${table}.${col} column not found — boot Strapi first. Skipping text backfill for ${table}.`);
       return;
@@ -84,27 +92,27 @@ async function backfillTexts(table: string, apply: boolean, reextract: boolean):
 
   if (reextract && apply) {
     await pgQuery(
-      `UPDATE "${table}" SET "offer_text" = NULL, "cashback_text" = NULL, "bank_offer_text" = NULL, "prepaid_text" = NULL`,
+      `UPDATE "${table}" SET ${columns.map((column) => `"${column}" = NULL`).join(", ")}`,
     );
-    logger.info(`${table}: cleared offer/cashback/bank/prepaid text for re-extraction`);
+    logger.info(`${table}: cleared ${columns.join("/")} for re-extraction`);
   }
 
   const rows = await pgQuery<{
     id: number;
     title: string | null;
     content: string | null;
-    offer_text: string | null;
+    offer_text?: string | null;
     cashback_text: string | null;
     bank_offer_text: string | null;
     prepaid_text: string | null;
   }>(
-    reextract
-      ? `SELECT id, title, content, offer_text, cashback_text, bank_offer_text, prepaid_text FROM "${table}"`
-      : `SELECT id, title, content, offer_text, cashback_text, bank_offer_text, prepaid_text FROM "${table}"
-         WHERE offer_text IS NULL OR cashback_text IS NULL OR bank_offer_text IS NULL OR prepaid_text IS NULL`,
+    `SELECT id, title, content, ${columns.map((column) => `"${column}"`).join(", ")} FROM "${table}"` +
+      (reextract
+        ? ""
+        : ` WHERE ${columns.map((column) => `"${column}" IS NULL`).join(" OR ")}`),
   );
 
-  logger.info(`${table}: scanning ${rows.length} row(s) with a null offer/cashback/bank/prepaid field…`);
+  logger.info(`${table}: scanning ${rows.length} row(s) with a null ${columns.join("/")} field…`);
 
   // Extract in memory, collect only rows that gained a value.
   type Pending = {
@@ -120,7 +128,9 @@ async function backfillTexts(table: string, apply: boolean, reextract: boolean):
     let cashback_text: string | null = null;
     let bank_offer_text: string | null = null;
     let prepaid_text: string | null = null;
-    if (row.offer_text == null) offer_text = extractOfferText(row.title, row.content);
+    if (includeOfferText && row.offer_text == null) {
+      offer_text = extractOfferText(row.title, row.content);
+    }
     if (row.cashback_text == null || row.bank_offer_text == null || row.prepaid_text == null) {
       const extracted = extractCashbackFields(row.title, row.content);
       if (row.cashback_text == null) cashback_text = extracted.cashbackText;
@@ -132,7 +142,7 @@ async function backfillTexts(table: string, apply: boolean, reextract: boolean):
     }
   }
 
-  logger.info(`${table}: ${pending.length} row(s) ${apply ? "to update" : "would change"} — offer/cashback/bank/prepaid text`);
+  logger.info(`${table}: ${pending.length} row(s) ${apply ? "to update" : "would change"} — ${columns.join("/")}`);
   if (!apply || pending.length === 0) return;
 
   // Batch writes: one UPDATE … FROM (VALUES …) per chunk instead of a round-trip
@@ -141,6 +151,27 @@ async function backfillTexts(table: string, apply: boolean, reextract: boolean):
   let done = 0;
   for (let i = 0; i < pending.length; i += CHUNK) {
     const chunk = pending.slice(i, i + CHUNK);
+    if (!includeOfferText) {
+      const tuples: string[] = [];
+      const params: Array<number | string | null> = [];
+      chunk.forEach((row, idx) => {
+        const b = idx * 4;
+        tuples.push(`($${b + 1}::int, $${b + 2}::text, $${b + 3}::text, $${b + 4}::text)`);
+        params.push(row.id, row.cashback_text, row.bank_offer_text, row.prepaid_text);
+      });
+      await pgQuery(
+        `UPDATE "${table}" AS c SET
+           "cashback_text" = COALESCE(c."cashback_text", v."cashback_text"),
+           "bank_offer_text" = COALESCE(c."bank_offer_text", v."bank_offer_text"),
+           "prepaid_text" = COALESCE(c."prepaid_text", v."prepaid_text")
+         FROM (VALUES ${tuples.join(", ")}) AS v(id, cashback_text, bank_offer_text, prepaid_text)
+         WHERE c.id = v.id`,
+        params,
+      );
+      done += chunk.length;
+      logger.info(`${table}: updated ${done}/${pending.length}`);
+      continue;
+    }
     const tuples: string[] = [];
     const params: Array<number | string | null> = [];
     chunk.forEach((row, idx) => {
