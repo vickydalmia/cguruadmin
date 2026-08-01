@@ -63,6 +63,21 @@ test("excluded-store CSV parsing normalizes and skips comments", () => {
   assert.equal(normalizeStoreName("  Jet   Airways "), "jet airways");
 });
 
+// The exclusion CSV came from an Excel sheet: autocorrect curled apostrophes
+// and substituted × where wp_terms.name holds ' and x — both sides must fold
+// to the same key or the listed store silently imports anyway.
+test("store-name normalization folds typographic characters to ASCII", () => {
+  assert.equal(normalizeStoreName("Banjara’s"), normalizeStoreName("Banjara's"));
+  assert.equal(normalizeStoreName("Kohl‘s"), "kohl's");
+  assert.equal(
+    normalizeStoreName("Gifts To India 24×7"),
+    normalizeStoreName("Gifts To India 24x7"),
+  );
+  assert.equal(normalizeStoreName("Firstcry – Baby Care"), "firstcry - baby care");
+  assert.equal(normalizeStoreName("“Style” Store"), '"style" store');
+  assert.equal(normalizeStoreName("Café Coffee’s"), "café coffee's");
+});
+
 test("resolveImportExclusions matches stores by name, store-typed terms only", () => {
   const terms: TermRowLike[] = [
     term({ term_id: 1, name: "Jet Airways", choose_type: "Store" }),

@@ -136,6 +136,14 @@ export async function syncSinglesSeo(apply: boolean): Promise<SinglesSeoSummary>
     optByName.get("show_on_front") === "page"
       ? parseInt(optByName.get("page_on_front") ?? "", 10)
       : NaN;
+  // page_on_front="0" means no static front page is configured (WP renders the
+  // posts index), so it must fall through to the home-wpseo template, and the
+  // front page must actually exist as a published page for its Yoast/template
+  // meta to apply — Yoast resolves %%title%% to the page's own post_title.
+  const frontPage =
+    Number.isFinite(frontPageId) && frontPageId > 0
+      ? (pages.find((page) => page.ID === frontPageId) ?? null)
+      : null;
 
   const matched = SINGLE_TARGETS.map((target) => ({
     target,
@@ -147,16 +155,16 @@ export async function syncSinglesSeo(apply: boolean): Promise<SinglesSeoSummary>
 
   const overrideIds = [
     ...matched.flatMap(({ page }) => (page ? [page.ID] : [])),
-    ...(Number.isFinite(frontPageId) ? [frontPageId] : []),
+    ...(frontPage ? [frontPage.ID] : []),
   ];
   const overrides = await loadYoastPostOverrides(overrideIds);
 
   // Homepage single.
-  const homepageSeo = Number.isFinite(frontPageId)
+  const homepageSeo = frontPage
     ? resolvePageSeo(site, {
         kind: "page",
-        pageName: site.siteName,
-        override: overrides.get(frontPageId),
+        pageName: frontPage.post_title || site.siteName,
+        override: overrides.get(frontPage.ID),
       })
     : resolvePageSeo(site, { kind: "home-wpseo", pageName: site.siteName });
   const allTargets: Array<{

@@ -77,9 +77,23 @@ function isStoreChooseType(value: string | null | undefined): boolean {
   return normalized === "" || normalized === "store";
 }
 
-/** Case/whitespace-insensitive name key for excluded-store matching. */
+/**
+ * Case/whitespace-insensitive name key for excluded-store matching. Also folds
+ * typographic characters to ASCII: the exclusion list originates from an Excel
+ * sheet whose autocorrect curls apostrophes (U+2019) and substitutes × (U+00D7),
+ * while `wp_terms.name` holds the ASCII forms — without folding, those rows
+ * silently match nothing and the store imports anyway.
+ */
 export function normalizeStoreName(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, " ");
+  return value
+    .normalize("NFKC")
+    .replace(/[‘’‚ʼ]/g, "'")
+    .replace(/[“”„]/g, '"')
+    .replace(/×/g, "x")
+    .replace(/[–—]/g, "-")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 }
 
 /** Parse the exclusion CSV: one name per line, '#' comments, deduplicated. */

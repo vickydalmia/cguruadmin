@@ -62,28 +62,62 @@ function hashFile(filePath: string): string {
 }
 
 /**
- * The FAL output archive: background-removed-deal-images/{version}/
- * {sourceSha256}-{name}.png. Each file is a transparent PNG that phase 08a
- * uploads through the normal pipeline, so its content hash is a first-class
- * manifest candidate carrying background_removal_* metadata.
+ * Recover the name a transparent archive file was UPLOADED under. Permanent
+ * archives are named `${sourceSha256}.png` (legacy runs: `${sourceSha256}-
+ * ${sourceStem}.png`), but the upload named the object `${sourceStem}-
+ * transparent.png` (media-resolver), and phase 02 derived the S3 folder from
+ * that name — so the manifest lookup only works with the upload name. The
+ * stem comes from the legacy suffix when present, else from the source file
+ * in the uploads tree, matched by sourceSha256 prefix (hashBuffer hashes the
+ * same bytes to sha256[0:16]).
+ *
+ * Returns null when the name is not an archive file at all; returns
+ * `uploadFileName: null` when it is one but the source stem is unrecoverable
+ * (canonical name and the source image is absent from the uploads tree).
  */
-function archiveCandidates(): RebuildCandidate[] {
+export function archiveCandidateUploadName(
+  archiveFileName: string,
+  sourceNameByHash16: (hash16: string) => string | null,
+): { sourceHash: string; uploadFileName: string | null } | null {
+  const match = /^([0-9a-f]{64})(?:-(.+?))?\.png$/.exec(archiveFileName);
+  if (!match) return null;
+  const sourceHash = match[1];
+  const sourceName = match[2] ?? sourceNameByHash16(sourceHash.slice(0, 16));
+  if (!sourceName) return { sourceHash, uploadFileName: null };
+  const stem = sourceName.replace(/\.[^.]+$/, "");
+  return { sourceHash, uploadFileName: `${stem}-transparent.png` };
+}
+
+/**
+ * The FAL output archive: background-removed-deal-images/{version}/. Each
+ * file is a transparent PNG that phase 08a uploads through the normal
+ * pipeline, so its content hash is a first-class manifest candidate carrying
+ * background_removal_* metadata.
+ */
+function archiveCandidates(
+  sourceNameByHash16: (hash16: string) => string | null,
+): RebuildCandidate[] {
   const candidates: RebuildCandidate[] = [];
+  let unresolvedSources = 0;
   if (!fs.existsSync(ARCHIVE_DIR)) return candidates;
   for (const version of fs.readdirSync(ARCHIVE_DIR)) {
     const versionDir = path.join(ARCHIVE_DIR, version);
     if (!fs.statSync(versionDir).isDirectory()) continue;
     for (const file of fs.readdirSync(versionDir)) {
-      const match = /^([0-9a-f]{64})-(.+)$/.exec(file);
-      if (!match) continue;
+      const parsed = archiveCandidateUploadName(file, sourceNameByHash16);
+      if (!parsed) continue;
+      if (!parsed.uploadFileName) {
+        unresolvedSources += 1;
+        continue;
+      }
       const fullPath = path.join(versionDir, file);
       try {
         candidates.push({
           hash: hashFile(fullPath),
           localPath: fullPath,
-          fileName: match[2],
+          fileName: parsed.uploadFileName,
           backgroundRemoval: {
-            sourceHash: match[1],
+            sourceHash: parsed.sourceHash,
             version,
             removedAt: fs.statSync(fullPath).mtime.toISOString(),
           },
@@ -92,6 +126,12 @@ function archiveCandidates(): RebuildCandidate[] {
         // unreadable archive file — skip
       }
     }
+  }
+  if (unresolvedSources > 0) {
+    logger.warn(
+      `Transparent archive: ${unresolvedSources} file(s) skipped — source ` +
+        `image not found in the uploads tree, upload name unrecoverable`,
+    );
   }
   return candidates;
 }
@@ -128,7 +168,10 @@ async function rebuildFromS3(skipColours: boolean): Promise<void> {
       fileName: path.basename(localPath),
       backgroundRemoval: null,
     })),
-    ...archiveCandidates(),
+    ...archiveCandidates((hash16) => {
+      const sourcePath = hashToPath.get(hash16);
+      return sourcePath ? path.basename(sourcePath) : null;
+    }),
   ];
   logger.info(
     `Rebuild candidates: ${candidates.length} ` +

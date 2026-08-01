@@ -450,6 +450,9 @@ async function getTermRelsBulk(
   postIds: number[],
   placeholders: string
 ): Promise<Map<number, number[]>> {
+  // An empty id list would interpolate `IN ()` — a MySQL syntax error — and
+  // crash the phase instead of letting it report "0 importable deal posts".
+  if (postIds.length === 0) return new Map();
   const rows = await wpQuery<{ object_id: number; term_id: number }>(`
     SELECT tr.object_id, tt.term_id
     FROM wp_term_relationships tr
