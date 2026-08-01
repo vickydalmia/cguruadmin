@@ -38,6 +38,9 @@ $RECYCLE.BIN/
 
 *.7z
 *.csv
+# Load-bearing import config, not a data artifact: without it a fresh
+# checkout would silently re-import the retired stores it lists.
+!migration/excluded-stores.csv
 *.dat
 *.dmg
 *.gz

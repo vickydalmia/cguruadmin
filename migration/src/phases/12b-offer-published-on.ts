@@ -5,10 +5,14 @@ import { logger } from "../utils/logger.js";
 const OFFER_TABLES = ["coupons", "deals"] as const;
 
 /**
- * Correct legacy migration rows that seeded the relevance timestamp from the
- * original publication date. Rows whose published_on already differs from
- * published_at are preserved because that difference represents an editorial
- * bump made after migration.
+ * Align the relevance timestamp with the WordPress PUBLISH date so imported
+ * ordering matches the old site exactly (decision: pure publish-date order,
+ * nothing pinned). `published_at` carries the WP post_date, so
+ * migration-owned rows converge to `published_on = published_at`.
+ *
+ * WordPress remains authoritative while this migration is being run, so every
+ * migration-owned row converges to the source publish date. Do not rerun the
+ * migration after editors begin using Strapi's explicit bump action.
  */
 export async function runOfferPublishedOnBackfill(): Promise<void> {
   await ensureMigrationRegistry();
@@ -16,22 +20,18 @@ export async function runOfferPublishedOnBackfill(): Promise<void> {
   for (const table of OFFER_TABLES) {
     const updated = await pgQuery<{ id: number }>(
       `UPDATE "${table}" AS offer
-          SET "published_on" = offer."updated_at"
+          SET "published_on" = offer."published_at"
          FROM "migration_source_entities" AS registry
         WHERE registry."target_table" = $1
           AND registry."document_id" = offer."document_id"
           AND offer."published_at" IS NOT NULL
-          AND offer."updated_at" IS NOT NULL
-          AND (
-            offer."published_on" IS NULL
-            OR offer."published_on" IS NOT DISTINCT FROM offer."published_at"
-          )
+          AND offer."published_on" IS DISTINCT FROM offer."published_at"
         RETURNING offer."id"`,
       [table],
     );
     logger.info(
-      `${table}: set published_on from the migrated WordPress modification ` +
-        `date for ${updated.length} offer(s)`,
+      `${table}: aligned published_on to the WordPress publish date for ` +
+        `${updated.length} offer(s)`,
     );
   }
 }

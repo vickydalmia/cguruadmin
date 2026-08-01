@@ -6,6 +6,10 @@ import { replaceOfferTaxonomyRelations } from "../utils/offer-relations.js";
 import { logger } from "../utils/logger.js";
 import { parseAcfTermId } from "../utils/acf.js";
 import {
+  getImportExclusions,
+  hasExcludedTerm,
+} from "../utils/import-exclusions.js";
+import {
   allowsPartialDeals,
   type PhaseOutcome,
 } from "../utils/phase-outcome.js";
@@ -23,8 +27,8 @@ import {
  *
  * This phase intentionally rebuilds the complete four-taxonomy relation set,
  * not just the ACF row. That makes it safe when ACF ownership changes or is
- * cleared: stale links disappear and ACF store → Yoast primary → remaining WP
- * term order converges to the same state as a clean phase-08 import.
+ * cleared: stale links disappear and ACF store → actual WP taxonomy terms
+ * converges to the same state as a clean phase-08 import.
  */
 export async function runOfferBackfill(): Promise<void | PhaseOutcome> {
   logger.info("=== Phase 12: Offer Backfill (ACF deal_store → stores taxonomy) ===");
@@ -88,29 +92,26 @@ export async function runOfferBackfill(): Promise<void | PhaseOutcome> {
     relationsByPost.set(relation.object_id, ids);
   }
 
-  let primaryTerms = new Map<number, number>();
-  if (postIds.length > 0) {
-    try {
-      const primaryRows = await wpQuery<{ post_id: number; term_id: number }>(
-        `SELECT post_id, term_id
-           FROM wp_yoast_primary_term
-          WHERE post_id IN (${placeholders})
-            AND taxonomy = 'category'`,
-        postIds,
-      );
-      primaryTerms = new Map(
-        primaryRows.map((row) => [row.post_id, row.term_id]),
-      );
-    } catch {
-      logger.warn("wp_yoast_primary_term not available for offer backfill");
-    }
+  // Posts under an excluded term (Articles tree, retired stores) were never
+  // imported — no mapping exists for them BY DESIGN, so they must not count
+  // as reconciliation failures. Mirrors phases 07/08/10.
+  const exclusions = await getImportExclusions();
+  const importableRows = rows.filter(
+    (row) =>
+      !hasExcludedTerm(relationsByPost.get(row.post_id) ?? [], exclusions.termIds),
+  );
+  if (importableRows.length !== rows.length) {
+    logger.info(
+      `Skipping ${rows.length - importableRows.length} excluded deal post(s) ` +
+        `(articles/retired stores) — never imported, nothing to reconcile`,
+    );
   }
 
   let reconciled = 0;
   let skipped = 0;
   const limit = pLimit(20);
   await Promise.all(
-    rows.map((row) =>
+    importableRows.map((row) =>
       limit(async () => {
         try {
           const ref = await ensurePostMapping(row.post_id, "deals");
@@ -118,10 +119,10 @@ export async function runOfferBackfill(): Promise<void | PhaseOutcome> {
             skipped++;
             return;
           }
+          const dealStoreTermId = parseAcfTermId(row.deal_store);
           await replaceOfferTaxonomyRelations("deals", ref.id, {
             termIds: relationsByPost.get(row.post_id) ?? [],
-            primaryTermId: primaryTerms.get(row.post_id),
-            acfStoreTermId: parseAcfTermId(row.deal_store),
+            logoStoreTermIds: dealStoreTermId ? [dealStoreTermId] : [],
           });
           reconciled++;
         } catch (err: any) {

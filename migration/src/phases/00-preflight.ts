@@ -1,6 +1,18 @@
+import { createRequire } from "node:module";
 import { wpQuery, getWpPool } from "../db/wp-client.js";
 import { pgQuery, getPgPool } from "../db/pg-client.js";
 import { logger } from "../utils/logger.js";
+
+const require = createRequire(import.meta.url);
+// Single source of truth for the background-removal dedup index: the Strapi
+// migration that owns it. On fresh databases that migration no-ops (files
+// table doesn't exist before schema sync) and is recorded forever, so the
+// importer must re-create the index itself.
+const {
+  indexSql: bgRemovalIndexSql,
+} = require("../../../database/migrations/2026.07.29T00.00.00.add-deal-image-background-removal.js");
+
+import { getImportExclusions } from "../utils/import-exclusions.js";
 
 export async function runPreflight(): Promise<void> {
   logger.info("=== Phase 0: Preflight Checks ===");
@@ -100,6 +112,8 @@ export async function runPreflight(): Promise<void> {
   await pgQuery(
     `CREATE UNIQUE INDEX IF NOT EXISTS "files_related_mph_uq" ON "files_related_mph" ("file_id", "related_id", "related_type", "field")`
   );
+  // Background-removal dedup guard (lost on fresh DBs — see the require above)
+  await pgQuery(bgRemovalIndexSql);
   logger.info("  ✓ Unique indexes ensured");
 
   // Discover link tables
@@ -113,7 +127,10 @@ export async function runPreflight(): Promise<void> {
   }
 
   // Print WP summary counts
-  logger.info("WordPress data summary:");
+  // RAW source totals — before the exclusion rules (Articles tree, retired
+  // stores) and the publish/future-only lifecycle. The exclusion-aware
+  // numbers that match what actually imports come from `yarn migrate:report`.
+  logger.info("WordPress data summary (RAW, before exclusions):");
   const [termCount] = await wpQuery<{ c: number }>(
     "SELECT COUNT(*) AS c FROM wp_terms"
   );
@@ -155,6 +172,22 @@ export async function runPreflight(): Promise<void> {
       "SELECT COUNT(*) AS c FROM wp_uc_codes"
     );
     logger.info(`  Unique codes: ${codeCount.c}`);
+  }
+
+  // What the exclusion rules will subtract from the raw totals above.
+  const exclusions = await getImportExclusions();
+  logger.info(
+    `  Will be EXCLUDED by import rules: ` +
+      `${exclusions.articleTermIds.size} article term(s), ` +
+      `${exclusions.excludedStoreTermIds.size} retired store term(s) ` +
+      `(+ every post filed under them — run \`yarn migrate:report\` for the ` +
+      `exact post funnel)`,
+  );
+  if (exclusions.unmatchedStoreNames.length > 0) {
+    logger.warn(
+      `  ${exclusions.unmatchedStoreNames.length} excluded-store name(s) match ` +
+        `no WordPress store term — review them in dry-run-excluded.csv`,
+    );
   }
 
   const [attachmentCount] = await wpQuery<{ c: number }>(

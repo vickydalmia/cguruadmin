@@ -668,6 +668,13 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
     },
   ].flatMap(({ uid, hints }) => [
     ...hints.map(({ field, hint }) => ({ uid, field, hint })),
+    {
+      uid,
+      field: 'logoStore',
+      hint:
+        'Optional image source only. The site borrows this Store logo; it does ' +
+        'not add Store membership, ownership, search matching, or Store-page placement.',
+    },
     // Mirrors offer-lifecycle-validation.ts: past dates rejected, scheduledAt
     // must precede expiresAt, contentStatus derived from these two dates.
     {
@@ -850,7 +857,6 @@ export const CONTENT_TYPE_FIELD_HINTS: Record<string, Record<string, string>> = 
   for (const { uid, field, hint } of VALIDATOR_MIRROR_HINTS) {
     append(CONTENT_TYPE_FIELD_HINTS, uid, field, hint);
   }
-
   // Component hints ride the existing component pass. An explicit description
   // declared above (homepage images, the canonicalUrl HTML warning) always
   // wins over a derived hint — skip keys already present.
@@ -870,8 +876,14 @@ export const CONTENT_TYPE_FIELD_HINTS: Record<string, Record<string, string>> = 
 // sortable list column, so the table header needs the same name the Publishing
 // panel uses or the two views disagree about what the field is called.
 const CONTENT_TYPE_FIELD_LABELS: Record<string, Record<string, string>> = {
-  'api::coupon.coupon': { publishedOn: 'Published date' },
-  'api::deal.deal': { publishedOn: 'Published date' },
+  'api::coupon.coupon': {
+    publishedOn: 'Published date',
+    logoStore: 'Logo Store (image only)',
+  },
+  'api::deal.deal': {
+    publishedOn: 'Published date',
+    logoStore: 'Logo Store (image only)',
+  },
   'api::menu.menu': {
     notification: 'Notification',
     topStoresLabel: 'Top Stores navigation label',
@@ -923,13 +935,16 @@ async function ensureFieldDescriptions(strapi: Core.Strapi): Promise<void> {
         }
         const description = fields[field];
         const label = labels[field];
+        const mainField = field === 'logoStore' ? 'name' : undefined;
         const prev = metadatas[field] ?? {};
         const descriptionSettled =
           description === undefined || prev.edit?.description === description;
         const labelSettled =
           label === undefined ||
           (prev.edit?.label === label && prev.list?.label === label);
-        if (descriptionSettled && labelSettled) continue;
+        const mainFieldSettled =
+          mainField === undefined || prev.edit?.mainField === mainField;
+        if (descriptionSettled && labelSettled && mainFieldSettled) continue;
 
         metadatas[field] = {
           ...prev,
@@ -937,6 +952,7 @@ async function ensureFieldDescriptions(strapi: Core.Strapi): Promise<void> {
             ...(prev.edit ?? {}),
             ...(description === undefined ? {} : { description }),
             ...(label === undefined ? {} : { label }),
+            ...(mainField === undefined ? {} : { mainField }),
           },
           // The list header reads metadatas[field].list.label, a separate key
           // from the edit one — set both or the table column keeps the

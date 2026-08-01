@@ -274,16 +274,16 @@ modified post.
 ### Phase 07 — Coupons
 
 Migrates WordPress posts where `is_deal` is not `'yes'` into the `coupons`
-table. `publish` and `future` rows are included normally. `draft`/`trash` rows
-are included only when a valid source expiry has already elapsed, in which case
-they are retained as `expired`; ordinary withdrawn rows are excluded. On
+table. Only `publish` and `future` rows are included (a published row whose
+expiry meta has elapsed imports as `expired`); `draft`/`trash` rows never
+import — the old withdrawn-by-expiry retention was deliberately dropped. On
 re-import, migration-owned Coupon rows no longer in that source inventory are
 removed, so deletion, withdrawal, and Coupon → Product Deal changes converge.
 For each coupon:
 
 - Strips WordPress shortcodes from content
 - Resolves `coupon_type` ("static" or "unique") from ACF meta
-- Wires taxonomy relationships (store, brand, category, bank) via link tables, respecting Yoast primary term
+- Wires taxonomy relationships (store, brand, category, bank) from WordPress `wp_term_relationships`
 - Links the unique coupon pool and SEO component; Coupon records do not own a
   featured image
 - Rewrites content-embedded images (see **Content-embedded images** below)
@@ -301,7 +301,7 @@ Rich-text HTML (`coupons.content`, `deals.content`, taxonomy `description`) can 
 ### Phase 08 — Deals
 
 Migrates deal posts (`is_deal='yes'`) into the `deals` table using the same
-published/future and expired-draft/trash lifecycle rule as Coupons. Re-import
+publish/future-only lifecycle rule as Coupons. Re-import
 removes migration-owned Deal rows that were withdrawn, deleted, or changed back
 to Coupons. Relationship wiring is the same as Coupons, plus deal-specific
 fields: `mrp`, `sale_price`, `discount`, and `dealImage`. The `deal_store` meta
@@ -327,8 +327,8 @@ Copies only the media files actually referenced by entities (via `files_related_
 ### Phase 12 — Offer Backfill
 
 Reconciles each Deal's complete ordered taxonomy relation set from WordPress.
-The ACF `deal_store` term is first in `stores`, followed by the Yoast primary
-term and the remaining WP terms in stable order. Every relation table is
+The ACF `deal_store` term is first in `stores`, followed by the WordPress
+taxonomy terms in their source order. Every relation table is
 replaced transactionally per Deal, so changed/cleared ACF ownership and stale
 links converge to the same result as a clean import.
 
@@ -352,11 +352,12 @@ the migration.
 ### Phase 12b — Offer Relevance Timestamp Backfill
 
 Sets `published_on`, the editor-controlled relevance/"bump to top" timestamp,
-from the migrated WordPress `post_modified_gmt` date. It repairs only
-migration-owned Coupons and Deals whose `published_on` is still null or equal
-to their original `published_at`; a value that already differs is preserved as
-a post-migration editorial bump. New phase 07/08 inserts seed the same field
-from the WordPress modification date directly.
+from the migrated WordPress publish date stored in `published_at`. It repairs
+every migration-owned Coupon and Deal whose value differs from that source
+publish date. Phase 07/08 inserts and reruns also set the field from the
+WordPress publish date, so the imported order remains identical to WordPress.
+This is a pre-launch migration rule; stop rerunning these phases after editors
+begin using Strapi's explicit bump action.
 
 ### Phase 13 — Site Content
 
@@ -427,7 +428,7 @@ Runs two passes over already-migrated S3 images.
 
 **Pass 1 — full optimize backfill.** Candidates are `files` rows with `provider='aws-s3'`, `formats IS NULL`, and an optimizable MIME type (jpeg/png/webp/avif/tiff). For each candidate (5 in parallel):
 
-1. **Source bytes** — resolved from the local `WP_UPLOADS_DIR` tree via a `sha256(file)[0:16] → path` map (cached in `.checkpoints/media-hash-map.json` keyed by mtime + size so re-runs don't rehash), falling back to downloading the current S3 object.
+1. **Source bytes** — resolved from the local `WP_UPLOADS_DIR` tree via a `sha256(file)[0:16] → path` map (cached in `.checkpoints/mediaHashMap.json` keyed by mtime + size so re-runs don't rehash; survives `--clean` like every `*Map.json`), falling back to downloading the current S3 object.
 2. **Optimize** — same pipeline as Phase 02: orientation baked, max 1920px, jpeg/png → webp, quality 80. AVIF twins are encoded from the raw source bytes for webp results.
 3. **Upload** — the optimized original (new `.webp` key when converted) plus all responsive variants (including AVIF twins).
 4. **Update** — a single `UPDATE files SET formats, ext, mime, url, width, height, size, provider_metadata, updated_at` as the **last** step, so a crash leaves the row eligible for the next run (row-level resume via the `formats IS NULL` predicate).
@@ -482,6 +483,34 @@ WordPress stores all taxonomy terms in `wp_terms` with `taxonomy='category'`. Th
 | `Brand`             | `brands`    |
 | `Category`          | `categories`|
 | `Bank`              | `banks`     |
+| `Article`/`Articles` | **not imported** — editorial content, skipped entirely |
+
+**Import exclusions** (`src/utils/import-exclusions.ts`) — two rules, both
+applied in phases 03/07/08 and mirrored by phase 10's expected counts:
+
+1. **Articles category**: the term with slug `articles` / name `Articles`
+   (case-insensitive; an `Article(s)` choose_type also counts) plus every
+   descendant term under it.
+2. **Retired stores**: `migration/excluded-stores.csv` — one store name per
+   line, `#` comments, matched case/whitespace-insensitively against terms
+   whose `choose_type` is `Store` or missing (a Brand/Bank/Category sharing
+   a name is never swallowed). Names that match no WP term are logged for
+   review. This file is deliberately un-gitignored — it is import config.
+
+An excluded term is never imported, and every post filed under one is
+excluded from phases 07/08 — *before* the inventory reconciliation, so a
+re-import also deletes posts a previous run imported. Skipped posts' media is
+never uploaded (uploads are on-demand); phase 16 removes previously-uploaded
+objects as orphans.
+
+**Dry run**: `yarn migrate:report` (read-only, WordPress only) prints how
+many stores/brands/categories/banks and how many coupons/deals would import
+after all exclusions, plus the withdrawn/excluded breakdown — and writes two
+CSVs: `migration/dry-run-report.csv` (one row per imported term: type,
+associated coupon/deal counts, dropped counts, valid remainder) and
+`migration/dry-run-excluded.csv` (one row per EXCLUDED term — articles /
+retired stores — with the coupon/deal counts its exclusion deletes, plus a
+row per listed name that matched no WP term).
 
 **Field mapping:**
 
@@ -498,8 +527,8 @@ WordPress stores all taxonomy terms in `wp_terms` with `taxonomy='category'`. Th
 ### Posts: Coupons vs Deals (Phases 07–08)
 
 WordPress posts with `post_type='post'` are first filtered by lifecycle:
-`publish`/`future` are included, and `draft`/`trash` are included only when a
-valid expiry has already elapsed. They are then split:
+only `publish`/`future` are included — `draft`/`trash` never import. They are
+then split:
 
 - **Deal** — `is_deal` postmeta = `'yes'` → `deals` table
 - **Coupon** — everything else → `coupons` table
@@ -533,7 +562,7 @@ valid expiry has already elapsed. They are then split:
 
 ### Taxonomy Relationship Wiring
 
-Each coupon/deal can link to one store, one brand, one category, and one bank via link tables (`coupons_store_lnk`, `deals_brand_lnk`, etc.). The Yoast primary term is processed first. If multiple terms map to the same type, only the first is linked.
+Coupon/deal taxonomy links come from WordPress `wp_term_relationships`; Yoast primary-term metadata is not treated as membership. Deal `deal_store` remains an explicit owning-store override and is ordered first.
 
 ### Unique Coupon Pool / Code Mapping
 
@@ -674,6 +703,12 @@ The migration is designed to be safely re-run after interruption or failure.
 > existing rows via `ON CONFLICT DO UPDATE` — any edits made to those fields in
 > the Strapi admin are overwritten by the freshly migrated WordPress values.
 > Once editors start working in Strapi, stop re-running these phases.
+>
+> Exception — **fill-only columns**: `deals.coupon_type`,
+> `show_trending_deals`, and `stores.is_cj_enabled` use
+> `COALESCE(existing, EXCLUDED)` instead of bare `EXCLUDED`. WordPress has no
+> opinion on these (the import only supplies the schema default), so an
+> editor's value always survives a re-run; NULLs from older imports are healed.
 
 ### Checkpointing
 

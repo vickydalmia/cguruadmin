@@ -30,13 +30,23 @@ import { logger } from "../utils/logger.js";
 import { isAcfTrue, parseAcfTermId } from "../utils/acf.js";
 import { parseDecimal } from "../utils/price.js";
 import { reconcileMigratedOfferInventory } from "../utils/offer-inventory.js";
+import {
+  getImportExclusions,
+  hasExcludedTerm,
+} from "../utils/import-exclusions.js";
 import { getWpOfferExpiryRaw } from "../utils/wp-offer-expiry.js";
 import { registerMigratedEntity } from "../utils/migration-registry.js";
 import {
   allowsPartialDeals,
   type PhaseOutcome,
 } from "../utils/phase-outcome.js";
-import { parseLegacyDealDiscount } from "../../../src/utils/deal-discount.js";
+// The application owns the discount parser; imported dynamically because
+// cguruadmin is CommonJS while this package runs as ESM under tsx — a static
+// named import from the CJS scope loses its exports (visible on Node 24).
+// Same pattern as calculateImageBackgroundColour in 02-media-upload.ts.
+const { parseLegacyDealDiscount } = await import(
+  "../../../src/utils/deal-discount.js"
+);
 
 export async function runDeals(): Promise<void | PhaseOutcome> {
   logger.info("=== Phase 8: Deals Migration ===");
@@ -62,7 +72,7 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
            p.post_status, p.post_author
     FROM wp_posts p
     WHERE p.post_type = 'post'
-      AND p.post_status IN ('publish', 'future', 'draft', 'trash')
+      AND p.post_status IN ('publish', 'future')
       AND EXISTS (
         SELECT 1 FROM wp_postmeta
         WHERE post_id = p.ID
@@ -75,7 +85,7 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
   const sourcePostIds = sourcePosts.map((post) => post.ID);
   const metaByPost = await getMetaBulk(sourcePostIds);
   const migrationNow = new Date();
-  const posts = sourcePosts.filter((post) => {
+  const lifecyclePosts = sourcePosts.filter((post) => {
     const expiresAt = parseExpiryDate(
       getWpOfferExpiryRaw(metaByPost.get(post.ID) || {}),
     );
@@ -85,6 +95,35 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
       now: migrationNow,
     });
   });
+
+  // Posts filed under an excluded term (Articles tree, retired stores)
+  // are not deals to import. Excluding them BEFORE expectedDocumentIds means the inventory
+  // reconciliation also converges previously imported excluded posts away on
+  // a re-import, instead of keeping them alive.
+  const lifecyclePostIds = lifecyclePosts.map((post) => post.ID);
+  const [exclusions, termRelByPost] = await Promise.all([
+    getImportExclusions(),
+    getTermRelsBulk(
+      lifecyclePostIds,
+      lifecyclePostIds.map(() => "?").join(","),
+    ),
+  ]);
+  const excludedPosts = lifecyclePosts.filter((post) =>
+    hasExcludedTerm(termRelByPost.get(post.ID) ?? [], exclusions.termIds),
+  );
+  if (excludedPosts.length > 0) {
+    const sample = excludedPosts
+      .slice(0, 10)
+      .map((post) => `${post.ID} (${post.post_title})`);
+    logger.info(
+      `Skipping ${excludedPosts.length} excluded post(s) (articles/retired ` +
+        `stores): ${sample.join("; ")}` +
+        (excludedPosts.length > sample.length ? "; ..." : ""),
+    );
+  }
+  const excludedPostIds = new Set(excludedPosts.map((post) => post.ID));
+  const posts = lifecyclePosts.filter((post) => !excludedPostIds.has(post.ID));
+
   const expectedDocumentIds = new Set(
     posts.map((post) => generateDocumentId(`deal:${post.ID}`)),
   );
@@ -92,7 +131,8 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
 
   logger.info(
     `Found ${posts.length} importable deal posts ` +
-      `(${sourcePosts.length - posts.length} ordinary withdrawn posts excluded)`,
+      `(${sourcePosts.length - lifecyclePosts.length} non-importable post(s) ` +
+      `dropped, ${excludedPosts.length} excluded post(s))`,
   );
   if (posts.length === 0) return;
 
@@ -103,16 +143,6 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
     `SELECT "id" FROM "admin_users"`,
   );
   const validAdminUserIds = new Set(adminUsers.map((user) => user.id));
-
-  const postIds = posts.map((p) => p.ID);
-  const placeholders = postIds.map(() => "?").join(",");
-
-  // Bulk-fetch relation data for importable posts only. Metadata was fetched
-  // above because expiry determines whether a withdrawn draft/trash belongs.
-  const [termRelByPost, primaryTerms] = await Promise.all([
-    getTermRelsBulk(postIds, placeholders),
-    getPrimaryTerms(postIds, placeholders),
-  ]);
 
   let inserted = 0;
   let failed = 0;
@@ -126,7 +156,6 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
     limit(async () => {
       const meta = metaByPost.get(post.ID) || {};
       const relations = termRelByPost.get(post.ID) || [];
-      const primaryTermId = primaryTerms.get(post.ID);
       let dealImageStatus: "ready" | "missing" | "failed" = "failed";
 
       try {
@@ -214,9 +243,10 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
             : authorId;
 
         // `published_on` is the EDITOR-CONTROLLED relevance/"newest first"
-        // sort key (src/utils/offer-visibility.ts). WordPress uses an edit to
-        // make an offer relevant again, so seed it from post_modified via
-        // updatedAt rather than from the original publication date.
+        // sort key (src/utils/offer-visibility.ts). Seeded from the WordPress
+        // PUBLISH date (post_date via createdAt) so the imported ordering
+        // matches the old site exactly; editors bump offers by re-dating
+        // them after migration.
         // It MUST be written at insert time: Postgres orders NULLs FIRST in a
         // DESC sort, so a row with no published_on outranks every row an editor
         // has actually dated — "Bump to top" would push an offer to the BOTTOM.
@@ -226,12 +256,13 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
         const result = await pgQuery<{ id: number }>(
           `INSERT INTO "deals" (
             "document_id", "title", "cashback_text", "bank_offer_text", "prepaid_text", "content", "code",
+            "coupon_type",
             "sale_price", "mrp", "discount", "discount_prefix",
             "badge", "affiliate_link", "expires_at", "scheduled_at", "content_status",
             "published_at", "published_on", "created_at", "updated_at", "locale",
             "created_by_id", "updated_by_id"
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
           )
           ON CONFLICT ("document_id") DO UPDATE SET
             "title" = EXCLUDED."title",
@@ -239,6 +270,7 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
             "bank_offer_text" = EXCLUDED."bank_offer_text",
             "prepaid_text" = EXCLUDED."prepaid_text",
             "code" = EXCLUDED."code",
+            "coupon_type" = COALESCE("deals"."coupon_type", EXCLUDED."coupon_type"),
             "sale_price" = EXCLUDED."sale_price",
             "mrp" = EXCLUDED."mrp",
             "discount" = EXCLUDED."discount",
@@ -250,7 +282,7 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
             "scheduled_at" = EXCLUDED."scheduled_at",
             "content_status" = EXCLUDED."content_status",
             "published_at" = EXCLUDED."published_at",
-            "published_on" = COALESCE("deals"."published_on", EXCLUDED."published_on"),
+            "published_on" = EXCLUDED."published_on",
             "updated_at" = EXCLUDED."updated_at",
             "updated_by_id" = EXCLUDED."updated_by_id"
           RETURNING id`,
@@ -262,6 +294,15 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
             prepaidText,
             content,
             cleanCode(meta.code),
+            // couponType is required + load-bearing (a NULL type renders the
+            // Deal as a no-code offer — src/utils/offer-visibility.ts) but the
+            // DB column has no default: schema sync never applies schema.json
+            // defaults. WP has no deal-uniqueness signal and no phase links
+            // deals to pools, so import-time deals are always "static". The
+            // conflict clause is fill-only (COALESCE), unlike coupons where WP
+            // is authoritative: overwriting would flip an editor's "unique"
+            // deal back to "static" while leaving its pool link attached.
+            "static",
             salePrice,
             mrp,
             discount,
@@ -272,7 +313,7 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
             contentStatus.scheduledAt,
             contentStatus.contentStatus,
             contentStatus.publishedAt,
-            contentStatus.publishedAt ? updatedAt : null,
+            contentStatus.publishedAt ? createdAt : null,
             createdAt,
             updatedAt,
             null,
@@ -299,19 +340,14 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
           targetTable: "deals",
         });
 
-        // The ACF `deal_store` is linked FIRST so it lands at deal_ord 1 and
-        // becomes `stores[0]`. This used to be a dedicated `deal.primaryStore`
-        // relation; with that field removed, the site resolves a deal's owning
-        // store as `stores[0]` (see primaryEntity() in cguru-ui), so the
-        // ordering IS the primary-store signal. Linked last — as it was — the
-        // ACF store ended up at the tail and a different store won the card
-        // badge. `parseAcfTermId` replaces a bare parseInt that returned NaN
-        // for every PHP-serialized value and dropped those stores silently.
+        // WordPress ACF `deal_store` selected the logo source, not taxonomy
+        // membership. Keep real membership from `relations` and put the ACF
+        // Store only in logoStore. `parseAcfTermId` also handles the serialized
+        // ACF values that a bare parseInt silently dropped.
         const dealStoreTermId = parseAcfTermId(meta.deal_store);
         await replaceOfferTaxonomyRelations("deals", entityId, {
           termIds: relations,
-          primaryTermId,
-          acfStoreTermId: dealStoreTermId,
+          logoStoreTermIds: dealStoreTermId ? [dealStoreTermId] : [],
         });
 
         // Replace dealImage exactly so a source change or clear cannot leave a
@@ -426,23 +462,6 @@ async function getTermRelsBulk(
     map.get(row.object_id)!.push(row.term_id);
   }
   return map;
-}
-
-async function getPrimaryTerms(
-  postIds: number[],
-  placeholders: string
-): Promise<Map<number, number>> {
-  try {
-    const rows = await wpQuery<{ post_id: number; term_id: number }>(`
-      SELECT post_id, term_id
-      FROM wp_yoast_primary_term
-      WHERE post_id IN (${placeholders}) AND taxonomy = 'category'
-    `, postIds);
-    return new Map(rows.map((r) => [r.post_id, r.term_id]));
-  } catch {
-    logger.warn("wp_yoast_primary_term not available for deals");
-    return new Map();
-  }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────

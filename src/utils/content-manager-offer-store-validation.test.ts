@@ -42,13 +42,11 @@ const errorPaths = (error: unknown) =>
 describe.each([
   'api::coupon.coupon',
   'api::deal.deal',
-] as OfferStoreUid[])('Content Manager single-Store validation — %s', (uid) => {
-  it('rejects create with zero Stores', async () => {
+] as OfferStoreUid[])('Content Manager optional single-Store validation — %s', (uid) => {
+  it('accepts create with zero Stores', async () => {
     const { strapi } = harness();
 
-    await expect(validate(strapi, uid, 'create', {})).rejects.toThrow(
-      'Select exactly one Store',
-    );
+    await expect(validate(strapi, uid, 'create', {})).resolves.toBeUndefined();
   });
 
   it('accepts create with one Store', async () => {
@@ -75,7 +73,7 @@ describe.each([
   });
 });
 
-describe('Content Manager single-Store relation payloads', () => {
+describe('Content Manager optional single-Store relation payloads', () => {
   const uid: OfferStoreUid = 'api::coupon.coupon';
 
   it('resolves direct arrays and set commands', async () => {
@@ -119,11 +117,11 @@ describe('Content Manager single-Store relation payloads', () => {
       ),
     ).resolves.toBeUndefined();
 
-    // Explicit null clears the relation — that is a real zero-Store write.
+    // Explicit null clears the optional relation.
     const cleared = harness({ currentStores: [STORE_ONE] });
     await expect(
       validate(cleared.strapi, uid, 'update', { stores: null }, 'coupon-1'),
-    ).rejects.toThrow('Select exactly one Store');
+    ).resolves.toBeUndefined();
   });
 
   it('accepts an atomic Content Manager replacement', async () => {
@@ -202,7 +200,7 @@ describe('Content Manager single-Store relation payloads', () => {
   });
 });
 
-describe('single-Store validation scope', () => {
+describe('optional single-Store validation scope', () => {
   const uid: OfferStoreUid = 'api::deal.deal';
 
   it('does not restrict background writes', async () => {

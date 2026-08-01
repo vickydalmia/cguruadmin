@@ -932,6 +932,7 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
       'api::coupon.coupon'
     > &
       Schema.Attribute.Private;
+    logoStore: Schema.Attribute.Relation<'manyToOne', 'api::store.store'>;
     offerText: Schema.Attribute.String & Schema.Attribute.Required;
     prepaidText: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
@@ -1068,6 +1069,7 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'> &
       Schema.Attribute.Private;
+    logoStore: Schema.Attribute.Relation<'manyToOne', 'api::store.store'>;
     mrp: Schema.Attribute.Decimal &
       Schema.Attribute.SetMinMax<
         {

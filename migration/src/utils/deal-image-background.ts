@@ -27,6 +27,24 @@ export interface MigrationDealImageSource {
   caption?: string | null;
 }
 
+/**
+ * Failures determined by the IMAGE CONTENT itself — retrying or fixing config
+ * cannot help (FAL returned no meaningful mask, rejected the format, or the
+ * source is undecodable). These soft-fall-back to importing the original
+ * opaque image. Config/credit/transient failures (NOT_CONFIGURED,
+ * CREDITS_EXHAUSTED, RATE_LIMITED, TIMED_OUT, UNAVAILABLE) still fail hard —
+ * soft-falling those would silently import the whole catalog opaque.
+ */
+const CONTENT_FAILURE_CODES = new Set([
+  "BACKGROUND_REMOVAL_INVALID_OUTPUT",
+  "BACKGROUND_REMOVAL_REJECTED",
+  "DEAL_IMAGE_INVALID_SOURCE",
+]);
+
+export function isContentBackgroundRemovalFailure(error: unknown): boolean {
+  return CONTENT_FAILURE_CODES.has((error as { code?: string })?.code ?? "");
+}
+
 const inFlightPreparations = new Map<string, Promise<any>>();
 
 export async function prepareMigrationDealImage(

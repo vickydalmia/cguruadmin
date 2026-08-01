@@ -149,6 +149,11 @@
       "target": "api::store.store",
       "inversedBy": "deals"
     },
+    "logoStore": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::store.store"
+    },
     "banks": {
       "type": "relation",
       "relation": "manyToMany",

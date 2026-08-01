@@ -287,6 +287,7 @@ function dealPopulate() {
   };
   return {
     dealImage: true,
+    logoStore: namedLogo,
     stores: namedLogo,
     brands: namedLogo,
     banks: namedLogo,

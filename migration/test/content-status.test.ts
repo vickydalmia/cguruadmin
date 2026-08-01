@@ -21,7 +21,11 @@ test("imports published and scheduled WordPress offers", () => {
   );
 });
 
-test("excludes ordinary draft and trash offers", () => {
+// Drafts and trash NEVER import — including the old special case that
+// retained a draft/trash row when an expiry plugin withdrew it. The fresh
+// catalog carries publish/future posts only; expired-by-meta PUBLISHED posts
+// still import (as contentStatus "expired").
+test("excludes draft and trash offers regardless of expiry", () => {
   for (const postStatus of ["draft", "trash"]) {
     assert.equal(
       shouldImportMigrationOffer({ postStatus, expiresAt: null, now: NOW }),
@@ -31,36 +35,11 @@ test("excludes ordinary draft and trash offers", () => {
       shouldImportMigrationOffer({ postStatus, expiresAt: FUTURE, now: NOW }),
       false,
     );
-  }
-});
-
-test("imports draft and trash offers withdrawn by an elapsed expiry", () => {
-  for (const postStatus of ["draft", "trash"]) {
     assert.equal(
       shouldImportMigrationOffer({ postStatus, expiresAt: PAST, now: NOW }),
-      true,
-    );
-    assert.equal(
-      computeMigrationStatus({
-        postStatus,
-        postDate: "2026-07-01T00:00:00.000Z",
-        expiresAt: PAST,
-        now: NOW,
-      }).contentStatus,
-      "expired",
+      false,
     );
   }
-});
-
-test("does not treat invalid expiry metadata as an expired withdrawal", () => {
-  assert.equal(
-    shouldImportMigrationOffer({
-      postStatus: "draft",
-      expiresAt: "not-a-date",
-      now: NOW,
-    }),
-    false,
-  );
   assert.equal(
     shouldImportMigrationOffer({
       postStatus: "private",
@@ -68,6 +47,26 @@ test("does not treat invalid expiry metadata as an expired withdrawal", () => {
       now: NOW,
     }),
     false,
+  );
+});
+
+test("published offers with an elapsed expiry import as expired entries", () => {
+  assert.equal(
+    shouldImportMigrationOffer({
+      postStatus: "publish",
+      expiresAt: PAST,
+      now: NOW,
+    }),
+    true,
+  );
+  assert.equal(
+    computeMigrationStatus({
+      postStatus: "publish",
+      postDate: "2026-07-01T00:00:00.000Z",
+      expiresAt: PAST,
+      now: NOW,
+    }).contentStatus,
+    "expired",
   );
 });
 

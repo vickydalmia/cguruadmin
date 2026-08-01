@@ -29,7 +29,10 @@ import { getS3Client, hashBuffer } from "./02-media-upload.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CHECKPOINT_DIR = path.resolve(__dirname, "../../.checkpoints");
-const HASH_MAP_CACHE = path.join(CHECKPOINT_DIR, "media-hash-map.json");
+// `*Map.json` survives clearCheckpoints(), so --clean no longer forces a
+// full rehash of the uploads tree. The old name is read once as a fallback.
+const HASH_MAP_CACHE = path.join(CHECKPOINT_DIR, "mediaHashMap.json");
+const LEGACY_HASH_MAP_CACHE = path.join(CHECKPOINT_DIR, "media-hash-map.json");
 
 export const CACHE_CONTROL = "public, max-age=31536000, immutable";
 
@@ -613,7 +616,7 @@ export async function fetchFromS3(
 /**
  * Build a map of sha256(file)[0:16] → absolute path for every image file
  * under config.wpUploadsDir (matching how Phase 02 hashes source bytes).
- * Hashes are cached in .checkpoints/media-hash-map.json keyed by
+ * Hashes are cached in .checkpoints/mediaHashMap.json keyed by
  * mtime + size so re-runs don't rehash unchanged files.
  */
 export function buildLocalHashMap(): Map<string, string> {
@@ -627,9 +630,12 @@ export function buildLocalHashMap(): Map<string, string> {
   }
 
   let cache: Record<string, HashCacheEntry> = {};
-  if (fs.existsSync(HASH_MAP_CACHE)) {
+  const cachePath = fs.existsSync(HASH_MAP_CACHE)
+    ? HASH_MAP_CACHE
+    : LEGACY_HASH_MAP_CACHE;
+  if (fs.existsSync(cachePath)) {
     try {
-      cache = JSON.parse(fs.readFileSync(HASH_MAP_CACHE, "utf8"));
+      cache = JSON.parse(fs.readFileSync(cachePath, "utf8"));
     } catch {
       cache = {};
     }

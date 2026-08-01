@@ -13,6 +13,7 @@ import {
 import {
   DEAL_IMAGE_ARCHIVE_DIR,
   DEAL_IMAGE_PROCESSOR_VERSION,
+  isContentBackgroundRemovalFailure,
   prepareMigrationDealImage,
 } from "../utils/deal-image-background.js";
 import { buildLocalHashMap } from "./14-media-optimize.js";
@@ -253,6 +254,7 @@ export async function runDealImageBackgroundBackfill(): Promise<void> {
   let processed = 0;
   let completed = 0;
   const failures: string[] = [];
+  const contentSkipped: string[] = [];
 
   await Promise.all(
     candidates.map(({ row, repairMissingS3 }, index) =>
@@ -357,11 +359,27 @@ export async function runDealImageBackgroundBackfill(): Promise<void> {
               `source=${sourceLabel}`,
           );
         } catch (error: any) {
-          failures.push(`deal ${row.deal_id} / file ${row.file_id}: ${error.message}`);
-          logger.error(
-            `[deal-image ${progress}] failed: deal=${row.deal_id}, ` +
-              `source_file=${row.file_id}, error=${error.message}`,
-          );
+          // Same soft rule as phase 08's resolver: when the IMAGE CONTENT
+          // defeats background removal (FAL returns no meaningful mask /
+          // rejects the format / undecodable source), the deal keeps its
+          // opaque image and the phase must not fail — retrying can never
+          // succeed. Config/credit/transient errors still fail the phase.
+          if (isContentBackgroundRemovalFailure(error)) {
+            contentSkipped.push(
+              `deal ${row.deal_id} / file ${row.file_id}: ${error.message}`,
+            );
+            logger.warn(
+              `[deal-image ${progress}] unprocessable image, keeping opaque ` +
+                `original: deal=${row.deal_id}, source_file=${row.file_id} ` +
+                `(${error.message}) — replace it editorially for a transparent card`,
+            );
+          } else {
+            failures.push(`deal ${row.deal_id} / file ${row.file_id}: ${error.message}`);
+            logger.error(
+              `[deal-image ${progress}] failed: deal=${row.deal_id}, ` +
+                `source_file=${row.file_id}, error=${error.message}`,
+            );
+          }
         } finally {
           completed += 1;
           logger.info(
@@ -401,7 +419,10 @@ export async function runDealImageBackgroundBackfill(): Promise<void> {
 
   logger.info(
     `Deal image backfill complete: ${processed} relation(s), ` +
-      `${deleted} unreferenced opaque file(s) deleted, ${retained} retained`,
+      `${deleted} unreferenced opaque file(s) deleted, ${retained} retained` +
+      (contentSkipped.length > 0
+        ? `, ${contentSkipped.length} unprocessable image(s) kept opaque`
+        : ""),
   );
   if (failures.length > 0) {
     const message =

@@ -179,6 +179,7 @@ const categoryRef = { fields: ['name', 'slug', 'iconAlt'], populate: { icon: tru
 // pool NAME only — its `codes` relation is never referenced, so redeemable
 // unique codes can never be harvested through this endpoint.
 const COUPON_PUBLIC_POPULATE = {
+  logoStore: storeRef,
   stores: storeRef,
   banks: bankRef,
   categories: categoryRef,
@@ -188,6 +189,7 @@ const COUPON_PUBLIC_POPULATE = {
 
 const DEAL_PUBLIC_POPULATE = {
   dealImage: true,
+  logoStore: storeRef,
   stores: storeRef,
   banks: bankRef,
   categories: categoryRef,

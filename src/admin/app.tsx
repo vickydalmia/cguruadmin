@@ -83,7 +83,7 @@ const RELATION_CONFIG: Record<string, RelationConfig[]> = {
       field: 'stores',
       target: 'api::store.store',
       label: 'Store',
-      minSelections: 1,
+      minSelections: 0,
       maxSelections: 1,
     },
     { field: 'brands', target: 'api::brand.brand', label: 'Brands' },
@@ -95,7 +95,7 @@ const RELATION_CONFIG: Record<string, RelationConfig[]> = {
       field: 'stores',
       target: 'api::store.store',
       label: 'Store',
-      minSelections: 1,
+      minSelections: 0,
       maxSelections: 1,
     },
     { field: 'brands', target: 'api::brand.brand', label: 'Brands' },
@@ -513,8 +513,7 @@ function RelationSection({
     get,
   ]);
 
-  const isSingleChoice =
-    config.minSelections === 1 && config.maxSelections === 1;
+  const isSingleChoice = config.maxSelections === 1;
 
   const applySingleRelationChange = (
     change:
@@ -738,7 +737,10 @@ function RelationSection({
         </Box>
       ) : null}
 
-      {isSingleChoice && selectedRelationsReady && selectedList.length === 0 ? (
+      {isSingleChoice &&
+      (config.minSelections ?? 0) > 0 &&
+      selectedRelationsReady &&
+      selectedList.length === 0 ? (
         <Box paddingBottom={2} width="100%">
           <Typography variant="pi" textColor="danger600">
             Select exactly one Store before saving.

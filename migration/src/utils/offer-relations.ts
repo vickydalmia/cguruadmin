@@ -3,7 +3,10 @@ import {
   ensureTermMapping,
   type StrapiEntityRef,
 } from "./id-maps.js";
-import { orderedUniqueTermIds } from "./offer-relation-order.js";
+import {
+  orderedUniqueTermIds,
+  shouldLinkLogoStore,
+} from "./offer-relation-order.js";
 
 export { orderedUniqueTermIds } from "./offer-relation-order.js";
 
@@ -13,6 +16,12 @@ type RelationTarget = {
   table: string;
   ownerColumn: "coupon_id" | "deal_id";
   targetColumn: "store_id" | "brand_id" | "category_id" | "bank_id";
+  orderColumn: "coupon_ord" | "deal_ord";
+};
+
+type LogoStoreTarget = {
+  table: "coupons_logo_store_lnk" | "deals_logo_store_lnk";
+  ownerColumn: "coupon_id" | "deal_id";
   orderColumn: "coupon_ord" | "deal_ord";
 };
 
@@ -74,6 +83,19 @@ const TARGETS: Record<
   },
 };
 
+const LOGO_STORE_TARGETS: Record<OfferTable, LogoStoreTarget> = {
+  coupons: {
+    table: "coupons_logo_store_lnk",
+    ownerColumn: "coupon_id",
+    orderColumn: "coupon_ord",
+  },
+  deals: {
+    table: "deals_logo_store_lnk",
+    ownerColumn: "deal_id",
+    orderColumn: "deal_ord",
+  },
+};
+
 function groupedRelationIds(
   refs: readonly StrapiEntityRef[],
 ): Map<keyof typeof TARGETS["deals"], number[]> {
@@ -91,7 +113,11 @@ function groupedRelationIds(
 }
 
 /**
- * Replace all WordPress-owned taxonomy links for one offer. This is the
+ * Replace all WordPress-owned taxonomy links and the image-only Logo Store
+ * for one offer. Logo Store is deliberately resolved separately: it supplies
+ * artwork and must never create Store membership.
+ *
+ * This is the
  * re-import boundary: stale rows disappear and order converges exactly to the
  * current WP source. The delete+insert set is atomic for each offer.
  */
@@ -100,8 +126,8 @@ export async function replaceOfferTaxonomyRelations(
   entityId: number,
   input: {
     termIds: readonly number[];
-    primaryTermId?: number;
-    acfStoreTermId?: number | null;
+    logoStoreTermIds?: readonly number[];
+    logoStoreOnlyWithoutStore?: boolean;
   },
 ): Promise<void> {
   const refs: StrapiEntityRef[] = [];
@@ -110,6 +136,21 @@ export async function replaceOfferTaxonomyRelations(
     if (ref) refs.push(ref);
   }
   const grouped = groupedRelationIds(refs);
+  let logoStoreRef: StrapiEntityRef | null = null;
+  if (
+    shouldLinkLogoStore({
+      onlyWithoutStore: input.logoStoreOnlyWithoutStore,
+      storeIds: grouped.get("stores") ?? [],
+    })
+  ) {
+    for (const termId of input.logoStoreTermIds ?? []) {
+      const ref = await ensureTermMapping(termId);
+      if (ref?.table === "stores") {
+        logoStoreRef = ref;
+        break;
+      }
+    }
+  }
 
   await pgTransaction(async () => {
     for (const [termTable, target] of Object.entries(TARGETS[offerTable])) {
@@ -128,6 +169,20 @@ export async function replaceOfferTaxonomyRelations(
           [entityId, ids[index], index + 1],
         );
       }
+    }
+
+    const logoTarget = LOGO_STORE_TARGETS[offerTable];
+    await pgQuery(
+      `DELETE FROM "${logoTarget.table}" WHERE "${logoTarget.ownerColumn}" = $1`,
+      [entityId],
+    );
+    if (logoStoreRef) {
+      await pgQuery(
+        `INSERT INTO "${logoTarget.table}" (
+           "${logoTarget.ownerColumn}", "store_id", "${logoTarget.orderColumn}"
+         ) VALUES ($1, $2, 1)`,
+        [entityId, logoStoreRef.id],
+      );
     }
   });
 }

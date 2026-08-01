@@ -1,20 +1,29 @@
-import { wpQuery } from "../db/wp-client.js";
 import { pgQuery } from "../db/pg-client.js";
 import { getAllTermMappings } from "../utils/id-maps.js";
-import { resolveYoastVariables } from "../utils/yoast-vars.js";
+import {
+  loadYoastSiteConfig,
+  resolveTermSeo,
+} from "../utils/yoast-term-seo.js";
 import { insertComponent } from "../utils/strapi-insert.js";
+import { clean } from "../utils/sanitize.js";
 import { logger } from "../utils/logger.js";
 
+/**
+ * Backfill SEO components for entities phase 03 somehow left without one.
+ * Uses the SAME Yoast resolution as phase 03 (per-term overrides from
+ * wpseo_taxonomy_meta → taxonomy templates from wpseo_titles → name
+ * fallback), so both paths can never disagree about what a term's SEO is.
+ */
 export async function runSeoBackfill(): Promise<void> {
   logger.info("=== Phase 9: SEO Backfill ===");
 
-  // Check which entities already have SEO components
   const tablesWithSeo = ["stores", "brands", "categories", "banks"];
+  const yoastSite = await loadYoastSiteConfig();
+  const termMappings = getAllTermMappings();
 
   let backfilled = 0;
 
   for (const table of tablesWithSeo) {
-    // Find entities without SEO components
     const entitiesWithSeo = await pgQuery<{ entity_id: number }>(`
       SELECT entity_id FROM "${table}_cmps"
       WHERE field = 'seo' AND component_type = 'shared.seo'
@@ -31,57 +40,53 @@ export async function runSeoBackfill(): Promise<void> {
 
     logger.info(`${table}: ${needsSeo.length} entities need SEO backfill`);
 
-    // For taxonomy tables, try to get SEO from Yoast indexable
-    if (["stores", "brands", "categories", "banks"].includes(table)) {
-      // Try wp_yoast_indexable for term SEO
-      try {
-        const yoastRows = await wpQuery<{
-          object_id: number;
-          title: string | null;
-          description: string | null;
-        }>(`
-          SELECT object_id, title, description
-          FROM wp_yoast_indexable
-          WHERE object_type = 'term'
-          AND object_sub_type = 'category'
-        `);
-
-        const yoastMap = new Map(
-          yoastRows.map((r) => [r.object_id, { title: r.title, description: r.description }])
-        );
-        const termMappings = getAllTermMappings();
-
-        for (const entity of needsSeo) {
-          // Find the WP term_id for this entity
-          for (const [wpTermId, ref] of termMappings) {
-            if (ref.id === entity.id && ref.table === table) {
-              const yoast = yoastMap.get(wpTermId);
-              if (yoast && (yoast.title || yoast.description)) {
-                const metaTitle = resolveYoastVariables(
-                  yoast.title,
-                  entity.name || ""
-                );
-                await insertComponent(
-                  "components_shared_seos",
-                  {
-                    meta_title: metaTitle || null,
-                    meta_description: yoast.description || null,
-                    canonical_url: null,
-                  },
-                  table,
-                  entity.id,
-                  "seo",
-                  "shared.seo"
-                );
-                backfilled++;
-              }
-              break;
-            }
-          }
+    for (const entity of needsSeo) {
+      // Find the WP term for this entity to reach its Yoast data.
+      let wpTermId: number | null = null;
+      for (const [candidateTermId, ref] of termMappings) {
+        if (ref.id === entity.id && ref.table === table) {
+          wpTermId = candidateTermId;
+          break;
         }
-      } catch {
-        logger.warn(`wp_yoast_indexable not available for ${table} SEO backfill`);
       }
+
+      const entityName = entity.name || "";
+      const seo =
+        wpTermId !== null
+          ? resolveTermSeo(yoastSite, {
+              termId: wpTermId,
+              taxonomy: "category",
+              termName: entityName,
+            })
+          : {
+              metaTitle: null,
+              metaDescription: null,
+              canonicalUrl: null,
+              noIndex: false,
+            };
+
+      // Same fallbacks and caps as phase 03, so the two paths converge.
+      const metaTitle = (clean(seo.metaTitle) || entityName).slice(0, 70);
+      const metaDescription = (
+        clean(seo.metaDescription) ||
+        `${entityName} coupons, offers and deals.`
+      ).slice(0, 170);
+      if (!metaTitle) continue;
+
+      await insertComponent(
+        "components_shared_seos",
+        {
+          meta_title: metaTitle,
+          meta_description: metaDescription,
+          canonical_url: seo.canonicalUrl,
+          no_index: seo.noIndex,
+        },
+        table,
+        entity.id,
+        "seo",
+        "shared.seo"
+      );
+      backfilled++;
     }
   }
 

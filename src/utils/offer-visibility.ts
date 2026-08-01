@@ -55,6 +55,7 @@ export const dealRef = {
   fields: DEAL_FIELDS,
   populate: {
     dealImage: true,
+    logoStore: storeRef,
     stores: storeRef,
     brands: brandRef,
     // Name only. The pool documentId (always emitted alongside the selected

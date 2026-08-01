@@ -10,6 +10,7 @@ import {
 } from "./content-media.js";
 import {
   DEAL_IMAGE_PROCESSOR_VERSION,
+  isContentBackgroundRemovalFailure,
   prepareMigrationDealImage,
 } from "./deal-image-background.js";
 import { logger } from "./logger.js";
@@ -84,7 +85,32 @@ export async function resolveDealMediaRef(
     return undefined;
   }
 
-  const prepared = await prepareMigrationDealImage(source);
+  let prepared;
+  try {
+    prepared = await prepareMigrationDealImage(source);
+  } catch (error) {
+    // Deliberate exception to the "never persist an opaque original"
+    // invariant: when the IMAGE ITSELF defeats background removal, blocking
+    // the whole deal helps nobody. Import the original opaque image (no
+    // background_removal metadata, so phase 08a / an editorial re-upload can
+    // still produce a transparent version later) and say so loudly.
+    if (!isContentBackgroundRemovalFailure(error)) throw error;
+    logger.warn(
+      `[deal-image] background removal cannot process ${source.fileName} ` +
+        `(${(error as { code?: string })?.code ?? "unknown"}); importing the ` +
+        "ORIGINAL opaque image instead — replace it editorially for a " +
+        "transparent card",
+    );
+    const fallback = await uploadFileFromDisk({
+      localPath: source.localPath,
+      fileName: source.fileName,
+      mimeType: source.mimeType,
+      altText: source.altText,
+      caption: source.caption,
+      throwOnFailure: true,
+    });
+    return fallback?.id;
+  }
   const preparation =
     prepared.reusedArchive
       ? "archive-reused"

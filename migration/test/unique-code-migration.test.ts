@@ -101,3 +101,24 @@ test("successful import recounts pool inventory after duplicate collapse", () =>
   assert.match(source, /COUNT\(\*\) FILTER \(WHERE code\."is_used"\)/);
   assert.match(source, /GROUP BY link\."unique_coupon_pool_id"/);
 });
+
+// Pools imported already-drained must carry exhausted_at immediately, not
+// after the nightly cron: the offer-expiry cron reads it to expire the pool's
+// offers. The stamping mirrors recountPools in unique-code-integrity.js —
+// keep an existing stamp, clear it when stock came back, and never touch
+// pools with zero code rows (editor-mid-setup pools are not in `inventory`).
+test("recount stamps exhausted_at for drained pools like recountPools does", () => {
+  assert.match(source, /"exhausted_at" = CASE/);
+  assert.match(
+    source,
+    /inventory\.used_codes >= inventory\.total_codes/,
+  );
+  assert.match(source, /COALESCE\(pool\."exhausted_at", NOW\(\)\)/);
+  assert.match(source, /ELSE NULL/);
+  // The reference implementation carries the same drained rule.
+  assert.match(integritySource, /const drained = total > 0 && used >= total/);
+  assert.match(
+    integritySource,
+    /exhausted_at: drained \? \(pool\.exhausted_at \?\? now\) : null/,
+  );
+});

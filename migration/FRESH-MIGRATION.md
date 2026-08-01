@@ -54,6 +54,32 @@ Key settings (full list in README § Setup & Configuration):
 
 ## 3. Run the migration
 
+### 3.0 Bootstrap the media manifest (once per machine — huge speedup)
+
+On a **fresh database**, the hash-based media reuse index (the `files` table)
+is empty, so without a manifest every image would be re-optimized and
+re-uploaded even though its immutable objects already sit in S3. The manifest
+(`.checkpoints/fileManifestMap.json`, mirrored to
+`{S3_ROOT_PATH}/.migration/files-manifest.json`) carries the full row payload
+per content hash, letting the import re-create `files` rows with **zero**
+image processing. Build it once:
+
+```bash
+# Preferred when the OLD database still exists: exact, fast.
+# (Temporarily point PG_CONNECTION_STRING at the old DB, then point it back.)
+yarn manifest:rebuild --from-db
+
+# Otherwise: reconstruct from the S3 listing + local uploads tree.
+# `ambiguous` in the summary is the small tail the normal path will reprocess.
+yarn manifest:rebuild
+```
+
+After the first manifested run, phase 02 keeps the manifest current and the
+S3 mirror makes future machines bootstrap-free — this step never needs
+repeating.
+
+### 3.1 Migrate
+
 ```bash
 yarn migrate
 ```
@@ -61,7 +87,15 @@ yarn migrate
 One command runs every phase in order. Each phase checkpoints on completion,
 so if anything fails you fix the cause and re-run `yarn migrate` — it resumes
 where it stopped. To re-run one phase against existing data, use
-`yarn migrate:phase <name>`.
+`yarn migrate:phase <name>`. Media stats at the end show
+`reused` (manifest hits — no processing) vs `uploaded` (full pipeline).
+
+The final phase (`16-orphan-media-cleanup`) deletes S3 objects under
+`S3_ROOT_PATH/` that no imported `files` row references — it only runs when
+every prior phase succeeded, refuses to act on an empty/wrong database, and
+trips a fuse above 40% orphans (`--force-orphan-cleanup` to override). Pass
+`--dry-run` to preview deletions, or run it standalone via
+`yarn cleanup:orphan-media -- --dry-run`.
 
 ### What `--clean` destroys
 
@@ -152,7 +186,25 @@ To repair an already-migrated database without a full re-run, use
       image validation pass on the seeded data.
 - [ ] Spot-check a store page and a Coupon homepage banner URL (CDN base correct).
 
-## 5. After migration
+## 5. Restart Strapi (required)
+
+Restart **both** CMS containers (`strapi` and `strapi-render`) after the
+import completes. The boot-time reconcilers — content-contract (published_on /
+coupon_type / alt-text fill), site-selection, search-index, and
+unique-code-integrity — only ever run during a boot, and the pre-import boot
+saw an empty database. None of them run on a cron except the nightly pool
+recount, so a post-import boot is what lets them see the imported rows. The
+same boot re-applies admin view configs and the search runtime against real
+content.
+
+Since the importer now writes every reconciled field at insert time, the
+reconcilers should report **~0 changes** — the restart is the safety net, not
+the mechanism.
+
+- [ ] Restart performed; boot log shows no non-zero `[content-contract]`
+      reconcile counts.
+
+## 6. After migration
 
 - Admin users/roles are not migrated — create editors in the admin and re-save
   role permissions if needed.

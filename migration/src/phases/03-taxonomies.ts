@@ -2,8 +2,12 @@ import { wpQuery } from "../db/wp-client.js";
 import { pgQuery } from "../db/pg-client.js";
 import { setTermMapping } from "../utils/id-maps.js";
 import { resolveMediaRef } from "../utils/media-resolver.js";
+import { uploadMediaOnDemand } from "./02-media-upload.js";
 import { parseFaqRepeater } from "../utils/acf-repeater.js";
-import { resolveYoastVariables } from "../utils/yoast-vars.js";
+import {
+  loadYoastSiteConfig,
+  resolveTermSeo,
+} from "../utils/yoast-term-seo.js";
 import {
   deduplicateSlug,
   primeSlugTracker,
@@ -22,6 +26,7 @@ import { parseDecimal, parseInteger } from "../utils/price.js";
 import { rewriteContentMedia } from "../utils/content-media.js";
 import { logger } from "../utils/logger.js";
 import { parseResumeFromTermFlag } from "../utils/cli.js";
+import { getImportExclusions } from "../utils/import-exclusions.js";
 
 interface WpTerm {
   term_id: number;
@@ -99,6 +104,23 @@ export async function runTaxonomies(): Promise<void> {
   `);
 
   logger.info(`Found ${terms.length} category terms`);
+
+  // Articles category (+descendants) and retired stores from
+  // excluded-stores.csv are never imported; phases 07/08 skip their posts.
+  const exclusions = await getImportExclusions();
+  logger.info(
+    `Import exclusions: ${exclusions.articleTermIds.size} article term(s), ` +
+      `${exclusions.excludedStoreTermIds.size} listed store term(s) matched`,
+  );
+  if (exclusions.unmatchedStoreNames.length > 0) {
+    const sample = exclusions.unmatchedStoreNames.slice(0, 10).join("; ");
+    logger.warn(
+      `${exclusions.unmatchedStoreNames.length} excluded-store name(s) ` +
+        `matched no WordPress store term (already gone or misspelled): ` +
+        `${sample}${exclusions.unmatchedStoreNames.length > 10 ? "; ..." : ""}`,
+    );
+  }
+
   resetSlugTracker();
   let termsToProcess = terms;
   let resumeIndex = 0;
@@ -144,10 +166,14 @@ export async function runTaxonomies(): Promise<void> {
 
   if (resumeIndex > 0) {
     primeSlugTracker(
-      terms.slice(0, resumeIndex).map((term) => ({
-        slug: buildFullSlug(term.term_id),
-        table: TYPE_TO_TABLE[term.choose_type || "Store"] || "stores",
-      })),
+      terms
+        .slice(0, resumeIndex)
+        // Excluded terms were skipped, so they never claimed a slug.
+        .filter((term) => !exclusions.termIds.has(term.term_id))
+        .map((term) => ({
+          slug: cleanSlug(term.slug) || term.slug,
+          table: TYPE_TO_TABLE[term.choose_type || "Store"] || "stores",
+        })),
     );
     logger.info(
       `Taxonomy resume: primed slug history from ${resumeIndex} skipped term(s)`,
@@ -167,7 +193,10 @@ export async function runTaxonomies(): Promise<void> {
     }
     if (depth > maxDepth) maxDepth = depth;
     if (depth > 1) {
-      logger.info(`  Hierarchy: ${term.name} (depth ${depth}) → slug: ${buildFullSlug(term.term_id)}`);
+      logger.info(
+        `  Hierarchy: ${term.name} (depth ${depth}) — imported FLAT as ` +
+          `"${cleanSlug(term.slug) || term.slug}" (WP slugs are verbatim)`,
+      );
     }
   }
   logger.info(`Max taxonomy depth: ${maxDepth}`);
@@ -199,33 +228,19 @@ export async function runTaxonomies(): Promise<void> {
     });
   }
 
-  // Get Yoast SEO data for terms
-  const yoastTermData = await wpQuery<{
-    term_id: number;
-    meta_key: string;
-    meta_value: string;
-  }>(`
-    SELECT term_id, meta_key, meta_value
-    FROM wp_termmeta
-    WHERE meta_key IN ('_yoast_wpseo_title', '_yoast_wpseo_metadesc')
-    ORDER BY term_id
-  `);
-
-  const yoastByTerm = new Map<
-    number,
-    { title?: string; description?: string }
-  >();
-  for (const row of yoastTermData) {
-    if (!yoastByTerm.has(row.term_id)) {
-      yoastByTerm.set(row.term_id, {});
-    }
-    const entry = yoastByTerm.get(row.term_id)!;
-    if (row.meta_key === "_yoast_wpseo_title") {
-      entry.title = row.meta_value;
-    } else if (row.meta_key === "_yoast_wpseo_metadesc") {
-      entry.description = row.meta_value;
-    }
-  }
+  // Term SEO comes from Yoast's real storage (wpseo_taxonomy_meta overrides +
+  // wpseo_titles templates), NOT wp_termmeta — `_yoast_wpseo_*` termmeta keys
+  // do not exist for terms, which is why the old lookup returned nothing and
+  // every entity fell back to its bare name. Warm the cached config here.
+  const yoastSite = await loadYoastSiteConfig();
+  const yoastOverrideCount = Object.values(yoastSite.overrides).reduce(
+    (sum, terms) => sum + Object.keys(terms).length,
+    0,
+  );
+  logger.info(
+    `Yoast term SEO loaded: ${yoastOverrideCount} per-term override(s), ` +
+      `separator "${yoastSite.separator}", site name "${yoastSite.siteName}"`,
+  );
 
   // Real content dates for the entity rows.
   //
@@ -271,10 +286,28 @@ export async function runTaxonomies(): Promise<void> {
     Brand: 0,
     Category: 0,
     Bank: 0,
+    Articles: 0,
+    ExcludedStore: 0,
     Unknown: 0,
   };
 
   for (const [termIndex, term] of termsToProcess.entries()) {
+    // Excluded terms (Articles category tree, retired stores) never import;
+    // phases 07/08 also skip every post filed under them.
+    if (exclusions.articleTermIds.has(term.term_id)) {
+      counts.Articles++;
+      logger.info(
+        `Skipping article term ${term.term_id} (${term.name}) — not a catalog entity`,
+      );
+      continue;
+    }
+    if (exclusions.excludedStoreTermIds.has(term.term_id)) {
+      counts.ExcludedStore++;
+      logger.info(
+        `Skipping excluded store ${term.term_id} (${term.name}) — listed in excluded-stores.csv`,
+      );
+      continue;
+    }
     const chooseType = term.choose_type || "Store"; // Default to Store if missing
     const table = TYPE_TO_TABLE[chooseType];
     const strapiType = TYPE_TO_STRAPI_TYPE[chooseType];
@@ -290,8 +323,6 @@ export async function runTaxonomies(): Promise<void> {
         "stores",
         "api::store.store",
         faqMetaByTerm,
-        yoastByTerm,
-        buildFullSlug,
         termDatesByTermId.get(term.term_id)
       );
       const completed = termIndex + 1;
@@ -309,8 +340,6 @@ export async function runTaxonomies(): Promise<void> {
       table,
       strapiType,
       faqMetaByTerm,
-      yoastByTerm,
-      buildFullSlug,
       termDatesByTermId.get(term.term_id)
     );
     const completed = termIndex + 1;
@@ -332,12 +361,14 @@ async function insertTerm(
   table: string,
   strapiType: string,
   faqMetaByTerm: Map<number, Array<{ meta_key: string; meta_value: string }>>,
-  yoastByTerm: Map<number, { title?: string; description?: string }>,
-  buildFullSlug: (termId: number) => string,
   termDates?: TermDates
 ): Promise<void> {
   const documentId = generateDocumentId(`term:${table}:${term.term_id}`);
-  const slug = deduplicateSlug(buildFullSlug(term.term_id), table);
+  // WP term slugs are flat and unique per taxonomy — import them VERBATIM
+  // (myntra-coupons stays myntra-coupons). No parent-chain joining: the old
+  // site's URLs never carried hierarchy, so a compound slug would change
+  // every nested term's URL. cleanSlug only sanitizes characters.
+  const slug = deduplicateSlug(cleanSlug(term.slug) || term.slug, table);
   const faqEnabled = term.faq_enabled === "1";
   const ratingAverage = parseDecimal(term.rating_avg);
   const ratingCount = parseInteger(term.rating_count) ?? 0;
@@ -357,6 +388,11 @@ async function insertTerm(
   // instead of importing a row that fails validation on first edit.
   const altColumn = isCategory ? "icon_alt" : "logo_alt";
 
+  // Schema-json defaults never reach the database (schema sync creates plain
+  // nullable columns), so every defaulted boolean this INSERT omits would land
+  // NULL. show_trending_deals defaults to true — a NULL renders as OFF in the
+  // admin toggle, and an editor saving without touching it would persist false
+  // and silently hide the section. is_cj_enabled exists on stores only.
   const columns = [
     "document_id",
     "name",
@@ -368,6 +404,8 @@ async function insertTerm(
     "rating_count",
     "is_verified",
     "faq_enabled",
+    "show_trending_deals",
+    ...(table === "stores" ? ["is_cj_enabled"] : []),
     "published_at",
     "created_at",
     "updated_at",
@@ -394,6 +432,8 @@ async function insertTerm(
     ratingCount,
     table === "stores",
     faqEnabled,
+    true, // show_trending_deals (schema default)
+    ...(table === "stores" ? [false] : []), // is_cj_enabled (schema default)
     createdAt, // published_at
     createdAt, // created_at
     updatedAt, // updated_at
@@ -414,7 +454,13 @@ async function insertTerm(
          "${altColumn}" = EXCLUDED."${altColumn}",
          "rating_average" = EXCLUDED."rating_average",
          "rating_count" = EXCLUDED."rating_count",
-         "faq_enabled" = EXCLUDED."faq_enabled"
+         "faq_enabled" = EXCLUDED."faq_enabled",
+         "show_trending_deals" = COALESCE("${table}"."show_trending_deals", EXCLUDED."show_trending_deals")${
+           table === "stores"
+             ? `,
+         "is_cj_enabled" = COALESCE("stores"."is_cj_enabled", EXCLUDED."is_cj_enabled")`
+             : ""
+         }
        RETURNING id`,
       values
     );
@@ -467,23 +513,35 @@ async function insertTerm(
       );
     }
 
-    // Reconcile the imported SEO component exactly.
-    const yoast = yoastByTerm.get(term.term_id);
+    // Reconcile the imported SEO component exactly, the way Yoast renders it:
+    // per-term override → taxonomy template → import fallback, with
+    // %%variables%% resolved against the real separator/site name, plus
+    // canonical and index/noindex.
+    const plainTermDescription = clean(
+      term.description?.replace(/<[^>]*>/gu, " "),
+    );
+    const yoastSeo = resolveTermSeo(await loadYoastSiteConfig(), {
+      termId: term.term_id,
+      taxonomy: "category",
+      termName: entityName,
+      termDescription: plainTermDescription || undefined,
+    });
+    // Deliberately NOT falling back to the term's content description — a
+    // page-body blurb is not a meta description. Yoast → short description →
+    // generic line only.
     const descriptionFallback =
-      clean(term.short_desc) ||
-      clean(term.description?.replace(/<[^>]*>/gu, " ")) ||
-      `${entityName} coupons, offers and deals.`;
-    const metaTitle = (
-      clean(resolveYoastVariables(yoast?.title || null, term.name)) ||
-      entityName
-    ).slice(0, 70);
+      clean(term.short_desc) || `${entityName} coupons, offers and deals.`;
+    const metaTitle = (clean(yoastSeo.metaTitle) || entityName).slice(0, 70);
     const metaDescription = (
-      clean(yoast?.description || null) || descriptionFallback
+      clean(yoastSeo.metaDescription) || descriptionFallback
     ).slice(0, 170);
     const seoRows = [{
       meta_title: metaTitle,
       meta_description: metaDescription,
-      canonical_url: null,
+      canonical_url: yoastSeo.canonicalUrl,
+      no_index: yoastSeo.noIndex,
+      og_title: yoastSeo.ogTitle,
+      og_description: yoastSeo.ogDescription,
     }];
     await replaceComponents(
       "components_shared_seos",
@@ -493,6 +551,28 @@ async function insertTerm(
       "seo",
       "shared.seo"
     );
+    // Per-term OG image (Yoast media-library pick) → normal media pipeline
+    // (manifest-reused), linked onto the SEO component.
+    if (yoastSeo.ogImageAttachmentId) {
+      try {
+        const ogFileId = await uploadMediaOnDemand(
+          yoastSeo.ogImageAttachmentId,
+        );
+        const [seoLink] = await pgQuery<{ cmp_id: number }>(
+          `SELECT cmp_id FROM "${table}_cmps"
+           WHERE entity_id = $1 AND field = 'seo' AND component_type = 'shared.seo'
+           ORDER BY "order" LIMIT 1`,
+          [entityId],
+        );
+        if (ogFileId && seoLink) {
+          await replaceMedia(ogFileId, seoLink.cmp_id, "shared.seo", "ogImage");
+        }
+      } catch (err: any) {
+        logger.warn(
+          `  OG image for ${term.name} failed: ${err?.message ?? err}`,
+        );
+      }
+    }
   } catch (err: any) {
     logger.error(
       `Failed to insert term ${term.term_id} (${term.name}) into ${table}: ${err.message}`

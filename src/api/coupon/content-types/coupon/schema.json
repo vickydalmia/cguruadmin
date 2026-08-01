@@ -125,6 +125,11 @@
       "target": "api::store.store",
       "inversedBy": "coupons"
     },
+    "logoStore": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::store.store"
+    },
     "banks": {
       "type": "relation",
       "relation": "manyToMany",

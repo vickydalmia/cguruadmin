@@ -30,8 +30,14 @@ import { runHomepageOfferBackfill } from "./phases/13a-homepage-offer-sections.j
 import { runFooterMediaBackfill } from "./phases/13b-footer-media.js";
 import { runFooterCountryLinksBackfill } from "./phases/13c-footer-country-links.js";
 import { runSiteSelectionBackfill } from "./phases/13d-site-selection-backfill.js";
+import { runSinglesSeo } from "./phases/13e-singles-seo.js";
 import { runMediaOptimize } from "./phases/14-media-optimize.js";
 import { runMediaFormatsBackfill } from "./phases/15-media-formats-backfill.js";
+import { runOrphanMediaCleanup } from "./cleanup-orphan-media.js";
+import {
+  clearFileManifest,
+  saveFileManifest,
+} from "./utils/file-manifest.js";
 import {
   ensureMigrationRegistry,
   migrationRegistryRows,
@@ -82,11 +88,26 @@ const phases: Phase[] = [
   { name: "13b-footer-media", fn: runFooterMediaBackfill },
   { name: "13c-footer-country-links", fn: runFooterCountryLinksBackfill },
   { name: "13d-site-selection-backfill", fn: runSiteSelectionBackfill },
+  // Re-runnable (replaceComponents updates in place); no checkpoint so a
+  // Yoast fix on the WP side can be re-imported with a plain re-run.
+  { name: "13e-singles-seo", fn: runSinglesSeo, skipCheckpoint: true },
   { name: "14-media-optimize", fn: runMediaOptimize },
   // Re-runnable by design (candidate SQL is the idempotency guard); a
   // checkpoint would let a --dry-run/--limit pilot mark it complete and make
   // resume-style runs skip the real backfill.
   { name: "15-media-formats-backfill", fn: runMediaFormatsBackfill, skipCheckpoint: true },
+  // Runs only when every phase above succeeded (the loop throws on failure),
+  // which is exactly the "after a successful full import" precondition for
+  // deleting unreferenced objects. Re-runnable; honors --dry-run.
+  {
+    name: "16-orphan-media-cleanup",
+    fn: () =>
+      runOrphanMediaCleanup({
+        dryRun: process.argv.includes("--dry-run"),
+        force: process.argv.includes("--force-orphan-cleanup"),
+      }),
+    skipCheckpoint: true,
+  },
 ];
 
 async function main(): Promise<void> {
@@ -123,9 +144,9 @@ async function main(): Promise<void> {
     }
     const tablesToTruncate = [
       // Link/join tables first
-      "coupons_stores_lnk", "coupons_brands_lnk", "coupons_categories_lnk", "coupons_banks_lnk",
+      "coupons_stores_lnk", "coupons_logo_store_lnk", "coupons_brands_lnk", "coupons_categories_lnk", "coupons_banks_lnk",
       "coupons_unique_coupon_pool_lnk",
-      "deals_stores_lnk", "deals_brands_lnk", "deals_categories_lnk", "deals_banks_lnk",
+      "deals_stores_lnk", "deals_logo_store_lnk", "deals_brands_lnk", "deals_categories_lnk", "deals_banks_lnk",
       "unique_codes_pool_lnk",
       "files_related_mph",
       // Component join tables
@@ -245,6 +266,8 @@ async function main(): Promise<void> {
         "--delete-media specified: deleting migration media records and S3 objects"
       );
       await clearS3Bucket();
+      // The manifest indexes objects that no longer exist — forget it too.
+      await clearFileManifest();
     } else {
       logger.info(
         "Preserved media records and S3 objects for hash-based reuse " +
@@ -287,6 +310,9 @@ async function main(): Promise<void> {
         );
         saveMaps();
       }
+      // Cheap local write — keeps finished uploads reusable even if a later
+      // phase fails. The S3 mirror is refreshed once, by phase 16.
+      await saveFileManifest();
     }
 
     logMediaUploadStats();
@@ -299,6 +325,7 @@ async function main(): Promise<void> {
     logger.error(`Migration failed: ${err.message}`);
     logger.error(err.stack);
     saveMaps(); // Save progress even on failure
+    await saveFileManifest().catch(() => undefined);
     process.exit(1);
   } finally {
     await closeWp();

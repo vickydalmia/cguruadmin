@@ -8,6 +8,12 @@ import {
   type WpOfferExpiryMeta,
 } from "../utils/wp-offer-expiry.js";
 import { ensureMigrationRegistry } from "../utils/migration-registry.js";
+import {
+  getImportExclusions,
+  loadExcludedStoreNames,
+  resolveImportExclusions,
+  type TermRowLike,
+} from "../utils/import-exclusions.js";
 import { getAllPoolMappings } from "../utils/id-maps.js";
 
 interface CountCheck {
@@ -39,7 +45,7 @@ async function countImportableWpOffers(
     SELECT p.ID, p.post_status
     FROM wp_posts p
     WHERE p.post_type = 'post'
-      AND p.post_status IN ('publish', 'future', 'draft', 'trash')
+      AND p.post_status IN ('publish', 'future')
       AND ${dealPredicate}
   `);
 
@@ -71,7 +77,7 @@ async function countImportableWpOffers(
     }
   }
 
-  return posts.filter((post) => {
+  const lifecycleImportable = posts.filter((post) => {
     const expiresAt = parseExpiryDate(
       getWpOfferExpiryRaw(metaByPost.get(post.ID) ?? {}),
     );
@@ -80,7 +86,33 @@ async function countImportableWpOffers(
       expiresAt,
       now,
     });
-  }).length;
+  });
+
+  // Mirror phases 07/08: posts filed under an excluded term (Articles tree,
+  // retired stores) are never imported, so they must not count as expected.
+  const { termIds: excludedTermIds } = await getImportExclusions();
+  if (excludedTermIds.size === 0) return lifecycleImportable.length;
+
+  const articlePostIds = new Set<number>();
+  for (let start = 0; start < lifecycleImportable.length; start += batchSize) {
+    const ids = lifecycleImportable
+      .slice(start, start + batchSize)
+      .map((post) => post.ID);
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = await wpQuery<{ object_id: number; term_id: number }>(
+      `SELECT tr.object_id, tt.term_id
+       FROM wp_term_relationships tr
+       JOIN wp_term_taxonomy tt
+         ON tr.term_taxonomy_id = tt.term_taxonomy_id AND tt.taxonomy = 'category'
+       WHERE tr.object_id IN (${placeholders})`,
+      ids,
+    );
+    for (const row of rows) {
+      if (excludedTermIds.has(row.term_id)) articlePostIds.add(row.object_id);
+    }
+  }
+  return lifecycleImportable.filter((post) => !articlePostIds.has(post.ID))
+    .length;
 }
 
 export async function runVerification(): Promise<void> {
@@ -92,37 +124,49 @@ export async function runVerification(): Promise<void> {
   // 1. Count checks
   logger.info("--- Record Count Verification ---");
 
-  // Stores
-  const [wpStores] = await wpQuery<{ c: number }>(`
-    SELECT COUNT(*) AS c FROM wp_termmeta WHERE meta_key = 'choose_type' AND meta_value = 'Store'
+  // Expected entity counts must mirror how phase 03 actually imports:
+  // excluded terms (Articles tree, retired stores) never import, and an
+  // unknown choose_type defaults to Store. Raw termmeta counts would flag
+  // every exclusion as a false mismatch.
+  const termRows = await wpQuery<TermRowLike>(`
+    SELECT t.term_id, t.name, t.slug, tt.parent,
+           MAX(CASE WHEN tm.meta_key='choose_type' THEN tm.meta_value END) AS choose_type
+    FROM wp_terms t
+    JOIN wp_term_taxonomy tt ON t.term_id = tt.term_id AND tt.taxonomy = 'category'
+    LEFT JOIN wp_termmeta tm ON t.term_id = tm.term_id AND tm.meta_key = 'choose_type'
+    GROUP BY t.term_id, t.name, t.slug, tt.parent
   `);
+  const termExclusions = resolveImportExclusions(
+    termRows,
+    loadExcludedStoreNames(),
+  );
+  const expectedByType: Record<string, number> = {
+    Store: 0,
+    Brand: 0,
+    Category: 0,
+    Bank: 0,
+  };
+  for (const term of termRows) {
+    if (termExclusions.termIds.has(term.term_id)) continue;
+    const chooseType = (term.choose_type || "Store").trim();
+    expectedByType[chooseType in expectedByType ? chooseType : "Store"] += 1;
+  }
+
   const [pgStores] = await pgQuery<{ c: number }>(`SELECT COUNT(*) AS c FROM stores`);
-  checks.push({ entity: "Stores", wpCount: wpStores.c, pgCount: pgStores.c, match: wpStores.c == pgStores.c });
+  checks.push({ entity: "Stores", wpCount: expectedByType.Store, pgCount: pgStores.c, match: expectedByType.Store == pgStores.c });
 
-  // Brands
-  const [wpBrands] = await wpQuery<{ c: number }>(`
-    SELECT COUNT(*) AS c FROM wp_termmeta WHERE meta_key = 'choose_type' AND meta_value = 'Brand'
-  `);
   const [pgBrands] = await pgQuery<{ c: number }>(`SELECT COUNT(*) AS c FROM brands`);
-  checks.push({ entity: "Brands", wpCount: wpBrands.c, pgCount: pgBrands.c, match: wpBrands.c == pgBrands.c });
+  checks.push({ entity: "Brands", wpCount: expectedByType.Brand, pgCount: pgBrands.c, match: expectedByType.Brand == pgBrands.c });
 
-  // Categories
-  const [wpCats] = await wpQuery<{ c: number }>(`
-    SELECT COUNT(*) AS c FROM wp_termmeta WHERE meta_key = 'choose_type' AND meta_value = 'Category'
-  `);
   const [pgCats] = await pgQuery<{ c: number }>(`SELECT COUNT(*) AS c FROM categories`);
-  checks.push({ entity: "Categories", wpCount: wpCats.c, pgCount: pgCats.c, match: wpCats.c == pgCats.c });
+  checks.push({ entity: "Categories", wpCount: expectedByType.Category, pgCount: pgCats.c, match: expectedByType.Category == pgCats.c });
 
-  // Banks
-  const [wpBanks] = await wpQuery<{ c: number }>(`
-    SELECT COUNT(*) AS c FROM wp_termmeta WHERE meta_key = 'choose_type' AND meta_value = 'Bank'
-  `);
   const [pgBanks] = await pgQuery<{ c: number }>(`SELECT COUNT(*) AS c FROM banks`);
-  checks.push({ entity: "Banks", wpCount: wpBanks.c, pgCount: pgBanks.c, match: wpBanks.c == pgBanks.c });
+  checks.push({ entity: "Banks", wpCount: expectedByType.Bank, pgCount: pgBanks.c, match: expectedByType.Bank == pgBanks.c });
 
   const verificationNow = new Date();
 
-  // Coupons (published/future plus draft/trash withdrawn by elapsed expiry)
+  // Coupons: publish/future only; expired-by-meta published rows count too
   const wpCouponCount = await countImportableWpOffers(
     "coupon",
     verificationNow,

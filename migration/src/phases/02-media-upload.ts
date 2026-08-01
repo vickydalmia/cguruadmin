@@ -19,6 +19,17 @@ import {
   slugifyFileName,
 } from "../utils/image-optimizer.js";
 import { mediaSourceResolution } from "../utils/media-source-candidates.js";
+import {
+  decideMediaReuse,
+  type FileManifestEntry,
+} from "../utils/manifest-core.js";
+import {
+  getManifestEntry,
+  s3RootPrefix,
+  s3UrlPrefix,
+  upsertManifestEntry,
+} from "../utils/file-manifest.js";
+import { manifestEntryFromRow } from "../utils/manifest-core.js";
 
 // The application owns the algorithm; the migration imports it dynamically
 // because cguruadmin is CommonJS while this package runs as ESM under tsx.
@@ -164,7 +175,7 @@ export async function getFileRecordById(
   return record;
 }
 
-let uploadStats = { uploaded: 0, skipped: 0, failed: 0 };
+let uploadStats = { uploaded: 0, reused: 0, skipped: 0, failed: 0 };
 const availabilityByFileId = new Map<number, Promise<boolean>>();
 let s3KeyIndexPromise: Promise<Set<string>> | null = null;
 
@@ -188,7 +199,7 @@ function providerKey(value: unknown): string | null {
  * cheaper than issuing a sequential HEAD request for every retained file, and
  * turns the rest of the migration's availability checks into local Set reads.
  */
-async function getS3KeyIndex(): Promise<Set<string>> {
+export async function getS3KeyIndex(): Promise<Set<string>> {
   if (s3KeyIndexPromise) return s3KeyIndexPromise;
   s3KeyIndexPromise = (async () => {
     const keys = new Set<string>();
@@ -362,6 +373,70 @@ export async function uploadFileFromDisk(
   return task;
 }
 
+/**
+ * Recreate a files row from a manifest entry without touching the image
+ * bytes. Current source metadata wins where it exists (alt text from the WP
+ * attachment being imported now; background-removal fields from an 08a
+ * caller), the manifest supplies everything derived from the pixels.
+ */
+async function insertFilesRowFromManifest(
+  hash: string,
+  entry: FileManifestEntry,
+  source: DiskUploadSource,
+): Promise<UploadedFileRecord> {
+  const backgroundRemoval = source.backgroundRemoval ?? entry.backgroundRemoval;
+  const result = await pgQuery<{ id: number }>(
+    `INSERT INTO files (
+      document_id, name, alternative_text, caption, width, height,
+      formats, ext, mime, size, hash, url, provider, provider_metadata,
+      background_colour, background_removal_source_hash,
+      background_removal_version, background_removed_at,
+      folder_path, created_at, updated_at, published_at
+    ) VALUES (
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+      $15, $16, $17, $18, $19, NOW(), NOW(), NOW()
+    ) RETURNING id`,
+    [
+      generateDocumentId(),
+      entry.name,
+      source.altText || entry.alternativeText,
+      source.caption || entry.caption,
+      entry.width,
+      entry.height,
+      entry.formats ? JSON.stringify(entry.formats) : null,
+      entry.ext,
+      entry.mime,
+      entry.sizeKb,
+      hash,
+      entry.url,
+      "aws-s3",
+      JSON.stringify(entry.providerMetadata),
+      entry.backgroundColour,
+      backgroundRemoval?.sourceHash ?? null,
+      backgroundRemoval?.version ?? null,
+      backgroundRemoval?.removedAt ?? null,
+      "/",
+    ],
+  );
+  const fileId = result[0].id;
+  existingHashes.set(hash, fileId);
+  const record: UploadedFileRecord = {
+    id: fileId,
+    name: entry.name,
+    hash,
+    ext: entry.ext,
+    url: entry.url,
+    formats: entry.formats,
+    width: entry.width,
+    height: entry.height,
+    provider: "aws-s3",
+    providerMetadata: JSON.stringify(entry.providerMetadata),
+  };
+  fileRecords.set(fileId, record);
+  availabilityByFileId.set(fileId, Promise.resolve(true));
+  return record;
+}
+
 async function doUploadFileFromDisk(
   source: DiskUploadSource
 ): Promise<UploadedFileRecord | undefined> {
@@ -443,6 +518,48 @@ async function doUploadFileFromDisk(
             source.backgroundRemoval.removedAt,
           ],
         );
+      }
+    }
+
+    // Fresh-database reuse: the hash cache above lives in the files table and
+    // is empty after a DB wipe, while the immutable S3 objects survive. The
+    // manifest (.checkpoints/fileManifestMap.json + S3 mirror) carries the
+    // full row payload per content hash, so a fresh DB gets its files row
+    // back without decoding, encoding, or uploading anything.
+    if (
+      repairExistingId === null &&
+      !existingHashes.has(hash) &&
+      config.s3.bucket &&
+      config.s3.accessKeyId
+    ) {
+      const manifestEntry = await getManifestEntry(hash);
+      if (manifestEntry) {
+        const decision = decideMediaReuse({
+          manifestEntry,
+          s3KeyIndex: await getS3KeyIndex(),
+        });
+        if (decision.action === "manifest-reuse") {
+          const record = await insertFilesRowFromManifest(
+            hash,
+            decision.entry,
+            source,
+          );
+          uploadStats.reused++;
+          if (uploadStats.reused % 100 === 0) {
+            logger.info(
+              `  On-demand media: reused=${uploadStats.reused}, ` +
+                `uploaded=${uploadStats.uploaded}, skipped=${uploadStats.skipped}`,
+            );
+          }
+          return record;
+        }
+        if (decision.action === "process" && decision.missingKeys) {
+          logger.debug(
+            `Manifest entry for ${source.fileName} is stale ` +
+              `(missing ${decision.missingKeys.length} object(s), ` +
+              `e.g. ${decision.missingKeys[0]}); reprocessing`,
+          );
+        }
       }
     }
 
@@ -667,6 +784,35 @@ async function doUploadFileFromDisk(
       if (key && s3KeyIndexPromise) {
         (await s3KeyIndexPromise).add(key);
       }
+      // Keep the manifest warm as uploads land, so even an interrupted run
+      // leaves its finished work reusable on the next fresh database.
+      const manifestEntry = manifestEntryFromRow(
+        {
+          name: source.fileName,
+          alternative_text: source.altText || null,
+          caption: source.caption || null,
+          width,
+          height,
+          formats: formatsJson,
+          ext,
+          mime,
+          size: parseFloat((sizeInBytes / 1024).toFixed(2)),
+          hash,
+          url: fileUrl,
+          provider,
+          provider_metadata: providerMetadata,
+          background_colour: backgroundColour,
+          background_removal_source_hash:
+            source.backgroundRemoval?.sourceHash ?? null,
+          background_removal_version:
+            source.backgroundRemoval?.version ?? null,
+          background_removed_at: source.backgroundRemoval?.removedAt ?? null,
+        },
+        s3UrlPrefix(),
+        s3RootPrefix(),
+        new Date().toISOString(),
+      );
+      if (manifestEntry) await upsertManifestEntry(hash, manifestEntry);
     }
     uploadStats.uploaded++;
 
@@ -684,7 +830,11 @@ async function doUploadFileFromDisk(
 }
 
 export function logMediaUploadStats(): void {
-  logger.info(`Media upload stats: uploaded=${uploadStats.uploaded}, skipped=${uploadStats.skipped}, failed=${uploadStats.failed}`);
+  logger.info(
+    `Media upload stats: uploaded=${uploadStats.uploaded}, ` +
+      `reused=${uploadStats.reused}, skipped=${uploadStats.skipped}, ` +
+      `failed=${uploadStats.failed}`,
+  );
 }
 
 /**

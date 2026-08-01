@@ -119,10 +119,14 @@ const relationRef = (mediaField: "logo" | "icon" = "logo") => ({
 const relations = Object.fromEntries(
   ENTITIES.map((config) => [config.key, relationRef(config.mediaField)]),
 ) as Record<EntityConfig["key"], ReturnType<typeof relationRef>>;
-const couponPopulate = relations;
+const couponPopulate = {
+  ...relations,
+  logoStore: relationRef("logo"),
+};
 const dealPopulate = {
   ...relations,
   dealImage: true,
+  logoStore: relationRef("logo"),
 };
 
 // Field/populate sets are shared between the query-engine finders and the
@@ -337,7 +341,14 @@ function offerOwner(document: any, _source: "coupon" | "deal") {
 // (first) relation has neither. Attribution (name/subtitle/link) stays with
 // the owner.
 function couponIdentityMedia(document: any): { media: any; alt: string | null } | null {
-  for (const relation of relatedEntities(document)) {
+  const candidates = [
+    ...(Array.isArray(document?.stores) ? document.stores : []),
+    document?.logoStore,
+    ...(Array.isArray(document?.brands) ? document.brands : []),
+    ...(Array.isArray(document?.banks) ? document.banks : []),
+    ...(Array.isArray(document?.categories) ? document.categories : []),
+  ];
+  for (const relation of candidates) {
     const media = relation?.logo ?? relation?.icon ?? null;
     if (!media) continue;
     const field = relation?.logo ? "logo" : "icon";
@@ -507,6 +518,17 @@ function mapOffer(document: any, type: "coupon" | "deal") {
   const ownerMediaField = owner?.icon ? "icon" : "logo";
   const ownerAlt = mediaAlt(owner, ownerMediaField, ownerName);
   const identity = type === "coupon" ? couponIdentityMedia(document) : null;
+  const storeWithLogo = Array.isArray(document?.stores)
+    ? document.stores.find((store: any) => store?.logo)
+    : null;
+  const storeMedia = storeWithLogo?.logo ?? null;
+  const logoStoreMedia = document?.logoStore?.logo ?? null;
+  const displayOwnerMedia = storeMedia ?? logoStoreMedia ?? ownerMedia;
+  const displayOwnerAlt = storeMedia
+    ? mediaAlt(storeWithLogo, "logo", ownerName ?? name)
+    : logoStoreMedia
+      ? mediaAlt(document.logoStore, "logo", ownerName ?? name)
+      : ownerAlt;
 
   return {
     id: type + ":" + String(document?.documentId ?? document?.id ?? name),
@@ -543,7 +565,7 @@ function mapOffer(document: any, type: "coupon" | "deal") {
       type === "deal" && ownerName
         ? {
             name: ownerName,
-            logo: mapMedia(ownerMedia, ownerAlt),
+            logo: mapMedia(displayOwnerMedia, displayOwnerAlt),
           }
         : null,
     // Both offer types can draw from a pool. Only the MODE ships — never a code

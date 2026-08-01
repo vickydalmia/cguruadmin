@@ -9,7 +9,9 @@
     "migrate": "tsx src/index.ts",
     "migrate:phase": "tsx src/index.ts --phase",
     "migrate:fresh": "tsx src/index.ts --clean",
+    "migrate:report": "tsx src/dry-run-report.ts",
     "fix:markdown-richtext": "tsx src/fix-markdown-richtext.ts",
+    "fix:seo-meta": "tsx src/fix-seo-meta.ts",
     "fix:cache-headers": "tsx src/fix-cache-headers.ts",
     "fix:content-srcsets": "tsx src/fix-content-srcsets.ts",
     "backfill:offer-fields": "tsx src/backfill-offer-fields.ts",
@@ -17,9 +19,13 @@
     "backfill:kksr-ratings": "tsx src/backfill-kksr-ratings.ts",
     "backfill:media-background-colours": "tsx src/backfill-media-background-colours.ts",
     "cleanup:legacy-fields": "tsx src/drop-legacy-fields.ts",
+    "cleanup:orphan-media": "tsx src/cleanup-orphan-media.ts",
+    "manifest:rebuild": "tsx src/rebuild-file-manifest.ts",
     "diagnose:search": "tsx src/diagnose-search.ts",
     "check:types": "tsc --noEmit",
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsx --test test/*.test.ts",
+    "fix:flat-slugs": "tsx src/fix-flat-slugs.ts",
+    "fix:wp-slugs": "tsx src/fix-flat-slugs.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",

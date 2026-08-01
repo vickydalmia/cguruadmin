@@ -44,17 +44,14 @@ const normalizeRelationShorthand = (value: unknown): unknown => {
 };
 
 const rejectStoreCount = (count: number): never => {
-  const message =
-    count === 0
-      ? 'Select exactly one Store.'
-      : `Exactly one Store is required. This entry currently has ${count} Stores; remove ${
-          count - 1
-        } before saving.`;
+  const message = `At most one Store is allowed. This entry currently has ${count} Stores; remove ${
+    count - 1
+  } before saving.`;
   throw toValidationError([{ path: ['stores'], message }]);
 };
 
 /**
- * Enforces the editor-only single-Store contract while leaving the schema and
+ * Enforces the editor-only at-most-one-Store contract while leaving the schema and
  * every non-Content-Manager write path many-to-many compatible.
  *
  * Updates and clones resolve their relation command against the stored row.
@@ -101,5 +98,5 @@ export async function validateContentManagerOfferStore(
       : resultingRelations(normalizeRelationShorthand(incomingStores), currentStores);
   const count = stores?.length ?? 0;
 
-  if (count !== 1) rejectStoreCount(count);
+  if (count > 1) rejectStoreCount(count);
 }

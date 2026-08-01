@@ -20,12 +20,17 @@ const userSource = readFileSync(
 );
 
 test("offer source queries read only statuses the lifecycle predicate can import", () => {
-  const statusFilter =
-    /post_status IN \('publish', 'future', 'draft', 'trash'\)/;
+  // publish + future ONLY: drafts and trash never import (the old
+  // withdrawn-by-expiry retention was deliberately dropped), so fetching
+  // them would be wasted work the lifecycle predicate rejects anyway.
+  const statusFilter = /post_status IN \('publish', 'future'\)/;
 
   assert.match(couponSource, statusFilter);
   assert.match(dealSource, statusFilter);
   assert.match(verificationSource, statusFilter);
+  for (const source of [couponSource, dealSource, verificationSource]) {
+    assert.doesNotMatch(source, /'draft', 'trash'/);
+  }
 });
 
 test("code verification uses the same resolved-pool ownership as Phase 6", () => {

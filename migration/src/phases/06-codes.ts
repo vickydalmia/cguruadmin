@@ -495,7 +495,13 @@ export async function runCodes(): Promise<void> {
     await pgQuery(
       `UPDATE "unique_coupon_pools" AS pool
           SET "total_codes" = inventory.total_codes,
-              "used_codes" = inventory.used_codes
+              "used_codes" = inventory.used_codes,
+              "exhausted_at" = CASE
+                WHEN inventory.total_codes > 0
+                 AND inventory.used_codes >= inventory.total_codes
+                  THEN COALESCE(pool."exhausted_at", NOW())
+                ELSE NULL
+              END
          FROM (
            SELECT
              link."unique_coupon_pool_id" AS pool_id,
@@ -508,6 +514,12 @@ export async function runCodes(): Promise<void> {
          ) AS inventory
         WHERE pool.id = inventory.pool_id`,
     );
+    // exhausted_at mirrors recountPools in database/unique-code-integrity.js:
+    // keep the original stamp when already set, clear it when stock came back,
+    // and never stamp pools with zero code rows (editor-mid-setup pools are
+    // handled by the first UPDATE and stay untouched here). Stamping at import
+    // means the offer-expiry cron treats already-drained pools as expired
+    // immediately instead of after the next nightly recount.
   });
 
   logger.info(

@@ -27,8 +27,16 @@ import {
 import { logger } from "../utils/logger.js";
 import { isAcfTrue } from "../utils/acf.js";
 import { reconcileMigratedOfferInventory } from "../utils/offer-inventory.js";
+import {
+  getImportExclusions,
+  hasExcludedTerm,
+} from "../utils/import-exclusions.js";
 import { getWpOfferExpiryRaw } from "../utils/wp-offer-expiry.js";
 import { registerMigratedEntity } from "../utils/migration-registry.js";
+import {
+  couponLogoStoreCandidates,
+  loadWpStoreLogoIndex,
+} from "../utils/offer-logo-store.js";
 
 interface WpPost {
   ID: number;
@@ -59,7 +67,7 @@ export async function runCoupons(): Promise<void> {
            p.post_status, p.post_author
     FROM wp_posts p
     WHERE p.post_type = 'post'
-      AND p.post_status IN ('publish', 'future', 'draft', 'trash')
+      AND p.post_status IN ('publish', 'future')
       AND NOT EXISTS (
         SELECT 1 FROM wp_postmeta
         WHERE post_id = p.ID
@@ -72,7 +80,7 @@ export async function runCoupons(): Promise<void> {
   const sourcePostIds = sourcePosts.map((post) => post.ID);
   const allMeta = await getPostMetaBulk(sourcePostIds);
   const migrationNow = new Date();
-  const posts = sourcePosts.filter((post) => {
+  const lifecyclePosts = sourcePosts.filter((post) => {
     const expiresAt = parseExpiryDate(
       getWpOfferExpiryRaw(allMeta.get(post.ID) || {}),
     );
@@ -82,6 +90,31 @@ export async function runCoupons(): Promise<void> {
       now: migrationNow,
     });
   });
+
+  // Posts filed under an excluded term (Articles tree, retired stores)
+  // are not coupons to import. Excluding them BEFORE expectedDocumentIds means the inventory
+  // reconciliation also converges previously imported excluded posts away on
+  // a re-import, instead of keeping them alive.
+  const [exclusions, allRelations] = await Promise.all([
+    getImportExclusions(),
+    getTermRelationsBulk(lifecyclePosts.map((post) => post.ID)),
+  ]);
+  const excludedPosts = lifecyclePosts.filter((post) =>
+    hasExcludedTerm(allRelations.get(post.ID) ?? [], exclusions.termIds),
+  );
+  if (excludedPosts.length > 0) {
+    const sample = excludedPosts
+      .slice(0, 10)
+      .map((post) => `${post.ID} (${post.post_title})`);
+    logger.info(
+      `Skipping ${excludedPosts.length} excluded post(s) (articles/retired ` +
+        `stores): ${sample.join("; ")}` +
+        (excludedPosts.length > sample.length ? "; ..." : ""),
+    );
+  }
+  const excludedPostIds = new Set(excludedPosts.map((post) => post.ID));
+  const posts = lifecyclePosts.filter((post) => !excludedPostIds.has(post.ID));
+
   const expectedDocumentIds = new Set(
     posts.map((post) => generateDocumentId(`coupon:${post.ID}`)),
   );
@@ -89,9 +122,15 @@ export async function runCoupons(): Promise<void> {
 
   logger.info(
     `Found ${posts.length} importable coupon posts ` +
-      `(${sourcePosts.length - posts.length} ordinary withdrawn posts excluded)`,
+      `(${sourcePosts.length - lifecyclePosts.length} non-importable post(s) ` +
+      `dropped, ${excludedPosts.length} excluded post(s))`,
   );
   if (posts.length === 0) return;
+
+  // Coupon `image` was a standalone URL in WordPress. It duplicates a Store
+  // logo in most records, so map that path to the image-only logoStore
+  // relation instead of uploading tens of thousands of duplicate files.
+  const storeLogoIndex = await loadWpStoreLogoIndex();
 
   // Saved migration maps can outlive a dev database reset. Never trust a
   // mapped Strapi admin ID until it is confirmed in the active target DB;
@@ -101,15 +140,6 @@ export async function runCoupons(): Promise<void> {
   );
   const validAdminUserIds = new Set(adminUsers.map((user) => user.id));
 
-  const postIds = posts.map((p) => p.ID);
-
-  // Bulk-fetch relation data for importable posts only. Metadata was fetched
-  // above because expiry determines whether a withdrawn draft/trash belongs.
-  const [allRelations, primaryTerms] = await Promise.all([
-    getTermRelationsBulk(postIds),
-    getPrimaryTerms(postIds),
-  ]);
-
   let inserted = 0;
   let failed = 0;
   const limit = pLimit(20);
@@ -118,7 +148,6 @@ export async function runCoupons(): Promise<void> {
     limit(async () => {
       const meta = allMeta.get(post.ID) || {};
       const relations = allRelations.get(post.ID) || [];
-      const primaryTermId = primaryTerms.get(post.ID);
 
       try {
         const sourceKey = `coupon:${post.ID}`;
@@ -183,9 +212,10 @@ export async function runCoupons(): Promise<void> {
             : authorId;
 
         // `published_on` is the EDITOR-CONTROLLED relevance/"newest first"
-        // sort key (src/utils/offer-visibility.ts). WordPress uses an edit to
-        // make an offer relevant again, so seed it from post_modified via
-        // updatedAt rather than from the original publication date.
+        // sort key (src/utils/offer-visibility.ts). Seeded from the WordPress
+        // PUBLISH date (post_date via createdAt) so the imported ordering
+        // matches the old site exactly; editors bump offers by re-dating
+        // them after migration.
         // It MUST be written at insert time: Postgres orders NULLs FIRST in a
         // DESC sort, so a row with no published_on outranks every row an editor
         // has actually dated — "Bump to top" would push an offer to the BOTTOM.
@@ -217,7 +247,7 @@ export async function runCoupons(): Promise<void> {
             "scheduled_at" = EXCLUDED."scheduled_at",
             "content_status" = EXCLUDED."content_status",
             "published_at" = EXCLUDED."published_at",
-            "published_on" = COALESCE("coupons"."published_on", EXCLUDED."published_on"),
+            "published_on" = EXCLUDED."published_on",
             "updated_at" = EXCLUDED."updated_at",
             "updated_by_id" = EXCLUDED."updated_by_id"
           RETURNING id`,
@@ -237,7 +267,7 @@ export async function runCoupons(): Promise<void> {
             contentStatus.scheduledAt,
             contentStatus.contentStatus,
             contentStatus.publishedAt,
-            contentStatus.publishedAt ? updatedAt : null,
+            contentStatus.publishedAt ? createdAt : null,
             createdAt,
             updatedAt,
             null,
@@ -264,10 +294,17 @@ export async function runCoupons(): Promise<void> {
           targetTable: "coupons",
         });
 
-        // Wire taxonomy relations
+        // Wire taxonomy relations. The WordPress Coupon image supplies an
+        // image-only Logo Store only when the resulting Coupon has no real
+        // Store membership; a real Store logo always remains authoritative.
         await replaceOfferTaxonomyRelations("coupons", entityId, {
           termIds: relations,
-          primaryTermId,
+          logoStoreTermIds: couponLogoStoreCandidates(
+            meta.image,
+            relations,
+            storeLogoIndex,
+          ),
+          logoStoreOnlyWithoutStore: true,
         });
 
         await replaceContentMedia(
@@ -347,7 +384,7 @@ async function getPostMetaBulk(postIds: number[]): Promise<Map<number, PostMeta>
        FROM wp_postmeta
        WHERE post_id IN (${placeholders})
        AND meta_key IN (
-         'code', 'link', 'popular_coupon',
+         'code', 'link', 'popular_coupon', 'image',
          'is_deal', 'unique_coupon', 'unique_coupon_name',
          '_action_manager_date', '_expiration-date', '_expiration-date-status', 'expiration-date',
          '_edit_last'
@@ -379,23 +416,6 @@ async function getTermRelationsBulk(postIds: number[]): Promise<Map<number, numb
     map.get(row.object_id)!.push(row.term_id);
   }
   return map;
-}
-
-async function getPrimaryTerms(postIds: number[]): Promise<Map<number, number>> {
-  if (postIds.length === 0) return new Map();
-  try {
-    const placeholders = postIds.map(() => "?").join(",");
-    const rows = await wpQuery<{ post_id: number; term_id: number }>(`
-      SELECT post_id, term_id
-      FROM wp_yoast_primary_term
-      WHERE post_id IN (${placeholders})
-      AND taxonomy = 'category'
-    `, postIds);
-    return new Map(rows.map((r) => [r.post_id, r.term_id]));
-  } catch {
-    logger.warn("wp_yoast_primary_term table not available");
-    return new Map();
-  }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
