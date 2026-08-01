@@ -341,13 +341,15 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
         });
 
         // WordPress ACF `deal_store` selected the logo source, not taxonomy
-        // membership. Keep real membership from `relations` and put the ACF
-        // Store only in logoStore. `parseAcfTermId` also handles the serialized
+        // membership. Keep real membership from `relations` and use the ACF
+        // Store as an image-only logoStore only when the resulting Deal has no
+        // real Store membership. `parseAcfTermId` also handles the serialized
         // ACF values that a bare parseInt silently dropped.
         const dealStoreTermId = parseAcfTermId(meta.deal_store);
         await replaceOfferTaxonomyRelations("deals", entityId, {
           termIds: relations,
           logoStoreTermIds: dealStoreTermId ? [dealStoreTermId] : [],
+          logoStoreOnlyWithoutStore: true,
         });
 
         // Replace dealImage exactly so a source change or clear cannot leave a
