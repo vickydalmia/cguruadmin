@@ -550,7 +550,7 @@ export interface ApiBankBank extends Struct.CollectionTypeSchema {
     shortDescription: Schema.Attribute.Text & Schema.Attribute.Required;
     showTrendingDeals: Schema.Attribute.Boolean &
       Schema.Attribute.DefaultTo<true>;
-    slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
+    slug: Schema.Attribute.String & Schema.Attribute.Required;
     topPickCoupons: Schema.Attribute.Relation<
       'manyToMany',
       'api::coupon.coupon'
@@ -618,7 +618,7 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
     shortDescription: Schema.Attribute.Text & Schema.Attribute.Required;
     showTrendingDeals: Schema.Attribute.Boolean &
       Schema.Attribute.DefaultTo<true>;
-    slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
+    slug: Schema.Attribute.String & Schema.Attribute.Required;
     topPickCoupons: Schema.Attribute.Relation<
       'manyToMany',
       'api::coupon.coupon'
@@ -748,7 +748,7 @@ export interface ApiCategoryCategory extends Struct.CollectionTypeSchema {
     shortDescription: Schema.Attribute.Text & Schema.Attribute.Required;
     showTrendingDeals: Schema.Attribute.Boolean &
       Schema.Attribute.DefaultTo<true>;
-    slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
+    slug: Schema.Attribute.String & Schema.Attribute.Required;
     topPickCoupons: Schema.Attribute.Relation<
       'manyToMany',
       'api::coupon.coupon'
@@ -1451,7 +1451,7 @@ export interface ApiJobJob extends Struct.CollectionTypeSchema {
         number
       >;
     seo: Schema.Attribute.Component<'shared.seo', false>;
-    slug: Schema.Attribute.UID<'title'> & Schema.Attribute.Required;
+    slug: Schema.Attribute.String & Schema.Attribute.Required;
     sortOrder: Schema.Attribute.Integer &
       Schema.Attribute.SetMinMax<
         {
@@ -1653,7 +1653,7 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
     shortDescription: Schema.Attribute.Text & Schema.Attribute.Required;
     showTrendingDeals: Schema.Attribute.Boolean &
       Schema.Attribute.DefaultTo<true>;
-    slug: Schema.Attribute.UID<'name'> & Schema.Attribute.Required;
+    slug: Schema.Attribute.String & Schema.Attribute.Required;
     topPickCoupons: Schema.Attribute.Relation<
       'manyToMany',
       'api::coupon.coupon'

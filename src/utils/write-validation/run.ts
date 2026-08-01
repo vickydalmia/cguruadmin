@@ -1,6 +1,7 @@
 import type { Core } from '@strapi/strapi';
 
 import { isIdentityUid } from '../identity-validation';
+import { JOB_UID } from '../job-slug-validation';
 import { isHumanWrite } from '../write-origin';
 import {
   acquireWriteSerializationLock,
@@ -129,10 +130,13 @@ async function collectLockedSteps(ctx: StepContext): Promise<void> {
 
 /**
  * Which advisory-lock domain this uid's cross-row invariants belong to, or null
- * when it has none. Identical to the middleware's original selection.
+ * when it has none. Identity and redirect are the middleware's original
+ * selection; job was added with the slug uid→string conversion, whose
+ * uniqueness guard is read-then-write like the other two.
  */
 function lockDomainFor(uid: string): WriteLockDomain | null {
   if (isIdentityUid(uid)) return 'identity';
   if (uid === 'api::redirect.redirect') return 'redirect';
+  if (uid === JOB_UID) return 'job';
   return null;
 }

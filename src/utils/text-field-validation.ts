@@ -111,8 +111,9 @@ export const TEXT_FIELD_UIDS = [
  * to `text`/`richtext` — `assertCollapseIsStringOnly` below enforces that at
  * module load so a future edit cannot quietly regress it.
  *
- * NOTE ON `slug`: `uid` attributes are excluded entirely. Strapi generates and
- * regex-validates them; rewriting a slug here would change public URLs.
+ * NOTE ON `slug`: excluded entirely. Slugs are plain `string` attributes whose
+ * schema `regex` already rejects leading/trailing/inner whitespace, and
+ * rewriting a slug here would change public URLs.
  *
  * NOTE ON BRAND: brand's SEO requiredness is already owned by
  * checkBrandRequired in entity-field-validation.ts and is NOT duplicated here —

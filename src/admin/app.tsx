@@ -37,7 +37,6 @@ import { HOMEPAGE_IMAGE_RULES } from '../constants/homepage-images';
 import RichTextEditor from './components/RichTextEditor';
 import DateTimeInput from './components/DateTimeInput';
 import BooleanConfirmInput from './components/BooleanConfirmInput';
-import SlugInput from './components/SlugInput';
 import PublicOfferLinkAction from './components/PublicOfferLinkAction';
 import BumpToTopAction from './components/BumpToTopAction';
 import OfferStatusTabs from './components/OfferStatusTabs';
@@ -1245,9 +1244,8 @@ export default {
     // Confirmation dialog before any boolean toggle flips (QC: avoid accidental
     // ON/OFF from a stray click).
     app.addFields({ type: 'boolean', Component: BooleanConfirmInput } as any);
-    // UID/slug input that starts empty instead of seeding the model name
-    // ("store"), auto-filling from `name` until hand-edited (QC bug).
-    app.addFields({ type: 'uid', Component: SlugInput } as any);
+    // Slug fields are plain `string` attributes (schema-regex-validated, typed
+    // by hand) — the former uid SlugInput and its Regenerate button are gone.
 
     // Generated Product Deal pages (/<slugified-entity-name>-deals/) have no content
     // type of their own — they are derived from the four entity collections —

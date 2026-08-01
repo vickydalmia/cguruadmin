@@ -564,7 +564,7 @@ export async function validateIdentity(
 }
 
 // Re-exported so a caller (and the tests) can assert against the same slug
-// generator the admin SlugInput uses, rather than a second copy of the rules.
+// generator this module uses, rather than a second copy of the rules.
 export { slugify };
 export { toRouteSlug };
 export type { IdentityKind };

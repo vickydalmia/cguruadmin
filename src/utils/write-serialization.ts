@@ -13,7 +13,7 @@ import type { Core } from '@strapi/strapi';
 
 const LOCK_NAMESPACE = 'cguru:document-write';
 
-export type WriteLockDomain = 'identity' | 'redirect';
+export type WriteLockDomain = 'identity' | 'redirect' | 'job';
 
 export type WriteLockRelease = () => Promise<void>;
 

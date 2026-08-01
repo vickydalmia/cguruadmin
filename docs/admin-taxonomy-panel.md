@@ -26,8 +26,10 @@ its own widget, so a deal or coupon edit view is dominated by them.
 
 Separately, several stock field inputs did not survive QA: the markdown editor
 could not edit the HTML our richtext fields actually store, the datetime picker
-stepped in 15-minute jumps, booleans flipped on a stray click, and the UID input
-seeded new entries with the model name (`store`) as their slug.
+stepped in 15-minute jumps, and booleans flipped on a stray click. (Slug fields
+were once a fourth case — a custom uid input with a Regenerate button — but
+editors regenerating live slugs proved worse than the stock behavior, so slugs
+are now plain regex-validated `string` attributes typed by hand.)
 
 ### Solution
 
@@ -48,7 +50,6 @@ seeded new entries with the model name (`store`) as their slug.
 | [`src/admin/components/RichTextEditor.tsx`](../src/admin/components/RichTextEditor.tsx) | TipTap WYSIWYG registered for `richtext` |
 | [`src/admin/components/DateTimeInput.tsx`](../src/admin/components/DateTimeInput.tsx) | `datetime` picker with 5-minute steps |
 | [`src/admin/components/BooleanConfirmInput.tsx`](../src/admin/components/BooleanConfirmInput.tsx) | `boolean` toggle behind a confirmation dialog |
-| [`src/admin/components/SlugInput.tsx`](../src/admin/components/SlugInput.tsx) | `uid` input that starts empty and auto-fills from `name` |
 | [`src/index.ts`](../src/index.ts) | Server bootstrap: hides the panel-owned relations from the content-manager layout, plus the rest of the boot-time view config |
 | [`src/constants/homepage-sections.ts`](../src/constants/homepage-sections.ts), [`src/constants/deal-of-the-day-sections.ts`](../src/constants/deal-of-the-day-sections.ts), [`src/constants/homepage-images.ts`](../src/constants/homepage-images.ts) | Section labels and image size rules shared by the admin bundle and the server |
 
@@ -72,7 +73,6 @@ field of that type, across every content type:
 | `richtext` | `RichTextEditor` | Fields store HTML (WP-migrated, rendered raw on the site); the stock markdown editor cannot edit it. Anything outside the server allowlist is stripped on save by [`src/utils/sanitize-richtext.ts`](../src/utils/sanitize-richtext.ts). |
 | `datetime` | `DateTimeInput` | 5-minute time steps instead of 15, for coupon scheduling precision. |
 | `boolean` | `BooleanConfirmInput` | Confirmation dialog before the toggle flips; the form value changes only after the editor confirms. |
-| `uid` | `SlugInput` | Starts empty instead of seeding the model's singular name, auto-fills from `name` until hand-edited, and offers a "Regenerate" button. Trades away Strapi's live availability indicator — uniqueness is still enforced by the schema on save. |
 
 The registry key must be the **raw attribute type**. In particular `richtext`,
 not the Strapi v4 `wysiwyg` key, which silently does nothing in v5.
@@ -410,8 +410,9 @@ computes durable ISR invalidation scopes. `destroy` stops the outbox dispatcher.
 11. **Validation panel.** Save a homepage with a wrong-sized image: the panel
     lists the section path and the exact required pixel dimensions.
 12. **Field replacements.** A richtext field opens as a WYSIWYG, a datetime
-    picker offers 5-minute steps, a boolean asks for confirmation, and a new
-    store's slug starts empty rather than reading `store`.
+    picker offers 5-minute steps, and a boolean asks for confirmation. A new
+    store's slug is a plain text field that starts empty and offers no
+    Regenerate button.
 
 ---
 

@@ -49,8 +49,12 @@ describe('write-validation step order', () => {
     ]);
   });
 
-  it('keeps identity and redirect together under the lock', () => {
-    expect(names(LOCKED_STEPS)).toEqual(['validateIdentity', 'validateRedirect']);
+  it('keeps identity, redirect and job slug together under the lock', () => {
+    expect(names(LOCKED_STEPS)).toEqual([
+      'validateIdentity',
+      'validateRedirect',
+      'validateJobSlug',
+    ]);
   });
 
   it('keeps the paid deal-image step isolated as a side effect', () => {

@@ -25,6 +25,7 @@ import {
 import { validateHomepageImages } from '../homepage-image-validation';
 import { validateHomepagePopularSearches } from '../homepage-popular-searches-validation';
 import { validateIdentity } from '../identity-validation';
+import { validateJobSlug } from '../job-slug-validation';
 import { MENU_UID, validateMenuCategorySections } from '../menu-category-validation';
 import { validateMenuNotification } from '../menu-notification-validation';
 import { validateOfferFieldsForWrite } from '../offer-field-validation';
@@ -283,8 +284,8 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
  * group B has already condemned. Within the group they are still collected
  * together, so a redirect with a bad `from` AND a bad `to` reports both.
  *
- * Both run for EVERY uid — each one no-ops internally on a type it does not
- * own. That is deliberately unchanged from the original middleware.
+ * All of them run for EVERY uid — each one no-ops internally on a type it
+ * does not own. That is deliberately unchanged from the original middleware.
  */
 export const LOCKED_STEPS: readonly ValidationStep[] = [
   {
@@ -300,6 +301,13 @@ export const LOCKED_STEPS: readonly ValidationStep[] = [
     name: 'validateRedirect',
     run: ({ strapi, uid, action, data, documentId, strict }) =>
       validateRedirect(strapi, uid, action, data, documentId, strict),
+  },
+  {
+    // Job slugs are plain strings with no uid/DB uniqueness; /careers/<slug>/
+    // and the application submit endpoint both take the first matching row.
+    name: 'validateJobSlug',
+    run: ({ strapi, uid, action, data, documentId }) =>
+      validateJobSlug(strapi, uid, action, data, documentId),
   },
 ];
 

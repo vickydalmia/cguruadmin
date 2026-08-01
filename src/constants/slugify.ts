@@ -1,5 +1,5 @@
 /**
- * URL/filename slug generation, shared by the admin SlugInput (entity slugs)
+ * URL/filename slug generation, shared by identity validation (entity slugs)
  * and the upload extension (media filenames) so the two can't drift.
  *
  * Lives in src/constants/ because that is this repo's dependency-free layer:

@@ -58,8 +58,7 @@ describe('slugify', () => {
   });
 
   it('yields an empty slug for input with no slug-able characters', () => {
-    // Callers decide the fallback (SlugInput leaves the field empty, the
-    // upload extension substitutes "image").
+    // Callers decide the fallback (the upload extension substitutes "image").
     expect(slugify('日本語')).toBe('');
     expect(slugify('™®©')).toBe('');
   });
