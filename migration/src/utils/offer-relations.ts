@@ -22,7 +22,6 @@ type RelationTarget = {
 type LogoStoreTarget = {
   table: "coupons_logo_store_lnk" | "deals_logo_store_lnk";
   ownerColumn: "coupon_id" | "deal_id";
-  orderColumn: "coupon_ord" | "deal_ord";
 };
 
 const TARGETS: Record<
@@ -87,12 +86,10 @@ const LOGO_STORE_TARGETS: Record<OfferTable, LogoStoreTarget> = {
   coupons: {
     table: "coupons_logo_store_lnk",
     ownerColumn: "coupon_id",
-    orderColumn: "coupon_ord",
   },
   deals: {
     table: "deals_logo_store_lnk",
     ownerColumn: "deal_id",
-    orderColumn: "deal_ord",
   },
 };
 
@@ -177,10 +174,13 @@ export async function replaceOfferTaxonomyRelations(
       [entityId],
     );
     if (logoStoreRef) {
+      // logoStore is many-to-one, so Strapi creates only the owner and target
+      // columns. Unlike the taxonomy many-to-many tables above, this link
+      // table has no coupon_ord/deal_ord column.
       await pgQuery(
         `INSERT INTO "${logoTarget.table}" (
-           "${logoTarget.ownerColumn}", "store_id", "${logoTarget.orderColumn}"
-         ) VALUES ($1, $2, 1)`,
+           "${logoTarget.ownerColumn}", "store_id"
+         ) VALUES ($1, $2)`,
         [entityId, logoStoreRef.id],
       );
     }

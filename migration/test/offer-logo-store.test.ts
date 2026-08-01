@@ -14,6 +14,10 @@ const dealsSource = readFileSync(
   new URL("../src/phases/08-deals.ts", import.meta.url),
   "utf8",
 );
+const offerRelationsSource = readFileSync(
+  new URL("../src/utils/offer-relations.ts", import.meta.url),
+  "utf8",
+);
 
 test("normalizes WordPress media URLs by upload path", () => {
   assert.equal(
@@ -57,4 +61,12 @@ test("Coupon and Deal migrations link Logo Store only without Store membership",
       /replaceOfferTaxonomyRelations\([\s\S]{0,500}logoStoreOnlyWithoutStore: true/,
     );
   }
+});
+
+test("Logo Store inserts match Strapi many-to-one link-table columns", () => {
+  assert.match(
+    offerRelationsSource,
+    /INSERT INTO "\$\{logoTarget\.table\}" \(\s*"\$\{logoTarget\.ownerColumn\}", "store_id"\s*\) VALUES \(\$1, \$2\)/,
+  );
+  assert.doesNotMatch(offerRelationsSource, /logoTarget\.orderColumn/);
 });
