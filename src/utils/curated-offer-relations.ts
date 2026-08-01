@@ -8,9 +8,9 @@ import {
   type IdentityKind,
 } from './route-normalization';
 
-type OfferUid = 'api::coupon.coupon' | 'api::deal.deal';
+export type OfferUid = 'api::coupon.coupon' | 'api::deal.deal';
 
-type CuratedOfferRelation = {
+export type CuratedOfferRelation = {
   sourceUid: string;
   field: string;
   targetUid: OfferUid;
@@ -22,58 +22,89 @@ export type CuratedOfferCleanupResult = {
   requiresFullRevalidation: boolean;
 };
 
+const OFFER_UIDS: readonly OfferUid[] = ['api::coupon.coupon', 'api::deal.deal'];
+
+function isOfferUid(target: unknown): target is OfferUid {
+  return OFFER_UIDS.includes(target as OfferUid);
+}
+
+type CuratedOfferRelationIndex = {
+  relations: readonly CuratedOfferRelation[];
+  targetBySourceAndField: ReadonlyMap<string, OfferUid>;
+};
+
+const curatedRelationCache = new WeakMap<object, CuratedOfferRelationIndex>();
+
 /**
  * Every curated Coupon/Deal relation used by the Homepage, Deal of the Day,
- * and entity Top Picks. Nested relation-picker requests use the immediate
- * component UID rather than the owning single type, so this is also the
- * precise allow-list for the request-scoped query filter below.
+ * headers, and entity Top Picks — derived from the loaded schemas so the list
+ * can never drift from the components again:
+ *
+ *   - every component relation targeting Coupon/Deal is curated (nested
+ *     relation-picker requests use the immediate component UID rather than the
+ *     owning single type, so this is also the precise allow-list for the
+ *     request-scoped query filter below), and
+ *   - every unidirectional content-type relation targeting Coupon/Deal is
+ *     curated (Top Picks / Ordered Coupons); the catalog inverses all carry
+ *     `mappedBy` and stay unfiltered.
+ *
+ * Derivation is lazy on purpose: this module is imported by config/cron-tasks
+ * and the middleware factory before a `strapi` instance exists.
  */
-export const CURATED_OFFER_RELATIONS: readonly CuratedOfferRelation[] = [
-  { sourceUid: 'home.hero-product', field: 'deal', targetUid: 'api::deal.deal' },
-  { sourceUid: 'home.top-offer-item', field: 'coupon', targetUid: 'api::coupon.coupon' },
-  { sourceUid: 'home.exclusive-item', field: 'coupon', targetUid: 'api::coupon.coupon' },
-  { sourceUid: 'home.coupon-card-item', field: 'coupon', targetUid: 'api::coupon.coupon' },
-  { sourceUid: 'home.offer-list', field: 'offers', targetUid: 'api::coupon.coupon' },
-  { sourceUid: 'home.explore-offer-tab', field: 'offers', targetUid: 'api::coupon.coupon' },
-  { sourceUid: 'home.deal-list', field: 'deals', targetUid: 'api::deal.deal' },
-  { sourceUid: 'home.explore-tab', field: 'deals', targetUid: 'api::deal.deal' },
-  { sourceUid: 'deal-day.section-heading', field: 'deals', targetUid: 'api::deal.deal' },
-  { sourceUid: 'deal-day.store-tab', field: 'deals', targetUid: 'api::deal.deal' },
-  { sourceUid: 'deal-day.telegram-deal-item', field: 'deal', targetUid: 'api::deal.deal' },
-  {
-    sourceUid: 'header.coupon-notification',
-    field: 'coupon',
-    targetUid: 'api::coupon.coupon',
-  },
-  {
-    sourceUid: 'header.product-deal-notification',
-    field: 'productDeal',
-    targetUid: 'api::deal.deal',
-  },
-  { sourceUid: 'api::store.store', field: 'topPickCoupons', targetUid: 'api::coupon.coupon' },
-  { sourceUid: 'api::store.store', field: 'orderedCoupons', targetUid: 'api::coupon.coupon' },
-  { sourceUid: 'api::brand.brand', field: 'topPickCoupons', targetUid: 'api::coupon.coupon' },
-  { sourceUid: 'api::brand.brand', field: 'orderedCoupons', targetUid: 'api::coupon.coupon' },
-  {
-    sourceUid: 'api::category.category',
-    field: 'topPickCoupons',
-    targetUid: 'api::coupon.coupon',
-  },
-  {
-    sourceUid: 'api::category.category',
-    field: 'orderedCoupons',
-    targetUid: 'api::coupon.coupon',
-  },
-  { sourceUid: 'api::bank.bank', field: 'topPickCoupons', targetUid: 'api::coupon.coupon' },
-  { sourceUid: 'api::bank.bank', field: 'orderedCoupons', targetUid: 'api::coupon.coupon' },
-] as const;
+function getCuratedOfferRelationIndex(strapi: Core.Strapi): CuratedOfferRelationIndex {
+  const cached = curatedRelationCache.get(strapi);
+  if (cached) return cached;
 
-const relationTargetBySourceAndField = new Map(
-  CURATED_OFFER_RELATIONS.map((relation) => [
-    `${relation.sourceUid}\0${relation.field}`,
-    relation.targetUid,
-  ]),
-);
+  const relations: CuratedOfferRelation[] = [];
+
+  for (const [sourceUid, component] of Object.entries(
+    (strapi.components ?? {}) as Record<string, any>,
+  )) {
+    for (const [field, attribute] of Object.entries(
+      (component?.attributes ?? {}) as Record<string, any>,
+    )) {
+      if (attribute?.type === 'relation' && isOfferUid(attribute.target)) {
+        relations.push({ sourceUid, field, targetUid: attribute.target });
+      }
+    }
+  }
+
+  for (const [sourceUid, contentType] of Object.entries(
+    (strapi.contentTypes ?? {}) as Record<string, any>,
+  )) {
+    if (!sourceUid.startsWith('api::')) continue;
+    for (const [field, attribute] of Object.entries(
+      (contentType?.attributes ?? {}) as Record<string, any>,
+    )) {
+      if (
+        attribute?.type === 'relation' &&
+        isOfferUid(attribute.target) &&
+        !attribute.mappedBy &&
+        !attribute.inversedBy
+      ) {
+        relations.push({ sourceUid, field, targetUid: attribute.target });
+      }
+    }
+  }
+
+  const index: CuratedOfferRelationIndex = {
+    relations,
+    targetBySourceAndField: new Map(
+      relations.map((relation) => [
+        `${relation.sourceUid}\0${relation.field}`,
+        relation.targetUid,
+      ]),
+    ),
+  };
+  curatedRelationCache.set(strapi, index);
+  return index;
+}
+
+export function getCuratedOfferRelations(
+  strapi: Core.Strapi,
+): readonly CuratedOfferRelation[] {
+  return getCuratedOfferRelationIndex(strapi).relations;
+}
 
 const liveRelationRequest = new AsyncLocalStorage<{ targetUid: OfferUid }>();
 
@@ -110,7 +141,7 @@ function safelyDecode(value: string): string {
  * exact title match. Preserve literal percent signs, decode valid escapes, and
  * ignore accidental leading/trailing whitespace.
  */
-export function normalizeCuratedRelationSearch(value: unknown): unknown {
+export function normalizeRelationSearch(value: unknown): unknown {
   if (typeof value !== 'string') return value;
 
   const escapedLiteralPercents = value.replace(/%(?![0-9a-f]{2})/gi, '%25');
@@ -122,7 +153,9 @@ export function normalizeCuratedRelationSearch(value: unknown): unknown {
  *   /content-manager/relations/:model/:targetField
  *   /content-manager/relations/:model/:id/:targetField
  */
-export function curatedOfferTargetForRelationPath(path: string): OfferUid | null {
+function relationPathParts(
+  path: string,
+): { sourceUid: string; field: string } | null {
   const parts = path.split('/').filter(Boolean).map(safelyDecode);
   const relationsIndex = parts.findIndex(
     (part, index) => part === 'relations' && parts[index - 1] === 'content-manager',
@@ -133,7 +166,25 @@ export function curatedOfferTargetForRelationPath(path: string): OfferUid | null
   const field = parts.at(-1);
   if (!sourceUid || !field || parts.length - relationsIndex < 3) return null;
 
-  return relationTargetBySourceAndField.get(`${sourceUid}\0${field}`) ?? null;
+  return { sourceUid, field };
+}
+
+export function isContentManagerRelationPath(path: string): boolean {
+  return relationPathParts(path) !== null;
+}
+
+export function curatedOfferTargetForRelationPath(
+  strapi: Core.Strapi,
+  path: string,
+): OfferUid | null {
+  const parsed = relationPathParts(path);
+  if (!parsed) return null;
+
+  return (
+    getCuratedOfferRelationIndex(strapi).targetBySourceAndField.get(
+      `${parsed.sourceUid}\0${parsed.field}`,
+    ) ?? null
+  );
 }
 
 export function runWithCuratedOfferRelationFilter<T>(
@@ -183,7 +234,7 @@ export async function removeInactiveCuratedOfferRelations(
   let requiresFullRevalidation = false;
   const affectedPaths = new Set<string>();
 
-  for (const relation of CURATED_OFFER_RELATIONS) {
+  for (const relation of getCuratedOfferRelations(strapi)) {
     const changedDocumentIds = changedOffers?.[relation.targetUid];
     if (changedOffers && (!changedDocumentIds || changedDocumentIds.length === 0)) {
       continue;

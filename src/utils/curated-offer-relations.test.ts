@@ -1,62 +1,170 @@
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   curatedOfferTargetForRelationPath,
-  normalizeCuratedRelationSearch,
+  getCuratedOfferRelations,
+  isContentManagerRelationPath,
+  normalizeRelationSearch,
   registerCuratedOfferRelationQueryFilter,
   removeDisplayedTopPicksFromOrdered,
   removeInactiveCuratedOfferRelations,
   runWithCuratedOfferRelationFilter,
 } from './curated-offer-relations';
 
+/**
+ * A `strapi` shaped like the loaded registries, built from the real schema
+ * files, so the derived curated list in these tests is the one production
+ * derives.
+ */
+function schemaStrapi(extra: Record<string, unknown> = {}): any {
+  const components: Record<string, any> = {};
+  const componentsDir = path.join(process.cwd(), 'src', 'components');
+  for (const namespace of readdirSync(componentsDir)) {
+    const dir = path.join(componentsDir, namespace);
+    if (!statSync(dir).isDirectory()) continue;
+    for (const file of readdirSync(dir).filter((f) => f.endsWith('.json'))) {
+      components[`${namespace}.${file.slice(0, -'.json'.length)}`] = JSON.parse(
+        readFileSync(path.join(dir, file), 'utf8'),
+      );
+    }
+  }
+
+  const contentTypes: Record<string, any> = {};
+  const apiDir = path.join(process.cwd(), 'src', 'api');
+  for (const api of readdirSync(apiDir)) {
+    const typesDir = path.join(apiDir, api, 'content-types');
+    let names: string[] = [];
+    try {
+      names = readdirSync(typesDir);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      const schemaPath = path.join(typesDir, name, 'schema.json');
+      try {
+        contentTypes[`api::${api}.${name}`] = JSON.parse(
+          readFileSync(schemaPath, 'utf8'),
+        );
+      } catch {
+        // content-type folder without a schema
+      }
+    }
+  }
+
+  return { components, contentTypes, ...extra };
+}
+
+const relationKey = (relation: { sourceUid: string; field: string }) =>
+  `${relation.sourceUid}.${relation.field}`;
+
+describe('curated offer relation derivation', () => {
+  // The drift alarm: every component relation targeting Coupon/Deal plus every
+  // unidirectional content-type relation targeting them must be curated —
+  // nothing more, nothing less.
+  it('derives exactly the known curated set from the schemas', () => {
+    const derived = [...getCuratedOfferRelations(schemaStrapi())].sort((a, b) =>
+      relationKey(a).localeCompare(relationKey(b)),
+    );
+
+    expect(derived).toEqual(
+      [
+        { sourceUid: 'home.hero-product', field: 'deal', targetUid: 'api::deal.deal' },
+        { sourceUid: 'home.top-offer-item', field: 'coupon', targetUid: 'api::coupon.coupon' },
+        { sourceUid: 'home.exclusive-item', field: 'coupon', targetUid: 'api::coupon.coupon' },
+        { sourceUid: 'home.coupon-card-item', field: 'coupon', targetUid: 'api::coupon.coupon' },
+        { sourceUid: 'home.offer-list', field: 'offers', targetUid: 'api::coupon.coupon' },
+        { sourceUid: 'home.explore-offer-tab', field: 'offers', targetUid: 'api::coupon.coupon' },
+        { sourceUid: 'home.deal-list', field: 'deals', targetUid: 'api::deal.deal' },
+        { sourceUid: 'home.explore-tab', field: 'deals', targetUid: 'api::deal.deal' },
+        { sourceUid: 'deal-day.section-heading', field: 'deals', targetUid: 'api::deal.deal' },
+        { sourceUid: 'deal-day.store-tab', field: 'deals', targetUid: 'api::deal.deal' },
+        { sourceUid: 'deal-day.telegram-deal-item', field: 'deal', targetUid: 'api::deal.deal' },
+        { sourceUid: 'header.coupon-notification', field: 'coupon', targetUid: 'api::coupon.coupon' },
+        { sourceUid: 'header.product-deal-notification', field: 'productDeal', targetUid: 'api::deal.deal' },
+        { sourceUid: 'api::store.store', field: 'topPickCoupons', targetUid: 'api::coupon.coupon' },
+        { sourceUid: 'api::store.store', field: 'orderedCoupons', targetUid: 'api::coupon.coupon' },
+        { sourceUid: 'api::brand.brand', field: 'topPickCoupons', targetUid: 'api::coupon.coupon' },
+        { sourceUid: 'api::brand.brand', field: 'orderedCoupons', targetUid: 'api::coupon.coupon' },
+        { sourceUid: 'api::category.category', field: 'topPickCoupons', targetUid: 'api::coupon.coupon' },
+        { sourceUid: 'api::category.category', field: 'orderedCoupons', targetUid: 'api::coupon.coupon' },
+        { sourceUid: 'api::bank.bank', field: 'topPickCoupons', targetUid: 'api::coupon.coupon' },
+        { sourceUid: 'api::bank.bank', field: 'orderedCoupons', targetUid: 'api::coupon.coupon' },
+      ].sort((a, b) => relationKey(a).localeCompare(relationKey(b))),
+    );
+  });
+});
+
 describe('curated offer relation picker filtering', () => {
   it('normalizes literal percent signs mixed with encoded spaces', () => {
-    expect(normalizeCuratedRelationSearch('100%%20Whey%20Protein')).toBe(
+    expect(normalizeRelationSearch('100%%20Whey%20Protein')).toBe(
       '100% Whey Protein',
     );
-    expect(normalizeCuratedRelationSearch('  Whey Protein  ')).toBe(
+    expect(normalizeRelationSearch('  Whey Protein  ')).toBe(
       'Whey Protein',
     );
-    expect(normalizeCuratedRelationSearch(['Whey'])).toEqual(['Whey']);
+    expect(normalizeRelationSearch(['Whey'])).toEqual(['Whey']);
+  });
+
+  it('detects Content Manager relation paths regardless of curation', () => {
+    expect(
+      isContentManagerRelationPath(
+        '/content-manager/relations/home.popular-stores/stores',
+      ),
+    ).toBe(true);
+    expect(
+      isContentManagerRelationPath('/content-manager/relations/home.deal-list'),
+    ).toBe(false);
+    expect(isContentManagerRelationPath('/api/coupons')).toBe(false);
   });
 
   it('recognises available and existing nested component relation routes', () => {
+    const strapi = schemaStrapi();
     expect(
       curatedOfferTargetForRelationPath(
+        strapi,
         '/content-manager/relations/home.deal-list/deals',
       ),
     ).toBe('api::deal.deal');
     expect(
       curatedOfferTargetForRelationPath(
+        strapi,
         '/content-manager/relations/header.coupon-notification/12/coupon',
       ),
     ).toBe('api::coupon.coupon');
     expect(
       curatedOfferTargetForRelationPath(
+        strapi,
         '/content-manager/relations/header.product-deal-notification/productDeal',
       ),
     ).toBe('api::deal.deal');
     expect(
       curatedOfferTargetForRelationPath(
+        strapi,
         '/content-manager/relations/home.explore-offer-tab/42/offers',
       ),
     ).toBe('api::coupon.coupon');
     expect(
       curatedOfferTargetForRelationPath(
+        strapi,
         '/content-manager/relations/home.hero-product%2Fwrong/deal',
       ),
     ).toBeNull();
     expect(
       curatedOfferTargetForRelationPath(
+        strapi,
         '/content-manager/relations/home.popular-stores/stores',
       ),
     ).toBeNull();
     expect(
       curatedOfferTargetForRelationPath(
+        strapi,
         '/content-manager/relations/api%3A%3Astore.store/store-1/topPickCoupons',
       ),
     ).toBe('api::coupon.coupon');
     expect(
       curatedOfferTargetForRelationPath(
+        strapi,
         '/content-manager/relations/api%3A%3Acategory.category/category-1/orderedCoupons',
       ),
     ).toBe('api::coupon.coupon');
@@ -148,7 +256,7 @@ describe('curated offer relation cleanup', () => {
       },
     ]);
     const emptyFindMany = vi.fn(async () => []);
-    const strapi = {
+    const strapi = schemaStrapi({
       db: {
         query: vi.fn((uid: string) =>
           uid === 'home.deal-list'
@@ -156,7 +264,7 @@ describe('curated offer relation cleanup', () => {
             : { findMany: emptyFindMany, update: vi.fn() },
         ),
       },
-    } as any;
+    });
 
     await expect(
       removeInactiveCuratedOfferRelations(strapi, now),
@@ -173,7 +281,7 @@ describe('curated offer relation cleanup', () => {
 
   it('handles to-one component relations with the same disconnect command', async () => {
     const update = vi.fn(async () => undefined);
-    const strapi = {
+    const strapi = schemaStrapi({
       db: {
         query: vi.fn((uid: string) => ({
           findMany: vi.fn(async () =>
@@ -184,7 +292,7 @@ describe('curated offer relation cleanup', () => {
           update,
         })),
       },
-    } as any;
+    });
 
     await expect(
       removeInactiveCuratedOfferRelations(
@@ -204,7 +312,7 @@ describe('curated offer relation cleanup', () => {
 
   it('disconnects expired entity Top Pick Coupons without touching taxonomy relations', async () => {
     const update = vi.fn(async () => undefined);
-    const strapi = {
+    const strapi = schemaStrapi({
       db: {
         query: vi.fn((uid: string) => ({
           findMany: vi.fn(async () =>
@@ -224,7 +332,7 @@ describe('curated offer relation cleanup', () => {
           update,
         })),
       },
-    } as any;
+    });
 
     await expect(
       removeInactiveCuratedOfferRelations(
@@ -245,7 +353,7 @@ describe('curated offer relation cleanup', () => {
 
   it('disconnects expired Ordered Coupons and reports the entity route for ISR', async () => {
     const update = vi.fn(async () => undefined);
-    const strapi = {
+    const strapi = schemaStrapi({
       db: {
         query: vi.fn((uid: string) => ({
           findMany: vi.fn(async (query: any) =>
@@ -266,7 +374,7 @@ describe('curated offer relation cleanup', () => {
           update,
         })),
       },
-    } as any;
+    });
 
     await expect(
       removeInactiveCuratedOfferRelations(
@@ -285,7 +393,7 @@ describe('curated offer relation cleanup', () => {
   });
 
   it('falls back to full revalidation when an affected entity has no route slug', async () => {
-    const strapi = {
+    const strapi = schemaStrapi({
       db: {
         query: vi.fn((uid: string) => ({
           findMany: vi.fn(async () =>
@@ -304,7 +412,7 @@ describe('curated offer relation cleanup', () => {
           update: vi.fn(async () => undefined),
         })),
       },
-    } as any;
+    });
 
     await expect(
       removeInactiveCuratedOfferRelations(strapi),
@@ -319,7 +427,7 @@ describe('curated offer relation cleanup', () => {
 describe('displayed Top Picks are kept out of Ordered Coupons', () => {
   function harness(row: unknown, uid = 'api::store.store') {
     const update = vi.fn(async () => undefined);
-    const strapi = {
+    const strapi = schemaStrapi({
       db: {
         query: vi.fn((queriedUid: string) => ({
           findMany: vi.fn(async () => (queriedUid === uid && row ? [row] : [])),
@@ -327,7 +435,7 @@ describe('displayed Top Picks are kept out of Ordered Coupons', () => {
         })),
       },
       log: { info: vi.fn() },
-    } as any;
+    });
     return { strapi, update };
   }
 

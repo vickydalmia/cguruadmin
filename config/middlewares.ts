@@ -33,6 +33,7 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Middlewar
   'strapi::poweredBy',
   'strapi::query',
   'global::live-offer-relations',
+  'global::relation-search-config-guard',
   {
     name: 'strapi::body',
     config: {

@@ -1,12 +1,29 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
-  ADMIN_RELATION_SEARCH_FIELDS,
   applyAdminRelationSearchFields,
+  getAdminRelationSearchFields,
   groupAdminRelationSearchFields,
+  LIVE_OFFER_PICKER_DESCRIPTION,
 } from './content-manager-relation-search';
+
+/** All real component schemas, shaped like the loaded `strapi.components`. */
+function schemaStrapi(): any {
+  const components: Record<string, any> = {};
+  const componentsDir = path.join(process.cwd(), 'src', 'components');
+  for (const namespace of readdirSync(componentsDir)) {
+    const dir = path.join(componentsDir, namespace);
+    if (!statSync(dir).isDirectory()) continue;
+    for (const file of readdirSync(dir).filter((f) => f.endsWith('.json'))) {
+      components[`${namespace}.${file.slice(0, -'.json'.length)}`] = JSON.parse(
+        readFileSync(path.join(dir, file), 'utf8'),
+      );
+    }
+  }
+  return { components };
+}
 
 type SchemaRelation = {
   sourceUid: string;
@@ -36,13 +53,13 @@ const relationKey = (
   relation: Pick<SchemaRelation, 'field' | 'sourceUid'>,
 ) => `${relation.sourceUid}.${relation.field}`;
 
-describe('ADMIN_RELATION_SEARCH_FIELDS', () => {
+describe('getAdminRelationSearchFields', () => {
   it('covers every Homepage and Deal-of-the-Day component relation', () => {
     const actual = [
       ...componentRelations('home'),
       ...componentRelations('deal-day'),
     ].sort((a, b) => relationKey(a).localeCompare(relationKey(b)));
-    const configured = ADMIN_RELATION_SEARCH_FIELDS
+    const configured = getAdminRelationSearchFields(schemaStrapi())
       .filter(
         ({ sourceUid }) =>
           sourceUid.startsWith('home.') ||
@@ -60,6 +77,9 @@ describe('ADMIN_RELATION_SEARCH_FIELDS', () => {
   });
 
   it('uses title for offers and name for directory entities', () => {
+    const derived = getAdminRelationSearchFields(schemaStrapi());
+    expect(derived.length).toBeGreaterThan(0);
+
     const expectedByTarget: Record<string, 'name' | 'title'> = {
       'api::coupon.coupon': 'title',
       'api::deal.deal': 'title',
@@ -69,30 +89,26 @@ describe('ADMIN_RELATION_SEARCH_FIELDS', () => {
       'api::bank.bank': 'name',
     };
 
-    for (const relation of ADMIN_RELATION_SEARCH_FIELDS) {
+    for (const relation of derived) {
       expect(relation.mainField).toBe(expectedByTarget[relation.targetUid]);
     }
   });
 
-  it('retains the existing header relation-search configuration', () => {
-    expect(
-      ADMIN_RELATION_SEARCH_FIELDS.filter(({ sourceUid }) =>
-        sourceUid.startsWith('header.'),
-      ),
-    ).toEqual([
-      {
-        sourceUid: 'header.coupon-notification',
-        field: 'coupon',
-        targetUid: 'api::coupon.coupon',
-        mainField: 'title',
-      },
-      {
-        sourceUid: 'header.product-deal-notification',
-        field: 'productDeal',
-        targetUid: 'api::deal.deal',
-        mainField: 'title',
-      },
-    ]);
+  it('pins the header and navigation pickers the static list used to miss', () => {
+    const derived = getAdminRelationSearchFields(schemaStrapi()).map(
+      ({ sourceUid, field, mainField }) => ({ sourceUid, field, mainField }),
+    );
+
+    expect(derived).toEqual(
+      expect.arrayContaining([
+        { sourceUid: 'header.coupon-notification', field: 'coupon', mainField: 'title' },
+        { sourceUid: 'header.product-deal-notification', field: 'productDeal', mainField: 'title' },
+        { sourceUid: 'header.search-top-store', field: 'store', mainField: 'name' },
+        { sourceUid: 'nav.link', field: 'store', mainField: 'name' },
+        { sourceUid: 'nav.link', field: 'category', mainField: 'name' },
+        { sourceUid: 'nav.category-section', field: 'category', mainField: 'name' },
+      ]),
+    );
   });
 });
 
@@ -139,13 +155,47 @@ describe('applyAdminRelationSearchFields', () => {
       ),
     ).toBeNull();
   });
+
+  it('fills the live-filter description only when the field has none', () => {
+    expect(
+      applyAdminRelationSearchFields(
+        {
+          deal: { edit: { mainField: 'title' } },
+          coupon: { edit: { mainField: 'title', description: 'Hand-authored' } },
+        },
+        [
+          {
+            field: 'deal',
+            mainField: 'title',
+            description: LIVE_OFFER_PICKER_DESCRIPTION,
+          },
+          {
+            field: 'coupon',
+            mainField: 'title',
+            description: LIVE_OFFER_PICKER_DESCRIPTION,
+          },
+        ],
+      ),
+    ).toEqual({
+      metadatas: {
+        deal: {
+          edit: {
+            mainField: 'title',
+            description: LIVE_OFFER_PICKER_DESCRIPTION,
+          },
+        },
+        coupon: { edit: { mainField: 'title', description: 'Hand-authored' } },
+      },
+      changedFields: ['deal'],
+    });
+  });
 });
 
 describe('groupAdminRelationSearchFields', () => {
   it('groups multiple relation pickers without losing their main fields', () => {
-    const fields = groupAdminRelationSearchFields().get(
-      'home.popular-searches',
-    );
+    const fields = groupAdminRelationSearchFields(
+      getAdminRelationSearchFields(schemaStrapi()),
+    ).get('home.popular-searches');
 
     expect(fields?.map(({ field, mainField }) => [field, mainField])).toEqual([
       ['stores', 'name'],

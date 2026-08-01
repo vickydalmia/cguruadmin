@@ -48,7 +48,8 @@ import {
   type EditLayout,
 } from './utils/content-manager-layout';
 import {
-  applyAdminRelationSearchFields,
+  ensureAdminRelationSearchFieldsForUid,
+  getAdminRelationSearchFields,
   groupAdminRelationSearchFields,
 } from './utils/content-manager-relation-search';
 import {
@@ -65,6 +66,7 @@ import { textFieldHints } from './utils/text-field-validation';
 // of their problems in a single error instead of the first one it hits.
 import { runWriteValidation } from './utils/write-validation/run';
 import {
+  getCuratedOfferRelations,
   registerCuratedOfferRelationQueryFilter,
   removeInactiveCuratedOfferRelations,
 } from './utils/curated-offer-relations';
@@ -422,65 +424,85 @@ async function ensureComponentEntryTitles(strapi: Core.Strapi): Promise<void> {
 async function ensureAdminRelationSearchFields(
   strapi: Core.Strapi
 ): Promise<void> {
-  const service: any = strapi.plugin('content-manager').service('components');
-  if (!service) return;
+  const grouped = groupAdminRelationSearchFields(
+    getAdminRelationSearchFields(strapi)
+  );
+  const failed: string[] = [];
 
-  for (const [uid, fields] of groupAdminRelationSearchFields()) {
+  for (const [uid, fields] of grouped) {
     try {
-      const component = service.findComponent(uid);
-      if (!component) continue;
-
-      const validFields = fields.filter((field) => {
-        const attribute =
-          (strapi.components as any)?.[uid]?.attributes?.[field.field];
-        if (
-          attribute?.type !== 'relation' ||
-          attribute?.target !== field.targetUid
-        ) {
-          strapi.log.warn(
-            `[content-manager] admin relation search skipped: `
-            + `${uid}.${field.field} is not a relation to ${field.targetUid}`
-          );
-          return false;
-        }
-
-        let target: any = null;
-        try {
-          target = strapi.contentType(field.targetUid as any);
-        } catch {
-          target = null;
-        }
-        if (!target?.attributes?.[field.mainField]) {
-          strapi.log.warn(
-            `[content-manager] admin relation search skipped: `
-            + `${field.targetUid} has no field "${field.mainField}"`
-          );
-          return false;
-        }
-        return true;
-      });
-      if (validFields.length === 0) continue;
-
-      const config = await service.findConfiguration(component);
-      const update = applyAdminRelationSearchFields(
-        config.metadatas,
-        validFields,
+      const ok = await ensureAdminRelationSearchFieldsForUid(
+        strapi,
+        uid,
+        fields
       );
-      if (!update) continue;
-
-      await service.updateConfiguration(component, {
-        ...config,
-        metadatas: update.metadatas,
-      });
-      strapi.log.info(
-        `[content-manager] admin relation search configured for ${uid}: `
-        + update.changedFields.join(', ')
-      );
+      if (!ok) failed.push(uid);
     } catch (err: any) {
-      strapi.log.warn(
+      strapi.log.error(
         `[content-manager] admin relation search for ${uid} failed: ${err?.message ?? err}`
       );
+      failed.push(uid);
     }
+  }
+
+  if (failed.length > 0) {
+    strapi.log.error(
+      `[content-manager] admin relation search configuration failed for `
+      + `${failed.join(', ')} — title search in these pickers may fall back to IDs`
+    );
+  }
+}
+
+// A role whose Content Manager read permission on a picker target omits the
+// searched text field makes Strapi silently search documentId instead — title
+// search then never matches for users of that role only. Surface it at boot;
+// never auto-grant (permission seeding elsewhere in this file is deliberate).
+async function ensureRelationTargetFieldReadability(
+  strapi: Core.Strapi
+): Promise<void> {
+  const mainFieldByTarget = new Map<string, string>();
+  for (const { targetUid, mainField } of getAdminRelationSearchFields(strapi)) {
+    mainFieldByTarget.set(targetUid, mainField);
+  }
+  if (mainFieldByTarget.size === 0) return;
+
+  try {
+    const [permissions, roles]: [any[], any[]] = await Promise.all([
+      strapi.db.query('admin::permission').findMany({
+        where: {
+          action: 'plugin::content-manager.explorer.read',
+          subject: { $in: [...mainFieldByTarget.keys()] },
+        },
+        populate: ['role'],
+      }),
+      strapi.db.query('admin::role').findMany({
+        where: { code: { $ne: 'strapi-super-admin' } },
+      }),
+    ]);
+
+    for (const role of roles) {
+      for (const [subject, mainField] of mainFieldByTarget) {
+        const rolePermissions = permissions.filter(
+          (permission) =>
+            permission.subject === subject && permission.role?.id === role.id
+        );
+        const canReadMainField = rolePermissions.some((permission) => {
+          const fields = permission.properties?.fields;
+          return !Array.isArray(fields) || fields.includes(mainField);
+        });
+        if (canReadMainField) continue;
+
+        strapi.log.error(
+          `[permissions] role "${role.code}" cannot read ${subject}.${mainField} — `
+          + `relation pickers targeting it will silently search documentId for `
+          + `these users`
+        );
+      }
+    }
+  } catch (err: any) {
+    strapi.log.error(
+      `[permissions] relation search readability check failed: ${err?.message ?? err}`
+    );
   }
 }
 
@@ -1744,6 +1766,23 @@ export default {
     // while leaving the normal offer collection views fully manageable.
     registerCuratedOfferRelationQueryFilter(strapi);
 
+    // The curated set is derived from the schemas at boot; this log is the
+    // audit trail for which pickers are live-filtered.
+    const curatedRelations = getCuratedOfferRelations(strapi);
+    if (curatedRelations.length === 0) {
+      strapi.log.error(
+        '[curated-offers] schema derivation returned zero relations — '
+        + 'live-offer filtering and cleanup are inactive',
+      );
+    } else {
+      strapi.log.info(
+        `[curated-offers] live-filtered relations (${curatedRelations.length}): `
+        + curatedRelations
+          .map((r) => `${r.sourceUid}.${r.field} → ${r.targetUid}`)
+          .join('; '),
+      );
+    }
+
     // User migrations run before Strapi's schema sync, so fresh databases do
     // not have the search tables when those migrations first execute. Retry
     // the same structural reconciliation here on every boot, after schema
@@ -1814,6 +1853,7 @@ export default {
     await ensureUploadSettings(strapi);
     await ensureComponentEntryTitles(strapi);
     await ensureAdminRelationSearchFields(strapi);
+    await ensureRelationTargetFieldReadability(strapi);
     await ensureNavigationIconPlacement(strapi);
     await ensureComponentFieldDescriptions(strapi);
     await ensureFieldDescriptions(strapi);
