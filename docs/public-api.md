@@ -415,16 +415,50 @@ Plugin routes, mounted under `/unique-coupon` — see
 
 `POST /unique-coupon/redeem` with `{ "poolDocumentId": "...", "activationId":
 "..." }` draws one unused code from the pool and marks it used. `activationId`
-is optional and identifies ONE click; it is the id the redeem interstitial
-already mints per activation (a `crypto.randomUUID()`, with or without dashes).
-Anything that is not that shape is ignored rather than rejected — a malformed
-id must not cost the visitor their code.
+is optional and identifies ONE click; it is the id the storefront mints per
+activation (a `crypto.randomUUID()`, with or without dashes). Anything that is
+not that shape is ignored rather than rejected — a malformed id must not cost
+the visitor their code.
 
 Passing it makes the draw **idempotent for that click**: a reload, a bfcache
 restore or a retried request replays the code that activation already claimed
 instead of consuming another. A genuinely new click carries a new activation id
 and draws a new code. The replay window is 24 hours, so a leaked activation id
 is not a permanent read capability for a live code.
+
+That idempotency is what lets one activation reach this endpoint twice. The
+storefront allocates at click time through the ISR gateway's
+`POST /redeem/:entityType/:documentId/allocate`, which takes an entity type and
+document ID and resolves the pool server-side; the redeem page that opens
+afterwards carries the same activation id and calls this endpoint again,
+receiving a replay rather than a second draw. **Within the 24-hour replay
+window, one code leaves the pool per activation however many requests carry its
+id.** Past that window the guarantee ends by design — see the conflict handling
+below. When allocation is unavailable the redeem page performs the first draw
+itself, which is the original single-call path.
+
+Pool IDs are withheld from the pages a visitor browses and shares, not from
+every document. Listing and detail markup never contain one, and the allocation
+request does not either, so a scraped page yields nothing that can be posted
+here. The redeem interstitial is the exception: it receives the pool ID in its
+inline config because it must be able to call this endpoint itself when
+click-time allocation is unavailable. That document is `no-store`, `noindex`,
+per-activation, and discarded on redirect.
+
+`claim_token` carries a partial unique index, so a second attempt to claim with
+an activation id that already owns a row raises a uniqueness violation. That
+has two causes and they need opposite handling:
+
+- **A concurrent request for the same activation.** The violation can only fire
+  against a committed row, so the winner's code is readable immediately and is
+  returned to both callers. No extra code leaves the pool.
+- **A token older than the replay window.** There is nothing left to replay,
+  but the index will keep rejecting that token forever. Retrying would burn
+  every attempt and hand the visitor a 503, so the token is dropped and a fresh
+  code is drawn. **This is the boundary of the one-code guarantee: an
+  activation id reused after 24 hours consumes another code.** It is a
+  deliberate trade — a stale id is far more likely to be an honest revisit than
+  an attack, and the per-IP limits remain the control against draining.
 
 Concurrency is handled by an atomic conditional `UPDATE ... FOR UPDATE SKIP
 LOCKED` on the code rows, not by locking the pool. Simultaneous claimers step
