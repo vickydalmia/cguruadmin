@@ -637,12 +637,22 @@ npm run migrate:phase -- 08a-deal-image-backgrounds
 
 ### Maintenance scripts
 
-Five non-phase scripts ship in this package's `package.json` and repair already-uploaded media / already-migrated content in place. All of them default to **dry-run** and refuse to write without `--apply` plus an explicit confirmation flag naming the target (`--yes-i-mean-<pg-host>`, or `--yes-i-mean-<bucket>` for `fix:cache-headers`); full runbook entries live in [FRESH-MIGRATION.md § Maintenance scripts](./FRESH-MIGRATION.md#maintenance-scripts). The two media-related ones are described here because they are part of this pipeline:
+The non-phase scripts in this package repair already-uploaded media or
+already-migrated content in place. They default to **dry-run** and refuse to
+write without `--apply` plus an explicit confirmation flag naming the target
+(`--yes-i-mean-<pg-host>`, or `--yes-i-mean-<bucket>` for
+`fix:cache-headers`); full runbook entries live in
+[FRESH-MIGRATION.md § Maintenance scripts](./FRESH-MIGRATION.md#maintenance-scripts).
+The media-related scripts are described here because they are part of this
+pipeline:
 
 - `npm run fix:cache-headers` — stamps `Cache-Control: public, max-age=31536000, immutable` on every already-uploaded S3 object via an in-place `CopyObject` (`MetadataDirective: REPLACE`) that carries the stored Content-Type/Disposition/Encoding/Language, user metadata, storage class, and SSE settings through unchanged. Objects already carrying the value are skipped, so re-runs are cheap. Write flag: `--apply --yes-i-mean-<bucket>`.
 - `npm run fix:content-srcsets` — rebuilds `srcset`/`sizes` on migrated rich-text `<img>` tags from the current `files.formats` (e.g. after Phase 15 adds missing variants). Only tags whose `src` exactly matches a `files.url` master URL are touched; the rest are logged and left as-is. Write flag: `--apply --yes-i-mean-<pg-host>`.
 
-The other three — `fix:markdown-richtext`, `backfill:offer-fields` and `cleanup:legacy-fields` (plus `src/reset-homepage.ts`, run through `tsx`) — are content/schema repairs rather than media work; see [FRESH-MIGRATION.md § Maintenance scripts](./FRESH-MIGRATION.md#maintenance-scripts).
+The content/schema repair scripts include `fix:markdown-richtext`,
+`backfill:taxonomy-descriptions`, `backfill:offer-fields`, and
+`cleanup:legacy-fields` (plus `src/reset-homepage.ts`, run through `tsx`); see
+[FRESH-MIGRATION.md § Maintenance scripts](./FRESH-MIGRATION.md#maintenance-scripts).
 
 ### Media Linking
 

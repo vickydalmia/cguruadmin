@@ -233,6 +233,7 @@ target and exits non-zero.
 | `yarn fix:content-srcsets` | Rebuild rich-text `<img>` srcsets from the current `files.formats` |
 | `yarn backfill:offer-fields` | Fill `badge`, Coupon `offerText`, and Coupon/Deal benefit texts on offers migrated before those fields existed |
 | `yarn backfill:entity-updated-at` | Repair store/brand/category/bank timestamps on an already-migrated database — the same derivation phase 12a runs, for when a full `migrate:fresh` is not wanted |
+| `yarn backfill:taxonomy-descriptions` | Fill blank taxonomy long descriptions from WordPress without replacing existing Strapi editor copy |
 | `yarn cleanup:legacy-fields` | Drop the columns, component rows and tables left orphaned by removed features |
 
 ### Reseed only the homepage
@@ -283,6 +284,22 @@ until the next rebuild:
 yarn fix:content-srcsets                                 # dry-run: prints the diff
 yarn fix:content-srcsets --apply --yes-i-mean-<pg-host>
 ```
+
+### Backfill missing taxonomy long descriptions
+
+Use this after a migration when WordPress gained Store/Brand/Category/Bank
+descriptions after phase 03 completed. It fills only `NULL`/blank Strapi
+descriptions, so CMS-authored copy always wins. The source HTML passes through
+the phase-03 sanitizer and embedded WordPress media is migrated and linked.
+
+```bash
+yarn backfill:taxonomy-descriptions                    # read-only coverage report
+yarn backfill:taxonomy-descriptions --apply --yes-i-mean-<pg-host>
+```
+
+The apply run rechecks the blank predicate inside each write transaction and
+then runs the coverage audit again. It exits non-zero if any fillable target
+remains blank.
 
 ### Backfill the newer offer fields
 

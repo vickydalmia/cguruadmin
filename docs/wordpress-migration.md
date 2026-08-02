@@ -140,6 +140,7 @@ dry-run by default and requires `--apply --yes-i-mean-<target>` to write; see
 | Path | npm script | Role |
 |---|---|---|
 | [`src/backfill-entity-updated-at.ts`](../migration/src/backfill-entity-updated-at.ts) | `backfill:entity-updated-at` | Repair store/brand/category/bank timestamps on an already-migrated database, without a full `migrate:fresh`. Also runs inside the phase loop as 12a |
+| [`src/backfill-taxonomy-descriptions.ts`](../migration/src/backfill-taxonomy-descriptions.ts) | `backfill:taxonomy-descriptions` | Fill blank store/brand/category/bank long descriptions from the current WordPress term description without overwriting CMS-authored content; sanitizes and rewrites embedded media exactly like phase 03 |
 | [`src/backfill-offer-fields.ts`](../migration/src/backfill-offer-fields.ts) | `backfill:offer-fields` | Fill `badge`, Coupon offer text, and Coupon/Deal benefit texts; `--reextract` re-derives existing values |
 | [`src/drop-legacy-fields.ts`](../migration/src/drop-legacy-fields.ts) | `cleanup:legacy-fields` | Drop superseded columns/tables and their leftover rows |
 | [`src/fix-cache-headers.ts`](../migration/src/fix-cache-headers.ts) | `fix:cache-headers` | Rewrite `Cache-Control` metadata on existing S3 objects |

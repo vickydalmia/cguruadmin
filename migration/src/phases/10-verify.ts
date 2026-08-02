@@ -12,9 +12,14 @@ import {
   getImportExclusions,
   loadExcludedStoreNames,
   resolveImportExclusions,
-  type TermRowLike,
 } from "../utils/import-exclusions.js";
 import { getAllPoolMappings } from "../utils/id-maps.js";
+import {
+  TAXONOMY_DESCRIPTION_TARGETS,
+  auditTaxonomyDescriptionCoverage,
+  type StrapiTaxonomyDescriptionRow,
+  type WpTaxonomyDescriptionRow,
+} from "../utils/taxonomy-description-backfill.js";
 
 interface CountCheck {
   entity: string;
@@ -128,8 +133,8 @@ export async function runVerification(): Promise<void> {
   // excluded terms (Articles tree, retired stores) never import, and an
   // unknown choose_type defaults to Store. Raw termmeta counts would flag
   // every exclusion as a false mismatch.
-  const termRows = await wpQuery<TermRowLike>(`
-    SELECT t.term_id, t.name, t.slug, tt.parent,
+  const termRows = await wpQuery<WpTaxonomyDescriptionRow>(`
+    SELECT t.term_id, t.name, t.slug, tt.parent, tt.description,
            MAX(CASE WHEN tm.meta_key='choose_type' THEN tm.meta_value END) AS choose_type
     FROM wp_terms t
     JOIN wp_term_taxonomy tt ON t.term_id = tt.term_id AND tt.taxonomy = 'category'
@@ -150,6 +155,43 @@ export async function runVerification(): Promise<void> {
     if (termExclusions.termIds.has(term.term_id)) continue;
     const chooseType = (term.choose_type || "Store").trim();
     expectedByType[chooseType in expectedByType ? chooseType : "Store"] += 1;
+  }
+
+  // A row-count match does not prove the entity content arrived. Phase 03 is
+  // checkpointed, so descriptions added in WordPress around a migration can
+  // otherwise remain silently blank in Strapi. Require every non-empty,
+  // sanitized source description to have non-empty target copy while treating
+  // existing Strapi descriptions as editor-owned (exact text need not match).
+  const descriptionTargetRows = (
+    await Promise.all(
+      Object.values(TAXONOMY_DESCRIPTION_TARGETS).map(async ({ table }) => {
+        const rows = await pgQuery<
+          Omit<StrapiTaxonomyDescriptionRow, "table">
+        >(`SELECT id, document_id, name, description FROM "${table}"`);
+        return rows.map((row) => ({ ...row, table }));
+      }),
+    )
+  ).flat();
+  const descriptionCoverage = auditTaxonomyDescriptionCoverage(
+    termRows,
+    descriptionTargetRows,
+    termExclusions.termIds,
+  );
+  checks.push({
+    entity: "Taxonomy long descriptions",
+    wpCount: descriptionCoverage.expected,
+    pgCount: descriptionCoverage.present,
+    match: descriptionCoverage.gaps.length === 0,
+  });
+  if (descriptionCoverage.gaps.length > 0) {
+    const sample = descriptionCoverage.gaps
+      .slice(0, 12)
+      .map((gap) => `${gap.table}/${gap.name} (${gap.reason})`)
+      .join("; ");
+    logger.warn(
+      `Taxonomy description gaps: ${descriptionCoverage.gaps.length}; ${sample}` +
+        (descriptionCoverage.gaps.length > 12 ? "; ..." : ""),
+    );
   }
 
   const [pgStores] = await pgQuery<{ c: number }>(`SELECT COUNT(*) AS c FROM stores`);
