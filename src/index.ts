@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { errors } from '@strapi/utils';
 import { join } from 'node:path';
 import { DOTD_SECTION_LABELS, DOTD_UID } from './constants/deal-of-the-day-sections';
 import { HOMEPAGE_IMAGE_RULES, imageRuleDescription } from './constants/homepage-images';
@@ -146,6 +147,16 @@ const HIDE_FROM_EDIT_FORM_ONLY: Record<string, string[]> = {
 const HIDE_FROM_COMPONENT_EDIT: Record<string, string[]> = {
   'homepage.slider-slide': ['order'],
 };
+
+// Write actions the edit lock guards. `create`/`clone` are absent on purpose:
+// they have no existing documentId, so there is nothing to lock.
+const LOCK_ENFORCED_ACTIONS = new Set([
+  'update',
+  'delete',
+  'publish',
+  'unpublish',
+  'discardDraft',
+]);
 
 const DOCUMENT_WRITE_ACTIONS = new Set([
   'create',
@@ -1434,6 +1445,55 @@ export default {
         },
       ],
     } as any);
+
+    // Edit-lock endpoints for the Content Manager edit view (RecordLockPanel
+    // in src/admin/app.tsx). Admin router for the same reason as the
+    // entity-deal-page settings routes above: src/api/*/routes cannot
+    // authenticate an admin session.
+    strapi.server.routes({
+      type: 'admin',
+      prefix: '/record-lock',
+      routes: [
+        {
+          method: 'POST',
+          path: '/acquire',
+          handler: 'api::record-lock.record-lock.acquire',
+          config: { policies: ['admin::isAuthenticatedAdmin'] },
+        },
+        {
+          method: 'POST',
+          path: '/release',
+          handler: 'api::record-lock.record-lock.release',
+          config: { policies: ['admin::isAuthenticatedAdmin'] },
+        },
+      ],
+    } as any);
+
+    // Enforce edit locks server-side. The RecordLockPanel warning alone would
+    // be advisory — an admin who ignores it (or opened the entry before the
+    // panel loaded) could still overwrite the holder's work. Scoped to
+    // Content Manager requests carrying an admin user so crons, the ISR
+    // outbox, redeem flows and other server-initiated writes are untouched.
+    strapi.documents.use(async (context: any, next: any) => {
+      if (!LOCK_ENFORCED_ACTIONS.has(context.action)) return next();
+      const documentId = context.params?.documentId;
+      if (typeof documentId !== 'string' || documentId === '') return next();
+      const ctx = strapi.requestContext.get();
+      const user = ctx?.state?.user;
+      if (!user || !ctx?.request?.url?.startsWith('/content-manager/')) {
+        return next();
+      }
+      const holder = await strapi
+        .service('api::record-lock.record-lock')
+        .activeHolder(context.uid, documentId);
+      if (holder && holder.adminUserId !== user.id) {
+        throw new errors.ApplicationError(
+          `This entry is currently being edited by ${holder.holderName}. ` +
+            'Come back later — your change was NOT saved.',
+        );
+      }
+      return next();
+    });
 
     strapi.documents.use(async (context: any, next: any) => {
       if (!DOCUMENT_WRITE_ACTIONS.has(context.action)) return next();

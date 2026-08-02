@@ -43,6 +43,7 @@ import OfferStatusTabs from './components/OfferStatusTabs';
 import PublishingPanel from './components/PublishingPanel';
 import OfferBenefitsPanel from './components/OfferBenefitsPanel';
 import EntryLinkCell from './components/EntryLinkCell';
+import RecordLockPanel from './components/RecordLockPanel';
 import UniqueCodeImport from './components/UniqueCodeImport';
 import { isLinkableCellType } from './utils/entry-link';
 import {
@@ -1308,6 +1309,9 @@ export default {
     // (Save, Publish) is always first; Publishing sits directly under it
     // because scheduling is what an editor checks right before saving.
     apis.addEditViewSidePanel([
+      // First so the "someone else is editing" warning is the first thing an
+      // editor sees; it also owns the heartbeat that holds the edit lock.
+      RecordLockPanel,
       PublishingPanel,
       OfferBenefitsPanel,
       RelationMultiSelectPanel,

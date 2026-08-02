@@ -1,0 +1,54 @@
+{
+  "kind": "collectionType",
+  "collectionName": "record_locks",
+  "info": {
+    "singularName": "record-lock",
+    "pluralName": "record-locks",
+    "displayName": "Record Lock",
+    "description": "Short-lived edit locks preventing two admins from editing the same entry"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {
+    "content-manager": {
+      "visible": false
+    },
+    "content-type-builder": {
+      "visible": false
+    }
+  },
+  "attributes": {
+    "key": {
+      "type": "string",
+      "required": true,
+      "unique": true,
+      "private": true
+    },
+    "model": {
+      "type": "string",
+      "required": true,
+      "private": true
+    },
+    "entryDocumentId": {
+      "type": "string",
+      "required": true,
+      "private": true
+    },
+    "adminUserId": {
+      "type": "integer",
+      "required": true,
+      "private": true
+    },
+    "holderName": {
+      "type": "string",
+      "required": true,
+      "private": true
+    },
+    "expiresAt": {
+      "type": "datetime",
+      "required": true,
+      "private": true
+    }
+  }
+}
