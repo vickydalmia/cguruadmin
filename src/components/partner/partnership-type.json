@@ -1,0 +1,9 @@
+{
+  "collectionName": "components_partner_partnership_types",
+  "info": { "displayName": "Partnership Type", "icon": "handHeart" },
+  "attributes": {
+    "number": { "type": "string", "maxLength": 8 },
+    "heading": { "type": "string", "required": true, "maxLength": 120 },
+    "description": { "type": "text", "required": true, "maxLength": 500 }
+  }
+}

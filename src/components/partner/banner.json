@@ -1,0 +1,10 @@
+{
+  "collectionName": "components_partner_banners",
+  "info": { "displayName": "Partner Banner", "icon": "cursor", "description": "Integrated marketing callout and in-page CTA." },
+  "attributes": {
+    "heading": { "type": "string", "maxLength": 140 },
+    "description": { "type": "text", "maxLength": 600 },
+    "buttonLabel": { "type": "string", "maxLength": 60 },
+    "buttonUrl": { "type": "string", "maxLength": 2048 }
+  }
+}

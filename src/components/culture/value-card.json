@@ -1,0 +1,18 @@
+{
+  "collectionName": "components_culture_value_cards",
+  "info": {
+    "displayName": "Culture Value Card",
+    "icon": "grid",
+    "description": "Circular icon badge over a title and short body. The icon is picked from a fixed set and rendered as inline SVG — no media upload, so it costs no extra request."
+  },
+  "attributes": {
+    "iconKey": {
+      "type": "enumeration",
+      "required": true,
+      "default": "verified",
+      "enum": ["bolt", "verified", "refresh", "target", "building", "globe", "book", "award", "dna"]
+    },
+    "title": { "type": "string", "required": true, "maxLength": 80 },
+    "body": { "type": "text", "maxLength": 320 }
+  }
+}

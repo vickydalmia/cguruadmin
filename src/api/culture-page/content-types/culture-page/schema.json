@@ -1,0 +1,30 @@
+{
+  "kind": "singleType",
+  "collectionName": "culture_pages",
+  "info": {
+    "singularName": "culture-page",
+    "pluralName": "culture-pages",
+    "displayName": "Culture Page",
+    "description": "Editable copy, stats, values, team photo gallery, testimonials, timeline and hiring banner for the public /culture/ page."
+  },
+  "options": { "draftAndPublish": false },
+  "pluginOptions": {},
+  "attributes": {
+    "title": { "type": "string", "default": "Culture" },
+    "breadcrumbAriaLabel": { "type": "string", "default": "Breadcrumb", "maxLength": 60 },
+    "breadcrumbItems": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.breadcrumb-item",
+      "max": 5
+    },
+    "hero": { "type": "component", "repeatable": false, "component": "culture.hero" },
+    "stats": { "type": "component", "repeatable": true, "component": "culture.stat", "max": 6 },
+    "values": { "type": "component", "repeatable": false, "component": "culture.values" },
+    "gallery": { "type": "component", "repeatable": false, "component": "culture.gallery" },
+    "testimonials": { "type": "component", "repeatable": false, "component": "culture.testimonials" },
+    "journey": { "type": "component", "repeatable": false, "component": "culture.journey" },
+    "recruitment": { "type": "component", "repeatable": false, "component": "culture.recruitment" },
+    "seo": { "type": "component", "repeatable": false, "component": "shared.seo" }
+  }
+}

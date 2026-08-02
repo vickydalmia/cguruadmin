@@ -1,0 +1,56 @@
+{
+  "kind": "singleType",
+  "collectionName": "testimonials_pages",
+  "info": {
+    "singularName": "testimonials-page",
+    "pluralName": "testimonials-pages",
+    "displayName": "Testimonials Page",
+    "description": "All editable copy, portraits, testimonial cards, CTA, FAQs and SEO for the public /testimonials/ page. The storefront uses the committed Figma content wherever a field has not yet been populated."
+  },
+  "options": { "draftAndPublish": false },
+  "pluginOptions": {},
+  "attributes": {
+    "title": { "type": "string", "default": "Testimonials Page" },
+    "breadcrumbAriaLabel": {
+      "type": "string",
+      "default": "Breadcrumb",
+      "maxLength": 60
+    },
+    "breadcrumbItems": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.breadcrumb-item",
+      "max": 5
+    },
+    "hero": {
+      "type": "component",
+      "repeatable": false,
+      "component": "testimonial.hero"
+    },
+    "featured": {
+      "type": "component",
+      "repeatable": false,
+      "component": "testimonial.featured-section"
+    },
+    "partners": {
+      "type": "component",
+      "repeatable": false,
+      "component": "testimonial.partners-section"
+    },
+    "partnerCta": {
+      "type": "component",
+      "repeatable": false,
+      "component": "testimonial.partner-cta"
+    },
+    "faq": {
+      "type": "component",
+      "repeatable": false,
+      "component": "testimonial.faq-section"
+    },
+    "seo": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.seo"
+    }
+  }
+}

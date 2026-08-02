@@ -581,6 +581,26 @@ describe('public route metadata aggregate', () => {
         updatedAt: '2026-07-24T10:00:00.000Z',
         seo: { noIndex: false },
       },
+      'api::testimonials-page.testimonials-page': {
+        documentId: 'testimonials-1',
+        updatedAt: '2026-07-25T12:00:00.000Z',
+        seo: { noIndex: false },
+      },
+      'api::partner-with-us-page.partner-with-us-page': {
+        documentId: 'partner-page-1',
+        updatedAt: '2026-07-25T13:00:00.000Z',
+        seo: { noIndex: false },
+      },
+      'api::privacy-policy-page.privacy-policy-page': {
+        documentId: 'privacy-1',
+        updatedAt: '2026-07-26T10:00:00.000Z',
+        seo: { noIndex: false },
+      },
+      'api::terms-and-conditions-page.terms-and-conditions-page': {
+        documentId: 'terms-1',
+        updatedAt: '2026-07-27T10:00:00.000Z',
+        seo: { noIndex: true },
+      },
       'api::deal-of-the-day-page.deal-of-the-day-page': {
         documentId: 'dotd-1',
         seo: { noIndex: true },
@@ -631,6 +651,26 @@ describe('public route metadata aggregate', () => {
         path: '/faqs/',
         updatedAt: '2026-07-24T10:00:00.000Z',
         noIndex: false,
+      },
+      {
+        path: '/testimonials/',
+        updatedAt: '2026-07-25T12:00:00.000Z',
+        noIndex: false,
+      },
+      {
+        path: '/partner-with-us/',
+        updatedAt: '2026-07-25T13:00:00.000Z',
+        noIndex: false,
+      },
+      {
+        path: '/privacy-policy/',
+        updatedAt: '2026-07-26T10:00:00.000Z',
+        noIndex: false,
+      },
+      {
+        path: '/terms-and-conditions/',
+        updatedAt: '2026-07-27T10:00:00.000Z',
+        noIndex: true,
       },
       {
         path: '/deal-of-the-day/',

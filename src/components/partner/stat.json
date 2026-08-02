@@ -1,0 +1,8 @@
+{
+  "collectionName": "components_partner_stats",
+  "info": { "displayName": "Impact Stat", "icon": "chartBubble" },
+  "attributes": {
+    "value": { "type": "string", "required": true, "maxLength": 30 },
+    "label": { "type": "text", "required": true, "maxLength": 160 }
+  }
+}

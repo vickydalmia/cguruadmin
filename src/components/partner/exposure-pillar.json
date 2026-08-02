@@ -1,0 +1,11 @@
+{
+  "collectionName": "components_partner_exposure_pillars",
+  "info": { "displayName": "Exposure Pillar", "icon": "apps" },
+  "attributes": {
+    "accent": { "type": "enumeration", "enum": ["teal", "blue"], "default": "teal" },
+    "eyebrow": { "type": "string", "maxLength": 80 },
+    "heading": { "type": "string", "required": true, "maxLength": 140 },
+    "description": { "type": "text", "required": true, "maxLength": 500 },
+    "items": { "type": "component", "repeatable": true, "component": "partner.exposure-item", "max": 8 }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "collectionName": "components_culture_gallery_photos",
+  "info": {
+    "displayName": "Culture Gallery Photo",
+    "icon": "picture",
+    "description": "One photo in the life-at-CouponzGuru grid. Category Id must match one of the tabs above; leave it blank and the photo shows only under \"All\"."
+  },
+  "attributes": {
+    "categoryId": {
+      "type": "string",
+      "maxLength": 40,
+      "regex": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "image": { "type": "media", "multiple": false, "required": true, "allowedTypes": ["images"] },
+    "alt": { "type": "string", "maxLength": 160 }
+  }
+}

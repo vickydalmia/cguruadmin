@@ -1,0 +1,20 @@
+{
+  "collectionName": "components_culture_recruitments",
+  "info": {
+    "displayName": "Culture Recruitment Banner",
+    "icon": "handHeart",
+    "description": "Closing hiring banner: copy and two CTAs beside a photograph. Untick Enabled to hide the whole banner."
+  },
+  "attributes": {
+    "enabled": { "type": "boolean", "default": true },
+    "eyebrow": { "type": "string", "maxLength": 60 },
+    "heading": { "type": "string", "required": true, "maxLength": 120 },
+    "description": { "type": "text", "maxLength": 320 },
+    "primaryLabel": { "type": "string", "maxLength": 40 },
+    "primaryUrl": { "type": "string", "maxLength": 200 },
+    "secondaryLabel": { "type": "string", "maxLength": 40 },
+    "secondaryUrl": { "type": "string", "maxLength": 200 },
+    "image": { "type": "media", "multiple": false, "allowedTypes": ["images"] },
+    "imageAlt": { "type": "string", "maxLength": 160 }
+  }
+}

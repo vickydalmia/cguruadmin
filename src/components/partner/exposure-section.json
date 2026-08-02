@@ -1,0 +1,11 @@
+{
+  "collectionName": "components_partner_exposure_sections",
+  "info": { "displayName": "Exposure Opportunities", "icon": "layer", "description": "Marketing channel pillars and integrated-marketing banner." },
+  "attributes": {
+    "enabled": { "type": "boolean", "default": true },
+    "eyebrow": { "type": "string", "maxLength": 80 },
+    "heading": { "type": "string", "maxLength": 160 },
+    "pillars": { "type": "component", "repeatable": true, "component": "partner.exposure-pillar", "max": 3 },
+    "banner": { "type": "component", "repeatable": false, "component": "partner.banner" }
+  }
+}

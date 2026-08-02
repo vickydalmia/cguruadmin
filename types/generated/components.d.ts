@@ -651,6 +651,361 @@ export interface ContactTopic extends Struct.ComponentSchema {
   };
 }
 
+export interface CultureGallery extends Struct.ComponentSchema {
+  collectionName: 'components_culture_galleries';
+  info: {
+    description: "Filterable team-photo grid. Every photo is rendered into the HTML; the tabs and Load more only toggle visibility, so nothing is hidden from search engines. Each photo's Category Id must match a category's Category Id for it to appear under that tab.";
+    displayName: 'Culture Gallery Band';
+    icon: 'picture';
+  };
+  attributes: {
+    allLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 24;
+      }> &
+      Schema.Attribute.DefaultTo<'All'>;
+    categories: Schema.Attribute.Component<'culture.gallery-category', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 10;
+        },
+        number
+      >;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    header: Schema.Attribute.Component<'shared.section-header', false>;
+    loadMoreLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 24;
+      }> &
+      Schema.Attribute.DefaultTo<'Load more'>;
+    photos: Schema.Attribute.Component<'culture.gallery-photo', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 60;
+        },
+        number
+      >;
+  };
+}
+
+export interface CultureGalleryCategory extends Struct.ComponentSchema {
+  collectionName: 'components_culture_gallery_categories';
+  info: {
+    description: 'One filter tab above the photo grid. Category Id must match the Category Id typed on each photo, and a tab that no photo uses is dropped rather than rendered as a tab that filters to nothing. The field is named categoryId rather than id because `id` is reserved by Strapi and a model cannot declare it.';
+    displayName: 'Culture Gallery Category';
+    icon: 'filter';
+  };
+  attributes: {
+    categoryId: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    label: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+  };
+}
+
+export interface CultureGalleryPhoto extends Struct.ComponentSchema {
+  collectionName: 'components_culture_gallery_photos';
+  info: {
+    description: 'One photo in the life-at-CouponzGuru grid. Category Id must match one of the tabs above; leave it blank and the photo shows only under "All".';
+    displayName: 'Culture Gallery Photo';
+    icon: 'picture';
+  };
+  attributes: {
+    alt: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+    categoryId: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    image: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
+  };
+}
+
+export interface CultureHero extends Struct.ComponentSchema {
+  collectionName: 'components_culture_heroes';
+  info: {
+    description: "Top-of-page hero: glass eyebrow pill, headline, a teal-ruled intro line and a primary CTA over a full-bleed photograph. This image is the page's LCP element \u2014 upload the largest original available; the site generates the responsive ladder.";
+    displayName: 'Culture Hero';
+    icon: 'picture';
+  };
+  attributes: {
+    ctaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    ctaUrl: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 200;
+      }>;
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 320;
+      }>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 120;
+      }>;
+    image: Schema.Attribute.Media<'images'>;
+    imageAlt: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+  };
+}
+
+export interface CultureJourney extends Struct.ComponentSchema {
+  collectionName: 'components_culture_journeys';
+  info: {
+    description: 'The "our journey" timeline. Milestones render oldest-to-newest in the order listed here \u2014 the page does not sort them.';
+    displayName: 'Culture Journey Band';
+    icon: 'clock';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    header: Schema.Attribute.Component<'shared.section-header', false>;
+    milestones: Schema.Attribute.Component<'culture.milestone', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 12;
+        },
+        number
+      >;
+  };
+}
+
+export interface CultureMilestone extends Struct.ComponentSchema {
+  collectionName: 'components_culture_milestones';
+  info: {
+    description: 'One dated entry on the culture timeline. `year` is a string so "2011" and copy like "2026 \u2192" both render; the connecting rail between entries is drawn by the component.';
+    displayName: 'Culture Milestone';
+    icon: 'clock';
+  };
+  attributes: {
+    body: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 240;
+      }>;
+    iconKey: Schema.Attribute.Enumeration<
+      [
+        'bolt',
+        'verified',
+        'refresh',
+        'target',
+        'building',
+        'globe',
+        'book',
+        'award',
+        'dna',
+      ]
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'globe'>;
+    year: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 12;
+      }>;
+  };
+}
+
+export interface CultureRecruitment extends Struct.ComponentSchema {
+  collectionName: 'components_culture_recruitments';
+  info: {
+    description: 'Closing hiring banner: copy and two CTAs beside a photograph. Untick Enabled to hide the whole banner.';
+    displayName: 'Culture Recruitment Banner';
+    icon: 'handHeart';
+  };
+  attributes: {
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 320;
+      }>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 120;
+      }>;
+    image: Schema.Attribute.Media<'images'>;
+    imageAlt: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+    primaryLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    primaryUrl: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 200;
+      }>;
+    secondaryLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    secondaryUrl: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 200;
+      }>;
+  };
+}
+
+export interface CultureStat extends Struct.ComponentSchema {
+  collectionName: 'components_culture_stats';
+  info: {
+    description: 'One figure in the band under the hero. `value` is a string so "30+", "6" and "Pune" render in the same row. `shortLabel` is what the narrow phone band shows \u2014 "countries served" does not fit a 375px third-column; leave it blank to reuse the full label.';
+    displayName: 'Culture Stat';
+    icon: 'chartBubble';
+  };
+  attributes: {
+    label: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    shortLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 20;
+      }>;
+    value: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 16;
+      }>;
+  };
+}
+
+export interface CultureTestimonial extends Struct.ComponentSchema {
+  collectionName: 'components_culture_testimonials';
+  info: {
+    description: 'One teammate quote. These are staff talking about working here, not customer reviews of a product \u2014 the page deliberately emits no Review structured data for them, so the star row is a visual device only.';
+    displayName: 'Culture Testimonial';
+    icon: 'quote';
+  };
+  attributes: {
+    avatar: Schema.Attribute.Media<'images'>;
+    avatarAlt: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+    name: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    quote: Schema.Attribute.Text &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 600;
+      }>;
+    rating: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 5;
+          min: 0;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<5>;
+    roleTenure: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+  };
+}
+
+export interface CultureTestimonials extends Struct.ComponentSchema {
+  collectionName: 'components_culture_testimonial_bands';
+  info: {
+    description: 'The dark "from the team" band. Untick Enabled to hide it; an empty item list falls back to the committed design copy.';
+    displayName: 'Culture Testimonials Band';
+    icon: 'quote';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    header: Schema.Attribute.Component<'shared.section-header', false>;
+    items: Schema.Attribute.Component<'culture.testimonial', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 12;
+        },
+        number
+      >;
+  };
+}
+
+export interface CultureValueCard extends Struct.ComponentSchema {
+  collectionName: 'components_culture_value_cards';
+  info: {
+    description: 'Circular icon badge over a title and short body. The icon is picked from a fixed set and rendered as inline SVG \u2014 no media upload, so it costs no extra request.';
+    displayName: 'Culture Value Card';
+    icon: 'grid';
+  };
+  attributes: {
+    body: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 320;
+      }>;
+    iconKey: Schema.Attribute.Enumeration<
+      [
+        'bolt',
+        'verified',
+        'refresh',
+        'target',
+        'building',
+        'globe',
+        'book',
+        'award',
+        'dna',
+      ]
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'verified'>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+  };
+}
+
+export interface CultureValues extends Struct.ComponentSchema {
+  collectionName: 'components_culture_values';
+  info: {
+    description: 'The "our values" band. Untick Enabled to hide the whole band; leaving the card list empty falls back to the committed design copy rather than rendering an empty grid.';
+    displayName: 'Culture Values Band';
+    icon: 'bulletList';
+  };
+  attributes: {
+    cards: Schema.Attribute.Component<'culture.value-card', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 8;
+        },
+        number
+      >;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    header: Schema.Attribute.Component<'shared.section-header', false>;
+  };
+}
+
 export interface DealDayDealsByStore extends Struct.ComponentSchema {
   collectionName: 'components_deal_day_deals_by_stores';
   info: {
@@ -1422,6 +1777,75 @@ export interface HomepageSliderSlide extends Struct.ComponentSchema {
   };
 }
 
+export interface LegalNavigationItem extends Struct.ComponentSchema {
+  collectionName: 'components_legal_navigation_items';
+  info: {
+    description: "A sidebar link to one section on a legal document page. Target ID must match that section's anchor ID.";
+    displayName: 'Legal Navigation Item';
+    icon: 'chevronRight';
+  };
+  attributes: {
+    label: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    targetId: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+  };
+}
+
+export interface LegalSection extends Struct.ComponentSchema {
+  collectionName: 'components_legal_sections';
+  info: {
+    description: 'One ordered section card in a legal document. Rich text supports paragraphs, lists, links, subheadings, and tables.';
+    displayName: 'Legal Section';
+    icon: 'file';
+  };
+  attributes: {
+    anchorId: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    body: Schema.Attribute.RichText & Schema.Attribute.Required;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 180;
+      }>;
+  };
+}
+
+export interface LegalSupportCta extends Struct.ComponentSchema {
+  collectionName: 'components_legal_support_ctas';
+  info: {
+    description: 'The contact card displayed beside a legal document on desktop and below it on mobile.';
+    displayName: 'Legal Support CTA';
+    icon: 'envelop';
+  };
+  attributes: {
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }>;
+    emailAddress: Schema.Attribute.Email;
+    emailLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+  };
+}
+
 export interface NavCategorySection extends Struct.ComponentSchema {
   collectionName: 'components_nav_category_sections';
   info: {
@@ -1454,6 +1878,450 @@ export interface NavLink extends Struct.ComponentSchema {
     label: Schema.Attribute.String;
     store: Schema.Attribute.Relation<'oneToOne', 'api::store.store'>;
     url: Schema.Attribute.String;
+  };
+}
+
+export interface PartnerBanner extends Struct.ComponentSchema {
+  collectionName: 'components_partner_banners';
+  info: {
+    description: 'Integrated marketing callout and in-page CTA.';
+    displayName: 'Partner Banner';
+    icon: 'cursor';
+  };
+  attributes: {
+    buttonLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    buttonUrl: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 2048;
+      }>;
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 600;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 140;
+      }>;
+  };
+}
+
+export interface PartnerBenefit extends Struct.ComponentSchema {
+  collectionName: 'components_partner_benefits';
+  info: {
+    displayName: 'Partner Benefit';
+    icon: 'star';
+  };
+  attributes: {
+    description: Schema.Attribute.Text &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 700;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 120;
+      }>;
+    icon: Schema.Attribute.Enumeration<['audience', 'campaign', 'results']> &
+      Schema.Attribute.DefaultTo<'audience'>;
+  };
+}
+
+export interface PartnerBenefitsSection extends Struct.ComponentSchema {
+  collectionName: 'components_partner_benefits_sections';
+  info: {
+    description: 'Introductory value proposition and benefit cards.';
+    displayName: 'Why Partner Section';
+    icon: 'information';
+  };
+  attributes: {
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+    items: Schema.Attribute.Component<'partner.benefit', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 6;
+        },
+        number
+      >;
+  };
+}
+
+export interface PartnerCta extends Struct.ComponentSchema {
+  collectionName: 'components_partner_ctas';
+  info: {
+    description: 'Blue gradient call to action above the footer.';
+    displayName: 'Partner CTA';
+    icon: 'cursor';
+  };
+  attributes: {
+    buttonLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    buttonUrl: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 2048;
+      }>;
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 140;
+      }>;
+  };
+}
+
+export interface PartnerExposureItem extends Struct.ComponentSchema {
+  collectionName: 'components_partner_exposure_items';
+  info: {
+    displayName: 'Exposure Item';
+    icon: 'bulletList';
+  };
+  attributes: {
+    icon: Schema.Attribute.Enumeration<
+      ['layout', 'list', 'zap', 'mail', 'share', 'search', 'award', 'users']
+    > &
+      Schema.Attribute.DefaultTo<'layout'>;
+    label: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 140;
+      }>;
+  };
+}
+
+export interface PartnerExposurePillar extends Struct.ComponentSchema {
+  collectionName: 'components_partner_exposure_pillars';
+  info: {
+    displayName: 'Exposure Pillar';
+    icon: 'apps';
+  };
+  attributes: {
+    accent: Schema.Attribute.Enumeration<['teal', 'blue']> &
+      Schema.Attribute.DefaultTo<'teal'>;
+    description: Schema.Attribute.Text &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 140;
+      }>;
+    items: Schema.Attribute.Component<'partner.exposure-item', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 8;
+        },
+        number
+      >;
+  };
+}
+
+export interface PartnerExposureSection extends Struct.ComponentSchema {
+  collectionName: 'components_partner_exposure_sections';
+  info: {
+    description: 'Marketing channel pillars and integrated-marketing banner.';
+    displayName: 'Exposure Opportunities';
+    icon: 'layer';
+  };
+  attributes: {
+    banner: Schema.Attribute.Component<'partner.banner', false>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+    pillars: Schema.Attribute.Component<'partner.exposure-pillar', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 3;
+        },
+        number
+      >;
+  };
+}
+
+export interface PartnerHero extends Struct.ComponentSchema {
+  collectionName: 'components_partner_heroes';
+  info: {
+    description: 'Full-width partner-network hero. Empty fields use the committed Figma fallback.';
+    displayName: 'Partner Hero';
+    icon: 'picture';
+  };
+  attributes: {
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 600;
+      }>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 140;
+      }>;
+    image: Schema.Attribute.Media<'images'>;
+    imageAlt: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 180;
+      }>;
+  };
+}
+
+export interface PartnerImpactSection extends Struct.ComponentSchema {
+  collectionName: 'components_partner_impact_sections';
+  info: {
+    description: 'Dark numbers section with up to eight metrics.';
+    displayName: 'Impact & Reach';
+    icon: 'chartCircle';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 120;
+      }>;
+    stats: Schema.Attribute.Component<'partner.stat', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 8;
+        },
+        number
+      >;
+  };
+}
+
+export interface PartnerLogo extends Struct.ComponentSchema {
+  collectionName: 'components_partner_logos';
+  info: {
+    description: 'One trusted-brand logo. A populated logo list replaces the committed fallback list.';
+    displayName: 'Partner Logo';
+    icon: 'picture';
+  };
+  attributes: {
+    image: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
+    imageAlt: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 180;
+      }>;
+    name: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    row: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 2;
+          min: 1;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<1>;
+    tone: Schema.Attribute.Enumeration<
+      ['white', 'blue', 'red', 'black', 'outlined']
+    > &
+      Schema.Attribute.DefaultTo<'white'>;
+  };
+}
+
+export interface PartnerPartnershipType extends Struct.ComponentSchema {
+  collectionName: 'components_partner_partnership_types';
+  info: {
+    displayName: 'Partnership Type';
+    icon: 'handHeart';
+  };
+  attributes: {
+    description: Schema.Attribute.Text &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 120;
+      }>;
+    number: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 8;
+      }>;
+  };
+}
+
+export interface PartnerPartnershipsSection extends Struct.ComponentSchema {
+  collectionName: 'components_partner_partnerships_sections';
+  info: {
+    description: 'Flexible commercial models and closing note.';
+    displayName: 'Partnership Types';
+    icon: 'handHeart';
+  };
+  attributes: {
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 600;
+      }>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+    items: Schema.Attribute.Component<'partner.partnership-type', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 6;
+        },
+        number
+      >;
+    note: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 1200;
+      }>;
+  };
+}
+
+export interface PartnerStat extends Struct.ComponentSchema {
+  collectionName: 'components_partner_stats';
+  info: {
+    displayName: 'Impact Stat';
+    icon: 'chartBubble';
+  };
+  attributes: {
+    label: Schema.Attribute.Text &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+    value: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 30;
+      }>;
+  };
+}
+
+export interface PartnerSupportItem extends Struct.ComponentSchema {
+  collectionName: 'components_partner_support_items';
+  info: {
+    displayName: 'Support Feature';
+    icon: 'userHeart';
+  };
+  attributes: {
+    description: Schema.Attribute.Text &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 900;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 140;
+      }>;
+    icon: Schema.Attribute.Enumeration<['users', 'pen']> &
+      Schema.Attribute.DefaultTo<'users'>;
+  };
+}
+
+export interface PartnerSupportSection extends Struct.ComponentSchema {
+  collectionName: 'components_partner_support_sections';
+  info: {
+    description: 'Support promise, trust badge and service cards.';
+    displayName: 'Dedicated Support';
+    icon: 'userHeart';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 180;
+      }>;
+    items: Schema.Attribute.Component<'partner.support-item', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 4;
+        },
+        number
+      >;
+    taglineDescription: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }>;
+    taglineHeading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 180;
+      }>;
+    trustBadge: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+  };
+}
+
+export interface PartnerTrustedSection extends Struct.ComponentSchema {
+  collectionName: 'components_partner_trusted_sections';
+  info: {
+    description: 'Logo marquee on desktop and six-logo grid on mobile.';
+    displayName: 'Trusted Relationships';
+    icon: 'grid';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    logos: Schema.Attribute.Component<'partner.logo', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 24;
+        },
+        number
+      >;
   };
 }
 
@@ -1741,6 +2609,186 @@ export interface SharedTelegramCta extends Struct.ComponentSchema {
   };
 }
 
+export interface TestimonialFaqSection extends Struct.ComponentSchema {
+  collectionName: 'components_testimonial_faq_sections';
+  info: {
+    description: 'Compact FAQ accordion shown above the site footer.';
+    displayName: 'Testimonials FAQ Section';
+    icon: 'question-circle';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    items: Schema.Attribute.Component<'faq.faq-item', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 8;
+        },
+        number
+      >;
+  };
+}
+
+export interface TestimonialFeaturedSection extends Struct.ComponentSchema {
+  collectionName: 'components_testimonial_featured_sections';
+  info: {
+    description: 'The highlighted quote carousel at the top of the page. Each slide supplies its own quote, author and portrait \u2014 the portrait is what appears in the selector row beneath the card, so a slide with no portrait falls back to the committed one. Add two or more slides to make the row interactive; with a single slide the selectors are hidden.';
+    displayName: 'Featured Testimonial Section';
+    icon: 'star';
+  };
+  attributes: {
+    autoplaySeconds: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 60;
+          min: 0;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<7>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    initialIndex: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 9;
+          min: 0;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<0>;
+    slides: Schema.Attribute.Component<'testimonial.testimonial', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 10;
+        },
+        number
+      >;
+  };
+}
+
+export interface TestimonialHero extends Struct.ComponentSchema {
+  collectionName: 'components_testimonial_heroes';
+  info: {
+    description: 'Intro badge, main heading and supporting copy above the testimonial sections.';
+    displayName: 'Testimonials Hero';
+    icon: 'quote';
+  };
+  attributes: {
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 320;
+      }>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 140;
+      }>;
+  };
+}
+
+export interface TestimonialPartnerCta extends Struct.ComponentSchema {
+  collectionName: 'components_testimonial_partner_ctas';
+  info: {
+    description: 'Blue gradient partnership call to action below the testimonial cards.';
+    displayName: 'Partner CTA';
+    icon: 'cursor';
+  };
+  attributes: {
+    buttonLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    buttonUrl: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 2048;
+      }>;
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 320;
+      }>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 140;
+      }>;
+  };
+}
+
+export interface TestimonialPartnersSection extends Struct.ComponentSchema {
+  collectionName: 'components_testimonial_partner_sections';
+  info: {
+    description: 'Heading, ordered quote cards and mobile pagination count.';
+    displayName: 'Partner Testimonials Section';
+    icon: 'grid';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    paginationCount: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 10;
+          min: 1;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<6>;
+    testimonials: Schema.Attribute.Component<'testimonial.testimonial', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 18;
+        },
+        number
+      >;
+  };
+}
+
+export interface TestimonialTestimonial extends Struct.ComponentSchema {
+  collectionName: 'components_testimonial_testimonials';
+  info: {
+    description: 'One partner quote and its author details.';
+    displayName: 'Testimonial';
+    icon: 'quote';
+  };
+  attributes: {
+    authorName: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    authorRole: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+    avatar: Schema.Attribute.Media<'images'>;
+    avatarAlt: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 180;
+      }>;
+    avatarRing: Schema.Attribute.Enumeration<['yellow', 'navy', 'teal']> &
+      Schema.Attribute.DefaultTo<'yellow'>;
+    quote: Schema.Attribute.Text &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 1500;
+      }>;
+  };
+}
+
 declare module '@strapi/strapi' {
   export module Public {
     export interface ComponentSchemas {
@@ -1763,6 +2811,18 @@ declare module '@strapi/strapi' {
       'contact.form': ContactForm;
       'contact.hero': ContactHero;
       'contact.topic': ContactTopic;
+      'culture.gallery': CultureGallery;
+      'culture.gallery-category': CultureGalleryCategory;
+      'culture.gallery-photo': CultureGalleryPhoto;
+      'culture.hero': CultureHero;
+      'culture.journey': CultureJourney;
+      'culture.milestone': CultureMilestone;
+      'culture.recruitment': CultureRecruitment;
+      'culture.stat': CultureStat;
+      'culture.testimonial': CultureTestimonial;
+      'culture.testimonials': CultureTestimonials;
+      'culture.value-card': CultureValueCard;
+      'culture.values': CultureValues;
       'deal-day.deals-by-store': DealDayDealsByStore;
       'deal-day.section-heading': DealDaySectionHeading;
       'deal-day.store-tab': DealDayStoreTab;
@@ -1809,8 +2869,27 @@ declare module '@strapi/strapi' {
       'home.top-offers': HomeTopOffers;
       'home.why-feature': HomeWhyFeature;
       'homepage.slider-slide': HomepageSliderSlide;
+      'legal.navigation-item': LegalNavigationItem;
+      'legal.section': LegalSection;
+      'legal.support-cta': LegalSupportCta;
       'nav.category-section': NavCategorySection;
       'nav.link': NavLink;
+      'partner.banner': PartnerBanner;
+      'partner.benefit': PartnerBenefit;
+      'partner.benefits-section': PartnerBenefitsSection;
+      'partner.cta': PartnerCta;
+      'partner.exposure-item': PartnerExposureItem;
+      'partner.exposure-pillar': PartnerExposurePillar;
+      'partner.exposure-section': PartnerExposureSection;
+      'partner.hero': PartnerHero;
+      'partner.impact-section': PartnerImpactSection;
+      'partner.logo': PartnerLogo;
+      'partner.partnership-type': PartnerPartnershipType;
+      'partner.partnerships-section': PartnerPartnershipsSection;
+      'partner.stat': PartnerStat;
+      'partner.support-item': PartnerSupportItem;
+      'partner.support-section': PartnerSupportSection;
+      'partner.trusted-section': PartnerTrustedSection;
       'shared.breadcrumb-item': SharedBreadcrumbItem;
       'shared.cta': SharedCta;
       'shared.entity-deal-page-seo': SharedEntityDealPageSeo;
@@ -1824,6 +2903,12 @@ declare module '@strapi/strapi' {
       'shared.seo': SharedSeo;
       'shared.stat': SharedStat;
       'shared.telegram-cta': SharedTelegramCta;
+      'testimonial.faq-section': TestimonialFaqSection;
+      'testimonial.featured-section': TestimonialFeaturedSection;
+      'testimonial.hero': TestimonialHero;
+      'testimonial.partner-cta': TestimonialPartnerCta;
+      'testimonial.partners-section': TestimonialPartnersSection;
+      'testimonial.testimonial': TestimonialTestimonial;
     }
   }
 }

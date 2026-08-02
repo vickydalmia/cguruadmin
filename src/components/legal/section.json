@@ -1,0 +1,29 @@
+{
+  "collectionName": "components_legal_sections",
+  "info": {
+    "displayName": "Legal Section",
+    "icon": "file",
+    "description": "One ordered section card in a legal document. Rich text supports paragraphs, lists, links, subheadings, and tables."
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "anchorId": {
+      "type": "string",
+      "required": true,
+      "maxLength": 100,
+      "regex": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "title": {
+      "type": "string",
+      "required": true,
+      "maxLength": 180
+    },
+    "body": {
+      "type": "richtext",
+      "required": true
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "collectionName": "components_culture_gallery_categories",
+  "info": {
+    "displayName": "Culture Gallery Category",
+    "icon": "filter",
+    "description": "One filter tab above the photo grid. Category Id must match the Category Id typed on each photo, and a tab that no photo uses is dropped rather than rendered as a tab that filters to nothing. The field is named categoryId rather than id because `id` is reserved by Strapi and a model cannot declare it."
+  },
+  "attributes": {
+    "categoryId": {
+      "type": "string",
+      "required": true,
+      "maxLength": 40,
+      "regex": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "label": { "type": "string", "required": true, "maxLength": 40 }
+  }
+}

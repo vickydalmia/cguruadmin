@@ -1,0 +1,16 @@
+{
+  "collectionName": "components_culture_galleries",
+  "info": {
+    "displayName": "Culture Gallery Band",
+    "icon": "picture",
+    "description": "Filterable team-photo grid. Every photo is rendered into the HTML; the tabs and Load more only toggle visibility, so nothing is hidden from search engines. Each photo's Category Id must match a category's Category Id for it to appear under that tab."
+  },
+  "attributes": {
+    "enabled": { "type": "boolean", "default": true },
+    "header": { "type": "component", "repeatable": false, "component": "shared.section-header" },
+    "allLabel": { "type": "string", "maxLength": 24, "default": "All" },
+    "loadMoreLabel": { "type": "string", "maxLength": 24, "default": "Load more" },
+    "categories": { "type": "component", "repeatable": true, "component": "culture.gallery-category", "max": 10 },
+    "photos": { "type": "component", "repeatable": true, "component": "culture.gallery-photo", "max": 60 }
+  }
+}

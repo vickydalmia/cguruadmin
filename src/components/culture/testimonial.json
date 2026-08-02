@@ -1,0 +1,16 @@
+{
+  "collectionName": "components_culture_testimonials",
+  "info": {
+    "displayName": "Culture Testimonial",
+    "icon": "quote",
+    "description": "One teammate quote. These are staff talking about working here, not customer reviews of a product — the page deliberately emits no Review structured data for them, so the star row is a visual device only."
+  },
+  "attributes": {
+    "quote": { "type": "text", "required": true, "maxLength": 600 },
+    "name": { "type": "string", "required": true, "maxLength": 80 },
+    "roleTenure": { "type": "string", "maxLength": 80 },
+    "rating": { "type": "integer", "default": 5, "min": 0, "max": 5 },
+    "avatar": { "type": "media", "multiple": false, "allowedTypes": ["images"] },
+    "avatarAlt": { "type": "string", "maxLength": 160 }
+  }
+}

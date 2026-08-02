@@ -460,6 +460,13 @@ const MANAGED_SINGLE_ROUTES = [
   ['api::career-page.career-page', '/careers/'],
   ['api::contact-page.contact-page', '/contact-us/'],
   ['api::faq-page.faq-page', '/faqs/'],
+  ['api::testimonials-page.testimonials-page', '/testimonials/'],
+  ['api::partner-with-us-page.partner-with-us-page', '/partner-with-us/'],
+  ['api::privacy-policy-page.privacy-policy-page', '/privacy-policy/'],
+  [
+    'api::terms-and-conditions-page.terms-and-conditions-page',
+    '/terms-and-conditions/',
+  ],
   [
     'api::deal-of-the-day-page.deal-of-the-day-page',
     '/deal-of-the-day/',

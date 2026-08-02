@@ -1,0 +1,25 @@
+{
+  "collectionName": "components_testimonial_testimonials",
+  "info": {
+    "displayName": "Testimonial",
+    "icon": "quote",
+    "description": "One partner quote and its author details."
+  },
+  "attributes": {
+    "quote": { "type": "text", "required": true, "maxLength": 1500 },
+    "authorName": { "type": "string", "required": true, "maxLength": 100 },
+    "authorRole": { "type": "string", "required": true, "maxLength": 160 },
+    "avatar": {
+      "type": "media",
+      "multiple": false,
+      "required": false,
+      "allowedTypes": ["images"]
+    },
+    "avatarAlt": { "type": "string", "maxLength": 180 },
+    "avatarRing": {
+      "type": "enumeration",
+      "enum": ["yellow", "navy", "teal"],
+      "default": "yellow"
+    }
+  }
+}

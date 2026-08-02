@@ -1,0 +1,21 @@
+{
+  "collectionName": "components_legal_navigation_items",
+  "info": {
+    "displayName": "Legal Navigation Item",
+    "icon": "chevronRight",
+    "description": "A sidebar link to one section on a legal document page. Target ID must match that section's anchor ID."
+  },
+  "attributes": {
+    "label": {
+      "type": "string",
+      "required": true,
+      "maxLength": 80
+    },
+    "targetId": {
+      "type": "string",
+      "required": true,
+      "maxLength": 100,
+      "regex": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    }
+  }
+}

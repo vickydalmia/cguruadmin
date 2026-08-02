@@ -1,0 +1,17 @@
+{
+  "collectionName": "components_culture_heroes",
+  "info": {
+    "displayName": "Culture Hero",
+    "icon": "picture",
+    "description": "Top-of-page hero: glass eyebrow pill, headline, a teal-ruled intro line and a primary CTA over a full-bleed photograph. This image is the page's LCP element — upload the largest original available; the site generates the responsive ladder."
+  },
+  "attributes": {
+    "eyebrow": { "type": "string", "maxLength": 60 },
+    "heading": { "type": "string", "required": true, "maxLength": 120 },
+    "description": { "type": "text", "maxLength": 320 },
+    "ctaLabel": { "type": "string", "maxLength": 40 },
+    "ctaUrl": { "type": "string", "maxLength": 200 },
+    "image": { "type": "media", "multiple": false, "allowedTypes": ["images"] },
+    "imageAlt": { "type": "string", "maxLength": 160 }
+  }
+}

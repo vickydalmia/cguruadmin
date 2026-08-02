@@ -1,0 +1,26 @@
+{
+  "kind": "singleType",
+  "collectionName": "partner_with_us_pages",
+  "info": {
+    "singularName": "partner-with-us-page",
+    "pluralName": "partner-with-us-pages",
+    "displayName": "Partner With Us Page",
+    "description": "All editable copy, hero media, logos, marketing sections, CTAs and SEO for /partner-with-us/. Empty fields use the committed Figma fallback."
+  },
+  "options": { "draftAndPublish": false },
+  "pluginOptions": {},
+  "attributes": {
+    "title": { "type": "string", "default": "Partner With Us Page" },
+    "breadcrumbAriaLabel": { "type": "string", "default": "Breadcrumb", "maxLength": 60 },
+    "breadcrumbItems": { "type": "component", "repeatable": true, "component": "shared.breadcrumb-item", "max": 5 },
+    "hero": { "type": "component", "repeatable": false, "component": "partner.hero" },
+    "trusted": { "type": "component", "repeatable": false, "component": "partner.trusted-section" },
+    "benefits": { "type": "component", "repeatable": false, "component": "partner.benefits-section" },
+    "impact": { "type": "component", "repeatable": false, "component": "partner.impact-section" },
+    "exposure": { "type": "component", "repeatable": false, "component": "partner.exposure-section" },
+    "partnerships": { "type": "component", "repeatable": false, "component": "partner.partnerships-section" },
+    "support": { "type": "component", "repeatable": false, "component": "partner.support-section" },
+    "cta": { "type": "component", "repeatable": false, "component": "partner.cta" },
+    "seo": { "type": "component", "repeatable": false, "component": "shared.seo" }
+  }
+}

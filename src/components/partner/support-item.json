@@ -1,0 +1,9 @@
+{
+  "collectionName": "components_partner_support_items",
+  "info": { "displayName": "Support Feature", "icon": "userHeart" },
+  "attributes": {
+    "icon": { "type": "enumeration", "enum": ["users", "pen"], "default": "users" },
+    "heading": { "type": "string", "required": true, "maxLength": 140 },
+    "description": { "type": "text", "required": true, "maxLength": 900 }
+  }
+}

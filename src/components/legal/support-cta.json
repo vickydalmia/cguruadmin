@@ -1,0 +1,29 @@
+{
+  "collectionName": "components_legal_support_ctas",
+  "info": {
+    "displayName": "Legal Support CTA",
+    "icon": "envelop",
+    "description": "The contact card displayed beside a legal document on desktop and below it on mobile."
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "description": {
+      "type": "text",
+      "maxLength": 300
+    },
+    "emailLabel": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "emailAddress": {
+      "type": "email"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "collectionName": "components_culture_stats",
+  "info": {
+    "displayName": "Culture Stat",
+    "icon": "chartBubble",
+    "description": "One figure in the band under the hero. `value` is a string so \"30+\", \"6\" and \"Pune\" render in the same row. `shortLabel` is what the narrow phone band shows — \"countries served\" does not fit a 375px third-column; leave it blank to reuse the full label."
+  },
+  "attributes": {
+    "value": { "type": "string", "required": true, "maxLength": 16 },
+    "label": { "type": "string", "required": true, "maxLength": 40 },
+    "shortLabel": { "type": "string", "maxLength": 20 }
+  }
+}

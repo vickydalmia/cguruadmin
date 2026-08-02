@@ -30,6 +30,21 @@ const CONTACT_PAGE_UID = 'api::contact-page.contact-page';
 const CONTACT_PAGE_SLUG = 'contact-us';
 const FAQ_PAGE_UID = 'api::faq-page.faq-page';
 const FAQ_PAGE_SLUG = 'faqs';
+const TESTIMONIALS_PAGE_UID = 'api::testimonials-page.testimonials-page';
+const TESTIMONIALS_PAGE_SLUG = 'testimonials';
+const PARTNER_WITH_US_PAGE_UID =
+  'api::partner-with-us-page.partner-with-us-page';
+const PARTNER_WITH_US_PAGE_SLUG = 'partner-with-us';
+const PRIVACY_POLICY_PAGE_UID = 'api::privacy-policy-page.privacy-policy-page';
+const PRIVACY_POLICY_PAGE_SLUG = 'privacy-policy';
+const TERMS_PAGE_UID =
+  'api::terms-and-conditions-page.terms-and-conditions-page';
+const TERMS_PAGE_SLUG = 'terms-and-conditions';
+const AFFILIATE_DISCLOSURE_PAGE_UID =
+  'api::affiliate-disclosure-page.affiliate-disclosure-page';
+const AFFILIATE_DISCLOSURE_PAGE_SLUG = 'affiliate-disclosure';
+const CULTURE_PAGE_UID = 'api::culture-page.culture-page';
+const CULTURE_PAGE_SLUG = 'culture';
 // A redirect is evaluated by cguru-ui/src/middleware.ts on EVERY request,
 // before routing — it is URL resolution itself, not page content. Nothing
 // narrower than `full` is correct here: the affected URL set is not derivable
@@ -295,6 +310,48 @@ export async function computeScope(
       // The path is code-owned, but its managed updatedAt/noIndex overlay is
       // read through the route cache. Refresh that metadata without widening
       // this into a global page invalidation.
+      refreshScopes: ['routes'],
+    };
+  }
+  if (uid === TESTIMONIALS_PAGE_UID) {
+    return {
+      slugs: [TESTIMONIALS_PAGE_SLUG],
+      sitemap: true,
+      refreshScopes: ['routes'],
+    };
+  }
+  if (uid === PARTNER_WITH_US_PAGE_UID) {
+    return {
+      slugs: [PARTNER_WITH_US_PAGE_SLUG],
+      sitemap: true,
+      refreshScopes: ['routes'],
+    };
+  }
+  if (uid === PRIVACY_POLICY_PAGE_UID) {
+    return {
+      slugs: [PRIVACY_POLICY_PAGE_SLUG],
+      sitemap: true,
+      refreshScopes: ['routes'],
+    };
+  }
+  if (uid === TERMS_PAGE_UID) {
+    return {
+      slugs: [TERMS_PAGE_SLUG],
+      sitemap: true,
+      refreshScopes: ['routes'],
+    };
+  }
+  if (uid === AFFILIATE_DISCLOSURE_PAGE_UID) {
+    return {
+      slugs: [AFFILIATE_DISCLOSURE_PAGE_SLUG],
+      sitemap: true,
+      refreshScopes: ['routes'],
+    };
+  }
+  if (uid === CULTURE_PAGE_UID) {
+    return {
+      slugs: [CULTURE_PAGE_SLUG],
+      sitemap: true,
       refreshScopes: ['routes'],
     };
   }

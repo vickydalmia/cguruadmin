@@ -77,6 +77,31 @@ describe('sanitizeRichtextData', () => {
     expect(() => sanitizeRichtextData('api::store.store', null)).not.toThrow();
   });
 
+  it('sanitizes rich text nested in legal page sections', () => {
+    const data = {
+      sections: [
+        { title: 'Safe', body: '<p onclick="x()">copy</p><script>x()</script>' },
+        { title: 'Not supplied' },
+      ],
+    };
+
+    sanitizeRichtextData('api::privacy-policy-page.privacy-policy-page', data);
+
+    expect(data.sections[0]?.body).toBe('<p>copy</p>');
+    expect(data.sections[1]).toEqual({ title: 'Not supplied' });
+  });
+
+  it('covers both legal page single types', () => {
+    const privacy = { sections: [{ body: '<p onmouseover="x()">privacy</p>' }] };
+    const terms = { sections: [{ body: '<p onmouseover="x()">terms</p>' }] };
+
+    sanitizeRichtextData('api::privacy-policy-page.privacy-policy-page', privacy);
+    sanitizeRichtextData('api::terms-and-conditions-page.terms-and-conditions-page', terms);
+
+    expect(privacy.sections[0]?.body).toBe('<p>privacy</p>');
+    expect(terms.sections[0]?.body).toBe('<p>terms</p>');
+  });
+
   it('covers all six richtext fields', () => {
     expect(Object.keys(RICHTEXT_FIELDS).sort()).toEqual([
       'api::bank.bank',

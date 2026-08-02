@@ -1,0 +1,12 @@
+{
+  "collectionName": "components_partner_partnerships_sections",
+  "info": { "displayName": "Partnership Types", "icon": "handHeart", "description": "Flexible commercial models and closing note." },
+  "attributes": {
+    "enabled": { "type": "boolean", "default": true },
+    "eyebrow": { "type": "string", "maxLength": 80 },
+    "heading": { "type": "string", "maxLength": 160 },
+    "description": { "type": "text", "maxLength": 600 },
+    "items": { "type": "component", "repeatable": true, "component": "partner.partnership-type", "max": 6 },
+    "note": { "type": "text", "maxLength": 1200 }
+  }
+}

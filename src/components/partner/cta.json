@@ -1,0 +1,12 @@
+{
+  "collectionName": "components_partner_ctas",
+  "info": { "displayName": "Partner CTA", "icon": "cursor", "description": "Blue gradient call to action above the footer." },
+  "attributes": {
+    "enabled": { "type": "boolean", "default": true },
+    "eyebrow": { "type": "string", "maxLength": 80 },
+    "heading": { "type": "string", "maxLength": 140 },
+    "description": { "type": "text", "maxLength": 500 },
+    "buttonLabel": { "type": "string", "maxLength": 60 },
+    "buttonUrl": { "type": "string", "maxLength": 2048 }
+  }
+}

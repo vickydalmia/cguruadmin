@@ -1,0 +1,13 @@
+{
+  "collectionName": "components_partner_support_sections",
+  "info": { "displayName": "Dedicated Support", "icon": "userHeart", "description": "Support promise, trust badge and service cards." },
+  "attributes": {
+    "enabled": { "type": "boolean", "default": true },
+    "eyebrow": { "type": "string", "maxLength": 80 },
+    "heading": { "type": "string", "maxLength": 180 },
+    "taglineHeading": { "type": "string", "maxLength": 180 },
+    "taglineDescription": { "type": "text", "maxLength": 500 },
+    "trustBadge": { "type": "string", "maxLength": 100 },
+    "items": { "type": "component", "repeatable": true, "component": "partner.support-item", "max": 4 }
+  }
+}

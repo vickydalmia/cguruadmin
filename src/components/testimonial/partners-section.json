@@ -1,0 +1,24 @@
+{
+  "collectionName": "components_testimonial_partner_sections",
+  "info": {
+    "displayName": "Partner Testimonials Section",
+    "icon": "grid",
+    "description": "Heading, ordered quote cards and mobile pagination count."
+  },
+  "attributes": {
+    "enabled": { "type": "boolean", "default": true },
+    "heading": { "type": "string", "maxLength": 100 },
+    "testimonials": {
+      "type": "component",
+      "repeatable": true,
+      "component": "testimonial.testimonial",
+      "max": 18
+    },
+    "paginationCount": {
+      "type": "integer",
+      "default": 6,
+      "min": 1,
+      "max": 10
+    }
+  }
+}

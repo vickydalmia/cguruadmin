@@ -77,12 +77,28 @@ export const RICHTEXT_FIELDS: Record<string, string[]> = {
   'api::store.store': ['description'],
 };
 
+const LEGAL_PAGE_UIDS = new Set([
+  'api::privacy-policy-page.privacy-policy-page',
+  'api::terms-and-conditions-page.terms-and-conditions-page',
+]);
+
 /** Sanitize (in place) every richtext field present in a write payload. */
 export function sanitizeRichtextData(uid: string, data: any): void {
   if (!data || typeof data !== 'object') return;
   for (const field of RICHTEXT_FIELDS[uid] ?? []) {
     if (typeof data[field] === 'string') {
       data[field] = cleanHtml(data[field]);
+    }
+  }
+
+  // Legal document HTML lives inside repeatable section components rather
+  // than a top-level attribute. Sanitize every supplied section body before
+  // Strapi persists the component rows.
+  if (LEGAL_PAGE_UIDS.has(uid) && Array.isArray(data.sections)) {
+    for (const section of data.sections) {
+      if (typeof section?.body === 'string') {
+        section.body = cleanHtml(section.body);
+      }
     }
   }
 }

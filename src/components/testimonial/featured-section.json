@@ -1,0 +1,29 @@
+{
+  "collectionName": "components_testimonial_featured_sections",
+  "info": {
+    "displayName": "Featured Testimonial Section",
+    "icon": "star",
+    "description": "The highlighted quote carousel at the top of the page. Each slide supplies its own quote, author and portrait — the portrait is what appears in the selector row beneath the card, so a slide with no portrait falls back to the committed one. Add two or more slides to make the row interactive; with a single slide the selectors are hidden."
+  },
+  "attributes": {
+    "enabled": { "type": "boolean", "default": true },
+    "slides": {
+      "type": "component",
+      "repeatable": true,
+      "component": "testimonial.testimonial",
+      "max": 10
+    },
+    "initialIndex": {
+      "type": "integer",
+      "default": 0,
+      "min": 0,
+      "max": 9
+    },
+    "autoplaySeconds": {
+      "type": "integer",
+      "default": 7,
+      "min": 0,
+      "max": 60
+    }
+  }
+}

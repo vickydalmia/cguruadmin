@@ -494,6 +494,82 @@ export interface ApiAboutPageAboutPage extends Struct.SingleTypeSchema {
   };
 }
 
+export interface ApiAffiliateDisclosurePageAffiliateDisclosurePage
+  extends Struct.SingleTypeSchema {
+  collectionName: 'affiliate_disclosure_pages';
+  info: {
+    description: 'Editable copy, ordered disclosure sections and SEO for the public /affiliate-disclosure/ page. This document renders in the full-width layout, so navigationItems and supportCta are unused by the storefront and are kept only for parity with the other legal single types.';
+    displayName: 'Affiliate Disclosure Page';
+    pluralName: 'affiliate-disclosure-pages';
+    singularName: 'affiliate-disclosure-page';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    breadcrumbAriaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }> &
+      Schema.Attribute.DefaultTo<'Breadcrumb'>;
+    breadcrumbItems: Schema.Attribute.Component<
+      'shared.breadcrumb-item',
+      true
+    > &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 5;
+        },
+        number
+      >;
+    contentHeading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    effectiveDate: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::affiliate-disclosure-page.affiliate-disclosure-page'
+    > &
+      Schema.Attribute.Private;
+    navigationItems: Schema.Attribute.Component<'legal.navigation-item', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 12;
+        },
+        number
+      >;
+    navigationTitle: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    publishedAt: Schema.Attribute.DateTime;
+    sections: Schema.Attribute.Component<'legal.section', true>;
+    seo: Schema.Attribute.Component<'shared.seo', false>;
+    supportCta: Schema.Attribute.Component<'legal.support-cta', false>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Affiliate Disclosure'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiBankBank extends Struct.CollectionTypeSchema {
   collectionName: 'banks';
   info: {
@@ -959,6 +1035,64 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
         number
       > &
       Schema.Attribute.DefaultTo<0>;
+  };
+}
+
+export interface ApiCulturePageCulturePage extends Struct.SingleTypeSchema {
+  collectionName: 'culture_pages';
+  info: {
+    description: 'Editable copy, stats, values, team photo gallery, testimonials, timeline and hiring banner for the public /culture/ page.';
+    displayName: 'Culture Page';
+    pluralName: 'culture-pages';
+    singularName: 'culture-page';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    breadcrumbAriaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }> &
+      Schema.Attribute.DefaultTo<'Breadcrumb'>;
+    breadcrumbItems: Schema.Attribute.Component<
+      'shared.breadcrumb-item',
+      true
+    > &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 5;
+        },
+        number
+      >;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    gallery: Schema.Attribute.Component<'culture.gallery', false>;
+    hero: Schema.Attribute.Component<'culture.hero', false>;
+    journey: Schema.Attribute.Component<'culture.journey', false>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::culture-page.culture-page'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    recruitment: Schema.Attribute.Component<'culture.recruitment', false>;
+    seo: Schema.Attribute.Component<'shared.seo', false>;
+    stats: Schema.Attribute.Component<'culture.stat', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 6;
+        },
+        number
+      >;
+    testimonials: Schema.Attribute.Component<'culture.testimonials', false>;
+    title: Schema.Attribute.String & Schema.Attribute.DefaultTo<'Culture'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    values: Schema.Attribute.Component<'culture.values', false>;
   };
 }
 
@@ -1539,6 +1673,140 @@ export interface ApiMenuMenu extends Struct.SingleTypeSchema {
   };
 }
 
+export interface ApiPartnerWithUsPagePartnerWithUsPage
+  extends Struct.SingleTypeSchema {
+  collectionName: 'partner_with_us_pages';
+  info: {
+    description: 'All editable copy, hero media, logos, marketing sections, CTAs and SEO for /partner-with-us/. Empty fields use the committed Figma fallback.';
+    displayName: 'Partner With Us Page';
+    pluralName: 'partner-with-us-pages';
+    singularName: 'partner-with-us-page';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    benefits: Schema.Attribute.Component<'partner.benefits-section', false>;
+    breadcrumbAriaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }> &
+      Schema.Attribute.DefaultTo<'Breadcrumb'>;
+    breadcrumbItems: Schema.Attribute.Component<
+      'shared.breadcrumb-item',
+      true
+    > &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 5;
+        },
+        number
+      >;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    cta: Schema.Attribute.Component<'partner.cta', false>;
+    exposure: Schema.Attribute.Component<'partner.exposure-section', false>;
+    hero: Schema.Attribute.Component<'partner.hero', false>;
+    impact: Schema.Attribute.Component<'partner.impact-section', false>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::partner-with-us-page.partner-with-us-page'
+    > &
+      Schema.Attribute.Private;
+    partnerships: Schema.Attribute.Component<
+      'partner.partnerships-section',
+      false
+    >;
+    publishedAt: Schema.Attribute.DateTime;
+    seo: Schema.Attribute.Component<'shared.seo', false>;
+    support: Schema.Attribute.Component<'partner.support-section', false>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Partner With Us Page'>;
+    trusted: Schema.Attribute.Component<'partner.trusted-section', false>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiPrivacyPolicyPagePrivacyPolicyPage
+  extends Struct.SingleTypeSchema {
+  collectionName: 'privacy_policy_pages';
+  info: {
+    description: 'Editable copy, ordered policy sections, sidebar links and SEO for the public /privacy-policy/ page.';
+    displayName: 'Privacy Policy Page';
+    pluralName: 'privacy-policy-pages';
+    singularName: 'privacy-policy-page';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    breadcrumbAriaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }> &
+      Schema.Attribute.DefaultTo<'Breadcrumb'>;
+    breadcrumbItems: Schema.Attribute.Component<
+      'shared.breadcrumb-item',
+      true
+    > &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 5;
+        },
+        number
+      >;
+    contentHeading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    effectiveDate: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::privacy-policy-page.privacy-policy-page'
+    > &
+      Schema.Attribute.Private;
+    navigationItems: Schema.Attribute.Component<'legal.navigation-item', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 12;
+        },
+        number
+      >;
+    navigationTitle: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    publishedAt: Schema.Attribute.DateTime;
+    sections: Schema.Attribute.Component<'legal.section', true>;
+    seo: Schema.Attribute.Component<'shared.seo', false>;
+    supportCta: Schema.Attribute.Component<'legal.support-cta', false>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Privacy Policy'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiRedirectRedirect extends Struct.CollectionTypeSchema {
   collectionName: 'redirects';
   info: {
@@ -1662,6 +1930,134 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     websiteUrl: Schema.Attribute.String;
+  };
+}
+
+export interface ApiTermsAndConditionsPageTermsAndConditionsPage
+  extends Struct.SingleTypeSchema {
+  collectionName: 'terms_and_conditions_pages';
+  info: {
+    description: 'Editable copy, ordered terms sections, sidebar links and SEO for the public /terms-and-conditions/ page.';
+    displayName: 'Terms & Conditions Page';
+    pluralName: 'terms-and-conditions-pages';
+    singularName: 'terms-and-conditions-page';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    breadcrumbAriaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }> &
+      Schema.Attribute.DefaultTo<'Breadcrumb'>;
+    breadcrumbItems: Schema.Attribute.Component<
+      'shared.breadcrumb-item',
+      true
+    > &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 5;
+        },
+        number
+      >;
+    contentHeading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    effectiveDate: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::terms-and-conditions-page.terms-and-conditions-page'
+    > &
+      Schema.Attribute.Private;
+    navigationItems: Schema.Attribute.Component<'legal.navigation-item', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 12;
+        },
+        number
+      >;
+    navigationTitle: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    publishedAt: Schema.Attribute.DateTime;
+    sections: Schema.Attribute.Component<'legal.section', true>;
+    seo: Schema.Attribute.Component<'shared.seo', false>;
+    supportCta: Schema.Attribute.Component<'legal.support-cta', false>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Terms & Conditions'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiTestimonialsPageTestimonialsPage
+  extends Struct.SingleTypeSchema {
+  collectionName: 'testimonials_pages';
+  info: {
+    description: 'All editable copy, portraits, testimonial cards, CTA, FAQs and SEO for the public /testimonials/ page. The storefront uses the committed Figma content wherever a field has not yet been populated.';
+    displayName: 'Testimonials Page';
+    pluralName: 'testimonials-pages';
+    singularName: 'testimonials-page';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    breadcrumbAriaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }> &
+      Schema.Attribute.DefaultTo<'Breadcrumb'>;
+    breadcrumbItems: Schema.Attribute.Component<
+      'shared.breadcrumb-item',
+      true
+    > &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 5;
+        },
+        number
+      >;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    faq: Schema.Attribute.Component<'testimonial.faq-section', false>;
+    featured: Schema.Attribute.Component<'testimonial.featured-section', false>;
+    hero: Schema.Attribute.Component<'testimonial.hero', false>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::testimonials-page.testimonials-page'
+    > &
+      Schema.Attribute.Private;
+    partnerCta: Schema.Attribute.Component<'testimonial.partner-cta', false>;
+    partners: Schema.Attribute.Component<'testimonial.partners-section', false>;
+    publishedAt: Schema.Attribute.DateTime;
+    seo: Schema.Attribute.Component<'shared.seo', false>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Testimonials Page'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
   };
 }
 
@@ -2284,6 +2680,7 @@ declare module '@strapi/strapi' {
       'admin::transfer-token-permission': AdminTransferTokenPermission;
       'admin::user': AdminUser;
       'api::about-page.about-page': ApiAboutPageAboutPage;
+      'api::affiliate-disclosure-page.affiliate-disclosure-page': ApiAffiliateDisclosurePageAffiliateDisclosurePage;
       'api::bank.bank': ApiBankBank;
       'api::brand.brand': ApiBrandBrand;
       'api::career-page.career-page': ApiCareerPageCareerPage;
@@ -2291,6 +2688,7 @@ declare module '@strapi/strapi' {
       'api::contact-page.contact-page': ApiContactPageContactPage;
       'api::contact-submission.contact-submission': ApiContactSubmissionContactSubmission;
       'api::coupon.coupon': ApiCouponCoupon;
+      'api::culture-page.culture-page': ApiCulturePageCulturePage;
       'api::deal-of-the-day-page.deal-of-the-day-page': ApiDealOfTheDayPageDealOfTheDayPage;
       'api::deal.deal': ApiDealDeal;
       'api::error-page.error-page': ApiErrorPageErrorPage;
@@ -2301,8 +2699,12 @@ declare module '@strapi/strapi' {
       'api::job-application.job-application': ApiJobApplicationJobApplication;
       'api::job.job': ApiJobJob;
       'api::menu.menu': ApiMenuMenu;
+      'api::partner-with-us-page.partner-with-us-page': ApiPartnerWithUsPagePartnerWithUsPage;
+      'api::privacy-policy-page.privacy-policy-page': ApiPrivacyPolicyPagePrivacyPolicyPage;
       'api::redirect.redirect': ApiRedirectRedirect;
       'api::store.store': ApiStoreStore;
+      'api::terms-and-conditions-page.terms-and-conditions-page': ApiTermsAndConditionsPageTermsAndConditionsPage;
+      'api::testimonials-page.testimonials-page': ApiTestimonialsPageTestimonialsPage;
       'api::unique-code.unique-code': ApiUniqueCodeUniqueCode;
       'api::unique-coupon-pool.unique-coupon-pool': ApiUniqueCouponPoolUniqueCouponPool;
       'plugin::content-releases.release': PluginContentReleasesRelease;

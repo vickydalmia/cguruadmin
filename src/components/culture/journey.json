@@ -1,0 +1,13 @@
+{
+  "collectionName": "components_culture_journeys",
+  "info": {
+    "displayName": "Culture Journey Band",
+    "icon": "clock",
+    "description": "The \"our journey\" timeline. Milestones render oldest-to-newest in the order listed here — the page does not sort them."
+  },
+  "attributes": {
+    "enabled": { "type": "boolean", "default": true },
+    "header": { "type": "component", "repeatable": false, "component": "shared.section-header" },
+    "milestones": { "type": "component", "repeatable": true, "component": "culture.milestone", "max": 12 }
+  }
+}

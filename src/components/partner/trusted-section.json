@@ -1,0 +1,9 @@
+{
+  "collectionName": "components_partner_trusted_sections",
+  "info": { "displayName": "Trusted Relationships", "icon": "grid", "description": "Logo marquee on desktop and six-logo grid on mobile." },
+  "attributes": {
+    "enabled": { "type": "boolean", "default": true },
+    "eyebrow": { "type": "string", "maxLength": 80 },
+    "logos": { "type": "component", "repeatable": true, "component": "partner.logo", "max": 24 }
+  }
+}

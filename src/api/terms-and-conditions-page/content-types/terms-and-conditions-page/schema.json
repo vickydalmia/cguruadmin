@@ -1,0 +1,72 @@
+{
+  "kind": "singleType",
+  "collectionName": "terms_and_conditions_pages",
+  "info": {
+    "singularName": "terms-and-conditions-page",
+    "pluralName": "terms-and-conditions-pages",
+    "displayName": "Terms & Conditions Page",
+    "description": "Editable copy, ordered terms sections, sidebar links and SEO for the public /terms-and-conditions/ page."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "default": "Terms & Conditions"
+    },
+    "breadcrumbAriaLabel": {
+      "type": "string",
+      "default": "Breadcrumb",
+      "maxLength": 60
+    },
+    "breadcrumbItems": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.breadcrumb-item",
+      "max": 5
+    },
+    "eyebrow": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "heading": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "effectiveDate": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "contentHeading": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "navigationTitle": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "navigationItems": {
+      "type": "component",
+      "repeatable": true,
+      "component": "legal.navigation-item",
+      "max": 12
+    },
+    "supportCta": {
+      "type": "component",
+      "repeatable": false,
+      "component": "legal.support-cta"
+    },
+    "sections": {
+      "type": "component",
+      "repeatable": true,
+      "component": "legal.section"
+    },
+    "seo": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.seo"
+    }
+  }
+}

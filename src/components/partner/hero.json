@@ -1,0 +1,15 @@
+{
+  "collectionName": "components_partner_heroes",
+  "info": {
+    "displayName": "Partner Hero",
+    "icon": "picture",
+    "description": "Full-width partner-network hero. Empty fields use the committed Figma fallback."
+  },
+  "attributes": {
+    "eyebrow": { "type": "string", "maxLength": 80 },
+    "heading": { "type": "string", "maxLength": 140 },
+    "description": { "type": "text", "maxLength": 600 },
+    "image": { "type": "media", "multiple": false, "required": false, "allowedTypes": ["images"] },
+    "imageAlt": { "type": "string", "maxLength": 180 }
+  }
+}

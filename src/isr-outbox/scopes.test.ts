@@ -291,7 +291,7 @@ describe('deal-of-the-day landing page scope', () => {
 });
 
 describe('managed page SEO scopes', () => {
-  it('refreshes sitemap metadata for homepage, About, Contact and FAQ edits', async () => {
+  it('refreshes sitemap metadata for homepage and every static editorial page edit', async () => {
     const { computeScope } = await import('./scopes');
     const strapi = strapiWithFindOne(async () => {
       throw new Error('must not be called');
@@ -323,6 +323,73 @@ describe('managed page SEO scopes', () => {
       computeScope(strapi, 'api::faq-page.faq-page', 'update', 'faq-1'),
     ).resolves.toEqual({
       slugs: ['faqs'],
+      sitemap: true,
+      refreshScopes: ['routes'],
+    });
+    await expect(
+      computeScope(
+        strapi,
+        'api::testimonials-page.testimonials-page',
+        'update',
+        'testimonials-1',
+      ),
+    ).resolves.toEqual({
+      slugs: ['testimonials'],
+      sitemap: true,
+      refreshScopes: ['routes'],
+    });
+    await expect(
+      computeScope(
+        strapi,
+        'api::partner-with-us-page.partner-with-us-page',
+        'update',
+        'partner-page-1',
+      ),
+    ).resolves.toEqual({
+      slugs: ['partner-with-us'],
+      sitemap: true,
+      refreshScopes: ['routes'],
+    });
+    await expect(
+      computeScope(
+        strapi,
+        'api::privacy-policy-page.privacy-policy-page',
+        'update',
+        'privacy-1',
+      ),
+    ).resolves.toEqual({
+      slugs: ['privacy-policy'],
+      sitemap: true,
+      refreshScopes: ['routes'],
+    });
+    await expect(
+      computeScope(
+        strapi,
+        'api::terms-and-conditions-page.terms-and-conditions-page',
+        'update',
+        'terms-1',
+      ),
+    ).resolves.toEqual({
+      slugs: ['terms-and-conditions'],
+      sitemap: true,
+      refreshScopes: ['routes'],
+    });
+    await expect(
+      computeScope(
+        strapi,
+        'api::affiliate-disclosure-page.affiliate-disclosure-page',
+        'update',
+        'affiliate-1',
+      ),
+    ).resolves.toEqual({
+      slugs: ['affiliate-disclosure'],
+      sitemap: true,
+      refreshScopes: ['routes'],
+    });
+    await expect(
+      computeScope(strapi, 'api::culture-page.culture-page', 'update', 'culture-1'),
+    ).resolves.toEqual({
+      slugs: ['culture'],
       sitemap: true,
       refreshScopes: ['routes'],
     });

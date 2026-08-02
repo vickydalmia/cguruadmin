@@ -1,0 +1,18 @@
+{
+  "collectionName": "components_culture_milestones",
+  "info": {
+    "displayName": "Culture Milestone",
+    "icon": "clock",
+    "description": "One dated entry on the culture timeline. `year` is a string so \"2011\" and copy like \"2026 →\" both render; the connecting rail between entries is drawn by the component."
+  },
+  "attributes": {
+    "year": { "type": "string", "required": true, "maxLength": 12 },
+    "body": { "type": "text", "maxLength": 240 },
+    "iconKey": {
+      "type": "enumeration",
+      "required": true,
+      "default": "globe",
+      "enum": ["bolt", "verified", "refresh", "target", "building", "globe", "book", "award", "dna"]
+    }
+  }
+}

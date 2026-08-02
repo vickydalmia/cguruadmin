@@ -1,0 +1,8 @@
+{
+  "collectionName": "components_partner_exposure_items",
+  "info": { "displayName": "Exposure Item", "icon": "bulletList" },
+  "attributes": {
+    "icon": { "type": "enumeration", "enum": ["layout", "list", "zap", "mail", "share", "search", "award", "users"], "default": "layout" },
+    "label": { "type": "string", "required": true, "maxLength": 140 }
+  }
+}

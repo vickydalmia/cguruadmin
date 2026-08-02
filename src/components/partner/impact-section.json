@@ -1,0 +1,10 @@
+{
+  "collectionName": "components_partner_impact_sections",
+  "info": { "displayName": "Impact & Reach", "icon": "chartCircle", "description": "Dark numbers section with up to eight metrics." },
+  "attributes": {
+    "enabled": { "type": "boolean", "default": true },
+    "eyebrow": { "type": "string", "maxLength": 80 },
+    "heading": { "type": "string", "maxLength": 120 },
+    "stats": { "type": "component", "repeatable": true, "component": "partner.stat", "max": 8 }
+  }
+}

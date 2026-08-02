@@ -992,6 +992,13 @@ const SINGLE_TYPE_ENTRY_TITLES = [
   'api::error-page.error-page',
   'api::career-page.career-page',
   'api::contact-page.contact-page',
+  'api::faq-page.faq-page',
+  'api::testimonials-page.testimonials-page',
+  'api::partner-with-us-page.partner-with-us-page',
+  'api::privacy-policy-page.privacy-policy-page',
+  'api::terms-and-conditions-page.terms-and-conditions-page',
+  'api::affiliate-disclosure-page.affiliate-disclosure-page',
+  'api::culture-page.culture-page',
 ] as const;
 
 async function ensureSingleTypeEntryTitles(strapi: Core.Strapi): Promise<void> {

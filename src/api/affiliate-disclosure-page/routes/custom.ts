@@ -1,0 +1,22 @@
+export default {
+  routes: [
+    {
+      method: 'GET',
+      path: '/affiliate-disclosure-page-full',
+      handler: 'custom.affiliateDisclosurePageFull',
+      config: {
+        auth: false,
+        middlewares: [
+          {
+            name: 'global::rate-limit',
+            config: { maxRequests: 60, windowMs: 60_000 },
+          },
+          {
+            name: 'global::cache',
+            config: { ttlMs: 60_000, keyByPath: true },
+          },
+        ],
+      },
+    },
+  ],
+};

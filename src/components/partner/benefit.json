@@ -1,0 +1,9 @@
+{
+  "collectionName": "components_partner_benefits",
+  "info": { "displayName": "Partner Benefit", "icon": "star" },
+  "attributes": {
+    "icon": { "type": "enumeration", "enum": ["audience", "campaign", "results"], "default": "audience" },
+    "heading": { "type": "string", "required": true, "maxLength": 120 },
+    "description": { "type": "text", "required": true, "maxLength": 700 }
+  }
+}

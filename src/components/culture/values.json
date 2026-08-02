@@ -1,0 +1,13 @@
+{
+  "collectionName": "components_culture_values",
+  "info": {
+    "displayName": "Culture Values Band",
+    "icon": "bulletList",
+    "description": "The \"our values\" band. Untick Enabled to hide the whole band; leaving the card list empty falls back to the committed design copy rather than rendering an empty grid."
+  },
+  "attributes": {
+    "enabled": { "type": "boolean", "default": true },
+    "header": { "type": "component", "repeatable": false, "component": "shared.section-header" },
+    "cards": { "type": "component", "repeatable": true, "component": "culture.value-card", "max": 8 }
+  }
+}

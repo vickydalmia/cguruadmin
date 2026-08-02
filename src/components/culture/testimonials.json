@@ -1,0 +1,13 @@
+{
+  "collectionName": "components_culture_testimonial_bands",
+  "info": {
+    "displayName": "Culture Testimonials Band",
+    "icon": "quote",
+    "description": "The dark \"from the team\" band. Untick Enabled to hide it; an empty item list falls back to the committed design copy."
+  },
+  "attributes": {
+    "enabled": { "type": "boolean", "default": true },
+    "header": { "type": "component", "repeatable": false, "component": "shared.section-header" },
+    "items": { "type": "component", "repeatable": true, "component": "culture.testimonial", "max": 12 }
+  }
+}

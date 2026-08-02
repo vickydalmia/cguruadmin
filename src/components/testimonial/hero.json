@@ -1,0 +1,13 @@
+{
+  "collectionName": "components_testimonial_heroes",
+  "info": {
+    "displayName": "Testimonials Hero",
+    "icon": "quote",
+    "description": "Intro badge, main heading and supporting copy above the testimonial sections."
+  },
+  "attributes": {
+    "eyebrow": { "type": "string", "maxLength": 60 },
+    "heading": { "type": "string", "maxLength": 140 },
+    "description": { "type": "text", "maxLength": 320 }
+  }
+}
