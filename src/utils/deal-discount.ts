@@ -15,6 +15,8 @@ const PREFIX_LABELS = new Map<string, string>(
   DEAL_DISCOUNT_PREFIXES.map(({ value, label }) => [value, label]),
 );
 
+const PREFIXES_WITHOUT_OFF = new Set<DealDiscountPrefix>(['under', 'below']);
+
 const LEGACY_PREFIXES: Array<{
   pattern: RegExp;
   value: DealDiscountPrefix;
@@ -45,7 +47,10 @@ export function formatDealDiscount(amount: unknown, prefix: unknown): string | n
   const trimmed = amount.trim();
   const label = dealDiscountPrefixLabel(prefix);
   if (!label || !isOfferAmount(trimmed)) return trimmed;
-  return `${label} ${normalizeOfferAmount(trimmed)} OFF`;
+  const suffix = isDealDiscountPrefix(prefix) && PREFIXES_WITHOUT_OFF.has(prefix)
+    ? ''
+    : ' OFF';
+  return `${label} ${normalizeOfferAmount(trimmed)}${suffix}`;
 }
 
 /** Parse a recognizable old free-text discount into the new stored fields. */

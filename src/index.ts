@@ -658,7 +658,7 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
         ...OFFER_BENEFIT_HINTS,
         {
           field: 'discount',
-          hint: offerAmountFieldHint('the selected prefix and OFF'),
+          hint: offerAmountFieldHint('the selected prefix and any applicable OFF suffix'),
         },
         {
           field: 'discountPrefix',

@@ -61,7 +61,7 @@ const DEAL_DISCOUNT_RULE: FieldRule = {
   problem: (value: string) =>
     isOfferAmount(value)
       ? null
-      : `Discount must be an amount only — a percent ("10%") or a currency amount ("₹100") — got "${value.trim()}". The selected prefix and “OFF” are assembled automatically on the site.`,
+      : `Discount must be an amount only — a percent ("10%") or a currency amount ("₹100") — got "${value.trim()}". The selected prefix and any applicable “OFF” suffix are assembled automatically on the site.`,
 };
 
 function fieldRulesForUid(uid?: string): FieldRule[] {

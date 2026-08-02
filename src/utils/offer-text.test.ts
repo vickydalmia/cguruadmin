@@ -72,6 +72,20 @@ describe('arrayizeOfferText', () => {
     expect(payload.deal.computedContent).toContain('Discount - Up To ₹2000 OFF');
   });
 
+  it('omits OFF from Under and Below Deal discounts everywhere in the payload', () => {
+    const payload: any = {
+      deals: [
+        { discount: 'Rs. 2,000', discountPrefix: 'under' },
+        { discount: '10 %', discountPrefix: 'below' },
+      ],
+    };
+    arrayizeOfferText(payload);
+    expect(payload.deals[0].discount).toBe('Under ₹2000');
+    expect(payload.deals[0].computedContent).toContain('Discount - Under ₹2000');
+    expect(payload.deals[1].discount).toBe('Below 10%');
+    expect(payload.deals[1].computedContent).toContain('Discount - Below 10%');
+  });
+
   it('preserves an unconverted legacy Deal discount while stripping the prefix field', () => {
     const deal: any = { discount: 'Buy one get one', discountPrefix: null };
     arrayizeOfferText(deal);

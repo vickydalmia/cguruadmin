@@ -9,12 +9,19 @@ import {
 const migration = require('../../database/migrations/2026.07.31T01.00.00.standardize-deal-discounts.js');
 
 describe('Deal discount formatting', () => {
-  it('formats every controlled prefix with the shared amount syntax and OFF', () => {
-    for (const { value, label } of DEAL_DISCOUNT_PREFIXES) {
+  it('formats discount prefixes with the shared amount syntax', () => {
+    for (const { value, label } of DEAL_DISCOUNT_PREFIXES.filter(
+      ({ value }) => value !== 'under' && value !== 'below',
+    )) {
       expect(formatDealDiscount('10 %', value)).toBe(`${label} 10% OFF`);
     }
     expect(formatDealDiscount('Rs. 2,000', 'flat')).toBe('Flat ₹2000 OFF');
     expect(formatDealDiscount('$ 40', 'extra')).toBe('Extra $40 OFF');
+  });
+
+  it('does not suffix OFF when the prefix is Under or Below', () => {
+    expect(formatDealDiscount('Rs. 2,000', 'under')).toBe('Under ₹2000');
+    expect(formatDealDiscount('10 %', 'below')).toBe('Below 10%');
   });
 
   it('preserves unconverted legacy copy and empty values', () => {
