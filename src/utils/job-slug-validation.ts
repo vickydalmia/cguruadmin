@@ -11,7 +11,7 @@ import { errors } from '@strapi/utils';
  * duplicate guard, and it matters because both slug consumers take the FIRST
  * row matching a slug: the /careers/<slug>/ page
  * (api/career-page/controllers/custom.ts) and the application submit endpoint
- * (api/job-application/controllers/submit.ts) — a duplicate would silently
+ * public careers routes resolve a job by slug — a duplicate would silently
  * route readers and applications to whichever row sorts first.
  *
  * Same grandfathering rule as identity-validation: only a payload that

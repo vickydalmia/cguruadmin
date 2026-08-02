@@ -3903,6 +3903,13 @@
     "@aws-sdk/client-ses" "3.1023.0"
     "@strapi/utils" "5.50.0"
 
+"@strapi/provider-email-nodemailer@5.50.0":
+  version "5.50.0"
+  resolved "https://registry.yarnpkg.com/@strapi/provider-email-nodemailer/-/provider-email-nodemailer-5.50.0.tgz#489192a1e5c120c381034d95f390aaa81e8e82d6"
+  integrity sha512-5qGCj5mDsRCq6pZ3W6IQ1haXfuGX7v4aQsC5spNnNUZ1AgYHm6Mk2oOoTEGE4ixUP/40EETlyCST8Zn6ne6Eww==
+  dependencies:
+    nodemailer "8.0.9"
+
 "@strapi/provider-email-sendmail@5.50.0":
   version "5.50.0"
   resolved "https://registry.yarnpkg.com/@strapi/provider-email-sendmail/-/provider-email-sendmail-5.50.0.tgz#1eac0752e50f672ab5bf923f5c2c0f980871db86"

@@ -894,54 +894,6 @@ export interface ApiContactPageContactPage extends Struct.SingleTypeSchema {
   };
 }
 
-export interface ApiContactSubmissionContactSubmission
-  extends Struct.CollectionTypeSchema {
-  collectionName: 'contact_submissions';
-  info: {
-    description: 'Messages submitted from the public Contact page. Public core routes are not exposed.';
-    displayName: 'Contact Submission';
-    pluralName: 'contact-submissions';
-    singularName: 'contact-submission';
-  };
-  options: {
-    draftAndPublish: false;
-  };
-  attributes: {
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    email: Schema.Attribute.Email & Schema.Attribute.Required;
-    fullName: Schema.Attribute.String &
-      Schema.Attribute.Required &
-      Schema.Attribute.SetMinMaxLength<{
-        maxLength: 120;
-      }>;
-    locale: Schema.Attribute.String & Schema.Attribute.Private;
-    localizations: Schema.Attribute.Relation<
-      'oneToMany',
-      'api::contact-submission.contact-submission'
-    > &
-      Schema.Attribute.Private;
-    message: Schema.Attribute.Text &
-      Schema.Attribute.SetMinMaxLength<{
-        maxLength: 2000;
-      }>;
-    publishedAt: Schema.Attribute.DateTime;
-    status: Schema.Attribute.Enumeration<
-      ['new', 'reviewing', 'responded', 'spam', 'archived']
-    > &
-      Schema.Attribute.DefaultTo<'new'>;
-    topic: Schema.Attribute.String &
-      Schema.Attribute.Required &
-      Schema.Attribute.SetMinMaxLength<{
-        maxLength: 100;
-      }>;
-    updatedAt: Schema.Attribute.DateTime;
-    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-  };
-}
-
 export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
   collectionName: 'coupons';
   info: {
@@ -1456,60 +1408,6 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
     title: Schema.Attribute.String & Schema.Attribute.DefaultTo<'Homepage'>;
     topDeals: Schema.Attribute.Component<'home.deal-list', false>;
     topOffers: Schema.Attribute.Component<'home.top-offers', false>;
-    updatedAt: Schema.Attribute.DateTime;
-    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-  };
-}
-
-export interface ApiJobApplicationJobApplication
-  extends Struct.CollectionTypeSchema {
-  collectionName: 'job_applications';
-  info: {
-    description: 'Applications submitted from public job detail pages. Public core routes are not exposed.';
-    displayName: 'Job Application';
-    pluralName: 'job-applications';
-    singularName: 'job-application';
-  };
-  options: {
-    draftAndPublish: false;
-  };
-  attributes: {
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    email: Schema.Attribute.Email & Schema.Attribute.Required;
-    fullName: Schema.Attribute.String &
-      Schema.Attribute.Required &
-      Schema.Attribute.SetMinMaxLength<{
-        maxLength: 120;
-      }>;
-    job: Schema.Attribute.Relation<'manyToOne', 'api::job.job'>;
-    linkedInUrl: Schema.Attribute.String &
-      Schema.Attribute.SetMinMaxLength<{
-        maxLength: 300;
-      }>;
-    locale: Schema.Attribute.String & Schema.Attribute.Private;
-    localizations: Schema.Attribute.Relation<
-      'oneToMany',
-      'api::job-application.job-application'
-    > &
-      Schema.Attribute.Private;
-    message: Schema.Attribute.Text &
-      Schema.Attribute.SetMinMaxLength<{
-        maxLength: 2000;
-      }>;
-    phone: Schema.Attribute.String &
-      Schema.Attribute.Required &
-      Schema.Attribute.SetMinMaxLength<{
-        maxLength: 40;
-      }>;
-    publishedAt: Schema.Attribute.DateTime;
-    resume: Schema.Attribute.Media<'files'>;
-    status: Schema.Attribute.Enumeration<
-      ['new', 'reviewing', 'shortlisted', 'rejected', 'hired']
-    > &
-      Schema.Attribute.DefaultTo<'new'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -2686,7 +2584,6 @@ declare module '@strapi/strapi' {
       'api::career-page.career-page': ApiCareerPageCareerPage;
       'api::category.category': ApiCategoryCategory;
       'api::contact-page.contact-page': ApiContactPageContactPage;
-      'api::contact-submission.contact-submission': ApiContactSubmissionContactSubmission;
       'api::coupon.coupon': ApiCouponCoupon;
       'api::culture-page.culture-page': ApiCulturePageCulturePage;
       'api::deal-of-the-day-page.deal-of-the-day-page': ApiDealOfTheDayPageDealOfTheDayPage;
@@ -2696,7 +2593,6 @@ declare module '@strapi/strapi' {
       'api::footer.footer': ApiFooterFooter;
       'api::global.global': ApiGlobalGlobal;
       'api::homepage.homepage': ApiHomepageHomepage;
-      'api::job-application.job-application': ApiJobApplicationJobApplication;
       'api::job.job': ApiJobJob;
       'api::menu.menu': ApiMenuMenu;
       'api::partner-with-us-page.partner-with-us-page': ApiPartnerWithUsPagePartnerWithUsPage;

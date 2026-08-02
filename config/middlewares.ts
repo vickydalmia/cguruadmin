@@ -38,13 +38,11 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Middlewar
     name: 'strapi::body',
     config: {
       // Formidable's default cap is 200 MB, and it is spent BEFORE any
-      // controller-level size check runs — an anonymous multipart request
-      // (e.g. the public job-application submit) could burn that much
-      // disk/network per attempt. 25 MB is global (admin media uploads share
-      // it), bounding abuse ~8× below the default while leaving headroom for
-      // editor images; the résumé route additionally enforces its own 5 MB
-      // rule in the controller, and the site gateway caps the public path at
-      // 6 MB before it reaches this server at all.
+      // controller-level size check runs. There is no longer a public
+      // multipart route on this server — résumés are emailed by the ISR
+      // gateway and never reach Strapi — so this now bounds authenticated
+      // admin media uploads only, ~8× below the default while leaving
+      // headroom for editor images.
       formidable: {
         maxFileSize: 25 * 1024 * 1024,
         maxTotalFileSize: 25 * 1024 * 1024,

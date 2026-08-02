@@ -11,6 +11,25 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
   const s3RootPath = env('S3_ROOT_PATH', '');
 
   return {
+    email: {
+      config: {
+        provider: 'nodemailer',
+        providerOptions: {
+          host: env('SMTP_HOST'),
+          port: env.int('SMTP_PORT', 587),
+          secure: env.bool('SMTP_SECURE', false),
+          auth: {
+            user: env('SMTP_USERNAME'),
+            pass: env('SMTP_PASSWORD'),
+          },
+        },
+        settings: {
+          defaultFrom: env('EMAIL_DEFAULT_FROM'),
+          defaultReplyTo: env('EMAIL_DEFAULT_REPLY_TO'),
+        },
+      },
+    },
+
     'unique-coupon': {
       enabled: true,
       resolve: './src/plugins/unique-coupon',
@@ -31,16 +50,11 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
         // so src/extensions/upload already rejects it outright — this list
         // just moves that refusal earlier, before the file is written.
         //
-        // Resume document types (PDF/DOC/DOCX) ARE listed: resumes normally
-        // reach the media library through the upload SERVICE
-        // (src/api/job-application/controllers/submit.ts), which this
-        // controller-level gate does not see — that endpoint does its own
-        // magic-byte validation in src/utils/resume-upload-validation.ts. They
-        // are allowed here so that if that path is ever routed through the
-        // controller gate, resume submissions keep working. Deliberate side
-        // effect: the admin Media Library's upload endpoint now also accepts
-        // these document types from editors (its UI picker is unchanged — it
-        // filters by asset category, not by this list).
+        // Images only. PDF/DOC/DOCX used to be listed so résumé submissions
+        // could reach the media library through the upload service; that path
+        // is gone (applications are emailed by the ISR gateway and never
+        // stored), so the document types come off with it. DOC/DOCX in
+        // particular can carry macros and had no editorial use case.
         security: {
           allowedTypes: [
             'image/jpeg',
@@ -48,9 +62,6 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
             'image/webp',
             'image/avif',
             'image/gif',
-            'application/pdf',
-            'application/msword',
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
           ],
         },
         // Breakpoints live OUTSIDE the S3 gate: the variant matrix must be
