@@ -100,4 +100,18 @@ describe('single-relation command generation', () => {
       }),
     ).toBeNull();
   });
+
+  it('disconnects the final persisted Store when the relation is optional', () => {
+    const first = store(1);
+    const result = singleRelationChange({
+      change: { type: 'remove', candidate: first },
+      selected: [first],
+      persistedDocumentIds: new Set(['store-1']),
+      minSelections: 0,
+    });
+
+    expect(result?.selected).toEqual([]);
+    expect(result?.formValue.connect).toEqual([]);
+    expect(commandIds(result?.formValue.disconnect)).toEqual(['store-1']);
+  });
 });

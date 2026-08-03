@@ -1,6 +1,7 @@
 import type { Core } from '@strapi/strapi';
 import { errors } from '@strapi/utils';
 import { join } from 'node:path';
+import { SINGLE_TYPE_LOCK_DOCUMENT_ID } from './constants/record-lock';
 import { DOTD_SECTION_LABELS, DOTD_UID } from './constants/deal-of-the-day-sections';
 import { HOMEPAGE_IMAGE_RULES, imageRuleDescription } from './constants/homepage-images';
 import {
@@ -149,7 +150,9 @@ const HIDE_FROM_COMPONENT_EDIT: Record<string, string[]> = {
 };
 
 // Write actions the edit lock guards. `create`/`clone` are absent on purpose:
-// they have no existing documentId, so there is nothing to lock.
+// for collection types they have no existing documentId, so there is nothing
+// to lock. Single types are the exception — their first-ever save IS a
+// create, and the middleware enforces that case separately.
 const LOCK_ENFORCED_ACTIONS = new Set([
   'update',
   'delete',
@@ -1475,8 +1478,22 @@ export default {
     // Content Manager requests carrying an admin user so crons, the ISR
     // outbox, redeem flows and other server-initiated writes are untouched.
     strapi.documents.use(async (context: any, next: any) => {
-      if (!LOCK_ENFORCED_ACTIONS.has(context.action)) return next();
-      const documentId = context.params?.documentId;
+      const isSingleType =
+        strapi.getModel(context.uid as any)?.kind === 'singleType';
+      // Single types additionally enforce `create`: their FIRST-ever save
+      // runs as the create action (no document row exists yet), but they are
+      // locked regardless of existence — without this, two admins could race
+      // on a never-saved single type straight past each other's lock.
+      const enforced =
+        LOCK_ENFORCED_ACTIONS.has(context.action) ||
+        (isSingleType && context.action === 'create');
+      if (!enforced) return next();
+      // Single types are locked under a fixed pseudo id — the panel has no
+      // real documentId to key on (see src/constants/record-lock.ts), so the
+      // guard must look the lock up under the same key.
+      const documentId = isSingleType
+        ? SINGLE_TYPE_LOCK_DOCUMENT_ID
+        : context.params?.documentId;
       if (typeof documentId !== 'string' || documentId === '') return next();
       const ctx = strapi.requestContext.get();
       const user = ctx?.state?.user;

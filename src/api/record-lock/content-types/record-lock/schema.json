@@ -40,6 +40,10 @@
       "required": true,
       "private": true
     },
+    "leaseId": {
+      "type": "string",
+      "private": true
+    },
     "holderName": {
       "type": "string",
       "required": true,

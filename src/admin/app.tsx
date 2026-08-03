@@ -528,6 +528,7 @@ function RelationSection({
       selected: selectedList,
       persistedDocumentIds,
       formValue: isRelationFormValue(formValue) ? formValue : {},
+      minSelections: config.minSelections ?? 0,
     });
     if (!result) return;
 

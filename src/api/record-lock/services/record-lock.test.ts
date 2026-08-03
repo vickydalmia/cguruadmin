@@ -12,6 +12,7 @@ type Row = {
   model: string;
   entryDocumentId: string;
   adminUserId: number;
+  leaseId?: string;
   holderName: string;
   expiresAt: string;
 };
@@ -21,24 +22,25 @@ type Row = {
  * covering exactly the operations the service uses: findOne/create/update by
  * id+holder guard/deleteMany, plus the UNIQUE(key) insert constraint.
  */
-function createHarness(seed: Row[] = []) {
+function createHarness(
+  seed: Row[] = [],
+  { kind = 'collectionType' }: { kind?: string } = {},
+) {
   let rows: Row[] = [...seed];
   let nextId = seed.reduce((max, row) => Math.max(max, row.id), 0) + 1;
 
   const matches = (row: Row, where: any): boolean =>
     Object.entries(where).every(([field, cond]) => {
-      if (
-        cond !== null &&
-        typeof cond === 'object' &&
-        '$lt' in (cond as any)
-      ) {
+      if (cond !== null && typeof cond === 'object' && '$lt' in (cond as any)) {
         return (row as any)[field] < (cond as any).$lt;
       }
       return (row as any)[field] === cond;
     });
 
   const query = {
-    findOne: vi.fn(async ({ where }: any) => rows.find((row) => matches(row, where)) ?? null),
+    findOne: vi.fn(
+      async ({ where }: any) => rows.find((row) => matches(row, where)) ?? null,
+    ),
     create: vi.fn(async ({ data }: any) => {
       if (rows.some((row) => row.key === data.key)) {
         throw Object.assign(new Error('unique violation'), { code: '23505' });
@@ -60,7 +62,10 @@ function createHarness(seed: Row[] = []) {
     }),
   };
 
-  const strapi = { db: { query: () => query } } as any;
+  const strapi = {
+    db: { query: () => query },
+    getModel: vi.fn(() => ({ kind })),
+  } as any;
   return {
     service: createRecordLockService({ strapi }),
     query,
@@ -72,6 +77,9 @@ const MODEL = 'api::coupon.coupon';
 const DOC = 'doc-1';
 const alice = { id: 1, firstname: 'Alice', lastname: 'Ops', email: 'a@x.com' };
 const bob = { id: 2, firstname: 'Bob', lastname: null, email: 'b@x.com' };
+const ALICE_LEASE = 'alice-tab-a';
+const ALICE_OTHER_LEASE = 'alice-tab-b';
+const BOB_LEASE = 'bob-tab-a';
 
 const activeRow = (user: typeof alice, msFromNow = LOCK_TTL_MS): Row => ({
   id: 99,
@@ -79,6 +87,7 @@ const activeRow = (user: typeof alice, msFromNow = LOCK_TTL_MS): Row => ({
   model: MODEL,
   entryDocumentId: DOC,
   adminUserId: user.id,
+  leaseId: user.id === alice.id ? ALICE_LEASE : BOB_LEASE,
   holderName: displayName(user),
   expiresAt: new Date(Date.now() + msFromNow).toISOString(),
 });
@@ -91,28 +100,32 @@ beforeEach(() => {
 describe('record-lock service', () => {
   it('grants a free entry and stores the holder snapshot', async () => {
     const { service, rows } = createHarness();
-    const result = await service.acquire(MODEL, DOC, alice);
+    const result = await service.acquire(MODEL, DOC, ALICE_LEASE, alice);
     expect(result).toMatchObject({ acquired: true });
     expect(rows()).toHaveLength(1);
     expect(rows()[0]).toMatchObject({
       key: `${MODEL}:${DOC}`,
       adminUserId: 1,
+      leaseId: ALICE_LEASE,
       holderName: 'Alice Ops',
     });
   });
 
   it('refuses a second admin while the lock is active, naming the holder', async () => {
     const { service } = createHarness([activeRow(alice)]);
-    const result = await service.acquire(MODEL, DOC, bob);
+    const result = await service.acquire(MODEL, DOC, BOB_LEASE, bob);
     expect(result).toEqual({
       acquired: false,
-      holder: expect.objectContaining({ adminUserId: 1, holderName: 'Alice Ops' }),
+      holder: expect.objectContaining({
+        adminUserId: 1,
+        holderName: 'Alice Ops',
+      }),
     });
   });
 
   it('treats a heartbeat from the holder as a refresh, not a conflict', async () => {
     const { service, rows } = createHarness([activeRow(alice, 10_000)]);
-    const result = await service.acquire(MODEL, DOC, alice);
+    const result = await service.acquire(MODEL, DOC, ALICE_LEASE, alice);
     expect(result).toMatchObject({ acquired: true });
     expect(new Date(rows()[0].expiresAt).getTime()).toBe(
       Date.now() + LOCK_TTL_MS,
@@ -121,7 +134,7 @@ describe('record-lock service', () => {
 
   it('lets another admin take over once the lock has expired', async () => {
     const { service, rows } = createHarness([activeRow(alice, -1_000)]);
-    const result = await service.acquire(MODEL, DOC, bob);
+    const result = await service.acquire(MODEL, DOC, BOB_LEASE, bob);
     expect(result).toMatchObject({ acquired: true });
     // The expired row was swept, so takeover arrives as a fresh insert.
     expect(rows()).toHaveLength(1);
@@ -139,7 +152,7 @@ describe('record-lock service', () => {
     query.create.mockRejectedValueOnce(
       Object.assign(new Error('unique violation'), { code: '23505' }),
     );
-    const result = await service.acquire(MODEL, DOC, alice);
+    const result = await service.acquire(MODEL, DOC, ALICE_LEASE, alice);
     expect(result).toMatchObject({
       acquired: false,
       holder: expect.objectContaining({ adminUserId: 2 }),
@@ -148,10 +161,26 @@ describe('record-lock service', () => {
 
   it('release removes only the caller’s own lock', async () => {
     const { service, rows } = createHarness([activeRow(alice)]);
-    await service.release(MODEL, DOC, bob);
+    await service.release(MODEL, DOC, BOB_LEASE, bob);
     expect(rows()).toHaveLength(1);
-    await service.release(MODEL, DOC, alice);
+    await service.release(MODEL, DOC, ALICE_LEASE, alice);
     expect(rows()).toHaveLength(0);
+  });
+
+  it("does not let a duplicate tab refresh or release the owner's lease", async () => {
+    const { service, rows } = createHarness([activeRow(alice)]);
+
+    const result = await service.acquire(MODEL, DOC, ALICE_OTHER_LEASE, alice);
+    expect(result).toMatchObject({
+      acquired: false,
+      holder: { adminUserId: alice.id },
+    });
+
+    expect(await service.release(MODEL, DOC, ALICE_OTHER_LEASE, alice)).toBe(
+      false,
+    );
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0].leaseId).toBe(ALICE_LEASE);
   });
 
   it('activeHolder ignores expired locks', async () => {
@@ -165,6 +194,26 @@ describe('record-lock service', () => {
       adminUserId: 1,
       holderName: 'Alice Ops',
     });
+  });
+
+  it('normalizes single types to the shared pseudo id whatever documentId the caller passes', async () => {
+    const { service, rows } = createHarness([], { kind: 'singleType' });
+    await service.acquire(MODEL, 'real-doc-id', ALICE_LEASE, alice);
+    expect(rows()[0].key).toBe(`${MODEL}:single`);
+    // A second admin using a DIFFERENT documentId still collides on the same
+    // single-type lock — the two ids name the same single document.
+    const result = await service.acquire(
+      MODEL,
+      'another-doc-id',
+      BOB_LEASE,
+      bob,
+    );
+    expect(result).toMatchObject({ acquired: false });
+    expect(await service.activeHolder(MODEL, 'yet-another-id')).toMatchObject({
+      adminUserId: 1,
+    });
+    await service.release(MODEL, 'whatever', ALICE_LEASE, alice);
+    expect(rows()).toHaveLength(0);
   });
 });
 

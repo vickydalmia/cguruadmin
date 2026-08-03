@@ -1,6 +1,7 @@
 import { useFetchClient } from '@strapi/strapi/admin';
 import * as React from 'react';
 
+import { startPoll } from '../../utils/poll';
 import { toCandidate, type CouponCandidate } from './coupon-layout';
 import type { CouponLayoutConfig } from './config';
 import {
@@ -79,17 +80,15 @@ export function useEntityCouponLayout(
     if (!outboxId || isTerminalRefreshState(currentState)) {
       return;
     }
-    let cancelled = false;
     let attempts = 0;
-    let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const poll = async () => {
+    const poll = startPoll(async (alive) => {
       attempts += 1;
       try {
         const response = await get(
           `/entity-coupon-layout/refresh/${outboxId}`,
         );
-        if (cancelled) return;
+        if (!alive()) return null;
         const body = response?.data?.data ?? response?.data;
         const next = String(body?.state ?? 'queued');
         // Only re-render when the value actually moved. This used to spread a
@@ -106,20 +105,16 @@ export function useEntityCouponLayout(
               }
             : current,
         );
-        if (isTerminalRefreshState(next)) return;
+        if (isTerminalRefreshState(next)) return null;
       } catch {
         // Keep the saved state and retry; refresh status must never turn a
         // successful layout write into a false save failure.
       }
-      if (cancelled || attempts >= REFRESH_POLL_MAX_ATTEMPTS) return;
-      timer = setTimeout(poll, refreshPollDelayMs(attempts));
-    };
+      if (attempts >= REFRESH_POLL_MAX_ATTEMPTS) return null;
+      return refreshPollDelayMs(attempts);
+    });
 
-    void poll();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
+    return poll.stop;
   }, [get, state.data?.refresh?.outboxId, state.data?.refresh?.state]);
 
   return {
