@@ -24,6 +24,11 @@ export function startPoll(
 ): Poll {
   let running = true;
   let ticking = false;
+  // A kick that arrives while a tick is in flight must not be dropped: the
+  // record-lock release broadcast is time-correlated with server work, so it
+  // routinely lands mid-tick — remember it and run again as soon as the
+  // current tick settles.
+  let pendingKick = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const alive = () => running;
 
@@ -38,6 +43,11 @@ export function startPoll(
     }
     ticking = false;
     if (!running || delay === null) return;
+    if (pendingKick) {
+      pendingKick = false;
+      void loop();
+      return;
+    }
     timer = setTimeout(() => void loop(), delay);
   };
 
@@ -49,7 +59,11 @@ export function startPoll(
       if (timer !== undefined) clearTimeout(timer);
     },
     kick() {
-      if (!running || ticking) return;
+      if (!running) return;
+      if (ticking) {
+        pendingKick = true;
+        return;
+      }
       if (timer !== undefined) clearTimeout(timer);
       void loop();
     },

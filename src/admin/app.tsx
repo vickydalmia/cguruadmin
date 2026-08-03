@@ -51,6 +51,7 @@ import {
   orderedRelationCommands,
   removalNeedsDisconnect,
 } from './utils/ordered-relation';
+import { installRecordLockLeaseInterceptor } from './utils/record-lock-lease';
 import { createDealAwareMediaInput } from './features/deal-image/components/deal-aware-media-input';
 import { couponLayoutPanel } from './features/coupon-layout/components/coupon-layout-panel';
 import {
@@ -528,7 +529,11 @@ function RelationSection({
       selected: selectedList,
       persistedDocumentIds,
       formValue: isRelationFormValue(formValue) ? formValue : {},
-      minSelections: config.minSelections ?? 0,
+      // Un-defaulted on purpose: a config that omits minSelections gets the
+      // util's FAIL-SAFE default (1 — the last selection cannot be removed),
+      // not a silent 0 that would make every future single relation
+      // emptiable. Store sets 0 explicitly where emptiable is intended.
+      minSelections: config.minSelections,
     });
     if (!result) return;
 
@@ -1295,6 +1300,7 @@ export default {
     }
   },
   bootstrap(app: StrapiApp) {
+    installRecordLockLeaseInterceptor();
     const contentManager = app.getPlugin('content-manager') as any;
     const apis = contentManager.apis;
     apis.addDocumentAction([PublicOfferLinkAction, BumpToTopAction]);

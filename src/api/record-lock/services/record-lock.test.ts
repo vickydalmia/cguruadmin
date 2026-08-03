@@ -17,6 +17,12 @@ type Row = {
   expiresAt: string;
 };
 
+type CancellationRow = {
+  id: number;
+  leaseId: string;
+  expiresAt: string;
+};
+
 /**
  * In-memory stand-in for strapi.db.query('api::record-lock.record-lock')
  * covering exactly the operations the service uses: findOne/create/update by
@@ -27,6 +33,7 @@ function createHarness(
   { kind = 'collectionType' }: { kind?: string } = {},
 ) {
   let rows: Row[] = [...seed];
+  let cancellations: CancellationRow[] = [];
   let nextId = seed.reduce((max, row) => Math.max(max, row.id), 0) + 1;
 
   const matches = (row: Row, where: any): boolean =>
@@ -62,14 +69,41 @@ function createHarness(
     }),
   };
 
+  const cancellationQuery = {
+    findOne: vi.fn(
+      async ({ where }: any) =>
+        cancellations.find((row) => matches(row as Row, where)) ?? null,
+    ),
+    create: vi.fn(async ({ data }: any) => {
+      if (cancellations.some((row) => row.leaseId === data.leaseId)) {
+        throw Object.assign(new Error('unique violation'), { code: '23505' });
+      }
+      const row = { id: nextId++, ...data } as CancellationRow;
+      cancellations.push(row);
+      return row;
+    }),
+    deleteMany: vi.fn(async ({ where }: any) => {
+      const before = cancellations.length;
+      cancellations = cancellations.filter(
+        (row) => !matches(row as Row, where),
+      );
+      return { count: before - cancellations.length };
+    }),
+  };
+
   const strapi = {
-    db: { query: () => query },
+    db: {
+      query: (uid: string) =>
+        uid.includes('record-lock-cancellation') ? cancellationQuery : query,
+    },
     getModel: vi.fn(() => ({ kind })),
   } as any;
   return {
     service: createRecordLockService({ strapi }),
     query,
+    cancellationQuery,
     rows: () => rows,
+    cancellations: () => cancellations,
   };
 }
 
@@ -116,11 +150,40 @@ describe('record-lock service', () => {
     const result = await service.acquire(MODEL, DOC, BOB_LEASE, bob);
     expect(result).toEqual({
       acquired: false,
+      self: false,
       holder: expect.objectContaining({
         adminUserId: 1,
         holderName: 'Alice Ops',
       }),
     });
+  });
+
+  it('lets the SAME admin explicitly take over their own orphaned lease, never another admin’s', async () => {
+    const { service, rows } = createHarness([activeRow(alice)]);
+
+    // Bob cannot steal Alice's lock even with takeover.
+    const bobAttempt = await service.acquire(MODEL, DOC, BOB_LEASE, bob, {
+      takeover: true,
+    });
+    expect(bobAttempt).toMatchObject({ acquired: false, self: false });
+    expect(rows()[0].leaseId).toBe(ALICE_LEASE);
+
+    // Alice's new session (post-F5) IS allowed to take her own lease over.
+    const aliceAttempt = await service.acquire(
+      MODEL,
+      DOC,
+      ALICE_OTHER_LEASE,
+      alice,
+      { takeover: true },
+    );
+    expect(aliceAttempt).toMatchObject({ acquired: true });
+    expect(rows()[0].leaseId).toBe(ALICE_OTHER_LEASE);
+  });
+
+  it('marks a same-admin block as self so the panel can offer takeover', async () => {
+    const { service } = createHarness([activeRow(alice)]);
+    const result = await service.acquire(MODEL, DOC, ALICE_OTHER_LEASE, alice);
+    expect(result).toMatchObject({ acquired: false, self: true });
   });
 
   it('treats a heartbeat from the holder as a refresh, not a conflict', async () => {
@@ -160,11 +223,18 @@ describe('record-lock service', () => {
   });
 
   it('release removes only the caller’s own lock', async () => {
-    const { service, rows } = createHarness([activeRow(alice)]);
+    const { service, rows, cancellations } = createHarness([
+      activeRow(alice),
+    ]);
     await service.release(MODEL, DOC, BOB_LEASE, bob);
     expect(rows()).toHaveLength(1);
-    await service.release(MODEL, DOC, ALICE_LEASE, alice);
+    expect(await service.release(MODEL, DOC, ALICE_LEASE, alice)).toBe(true);
     expect(rows()).toHaveLength(0);
+    expect(cancellations().map((row) => row.leaseId)).toEqual([
+      BOB_LEASE,
+      ALICE_LEASE,
+    ]);
+    expect(await service.activeHolder(MODEL, DOC)).toBeNull();
   });
 
   it("does not let a duplicate tab refresh or release the owner's lease", async () => {
@@ -183,6 +253,57 @@ describe('record-lock service', () => {
     expect(rows()[0].leaseId).toBe(ALICE_LEASE);
   });
 
+  it('fences an acquire that reaches the server after its release', async () => {
+    const { service, rows, cancellations } = createHarness();
+
+    expect(await service.release(MODEL, DOC, ALICE_LEASE, alice)).toBe(false);
+    expect(cancellations()[0].leaseId).toBe(ALICE_LEASE);
+    await expect(
+      service.acquire(MODEL, DOC, ALICE_LEASE, alice),
+    ).resolves.toEqual({ acquired: false, cancelled: true });
+    expect(await service.activeHolder(MODEL, DOC)).toBeNull();
+  });
+
+  it('removes a lock when cancellation lands during its acquire', async () => {
+    const { service, rows, cancellationQuery } = createHarness();
+    cancellationQuery.findOne
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        leaseId: ALICE_LEASE,
+        expiresAt: new Date(Date.now() + LOCK_TTL_MS).toISOString(),
+      } as any);
+
+    await expect(
+      service.acquire(MODEL, DOC, ALICE_LEASE, alice),
+    ).resolves.toEqual({ acquired: false, cancelled: true });
+    expect(rows()).toHaveLength(0);
+  });
+
+  it('allows a different tab to acquire after another lease is cancelled', async () => {
+    const { service, rows } = createHarness();
+    await service.release(MODEL, DOC, ALICE_LEASE, alice);
+
+    await expect(
+      service.acquire(MODEL, DOC, ALICE_OTHER_LEASE, alice),
+    ).resolves.toMatchObject({ acquired: true });
+    expect(rows()[0]).toMatchObject({
+      leaseId: ALICE_OTHER_LEASE,
+    });
+  });
+
+  it('fences a blocked tab even if the current owner later releases', async () => {
+    const { service, rows } = createHarness([activeRow(alice)]);
+
+    // Bob closes while his acquire is unresolved. Alice still owns the row,
+    // so the cancellation must live independently from that row.
+    await service.release(MODEL, DOC, BOB_LEASE, bob);
+    await service.release(MODEL, DOC, ALICE_LEASE, alice);
+    expect(rows()).toHaveLength(0);
+    await expect(
+      service.acquire(MODEL, DOC, BOB_LEASE, bob),
+    ).resolves.toEqual({ acquired: false, cancelled: true });
+  });
+
   it('activeHolder ignores expired locks', async () => {
     const { service } = createHarness([activeRow(alice, -1)]);
     expect(await service.activeHolder(MODEL, DOC)).toBeNull();
@@ -192,6 +313,7 @@ describe('record-lock service', () => {
     const { service } = createHarness([activeRow(alice)]);
     expect(await service.activeHolder(MODEL, DOC)).toMatchObject({
       adminUserId: 1,
+      leaseId: ALICE_LEASE,
       holderName: 'Alice Ops',
     });
   });
@@ -213,7 +335,47 @@ describe('record-lock service', () => {
       adminUserId: 1,
     });
     await service.release(MODEL, 'whatever', ALICE_LEASE, alice);
+    expect(await service.activeHolder(MODEL, 'whatever')).toBeNull();
     expect(rows()).toHaveLength(0);
+  });
+
+  it('locks single types with documentId omitted entirely — the service owns the pseudo id', async () => {
+    const { service, rows } = createHarness([], { kind: 'singleType' });
+    const result = await service.acquire(MODEL, undefined, ALICE_LEASE, alice);
+    expect(result).toMatchObject({ acquired: true });
+    expect(rows()[0].key).toBe(`${MODEL}:single`);
+    expect(await service.activeHolder(MODEL, undefined)).toMatchObject({
+      adminUserId: 1,
+    });
+    expect(await service.release(MODEL, undefined, ALICE_LEASE, alice)).toBe(
+      true,
+    );
+  });
+
+  it('rejects a collection-type acquire without a documentId', async () => {
+    const { service } = createHarness();
+    await expect(
+      service.acquire(MODEL, undefined, ALICE_LEASE, alice),
+    ).rejects.toThrow(/documentId is required/);
+  });
+
+  it('surfaces a non-unique create failure instead of retrying it as a race', async () => {
+    const { service, query } = createHarness();
+    query.create.mockRejectedValueOnce(new Error('connection reset'));
+    await expect(
+      service.acquire(MODEL, DOC, ALICE_LEASE, alice),
+    ).rejects.toThrow('connection reset');
+  });
+
+  it('gives up with an error after persistently losing the guarded update', async () => {
+    const { service, query } = createHarness([activeRow(alice, -1_000)]);
+    // Every guarded takeover of the expired row "loses": update matches
+    // nothing, and the re-read keeps showing the same expired row.
+    query.findOne.mockResolvedValue(activeRow(alice, -1_000) as any);
+    query.update.mockResolvedValue(null as any);
+    await expect(
+      service.acquire(MODEL, DOC, BOB_LEASE, bob),
+    ).rejects.toThrow(/gave up acquiring/);
   });
 });
 

@@ -1705,6 +1705,50 @@ export interface ApiPrivacyPolicyPagePrivacyPolicyPage
   };
 }
 
+export interface ApiRecordLockCancellationRecordLockCancellation
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'record_lock_cancellations';
+  info: {
+    description: 'Short-lived fences preventing late edit-lock acquires';
+    displayName: 'Record Lock Cancellation';
+    pluralName: 'record-lock-cancellations';
+    singularName: 'record-lock-cancellation';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  pluginOptions: {
+    'content-manager': {
+      visible: false;
+    };
+    'content-type-builder': {
+      visible: false;
+    };
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    expiresAt: Schema.Attribute.DateTime &
+      Schema.Attribute.Required &
+      Schema.Attribute.Private;
+    leaseId: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Private &
+      Schema.Attribute.Unique;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::record-lock-cancellation.record-lock-cancellation'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiRecordLockRecordLock extends Struct.CollectionTypeSchema {
   collectionName: 'record_locks';
   info: {
@@ -2653,6 +2697,7 @@ declare module '@strapi/strapi' {
       'api::menu.menu': ApiMenuMenu;
       'api::partner-with-us-page.partner-with-us-page': ApiPartnerWithUsPagePartnerWithUsPage;
       'api::privacy-policy-page.privacy-policy-page': ApiPrivacyPolicyPagePrivacyPolicyPage;
+      'api::record-lock-cancellation.record-lock-cancellation': ApiRecordLockCancellationRecordLockCancellation;
       'api::record-lock.record-lock': ApiRecordLockRecordLock;
       'api::redirect.redirect': ApiRedirectRedirect;
       'api::store.store': ApiStoreStore;
