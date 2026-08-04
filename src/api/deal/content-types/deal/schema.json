@@ -112,7 +112,7 @@
     "affiliateLink": {
       "type": "text",
       "required": true,
-      "regex": "^https?://[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?([.][a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+(:[0-9]{1,5})?([/?#]\\S*)?$"
+      "regex": "^https?://[^\\u0000-\\u001f\\u007f<>]+$"
     },
     "expiresAt": {
       "type": "datetime"

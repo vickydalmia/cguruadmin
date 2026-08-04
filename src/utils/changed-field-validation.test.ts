@@ -142,6 +142,39 @@ describe('validateChangedFields', () => {
     ).rejects.toThrow(/Website URL/);
   });
 
+  it.each(['api::coupon.coupon', 'api::deal.deal'])(
+    'accepts browser-normalized affiliate URLs for %s',
+    async (uid) => {
+      const { strapi } = harness();
+
+      await expect(
+        validateChangedFields(strapi, uid, 'create', {
+          affiliateLink:
+            'https://www.myntra.com/adidas?sort=popularity&rf=Discount Range:30.0_100.0_30.0 TO 100.0&utm_source=admitad&utm_medium=affiliate&utm_campaign=306480_ADIDAS',
+        }),
+      ).resolves.toBeUndefined();
+    },
+  );
+
+  it.each(['api::coupon.coupon', 'api::deal.deal'])(
+    'rejects unsafe affiliate URLs for %s',
+    async (uid) => {
+      const { strapi } = harness();
+
+      await expect(
+        validateChangedFields(strapi, uid, 'create', {
+          affiliateLink: 'https://merchant.example/a\nb',
+        }),
+      ).rejects.toThrow(/Affiliate link/);
+
+      await expect(
+        validateChangedFields(strapi, uid, 'create', {
+          affiliateLink: 'javascript:alert(1)',
+        }),
+      ).rejects.toThrow(/Affiliate link/);
+    },
+  );
+
   it('compares decimal representations semantically', async () => {
     const { strapi } = harness({
       documentId: 'deal-1',
