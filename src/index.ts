@@ -38,8 +38,10 @@ import type {
 } from './isr-outbox/types';
 import {
   computeScope,
+  FESTIVE_OFFER_ENTITY_UIDS,
   isRedirectNoteOnlyChange,
   preDeleteScope,
+  type FestiveOfferSnapshot,
 } from './isr-outbox/scopes';
 import {
   appendListColumns,
@@ -1711,6 +1713,32 @@ export default {
           }
         }
 
+        // Festive fields BEFORE the write. The content-manager form submits
+        // the full document, so computeScope cannot tell "festive edited"
+        // from "festive merely present" by looking at the payload — without
+        // this snapshot every Store/Brand save would escalate to a full-site
+        // rebuild (see festiveOfferChanged in isr-outbox/scopes.ts). A failed
+        // read stays null, which fails toward invalidation, never away.
+        let festiveOfferBefore: FestiveOfferSnapshot | null = null;
+        if (
+          context.action === 'update' &&
+          FESTIVE_OFFER_ENTITY_UIDS.has(context.uid) &&
+          context.params?.documentId
+        ) {
+          try {
+            festiveOfferBefore = await strapi.documents(context.uid).findOne({
+              documentId: context.params.documentId,
+              fields: [
+                'isFestiveOffer',
+                'festiveOfferTitle',
+                'festiveOfferDescription',
+              ] as any,
+            });
+          } catch {
+            festiveOfferBefore = null;
+          }
+        }
+
         return await runContentTransaction(
           strapi,
           () => next(),
@@ -1801,6 +1829,7 @@ export default {
                     context.action,
                     documentId,
                     context.params?.data,
+                    festiveOfferBefore,
                   );
             let scope =
               context.action === 'delete'

@@ -1,6 +1,7 @@
 import type { Core } from '@strapi/strapi';
 import { DOTD_SECTION_CAPS as SECTION_CAPS } from '../../../constants/deal-of-the-day-sections';
 import { arrayizeOfferText } from '../../../utils/offer-text';
+import { attachFestiveOffers } from '../../../utils/festive-offer-response';
 import {
   backfillDeals,
   cap,
@@ -411,6 +412,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     await attachDealCounts(strapi, sanitized);
     // Decorate Deal benefit labels and attach computed pricing content.
     arrayizeOfferText(sanitized);
+    // Resolves each Deal's Checkout Merchant to its festive offer.
+    await attachFestiveOffers(strapi, sanitized);
 
     return ctx.send({ data: sanitized });
   },

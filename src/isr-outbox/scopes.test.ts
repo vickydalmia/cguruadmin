@@ -290,6 +290,305 @@ describe('deal-of-the-day landing page scope', () => {
   });
 });
 
+describe('festive offer scope', () => {
+  const entityDoc = { name: 'Flipkart', slug: 'flipkart' };
+  const FESTIVE_ON = {
+    isFestiveOffer: true,
+    festiveOfferTitle: 'Big Billion Days',
+    festiveOfferDescription: '<p>Up to 80% off</p>',
+  };
+
+  it('repaints exactly the pages showing offers that check out with the merchant', async () => {
+    // A festive change stales every card whose checkoutMerchant is this Store:
+    // each offer's detail page, the entity pages listing those offers, the
+    // deal landing page (Deals involved) and the homepage — merged into the
+    // Store's own narrow scope, NOT a full-site rebuild.
+    const { computeScope } = await import('./scopes');
+    const strapi = strapiWithFindOne(
+      async () => entityDoc,
+      async (uid) => {
+        if (uid === 'api::coupon.coupon') {
+          return [
+            {
+              id: 11,
+              documentId: 'c1',
+              stores: [{ name: 'Amazon India', slug: 'amazon-coupons' }],
+            },
+          ];
+        }
+        if (uid === 'api::deal.deal') {
+          return [
+            { id: 7, documentId: 'd1', brands: [{ name: 'Nike', slug: 'nike' }] },
+          ];
+        }
+        return []; // reverse curated-relation lookups find nothing extra
+      },
+    );
+
+    await expect(
+      computeScope(
+        strapi,
+        'api::store.store',
+        'update',
+        'store-1',
+        FESTIVE_ON,
+        { isFestiveOffer: false },
+      ),
+    ).resolves.toEqual({
+      full: false,
+      homepage: true,
+      sitemap: true,
+      slugs: [
+        'flipkart',
+        'deal-of-the-day',
+        'coupon/11',
+        'amazon-coupons',
+        'deal/7',
+        'nike',
+      ],
+      optionalSlugs: ['flipkart-deals', 'nike-deals'],
+    });
+  });
+
+  it('adds no repaint pages when no offer names the merchant', async () => {
+    const { computeScope } = await import('./scopes');
+    const strapi = strapiWithFindOne(async () => entityDoc);
+
+    await expect(
+      computeScope(strapi, 'api::store.store', 'update', 'store-1', FESTIVE_ON, {
+        isFestiveOffer: false,
+      }),
+    ).resolves.toEqual({
+      slugs: ['flipkart', 'deal-of-the-day'],
+      optionalSlugs: ['flipkart-deals'],
+      homepage: true,
+      sitemap: true,
+    });
+  });
+
+  it('degrades to a full rebuild past the scan bound', async () => {
+    const { computeScope } = await import('./scopes');
+    const strapi = strapiWithFindOne(
+      async () => entityDoc,
+      async (uid) =>
+        uid === 'api::coupon.coupon'
+          ? Array.from({ length: 1_001 }, (_, i) => ({
+              id: i + 1,
+              documentId: `c${i}`,
+            }))
+          : [],
+    );
+
+    await expect(
+      computeScope(strapi, 'api::store.store', 'update', 'store-1', FESTIVE_ON, {
+        isFestiveOffer: false,
+      }),
+    ).resolves.toEqual({ full: true, refreshScopes: ['routes'] });
+  });
+
+  it('falls back to a full rebuild when the merchant scan fails', async () => {
+    const { computeScope } = await import('./scopes');
+    const strapi = strapiWithFindOne(
+      async () => entityDoc,
+      async () => {
+        throw new Error('db down');
+      },
+    );
+
+    await expect(
+      computeScope(strapi, 'api::brand.brand', 'update', 'brand-1', {
+        isFestiveOffer: false,
+      }),
+    ).resolves.toEqual({ full: true, refreshScopes: ['routes'] });
+  });
+
+  it('leaves an ordinary Store edit on the narrow scope', async () => {
+    const { computeScope } = await import('./scopes');
+    const strapi = strapiWithFindOne(async () => entityDoc);
+
+    await expect(
+      computeScope(strapi, 'api::store.store', 'update', 'store-1', {
+        shortDescription: 'A marketplace',
+      }),
+    ).resolves.toEqual({
+      slugs: ['flipkart', 'deal-of-the-day'],
+      optionalSlugs: ['flipkart-deals'],
+      homepage: true,
+      sitemap: true,
+    });
+  });
+
+  it('does not escalate for entity types with no festive fields', async () => {
+    const { computeScope } = await import('./scopes');
+    const strapi = strapiWithFindOne(async () => ({
+      name: 'Fashion',
+      slug: 'categories/fashion',
+    }));
+
+    await expect(
+      computeScope(strapi, 'api::category.category', 'update', 'cat-1', {
+        shortDescription: 'Clothes',
+      }),
+    ).resolves.toMatchObject({ homepage: true });
+  });
+
+  it('keeps the narrow scope when the festive fields are present but UNCHANGED', async () => {
+    // The content-manager edit form submits the full document, so every
+    // Store save carries all three festive keys. A logo fix must not become
+    // a full-site rebuild just because the untouched values rode along.
+    const { computeScope } = await import('./scopes');
+    const strapi = strapiWithFindOne(async () => entityDoc);
+    const festive = {
+      isFestiveOffer: true,
+      festiveOfferTitle: 'Big Billion Days',
+      festiveOfferDescription: '<p>Up to 80% off</p>',
+    };
+
+    await expect(
+      computeScope(
+        strapi,
+        'api::store.store',
+        'update',
+        'store-1',
+        { name: 'Flipkart', ...festive },
+        festive,
+      ),
+    ).resolves.toEqual({
+      slugs: ['flipkart', 'deal-of-the-day'],
+      optionalSlugs: ['flipkart-deals'],
+      homepage: true,
+      sitemap: true,
+      // From the payload carrying `name` (identity refresh), NOT from festive.
+      refreshScopes: ['routes'],
+    });
+  });
+
+  it('runs the repaint scan for a full-document save whose festive values changed', async () => {
+    const { computeScope } = await import('./scopes');
+    const strapi = strapiWithFindOne(
+      async () => entityDoc,
+      async (uid) =>
+        uid === 'api::coupon.coupon' ? [{ id: 3, documentId: 'c3' }] : [],
+    );
+
+    await expect(
+      computeScope(
+        strapi,
+        'api::store.store',
+        'update',
+        'store-1',
+        {
+          name: 'Flipkart',
+          isFestiveOffer: true,
+          festiveOfferTitle: 'Diwali Dhamaka',
+          festiveOfferDescription: '<p>Up to 80% off</p>',
+        },
+        {
+          isFestiveOffer: true,
+          festiveOfferTitle: 'Big Billion Days',
+          festiveOfferDescription: '<p>Up to 80% off</p>',
+        },
+      ),
+    ).resolves.toEqual({
+      full: false,
+      homepage: true,
+      sitemap: true,
+      slugs: ['flipkart', 'deal-of-the-day', 'coupon/3'],
+      optionalSlugs: ['flipkart-deals'],
+      refreshScopes: ['routes'],
+    });
+  });
+});
+
+describe('festiveOfferChanged', () => {
+  const live = {
+    isFestiveOffer: true,
+    festiveOfferTitle: 'Big Billion Days',
+    festiveOfferDescription: '<p>Up to 80% off</p>',
+  };
+
+  it('is false when the payload never touches the festive keys', async () => {
+    const { festiveOfferChanged } = await import('./scopes');
+    expect(festiveOfferChanged({ name: 'Flipkart' }, live)).toBe(false);
+    expect(festiveOfferChanged(null, live)).toBe(false);
+  });
+
+  it('is false when the submitted values match the row', async () => {
+    const { festiveOfferChanged } = await import('./scopes');
+    expect(festiveOfferChanged({ ...live }, live)).toBe(false);
+  });
+
+  it('detects toggling the campaign on and off', async () => {
+    const { festiveOfferChanged } = await import('./scopes');
+    expect(
+      festiveOfferChanged({ isFestiveOffer: false }, live),
+    ).toBe(true);
+    expect(
+      festiveOfferChanged(
+        { isFestiveOffer: true },
+        { ...live, isFestiveOffer: false },
+      ),
+    ).toBe(true);
+  });
+
+  it('detects a copy edit on a live campaign', async () => {
+    const { festiveOfferChanged } = await import('./scopes');
+    expect(
+      festiveOfferChanged({ festiveOfferTitle: 'Diwali Dhamaka' }, live),
+    ).toBe(true);
+  });
+
+  it('ignores edits that never render: copy changes while the toggle is off', async () => {
+    // The response walker only ships complete, switched-on campaigns, so a
+    // draft title typed before enabling the toggle changes nothing on any page.
+    const { festiveOfferChanged } = await import('./scopes');
+    expect(
+      festiveOfferChanged(
+        { festiveOfferTitle: 'Draft title' },
+        { ...live, isFestiveOffer: false },
+      ),
+    ).toBe(false);
+  });
+
+  it('ignores an incomplete campaign in both states', async () => {
+    const { festiveOfferChanged } = await import('./scopes');
+    expect(
+      festiveOfferChanged(
+        { festiveOfferDescription: '' },
+        { ...live, festiveOfferDescription: '   ' },
+      ),
+    ).toBe(false);
+  });
+
+  it('fails toward invalidation when the before-row could not be read', async () => {
+    const { festiveOfferChanged } = await import('./scopes');
+    expect(festiveOfferChanged({ isFestiveOffer: true }, null)).toBe(true);
+    expect(festiveOfferChanged({ isFestiveOffer: false }, undefined)).toBe(true);
+  });
+});
+
+describe('touchesFestiveOffer', () => {
+  it('matches any of the three festive keys', async () => {
+    const { touchesFestiveOffer } = await import('./scopes');
+    expect(touchesFestiveOffer({ isFestiveOffer: true })).toBe(true);
+    expect(touchesFestiveOffer({ festiveOfferTitle: 'x' })).toBe(true);
+    expect(touchesFestiveOffer({ festiveOfferDescription: null })).toBe(true);
+  });
+
+  it('matches a key present but explicitly cleared', async () => {
+    // Switching a campaign OFF stales exactly the same pages as switching it on.
+    const { touchesFestiveOffer } = await import('./scopes');
+    expect(touchesFestiveOffer({ isFestiveOffer: false })).toBe(true);
+  });
+
+  it('ignores unrelated payloads', async () => {
+    const { touchesFestiveOffer } = await import('./scopes');
+    expect(touchesFestiveOffer({ name: 'Flipkart' })).toBe(false);
+    expect(touchesFestiveOffer(null)).toBe(false);
+    expect(touchesFestiveOffer([{ isFestiveOffer: true }])).toBe(false);
+  });
+});
+
 describe('managed page SEO scopes', () => {
   it('refreshes sitemap metadata for homepage and every static editorial page edit', async () => {
     const { computeScope } = await import('./scopes');

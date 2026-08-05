@@ -5,6 +5,7 @@ import {
   CHECKOUT_MERCHANT_MAX_LENGTH,
   CHECKOUT_MERCHANT_OFFER_UIDS,
   checkoutMerchantSource,
+  formatCheckoutMerchant,
   isBlankCheckoutMerchant,
   isCheckoutMerchantOfferUid,
   parseCheckoutMerchant,
@@ -116,7 +117,15 @@ export async function validateCheckoutMerchantForWrite(
     }
   }
 
-  if (isBlankCheckoutMerchant(value)) return;
+  if (isBlankCheckoutMerchant(value)) {
+    // A touched blank ("" or whitespace) means "no merchant" — store NULL, not
+    // the raw spelling, so downstream equality filters never meet a padded
+    // empty string.
+    if (touched && value !== null && value !== undefined) {
+      Reflect.set(data, CHECKOUT_MERCHANT_FIELD, null);
+    }
+    return;
+  }
 
   const problems: Problem[] = [];
   const path = [CHECKOUT_MERCHANT_FIELD];
@@ -152,6 +161,19 @@ export async function validateCheckoutMerchantForWrite(
         `exists ("${ref.documentId}"). Pick another merchant, or clear the field.`,
     });
     throw toValidationError(problems);
+  }
+
+  // Canonicalize what gets STORED. parseCheckoutMerchant tolerates padding
+  // (" store:x "), but everything downstream that matches by equality — the
+  // festive scope's `checkoutMerchant` filter in isr-outbox/scopes.ts above
+  // all — assumes the canonical spelling. Only a payload-carried value is
+  // rewritten; the strict fallback read of a stored value has nothing to fix
+  // in this write.
+  if (touched) {
+    const canonical = formatCheckoutMerchant(ref);
+    if (value !== canonical) {
+      Reflect.set(data, CHECKOUT_MERCHANT_FIELD, canonical);
+    }
   }
 }
 

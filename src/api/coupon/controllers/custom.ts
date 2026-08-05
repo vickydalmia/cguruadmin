@@ -3,6 +3,7 @@ import { resolveEntityLastUpdate } from '../services/entity-last-update';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { publishedOnlyFilters } from '../../../utils/content-status';
 import { arrayizeOfferText } from '../../../utils/offer-text';
+import { attachFestiveOffers } from '../../../utils/festive-offer-response';
 
 const MAX_PAGE_SIZE = 100;
 const clampPageSize = (raw: unknown, fallback: number) =>
@@ -109,6 +110,9 @@ const COUPON_PUBLIC_FIELDS = [
   'code',
   'couponType',
   'affiliateLink',
+  // Read by the festive-offer walker, which strips it from the response before
+  // it reaches the UI (see src/utils/festive-offer-response.ts).
+  'checkoutMerchant',
   'expiresAt',
   'contentStatus',
   'scheduledAt',
@@ -131,6 +135,9 @@ const DEAL_PUBLIC_FIELDS = [
   'discount',
   'discountPrefix',
   'affiliateLink',
+  // Read by the festive-offer walker, which strips it from the response before
+  // it reaches the UI (see src/utils/festive-offer-response.ts).
+  'checkoutMerchant',
   'expiresAt',
   'contentStatus',
   'scheduledAt',
@@ -250,6 +257,7 @@ async function listPublishedOffers(
   const items = await documents.findMany(listQuery);
   const total = await documents.count(countQuery);
   const data = arrayizeOfferText(await sanitizeDocumentOutput(strapi, ctx, uid, items));
+  await attachFestiveOffers(strapi, data);
 
   return {
     data,
@@ -386,13 +394,15 @@ async function hydrateEntityTopPickCoupons(
     .map((documentId) => byId.get(documentId))
     .filter(Boolean);
 
-  return arrayizeOfferText(
+  const topPicks = arrayizeOfferText(
     await sanitizePublicDocumentOutput(
       strapi,
       'api::coupon.coupon',
       ordered,
     ),
   );
+  await attachFestiveOffers(strapi, topPicks);
+  return topPicks;
 }
 
 // Return an entity's Coupons with its explicit `orderedCoupons` selection
@@ -688,13 +698,18 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       .filter(isRenderableCouponPageDeal)
       .slice(0, COUPON_PAGE_RELATED_DEAL_LIMIT);
 
-    return ctx.send({
+    const body = {
       coupon: arrayizeOfferText(safeCoupon),
       primaryEntity: couponPagePrimaryEntity(safeCoupon),
       relatedCoupons: arrayizeOfferText(safeRelatedCoupons),
       relatedDeals: arrayizeOfferText(safeRelatedDeals),
       similarStores,
-    });
+    };
+    // One pass over the whole body: the main coupon, its related coupons and
+    // its related deals are all offers and all need their merchant resolved.
+    await attachFestiveOffers(strapi, body);
+
+    return ctx.send(body);
   },
 
   async getDealPage(ctx) {
@@ -769,12 +784,15 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       .filter(isRenderableCouponPageDeal)
       .slice(0, DEAL_PAGE_RELATED_LIMIT);
 
-    return ctx.send({
+    const body = {
       deal: arrayizeOfferText(safeDeal),
       primaryEntity: dealPagePrimaryEntity(safeDeal),
       relatedDeals: arrayizeOfferText(safeRelatedDeals),
       similarStores,
-    });
+    };
+    await attachFestiveOffers(strapi, body);
+
+    return ctx.send(body);
   },
 
   async getRedeemOffer(ctx) {
@@ -847,6 +865,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const coupons = arrayizeOfferText(
       await sanitizeDocumentOutput(strapi, ctx, 'api::coupon.coupon', result.offers)
     );
+    await attachFestiveOffers(strapi, coupons);
 
     return ctx.send({
       ...(page === 1 ? { [entityType]: result.sanitizedEntity } : {}),
@@ -883,6 +902,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const deals = arrayizeOfferText(
       await sanitizeDocumentOutput(strapi, ctx, 'api::deal.deal', result.offers)
     );
+    await attachFestiveOffers(strapi, deals);
 
     return ctx.send({
       ...(page === 1 ? { [entityType]: result.sanitizedEntity } : {}),

@@ -80,6 +80,32 @@ describe('validateCheckoutMerchantForWrite', () => {
     expect(findOne).not.toHaveBeenCalled();
   });
 
+  it('stores a touched blank as NULL, not the raw spelling', async () => {
+    const { strapi } = strapiWith(LIVE);
+    for (const value of ['', '   ']) {
+      const data = { checkoutMerchant: value };
+      await validateCheckoutMerchantForWrite(strapi, COUPON, 'update', data);
+      expect(data.checkoutMerchant).toBeNull();
+    }
+  });
+
+  it('canonicalizes a padded reference before it is stored', async () => {
+    // parseCheckoutMerchant tolerates the padding, but the festive scope in
+    // isr-outbox/scopes.ts matches checkoutMerchant by exact equality — a
+    // stored " store:store123 " would render festive yet never revalidate.
+    const { strapi } = strapiWith(LIVE);
+    const data = { checkoutMerchant: '  store:store123  ' };
+    await validateCheckoutMerchantForWrite(strapi, COUPON, 'update', data);
+    expect(data.checkoutMerchant).toBe('store:store123');
+  });
+
+  it('leaves an already-canonical reference untouched', async () => {
+    const { strapi } = strapiWith(LIVE);
+    const data = { checkoutMerchant: 'brand:brand456' };
+    await validateCheckoutMerchantForWrite(strapi, DEAL, 'update', data);
+    expect(data.checkoutMerchant).toBe('brand:brand456');
+  });
+
   it('rejects a malformed reference with an inline field path', async () => {
     const { strapi } = strapiWith(LIVE);
     try {

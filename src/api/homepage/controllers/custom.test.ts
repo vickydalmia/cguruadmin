@@ -182,7 +182,7 @@ describe('homepage aggregate offer population', () => {
 
     expect(response.data.popularStores.stores).toHaveLength(31);
     expect(response.data.topDeals.deals).toHaveLength(10);
-    expect(response.data.offersByBrand.offers).toHaveLength(7);
+    expect(response.data.offersByBrand.offers).toHaveLength(10);
     expect(response.data.exploreDeals.tabs[0].deals).toHaveLength(10);
     expect(response.data.exploreOffers.tabs[0].offers).toHaveLength(10);
     expect(JSON.stringify(response.data)).not.toContain('expired');

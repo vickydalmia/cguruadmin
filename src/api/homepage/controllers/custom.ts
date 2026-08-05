@@ -1,5 +1,6 @@
 import type { Core } from '@strapi/strapi';
 import { arrayizeOfferText } from '../../../utils/offer-text';
+import { attachFestiveOffers } from '../../../utils/festive-offer-response';
 import {
   backfillDeals,
   brandRef,
@@ -32,7 +33,7 @@ const SECTION_LIST_CAPS = {
   popularStores: 31, // site shows 31
   topDeals: 10, // site shows 6
   dealsByBrand: 10, // legacy fallback, mirrors topDeals
-  offersByBrand: 7, // site shows 3
+  offersByBrand: 10, // site shows 6
   exploreOffersPerTab: 10, // site shows 6 per tab
   exploreDealsPerTab: 10, // legacy fallback, mirrors exploreOffers
 } as const;
@@ -47,6 +48,8 @@ const COUPON_FIELDS = [
   'code',
   'couponType',
   'affiliateLink',
+  // Consumed and removed by the festive-offer walker.
+  'checkoutMerchant',
   'expiresAt',
   'contentStatus',
 ];
@@ -506,6 +509,10 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     // Nested Coupon cards emit offerText as words; Deal benefit labels and
     // computed pricing content are normalized by the same response walker.
     arrayizeOfferText(sanitized);
+    // Resolves each offer's Checkout Merchant to its festive offer. Needs a
+    // database read, so it cannot ride the synchronous walker above; it walks
+    // the same nested section tree.
+    await attachFestiveOffers(strapi, sanitized);
 
     return ctx.send({ data: sanitized });
   },

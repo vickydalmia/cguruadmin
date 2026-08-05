@@ -15,6 +15,7 @@
     "fix:cache-headers": "tsx src/fix-cache-headers.ts",
     "fix:content-srcsets": "tsx src/fix-content-srcsets.ts",
     "backfill:offer-fields": "tsx src/backfill-offer-fields.ts",
+    "backfill:checkout-merchant": "tsx src/backfill-checkout-merchant.ts",
     "backfill:entity-updated-at": "tsx src/backfill-entity-updated-at.ts",
     "backfill:taxonomy-descriptions": "tsx src/backfill-taxonomy-descriptions.ts",
     "backfill:kksr-ratings": "tsx src/backfill-kksr-ratings.ts",
