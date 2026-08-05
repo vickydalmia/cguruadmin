@@ -70,6 +70,40 @@
       "type": "boolean",
       "default": true
     },
+    "isFestiveOffer": {
+      "type": "boolean",
+      "default": false
+    },
+    "festiveOfferTitle": {
+      "type": "string",
+      "maxLength": 60,
+      "searchable": false,
+      "conditions": {
+        "visible": {
+          "==": [
+            {
+              "var": "isFestiveOffer"
+            },
+            true
+          ]
+        }
+      }
+    },
+    "festiveOfferDescription": {
+      "type": "richtext",
+      "maxLength": 50000,
+      "searchable": false,
+      "conditions": {
+        "visible": {
+          "==": [
+            {
+              "var": "isFestiveOffer"
+            },
+            true
+          ]
+        }
+      }
+    },
     "coupons": {
       "type": "relation",
       "relation": "manyToMany",

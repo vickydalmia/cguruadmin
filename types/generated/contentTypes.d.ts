@@ -662,6 +662,16 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
     >;
     faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     faqs: Schema.Attribute.Component<'shared.faq-item', true>;
+    festiveOfferDescription: Schema.Attribute.RichText &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 50000;
+      }>;
+    festiveOfferTitle: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    isFestiveOffer: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
     isVerified: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::brand.brand'> &
@@ -925,6 +935,11 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
       'manyToMany',
       'api::category.category'
     >;
+    checkoutMerchant: Schema.Attribute.String &
+      Schema.Attribute.CustomField<'global::checkout-merchant'> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 64;
+      }>;
     code: Schema.Attribute.String &
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 64;
@@ -1122,6 +1137,11 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
       'manyToMany',
       'api::category.category'
     >;
+    checkoutMerchant: Schema.Attribute.String &
+      Schema.Attribute.CustomField<'global::checkout-merchant'> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 64;
+      }>;
     code: Schema.Attribute.Text;
     content: Schema.Attribute.RichText &
       Schema.Attribute.SetMinMaxLength<{
@@ -1886,7 +1906,17 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
     >;
     faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     faqs: Schema.Attribute.Component<'shared.faq-item', true>;
+    festiveOfferDescription: Schema.Attribute.RichText &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 50000;
+      }>;
+    festiveOfferTitle: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
     isCjEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    isFestiveOffer: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
     isVerified: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::store.store'> &

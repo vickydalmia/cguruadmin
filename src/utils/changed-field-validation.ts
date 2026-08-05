@@ -145,6 +145,21 @@ const TOP_LEVEL_RULES: Rule[] = [
       'Complete http(s) address with a valid domain.',
     ),
   ),
+  // Schema `maxLength: 60` on this field is enforced CLIENT-side only (see
+  // AGENTS.md, "The two-layer reality"), so it stops an editor typing past the
+  // cap but nothing else — an import or a REST write sails straight past it.
+  // This is the server-side half, and it is where the "Up to 60 characters."
+  // hint under the field comes from, so the shown limit cannot drift from the
+  // enforced one.
+  ...['api::store.store', 'api::brand.brand'].map((uid) =>
+    topRule(
+      uid,
+      'festiveOfferTitle',
+      maxLength(60),
+      'Festive offer title must be at most 60 characters.',
+      'Up to 60 characters.',
+    ),
+  ),
   ...['api::coupon.coupon', 'api::deal.deal'].map((uid) =>
     topRule(
       uid,

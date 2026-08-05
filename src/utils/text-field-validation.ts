@@ -174,12 +174,20 @@ export const TEXT_FIELD_RULES: readonly TextFieldRule[] = [
   // unlabelled image to every store card and page header.
   { uid: STORE_UID, field: 'logoAlt', label: 'Logo alt text', kind: 'string', requiredNonBlank: true, collapse: true },
   { uid: STORE_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string' },
+  // Festive offer title/description are CONDITIONALLY required — only when
+  // `isFestiveOffer` is on — which this table cannot express, so their
+  // requiredness lives in entity-field-validation.ts (checkFestiveOffer). The
+  // row here exists purely so a pasted title is trimmed and collapsed like
+  // every other short display string before the 60-character cap counts it.
+  { uid: STORE_UID, field: 'festiveOfferTitle', label: 'Festive offer title', kind: 'string', collapse: true },
 
   // --- Brand --------------------------------------------------------------
   { uid: BRAND_UID, field: 'name', label: 'Name', kind: 'string', requiredNonBlank: true, collapse: true },
   { uid: BRAND_UID, field: 'shortDescription', label: 'Short description', kind: 'text', requiredNonBlank: true },
   { uid: BRAND_UID, field: 'logoAlt', label: 'Logo alt text', kind: 'string', requiredNonBlank: true, collapse: true },
   { uid: BRAND_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string' },
+  // Same reasoning as the Store row above.
+  { uid: BRAND_UID, field: 'festiveOfferTitle', label: 'Festive offer title', kind: 'string', collapse: true },
 
   // --- Category -----------------------------------------------------------
   // Category's media field is `icon`, not `logo`, and `iconAlt` was added

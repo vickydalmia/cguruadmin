@@ -34,6 +34,7 @@ import {
   DOTD_UID,
 } from '../constants/deal-of-the-day-sections';
 import { HOMEPAGE_IMAGE_RULES } from '../constants/homepage-images';
+import { CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME } from '../constants/checkout-merchant';
 import RichTextEditor from './components/RichTextEditor';
 import DateTimeInput from './components/DateTimeInput';
 import BooleanConfirmInput from './components/BooleanConfirmInput';
@@ -1253,6 +1254,46 @@ export default {
     app.addFields({ type: 'boolean', Component: BooleanConfirmInput } as any);
     // Slug fields are plain `string` attributes (schema-regex-validated, typed
     // by hand) — the former uid SlugInput and its Regenerate button are gone.
+
+    // Checkout Merchant: one dropdown listing every Store AND every Brand, on
+    // both Coupon and Product Deal. A custom field rather than a relation
+    // because a relation targets exactly one content type, and rather than a
+    // side panel because a custom field is the only supported seam that
+    // renders inside the MAIN edit form — see
+    // src/constants/checkout-merchant.ts for the alternatives and why they
+    // lose. The server half (src/index.ts register) must declare the same
+    // name, or the two `global::` uids diverge and the field renders as
+    // "missing custom field".
+    //
+    // Input is lazy on purpose: the registry expects a loader, and this keeps
+    // the picker's fetch code out of the initial admin bundle for the many
+    // screens that never show the field.
+    app.customFields.register({
+      name: CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME,
+      type: 'string',
+      intlLabel: {
+        id: 'checkout-merchant.label',
+        defaultMessage: 'Checkout merchant',
+      },
+      intlDescription: {
+        id: 'checkout-merchant.description',
+        defaultMessage: 'The Store or Brand the shopper checks out with',
+      },
+      components: {
+        Input: async () => {
+          const module = await import(
+            './features/checkout-merchant/components/checkout-merchant-input'
+          );
+          // The registry types the loader as ComponentType<{}> — it renders
+          // every custom field through one untyped slot and feeds it the
+          // field's props at runtime — so a component declaring real required
+          // props needs this widening to be assignable at all.
+          return {
+            default: module.default as unknown as React.ComponentType,
+          };
+        },
+      },
+    });
 
     // Generated Product Deal pages (/<slugified-entity-name>-deals/) have no content
     // type of their own — they are derived from the four entity collections —

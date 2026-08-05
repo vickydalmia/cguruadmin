@@ -1,6 +1,8 @@
 import type { Core } from '@strapi/strapi';
 
 import { validateChangedFields } from '../changed-field-validation';
+import { validateCheckoutMerchantForWrite } from '../checkout-merchant-validation';
+import { isCheckoutMerchantOfferUid } from '../../constants/checkout-merchant';
 import {
   isOfferStoreUid,
   validateContentManagerOfferStore,
@@ -13,6 +15,10 @@ import {
 import { ensureTransparentDealImageForWrite } from '../deal-image-upload';
 import { validateDealOfTheDaySectionLimits } from '../deal-of-the-day-validation';
 import { validateEntityFieldsForWrite } from '../entity-field-validation';
+import {
+  isFestiveOfferUid,
+  normaliseFestiveOfferFields,
+} from '../festive-offer-consistency';
 import { validateEntityDealPageSeo } from '../entity-deal-page-seo-validation';
 import {
   isEntityTopPickUid,
@@ -126,6 +132,19 @@ export const MUTATOR_STEPS: readonly ValidationStep[] = [
     applies: isCouponUid,
     run: ({ data }) => normaliseCouponTypeFields(data),
   },
+  {
+    // Same trap as normaliseCouponTypeFields, one content type over: the
+    // festive title/description are `conditions.visible` fields, so turning
+    // the toggle off OMITS them from the payload and leaves the stored values
+    // live. Clear them explicitly. Runs AFTER sanitizeRichtextData on purpose
+    // — sanitizing a value that is about to become null is wasted work, but
+    // the reverse order would sanitize nothing and leave the cleared field
+    // untouched only by luck; keeping it last in the group makes the "clears
+    // what earlier steps normalised" direction explicit.
+    name: 'normaliseFestiveOfferFields',
+    applies: isFestiveOfferUid,
+    run: ({ data }) => normaliseFestiveOfferFields(data),
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -211,6 +230,22 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
             documentId,
           )
         : undefined,
+  },
+  {
+    // checkoutMerchant is a custom STRING field, not a relation, so nothing at
+    // the database level stops a write from referencing a Store or Brand that
+    // does not exist. This is that check.
+    name: 'validateCheckoutMerchantForWrite',
+    applies: isCheckoutMerchantOfferUid,
+    run: ({ strapi, uid, action, data, documentId, strict }) =>
+      validateCheckoutMerchantForWrite(
+        strapi,
+        uid,
+        action,
+        data,
+        documentId,
+        strict,
+      ),
   },
   {
     name: 'validateEntityTopPickCoupons',

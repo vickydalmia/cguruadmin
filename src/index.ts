@@ -80,6 +80,11 @@ import {
   ENTITY_COUPON_LAYOUT_ACTION,
   ENTITY_COUPON_LAYOUT_ACTION_ATTRIBUTES,
 } from './api/entity-coupon-layout/services/entity-coupon-layout';
+import {
+  CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME,
+  CHECKOUT_MERCHANT_FIELD,
+} from './constants/checkout-merchant';
+import { clearDeletedCheckoutMerchant } from './utils/checkout-merchant-validation';
 const HIDE_FROM_EDIT: Record<string, string[]> = {
   'api::deal.deal': ['stores', 'brands', 'categories', 'banks'],
   'api::coupon.coupon': ['stores', 'brands', 'categories', 'banks'],
@@ -689,6 +694,17 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
         'Optional image source only. The site borrows this Store logo; it does ' +
         'not add Store membership, ownership, search matching, or Store-page placement.',
     },
+    // Mirrors checkout-merchant-validation.ts: the reference must resolve to a
+    // live row, and it is nulled automatically if that row is later deleted.
+    {
+      uid,
+      field: 'checkoutMerchant',
+      hint:
+        'Optional. One Store OR Brand — the merchant the shopper actually ' +
+        'checks out with. Search the dropdown to see both; each option is ' +
+        'tagged Store or Brand. Like Logo Store, this adds no membership, ' +
+        'ownership or search matching.',
+    },
     // Mirrors offer-lifecycle-validation.ts: past dates rejected, scheduledAt
     // must precede expiresAt, contentStatus derived from these two dates.
     {
@@ -744,6 +760,32 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
       'Required when Coupon type is "unique" — codes are handed out from this ' +
       'pool. Cleared automatically for static coupons.',
   },
+  // Mirrors festive-offer-consistency.ts (clearing) and the checkFestiveOffer
+  // rule in entity-field-validation.ts (both fields required when on). The
+  // 60-character cap on the title is NOT restated here — changedFieldHints()
+  // derives "Up to 60 characters." from the rule that enforces it, and both
+  // hints are appended to the same field.
+  ...['api::store.store', 'api::brand.brand'].flatMap((uid) => [
+    {
+      uid,
+      field: 'isFestiveOffer',
+      hint:
+        'Turns on the festive offer title and description below. Switching it ' +
+        'off CLEARS both of them on save — they are not kept in the background.',
+    },
+    {
+      uid,
+      field: 'festiveOfferTitle',
+      hint: 'Required while "Is festive offer" is on.',
+    },
+    {
+      uid,
+      field: 'festiveOfferDescription',
+      hint:
+        'Required while "Is festive offer" is on. Rendered as formatted text ' +
+        'on the site.',
+    },
+  ]),
   // Mirrors redirect-validation.ts: from must be a rooted on-site path that
   // shadows nothing live; to must be a rooted path or absolute http(s) URL
   // and must not close a loop.
@@ -893,10 +935,12 @@ const CONTENT_TYPE_FIELD_LABELS: Record<string, Record<string, string>> = {
   'api::coupon.coupon': {
     publishedOn: 'Published date',
     logoStore: 'Logo Store (image only)',
+    checkoutMerchant: 'Checkout merchant (Store or Brand)',
   },
   'api::deal.deal': {
     publishedOn: 'Published date',
     logoStore: 'Logo Store (image only)',
+    checkoutMerchant: 'Checkout merchant (Store or Brand)',
   },
   'api::menu.menu': {
     notification: 'Notification',
@@ -1332,6 +1376,26 @@ async function ensureSortableListColumns(strapi: Core.Strapi): Promise<void> {
 
 export default {
   async register({ strapi }: { strapi: Core.Strapi }) {
+    // The Checkout Merchant custom field, which is what lets ONE dropdown
+    // offer Stores and Brands together in the main edit form (a relation can
+    // only target one content type — src/constants/checkout-merchant.ts has
+    // the full reasoning).
+    //
+    // Registering HERE is mandatory, not stylistic: Strapi.register() runs the
+    // user register lifecycle and only THEN calls convertCustomFieldType(),
+    // which swaps `"type": "customField"` in the offer schemas for this
+    // field's underlying `string`. Register any later and both schemas fail to
+    // load with "Could not find Custom Field: global::checkout-merchant".
+    //
+    // No `plugin` key, so the registry derives the `global::` uid the two
+    // schema.json files name. The admin half registers the matching Input in
+    // src/admin/app.tsx.
+    strapi.customFields.register({
+      name: CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME,
+      type: 'string',
+      inputSize: { default: 6, isResizable: true },
+    });
+
     // NOTE: no custom /_health route — Strapi core already serves /_health
     // (all methods, 204, no auth) and registers it BEFORE this lifecycle,
     // so a route here would be dead code. The docker healthcheck and
@@ -1665,6 +1729,49 @@ export default {
                 result,
                 context.params?.documentId,
               );
+            }
+
+            // checkoutMerchant is a custom STRING field, not a relation, so
+            // deleting a Store or Brand leaves every offer that pointed at it
+            // holding a reference to a row that is gone — the one thing a
+            // foreign key's ON DELETE SET NULL would have handled for free.
+            // Do it by hand, in this transaction, so the clear commits with
+            // the delete or not at all.
+            //
+            // strapi.db.query joins the ambient transaction through
+            // AsyncLocalStorage (AGENTS.md); a raw strapi.db.connection write
+            // here would take a second pool connection and deadlock against
+            // the row locks the delete still holds.
+            if (
+              context.action === 'delete' &&
+              context.params?.documentId &&
+              (context.uid === 'api::store.store' ||
+                context.uid === 'api::brand.brand')
+            ) {
+              try {
+                const cleared = await clearDeletedCheckoutMerchant(
+                  strapi,
+                  context.uid === 'api::store.store' ? 'store' : 'brand',
+                  context.params.documentId,
+                );
+                if (cleared > 0) {
+                  strapi.log.info(
+                    `[${CHECKOUT_MERCHANT_FIELD}] cleared ${cleared} offer ` +
+                      `reference(s) to deleted ${context.uid} ` +
+                      `${context.params.documentId}`,
+                  );
+                }
+              } catch (err: any) {
+                // Never block the delete on the cleanup. A leftover reference
+                // is caught by validateCheckoutMerchantForWrite on the next
+                // save of that offer, which is a recoverable state; a delete
+                // that half-fails inside a content transaction is not.
+                strapi.log.warn(
+                  `[${CHECKOUT_MERCHANT_FIELD}] cleanup failed for ` +
+                    `${context.uid} ${context.params.documentId}: ` +
+                    `${err?.message ?? err}`,
+                );
+              }
             }
 
             if (

@@ -114,6 +114,11 @@
       "required": true,
       "regex": "^https?://[^\\u0000-\\u001f\\u007f<>]+$"
     },
+    "checkoutMerchant": {
+      "type": "customField",
+      "customField": "global::checkout-merchant",
+      "maxLength": 64
+    },
     "expiresAt": {
       "type": "datetime"
     },

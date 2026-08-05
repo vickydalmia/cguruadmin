@@ -217,6 +217,108 @@ describe('validateEntityFields', () => {
     });
   });
 
+  describe('festive offer', () => {
+    const CATEGORY = 'api::category.category';
+
+    it('accepts the toggle off regardless of the other fields', () => {
+      expect(() =>
+        validateEntityFields(STORE, 'update', {
+          isFestiveOffer: false,
+          festiveOfferTitle: null,
+          festiveOfferDescription: null,
+        }),
+      ).not.toThrow();
+    });
+
+    it('accepts the toggle on with both fields filled in', () => {
+      expect(() =>
+        validateEntityFields(BRAND, 'update', {
+          isFestiveOffer: true,
+          festiveOfferTitle: 'Diwali Dhamaka',
+          festiveOfferDescription: '<p>Up to 70% off</p>',
+        }),
+      ).not.toThrow();
+    });
+
+    it('rejects the toggle on with both fields missing, naming both', () => {
+      // Visibility is not requiredness: Strapi skips validation entirely for a
+      // field hidden by conditions.visible, so nothing else catches this.
+      try {
+        validateEntityFields(STORE, 'create', { isFestiveOffer: true });
+        throw new Error('expected to throw');
+      } catch (err: any) {
+        const paths = err.details?.errors?.map((e: any) => e.path.join('.'));
+        expect(paths).toEqual(['festiveOfferTitle', 'festiveOfferDescription']);
+      }
+    });
+
+    it('rejects a blank-after-trim title', () => {
+      expect(() =>
+        validateEntityFields(BRAND, 'create', {
+          isFestiveOffer: true,
+          festiveOfferTitle: '   ',
+          festiveOfferDescription: '<p>x</p>',
+        }),
+      ).toThrow(/festive offer title/);
+    });
+
+    it('reads the toggle from the stored row on a partial update', () => {
+      // The payload sets only the title; whether the rule applies at all comes
+      // from what is already stored.
+      expect(() =>
+        validateEntityFields(
+          STORE,
+          'update',
+          { festiveOfferTitle: '' },
+          { isFestiveOffer: true, festiveOfferDescription: '<p>x</p>' },
+        ),
+      ).toThrow(/festive offer title/);
+    });
+
+    it('does not apply to category or bank', () => {
+      expect(() =>
+        validateEntityFields(CATEGORY, 'create', { isFestiveOffer: true }),
+      ).not.toThrow();
+    });
+
+    it('grandfathers an untouched enabled-but-empty legacy row', () => {
+      expect(() =>
+        validateEntityFields(
+          STORE,
+          'update',
+          { name: 'Nike' },
+          { isFestiveOffer: true, festiveOfferTitle: '', festiveOfferDescription: '' },
+          false,
+        ),
+      ).not.toThrow();
+    });
+
+    it('stops grandfathering as soon as the editor turns the toggle on', () => {
+      // Touching the toggle in this payload makes the write ABOUT the festive
+      // offer, so the empty fields are this save's problem.
+      expect(() =>
+        validateEntityFields(
+          STORE,
+          'update',
+          { isFestiveOffer: true },
+          { isFestiveOffer: false },
+        ),
+      ).toThrow(/festive offer title/);
+    });
+
+    it('strict blocks the same untouched enabled-but-empty legacy row', () => {
+      expect(() =>
+        validateEntityFields(
+          BRAND,
+          'update',
+          { name: 'Nike' },
+          { isFestiveOffer: true, festiveOfferTitle: '', festiveOfferDescription: '' },
+          true,
+        ),
+      ).toThrow(/festive offer/);
+    });
+  });
+
   describe('strict ("clean as you touch") mode', () => {
     // In strict mode EVERY rule runs against the whole effective record (payload
     // merged over stored), so a dirty field the editor never touched blocks the
