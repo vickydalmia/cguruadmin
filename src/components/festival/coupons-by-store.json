@@ -1,0 +1,23 @@
+{
+  "collectionName": "components_festival_coupons_by_stores",
+  "info": {
+    "displayName": "Festival Coupons By Store",
+    "icon": "shoppingCart"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string",
+      "default": "Explore By Stores"
+    },
+    "tabs": {
+      "type": "component",
+      "repeatable": true,
+      "component": "festival.coupon-store-tab",
+      "max": 8
+    }
+  }
+}

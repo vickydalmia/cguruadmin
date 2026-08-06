@@ -32,6 +32,7 @@ export const SEO_UIDS = new Set([
   'api::career-page.career-page',
   'api::contact-page.contact-page',
   'api::deal-of-the-day-page.deal-of-the-day-page',
+  'api::independence-day-sale-page.independence-day-sale-page',
   'api::faq-page.faq-page',
   'api::homepage.homepage',
   'api::job.job',

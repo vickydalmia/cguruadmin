@@ -39,6 +39,7 @@ describe('write-validation step order', () => {
       'validateMenuCategorySections',
       'validateMenuNotification',
       'validateDealOfTheDaySectionLimits',
+      'validateIndependenceDaySale',
       'validateContentManagerOfferStore',
       'validateCheckoutMerchantForWrite',
       'validateEntityTopPickCoupons',

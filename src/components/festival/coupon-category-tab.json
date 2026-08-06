@@ -1,0 +1,34 @@
+{
+  "collectionName": "components_festival_coupon_category_tabs",
+  "info": {
+    "displayName": "Festival Coupon Category Tab",
+    "description": "One of the four category tabs, with an optional campaign-specific image",
+    "icon": "grid"
+  },
+  "attributes": {
+    "category": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::category.category"
+    },
+    "labelOverride": {
+      "type": "string"
+    },
+    "iconOverride": {
+      "type": "media",
+      "multiple": false,
+      "required": false,
+      "allowedTypes": ["images"]
+    },
+    "viewAllCta": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.cta"
+    },
+    "offers": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::coupon.coupon"
+    }
+  }
+}

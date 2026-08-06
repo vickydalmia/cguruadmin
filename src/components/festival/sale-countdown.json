@@ -1,0 +1,41 @@
+{
+  "collectionName": "components_festival_sale_countdowns",
+  "info": {
+    "displayName": "Festival Sale Countdown",
+    "icon": "clock"
+  },
+  "attributes": {
+    "saleStartAt": {
+      "type": "datetime",
+      "required": true
+    },
+    "saleEndAt": {
+      "type": "datetime",
+      "required": true
+    },
+    "preSaleLabel": {
+      "type": "string",
+      "default": "Sale starts in"
+    },
+    "preSaleCtaLabel": {
+      "type": "string",
+      "default": "Reserve offers now"
+    },
+    "preSaleCtaHref": {
+      "type": "string",
+      "default": "#top-picks"
+    },
+    "liveLabel": {
+      "type": "string",
+      "default": "Sale ends in"
+    },
+    "liveCtaLabel": {
+      "type": "string",
+      "default": "Offers live"
+    },
+    "liveCtaHref": {
+      "type": "string",
+      "default": "#all-coupons"
+    }
+  }
+}

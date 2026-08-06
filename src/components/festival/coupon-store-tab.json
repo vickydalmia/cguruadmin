@@ -1,0 +1,22 @@
+{
+  "collectionName": "components_festival_coupon_store_tabs",
+  "info": {
+    "displayName": "Festival Coupon Store Tab",
+    "icon": "shoppingCart"
+  },
+  "attributes": {
+    "store": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::store.store"
+    },
+    "labelOverride": {
+      "type": "string"
+    },
+    "offers": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::coupon.coupon"
+    }
+  }
+}

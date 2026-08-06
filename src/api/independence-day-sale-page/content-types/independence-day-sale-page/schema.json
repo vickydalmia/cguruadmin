@@ -1,0 +1,77 @@
+{
+  "kind": "singleType",
+  "collectionName": "independence_day_sale_pages",
+  "info": {
+    "singularName": "independence-day-sale-page",
+    "pluralName": "independence-day-sale-pages",
+    "displayName": "Independence Day Sale Page",
+    "description": "Single CMS surface for the Independence Day Coupon and product Deal landing page"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "default": "Independence Day Sale Page"
+    },
+    "countdown": {
+      "type": "component",
+      "component": "festival.sale-countdown",
+      "repeatable": false,
+      "required": true
+    },
+    "hero": {
+      "type": "component",
+      "component": "festival.campaign-hero",
+      "repeatable": false,
+      "required": true
+    },
+    "topPicks": {
+      "type": "component",
+      "component": "home.offer-list",
+      "repeatable": false
+    },
+    "couponsByCategory": {
+      "type": "component",
+      "component": "festival.coupons-by-category",
+      "repeatable": false
+    },
+    "productDealsByCategory": {
+      "type": "component",
+      "component": "home.explore-deals",
+      "repeatable": false
+    },
+    "promoStrip": {
+      "type": "component",
+      "component": "festival.promo-strip",
+      "repeatable": false
+    },
+    "couponsByStore": {
+      "type": "component",
+      "component": "festival.coupons-by-store",
+      "repeatable": false
+    },
+    "allCoupons": {
+      "type": "component",
+      "component": "home.offer-list",
+      "repeatable": false
+    },
+    "allDeals": {
+      "type": "component",
+      "component": "home.deal-list",
+      "repeatable": false
+    },
+    "popularSearches": {
+      "type": "component",
+      "component": "home.popular-searches",
+      "repeatable": false
+    },
+    "seo": {
+      "type": "component",
+      "component": "shared.seo",
+      "repeatable": false
+    }
+  }
+}

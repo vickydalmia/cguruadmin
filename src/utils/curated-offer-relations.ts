@@ -118,6 +118,7 @@ const ENTITY_KIND_BY_UID: Readonly<Record<string, IdentityKind>> = {
 function curatedSourcePath(sourceUid: string, row: any): string | null {
   if (sourceUid.startsWith('home.')) return '/';
   if (sourceUid.startsWith('deal-day.')) return '/deal-of-the-day/';
+  if (sourceUid.startsWith('festival.')) return '/independence-day-sale-coupons/';
   if (sourceUid.startsWith('header.')) return '/';
 
   const kind = ENTITY_KIND_BY_UID[sourceUid];

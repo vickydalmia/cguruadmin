@@ -3,6 +3,10 @@ import { errors } from '@strapi/utils';
 import { join } from 'node:path';
 import { RECORD_LOCK_LEASE_HEADER } from './constants/record-lock';
 import { DOTD_SECTION_LABELS, DOTD_UID } from './constants/deal-of-the-day-sections';
+import {
+  INDEPENDENCE_DAY_SALE_SECTION_LABELS,
+  INDEPENDENCE_DAY_SALE_UID,
+} from './constants/independence-day-sale-sections';
 import { HOMEPAGE_IMAGE_RULES, imageRuleDescription } from './constants/homepage-images';
 import {
   HOMEPAGE_SECTION_LABELS,
@@ -1046,6 +1050,7 @@ async function ensureFieldDescriptions(strapi: Core.Strapi): Promise<void> {
 const SINGLE_TYPE_ENTRY_TITLES = [
   'api::homepage.homepage',
   'api::deal-of-the-day-page.deal-of-the-day-page',
+  'api::independence-day-sale-page.independence-day-sale-page',
   'api::menu.menu',
   'api::footer.footer',
   'api::global.global',
@@ -2080,6 +2085,23 @@ export default {
       strapi.log
     );
 
+    // This page originally reused the Homepage category component. It now has
+    // a festival-only component so Content Manager can enforce max: 4 without
+    // reducing Homepage's eight-tab allowance. Preserve already-authored tabs
+    // after the new component tables exist; repeated boots are a no-op.
+    const festivalCategoryTabsPath = join(
+      (strapi as any).dirs.app.root,
+      'database',
+      'festival-category-tabs-reconciliation.js'
+    );
+    const { reconcileFestivalCategoryTabsAfterSchemaSync } = require(
+      festivalCategoryTabsPath
+    );
+    await reconcileFestivalCategoryTabsAfterSchemaSync(
+      (strapi as any).db.connection,
+      strapi.log
+    );
+
     const searchIndexMigrationPath = join(
       (strapi as any).dirs.app.root,
       'database',
@@ -2126,6 +2148,11 @@ export default {
     await ensureFullWidthEditFields(strapi);
     await ensureSectionLabels(strapi, HOMEPAGE_UID, HOMEPAGE_SECTION_LABELS);
     await ensureSectionLabels(strapi, DOTD_UID, DOTD_SECTION_LABELS);
+    await ensureSectionLabels(
+      strapi,
+      INDEPENDENCE_DAY_SALE_UID,
+      INDEPENDENCE_DAY_SALE_SECTION_LABELS,
+    );
 
     // S3_UPLOAD_ENABLED defaults OFF in production (config/plugins.ts), so a
     // boot missing the flag silently writes uploads to the container's local

@@ -1434,6 +1434,59 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
   };
 }
 
+export interface ApiIndependenceDaySalePageIndependenceDaySalePage
+  extends Struct.SingleTypeSchema {
+  collectionName: 'independence_day_sale_pages';
+  info: {
+    description: 'Single CMS surface for the Independence Day Coupon and product Deal landing page';
+    displayName: 'Independence Day Sale Page';
+    pluralName: 'independence-day-sale-pages';
+    singularName: 'independence-day-sale-page';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    allCoupons: Schema.Attribute.Component<'home.offer-list', false>;
+    allDeals: Schema.Attribute.Component<'home.deal-list', false>;
+    countdown: Schema.Attribute.Component<'festival.sale-countdown', false> &
+      Schema.Attribute.Required;
+    couponsByCategory: Schema.Attribute.Component<
+      'festival.coupons-by-category',
+      false
+    >;
+    couponsByStore: Schema.Attribute.Component<
+      'festival.coupons-by-store',
+      false
+    >;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    hero: Schema.Attribute.Component<'festival.campaign-hero', false> &
+      Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::independence-day-sale-page.independence-day-sale-page'
+    > &
+      Schema.Attribute.Private;
+    popularSearches: Schema.Attribute.Component<'home.popular-searches', false>;
+    productDealsByCategory: Schema.Attribute.Component<
+      'home.explore-deals',
+      false
+    >;
+    promoStrip: Schema.Attribute.Component<'festival.promo-strip', false>;
+    publishedAt: Schema.Attribute.DateTime;
+    seo: Schema.Attribute.Component<'shared.seo', false>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Independence Day Sale Page'>;
+    topPicks: Schema.Attribute.Component<'home.offer-list', false>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiJobJob extends Struct.CollectionTypeSchema {
   collectionName: 'jobs';
   info: {
@@ -2723,6 +2776,7 @@ declare module '@strapi/strapi' {
       'api::footer.footer': ApiFooterFooter;
       'api::global.global': ApiGlobalGlobal;
       'api::homepage.homepage': ApiHomepageHomepage;
+      'api::independence-day-sale-page.independence-day-sale-page': ApiIndependenceDaySalePageIndependenceDaySalePage;
       'api::job.job': ApiJobJob;
       'api::menu.menu': ApiMenuMenu;
       'api::partner-with-us-page.partner-with-us-page': ApiPartnerWithUsPagePartnerWithUsPage;
