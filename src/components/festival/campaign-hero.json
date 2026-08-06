@@ -1,0 +1,19 @@
+{
+  "collectionName": "components_festival_campaign_heroes",
+  "info": {
+    "displayName": "Festival Campaign Hero",
+    "icon": "picture"
+  },
+  "attributes": {
+    "image": {
+      "type": "media",
+      "multiple": false,
+      "required": true,
+      "allowedTypes": ["images"]
+    },
+    "altText": {
+      "type": "string",
+      "required": true
+    }
+  }
+}

@@ -23,6 +23,9 @@ const OFFER_UIDS = new Set(['api::coupon.coupon', 'api::deal.deal']);
 // there and do not carry it.
 const DEAL_OF_THE_DAY_SLUG = 'deal-of-the-day';
 const DOTD_PAGE_UID = 'api::deal-of-the-day-page.deal-of-the-day-page';
+const INDEPENDENCE_DAY_SALE_SLUG = 'independence-day-sale-coupons';
+const INDEPENDENCE_DAY_SALE_PAGE_UID =
+  'api::independence-day-sale-page.independence-day-sale-page';
 // The About page is a standalone editorial route with no entity relations, so
 // an edit rebuilds exactly one page. Its country cards read from the Footer
 // single type, which is in CHROME_UIDS and already triggers a full rebuild.
@@ -78,9 +81,14 @@ const ERROR_DOCUMENT_SLUGS = [
   'error-pages/template',
 ] as const;
 
-function withDealLandingSlug(uid: string, slugs: string[]): string[] {
-  if (uid !== 'api::deal.deal') return slugs;
-  return [...new Set([...slugs, DEAL_OF_THE_DAY_SLUG])];
+function withOfferLandingSlugs(uid: string, slugs: string[]): string[] {
+  return [
+    ...new Set([
+      ...slugs,
+      INDEPENDENCE_DAY_SALE_SLUG,
+      ...(uid === 'api::deal.deal' ? [DEAL_OF_THE_DAY_SLUG] : []),
+    ]),
+  ];
 }
 const ENTITY_UIDS: Record<string, IdentityKind> = {
   'api::store.store': 'store',
@@ -225,7 +233,7 @@ export async function preDeleteScope(
     );
     return relationScope
       ? {
-          slugs: withDealLandingSlug(uid, relationScope.slugs),
+          slugs: withOfferLandingSlugs(uid, relationScope.slugs),
           ...(relationScope.optionalSlugs.length > 0
             ? { optionalSlugs: relationScope.optionalSlugs }
             : {}),
@@ -452,6 +460,9 @@ async function festiveMerchantScope(
     }
   }
   if (dealIds.length > 0) slugs.add(DEAL_OF_THE_DAY_SLUG);
+  if (couponIds.length > 0 || dealIds.length > 0) {
+    slugs.add(INDEPENDENCE_DAY_SALE_SLUG);
+  }
 
   return {
     slugs: [...slugs],
@@ -480,6 +491,13 @@ export async function computeScope(
   }
   if (uid === DOTD_PAGE_UID) {
     return { slugs: [DEAL_OF_THE_DAY_SLUG], sitemap: true };
+  }
+  if (uid === INDEPENDENCE_DAY_SALE_PAGE_UID) {
+    return {
+      slugs: [INDEPENDENCE_DAY_SALE_SLUG],
+      sitemap: true,
+      refreshScopes: ['routes'],
+    };
   }
   if (uid === ABOUT_PAGE_UID) {
     return {
@@ -600,7 +618,7 @@ export async function computeScope(
     }
     // An offer with no entity relations only shows via curation surfaces.
     return {
-      slugs: withDealLandingSlug(uid, relationScope.slugs),
+      slugs: withOfferLandingSlugs(uid, relationScope.slugs),
       ...(relationScope.optionalSlugs.length > 0
         ? { optionalSlugs: relationScope.optionalSlugs }
         : {}),
@@ -660,7 +678,13 @@ export async function computeScope(
     // names/icons into its HTML — same reason entity edits carry homepage.
     const slugs =
       kind === 'store' || kind === 'category'
-        ? [...new Set([slug, DEAL_OF_THE_DAY_SLUG])]
+        ? [
+            ...new Set([
+              slug,
+              DEAL_OF_THE_DAY_SLUG,
+              INDEPENDENCE_DAY_SALE_SLUG,
+            ]),
+          ]
         : [slug];
     const identityChanged =
       data

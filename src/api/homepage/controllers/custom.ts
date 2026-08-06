@@ -474,6 +474,10 @@ const MANAGED_SINGLE_ROUTES = [
     'api::deal-of-the-day-page.deal-of-the-day-page',
     '/deal-of-the-day/',
   ],
+  [
+    'api::independence-day-sale-page.independence-day-sale-page',
+    '/independence-day-sale-coupons/',
+  ],
 ] as const;
 
 function routeMetadata(path: string, row: any) {

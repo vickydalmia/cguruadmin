@@ -30,6 +30,7 @@ import {
 } from '../entity-ordered-coupon-validation';
 import { validateHomepageImages } from '../homepage-image-validation';
 import { validateHomepagePopularSearches } from '../homepage-popular-searches-validation';
+import { validateIndependenceDaySale } from '../independence-day-sale-validation';
 import { validateIdentity } from '../identity-validation';
 import { validateJobSlug } from '../job-slug-validation';
 import { MENU_UID, validateMenuCategorySections } from '../menu-category-validation';
@@ -46,6 +47,7 @@ import { normaliseTextFields, validateTextFieldsForWrite } from '../text-field-v
 
 import { DOTD_UID } from '../../constants/deal-of-the-day-sections';
 import { HOMEPAGE_UID } from '../../constants/homepage-sections';
+import { INDEPENDENCE_DAY_SALE_UID } from '../../constants/independence-day-sale-sections';
 
 /**
  * The write-validation pipeline, as data.
@@ -216,6 +218,12 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     actions: CREATE_UPDATE,
     applies: (uid) => uid === DOTD_UID,
     run: ({ strapi, data }) => validateDealOfTheDaySectionLimits(strapi, data),
+  },
+  {
+    name: 'validateIndependenceDaySale',
+    actions: CREATE_UPDATE,
+    applies: (uid) => uid === INDEPENDENCE_DAY_SALE_UID,
+    run: ({ strapi, data }) => validateIndependenceDaySale(strapi, data),
   },
   {
     name: 'validateContentManagerOfferStore',
