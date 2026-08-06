@@ -42,6 +42,9 @@ export const DEAL_FIELDS = [
   'discount',
   'discountPrefix',
   'affiliateLink',
+  // Read by the festive-offer walker, which strips it from the response before
+  // it reaches the UI (see src/utils/festive-offer-response.ts).
+  'checkoutMerchant',
   'expiresAt',
   'contentStatus',
   'publishedOn',

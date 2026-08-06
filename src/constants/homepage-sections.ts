@@ -72,7 +72,7 @@ export const HOMEPAGE_SECTION_LABELS: SectionLabel[] = [
     attr: 'offersByBrand',
     label: '8 · Offers by Brand',
     description:
-      'Coupon offers associated with brands (up to 7). The site shows 3; ' +
+      'Coupon offers associated with brands (up to 10). The site shows 6; ' +
       'the extras backfill automatically when an offer expires.',
   },
   {

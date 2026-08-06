@@ -1,6 +1,7 @@
 import type { Core } from '@strapi/strapi';
 import { errors } from '@strapi/utils';
 import { arrayizeOfferText } from '../../../utils/offer-text';
+import { attachFestiveOffers } from '../../../utils/festive-offer-response';
 import {
   CANONICAL_PATH_RULE,
   normalizeCanonicalPath,
@@ -108,6 +109,9 @@ const DEAL_FIELDS = [
   'discount',
   'discountPrefix',
   'affiliateLink',
+  // Read by the festive-offer walker, which strips it from the response before
+  // it reaches the UI (see src/utils/festive-offer-response.ts).
+  'checkoutMerchant',
   'expiresAt',
   'contentStatus',
   'scheduledAt',
@@ -1002,6 +1006,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       routeConflict,
     });
 
+    const decoratedDeals = arrayizeOfferText(deals);
+    await attachFestiveOffers(strapi, decoratedDeals);
+
     return {
       data: {
         route: {
@@ -1014,7 +1021,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         },
         entity,
         seo: resolvedSeo,
-        deals: arrayizeOfferText(deals),
+        deals: decoratedDeals,
         pagination: {
           page,
           pageSize,

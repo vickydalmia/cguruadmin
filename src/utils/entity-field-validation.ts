@@ -1,6 +1,11 @@
 import type { Core } from '@strapi/strapi';
 import { errors } from '@strapi/utils';
 
+import {
+  FESTIVE_OFFER_FIELDS,
+  isFestiveOfferUid,
+} from './festive-offer-consistency';
+
 /**
  * Cross-field validation for the taxonomy content types (store / brand /
  * category / bank), run from the documents middleware on create+update. Throws
@@ -14,6 +19,11 @@ import { errors } from '@strapi/utils';
  *    re-assert ratingAverage 0–5) with a friendly field error instead.
  *  - FAQ enabled but empty — `faqEnabled` on with no `faqs` rows is almost
  *    always a mistake; require at least one item.
+ *  - Festive offer enabled but empty — same shape one field over. Store and
+ *    Brand carry `isFestiveOffer` plus a title and a rich-text description
+ *    that the schema only makes VISIBLE when the toggle is on. Visibility is
+ *    not requiredness: Strapi skips validation entirely for a hidden field, so
+ *    "on with nothing filled in" has to be caught here.
  *  - Brand required fields — SEO title/description are mandatory on brand. (The
  *    scalar/media required fields — shortDescription, logo, slug — are enforced
  *    natively via `required: true` in the brand schema; SEO lives in the SHARED
@@ -118,6 +128,71 @@ function checkFaqEnabled(
   }
 }
 
+/**
+ * `isFestiveOffer` on requires BOTH conditional fields to be filled in. Only
+ * Store and Brand carry the trio — category and bank fall straight through.
+ *
+ * Grandfathering mirrors checkFaqEnabled exactly: an update that leaves an
+ * already-broken legacy row exactly as broken as it found it is allowed
+ * through, so an editor fixing an unrelated typo is not held hostage by a
+ * festive offer somebody half-configured months ago. `strict` re-arms it.
+ *
+ * The 60-character cap on the title is NOT checked here — it lives in
+ * changed-field-validation.ts with the other length rules, which derives the
+ * editor-facing hint from the same number it enforces.
+ */
+function checkFestiveOffer(
+  data: any,
+  action: string,
+  stored: any,
+  problems: Problem[],
+  strict: boolean,
+): void {
+  const has = (field: string) =>
+    Object.prototype.hasOwnProperty.call(data, field);
+
+  const enabled = has('isFestiveOffer')
+    ? data.isFestiveOffer
+    : stored?.isFestiveOffer;
+  if (enabled !== true) return;
+
+  const fields = [
+    { name: 'festiveOfferTitle', label: 'Add the festive offer title' },
+    {
+      name: 'festiveOfferDescription',
+      label: 'Add the festive offer description',
+    },
+  ] as const;
+
+  for (const { name, label } of fields) {
+    const value = has(name) ? data[name] : stored?.[name];
+    if (!isBlank(value)) continue;
+
+    // Already broken before this write, and this write is not about it:
+    // leave it alone unless strict says judge the whole record.
+    //
+    // "Not about it" has to mean the payload carries NEITHER the toggle nor
+    // this field. Testing the stored state alone would grandfather an editor
+    // who just blanked the title by hand — they touched it, so it is this
+    // save's problem, not the legacy row's.
+    if (
+      !strict &&
+      action === 'update' &&
+      !has('isFestiveOffer') &&
+      !has(name) &&
+      stored?.isFestiveOffer === true &&
+      isBlank(stored?.[name])
+    ) {
+      continue;
+    }
+
+    problems.push({
+      path: [name],
+      message: `${label}, or turn "Is festive offer" off.`,
+    });
+  }
+}
+
 function checkBrandRequired(
   data: any,
   action: string,
@@ -181,6 +256,9 @@ export function validateEntityFields(
   const problems: Problem[] = [];
   checkRatingRange(effective, action, stored, problems, strict);
   checkFaqEnabled(effective, action, stored, problems, strict);
+  if (isFestiveOfferUid(uid)) {
+    checkFestiveOffer(effective, action, stored, problems, strict);
+  }
   if (uid === 'api::brand.brand') {
     checkBrandRequired(effective, action, stored, problems, strict);
   }
@@ -223,6 +301,9 @@ export async function validateEntityFieldsForWrite(
   const ratingFields = ['ratingCount', 'ratingAverage'].filter(has);
   const faqTouched = has('faqEnabled') || has('faqs');
   const seoTouched = uid === 'api::brand.brand' && has('seo');
+  const festiveTouched =
+    isFestiveOfferUid(uid) &&
+    (has('isFestiveOffer') || FESTIVE_OFFER_FIELDS.some(has));
   const isClone = action === 'clone';
   // strict needs the WHOLE stored record to build the effective merge — the
   // same complete cross-field read the clone path already performs.
@@ -232,12 +313,23 @@ export async function validateEntityFieldsForWrite(
   if (
     (action === 'update' || isClone) &&
     documentId &&
-    (wantsFullRecord || ratingFields.length > 0 || faqTouched || seoTouched)
+    (wantsFullRecord ||
+      ratingFields.length > 0 ||
+      faqTouched ||
+      seoTouched ||
+      festiveTouched)
   ) {
     const fields = [
       'documentId',
       ...(wantsFullRecord ? ['ratingCount', 'ratingAverage'] : ratingFields),
       ...(wantsFullRecord || faqTouched ? ['faqEnabled'] : []),
+      // The toggle AND both conditional fields: checkFestiveOffer needs the
+      // stored value of whichever one this payload leaves out, and its
+      // grandfathering clause needs to know whether the stored row was
+      // already enabled-but-empty.
+      ...(isFestiveOfferUid(uid) && (wantsFullRecord || festiveTouched)
+        ? ['isFestiveOffer', ...FESTIVE_OFFER_FIELDS]
+        : []),
     ];
     const populate: Record<string, unknown> = {};
     if (wantsFullRecord || faqTouched) populate.faqs = true;

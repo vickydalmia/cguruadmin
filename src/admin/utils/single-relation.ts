@@ -73,6 +73,7 @@ type SingleRelationChangeInput = {
   selected: readonly RelationCandidate[];
   persistedDocumentIds: ReadonlySet<string>;
   formValue?: RelationFormValue;
+  minSelections?: number;
 };
 
 export type SingleRelationChangeResult = {
@@ -100,15 +101,16 @@ const candidateFromCommand = (
  * selection makes replacement atomic and also cancels stale pending commands
  * (including re-selecting a Store that was pending disconnect).
  *
- * Returns null only when removing the final selected Store. Legacy records may
- * remove Stores while more than one remains, but opening one never emits a
- * change by itself.
+ * Returns null when a removal would go below `minSelections`. Rebuilding from
+ * an empty final selection is valid when the relation is optional and emits a
+ * disconnect for every persisted Store.
  */
 export function singleRelationChange({
   change,
   selected,
   persistedDocumentIds,
   formValue = {},
+  minSelections = 1,
 }: SingleRelationChangeInput): SingleRelationChangeResult | null {
   const next =
     change.type === 'select'
@@ -118,7 +120,7 @@ export function singleRelationChange({
             candidate.documentId !== change.candidate.documentId,
         );
 
-  if (next.length === 0) return null;
+  if (next.length < minSelections) return null;
 
   const candidatesByDocumentId = new Map<string, RelationCandidate>();
   for (const candidate of selected) {

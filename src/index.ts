@@ -1,5 +1,7 @@
 import type { Core } from '@strapi/strapi';
+import { errors } from '@strapi/utils';
 import { join } from 'node:path';
+import { RECORD_LOCK_LEASE_HEADER } from './constants/record-lock';
 import { DOTD_SECTION_LABELS, DOTD_UID } from './constants/deal-of-the-day-sections';
 import { HOMEPAGE_IMAGE_RULES, imageRuleDescription } from './constants/homepage-images';
 import {
@@ -36,8 +38,10 @@ import type {
 } from './isr-outbox/types';
 import {
   computeScope,
+  FESTIVE_OFFER_ENTITY_UIDS,
   isRedirectNoteOnlyChange,
   preDeleteScope,
+  type FestiveOfferSnapshot,
 } from './isr-outbox/scopes';
 import {
   appendListColumns,
@@ -78,6 +82,11 @@ import {
   ENTITY_COUPON_LAYOUT_ACTION,
   ENTITY_COUPON_LAYOUT_ACTION_ATTRIBUTES,
 } from './api/entity-coupon-layout/services/entity-coupon-layout';
+import {
+  CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME,
+  CHECKOUT_MERCHANT_FIELD,
+} from './constants/checkout-merchant';
+import { clearDeletedCheckoutMerchant } from './utils/checkout-merchant-validation';
 const HIDE_FROM_EDIT: Record<string, string[]> = {
   'api::deal.deal': ['stores', 'brands', 'categories', 'banks'],
   'api::coupon.coupon': ['stores', 'brands', 'categories', 'banks'],
@@ -146,6 +155,18 @@ const HIDE_FROM_EDIT_FORM_ONLY: Record<string, string[]> = {
 const HIDE_FROM_COMPONENT_EDIT: Record<string, string[]> = {
   'homepage.slider-slide': ['order'],
 };
+
+// Write actions the edit lock guards. `create`/`clone` are absent on purpose:
+// for collection types they have no existing documentId, so there is nothing
+// to lock. Single types are the exception — their first-ever save IS a
+// create, and the middleware enforces that case separately.
+const LOCK_ENFORCED_ACTIONS = new Set([
+  'update',
+  'delete',
+  'publish',
+  'unpublish',
+  'discardDraft',
+]);
 
 const DOCUMENT_WRITE_ACTIONS = new Set([
   'create',
@@ -675,6 +696,17 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
         'Optional image source only. The site borrows this Store logo; it does ' +
         'not add Store membership, ownership, search matching, or Store-page placement.',
     },
+    // Mirrors checkout-merchant-validation.ts: the reference must resolve to a
+    // live row, and it is nulled automatically if that row is later deleted.
+    {
+      uid,
+      field: 'checkoutMerchant',
+      hint:
+        'Optional. One Store OR Brand — the merchant the shopper actually ' +
+        'checks out with. Search the dropdown to see both; each option is ' +
+        'tagged Store or Brand. Like Logo Store, this adds no membership, ' +
+        'ownership or search matching.',
+    },
     // Mirrors offer-lifecycle-validation.ts: past dates rejected, scheduledAt
     // must precede expiresAt, contentStatus derived from these two dates.
     {
@@ -730,6 +762,32 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
       'Required when Coupon type is "unique" — codes are handed out from this ' +
       'pool. Cleared automatically for static coupons.',
   },
+  // Mirrors festive-offer-consistency.ts (clearing) and the checkFestiveOffer
+  // rule in entity-field-validation.ts (both fields required when on). The
+  // 60-character cap on the title is NOT restated here — changedFieldHints()
+  // derives "Up to 60 characters." from the rule that enforces it, and both
+  // hints are appended to the same field.
+  ...['api::store.store', 'api::brand.brand'].flatMap((uid) => [
+    {
+      uid,
+      field: 'isFestiveOffer',
+      hint:
+        'Turns on the festive offer title and description below. Switching it ' +
+        'off CLEARS both of them on save — they are not kept in the background.',
+    },
+    {
+      uid,
+      field: 'festiveOfferTitle',
+      hint: 'Required while "Is festive offer" is on.',
+    },
+    {
+      uid,
+      field: 'festiveOfferDescription',
+      hint:
+        'Required while "Is festive offer" is on. Rendered as formatted text ' +
+        'on the site.',
+    },
+  ]),
   // Mirrors redirect-validation.ts: from must be a rooted on-site path that
   // shadows nothing live; to must be a rooted path or absolute http(s) URL
   // and must not close a loop.
@@ -879,10 +937,12 @@ const CONTENT_TYPE_FIELD_LABELS: Record<string, Record<string, string>> = {
   'api::coupon.coupon': {
     publishedOn: 'Published date',
     logoStore: 'Logo Store (image only)',
+    checkoutMerchant: 'Checkout merchant (Store or Brand)',
   },
   'api::deal.deal': {
     publishedOn: 'Published date',
     logoStore: 'Logo Store (image only)',
+    checkoutMerchant: 'Checkout merchant (Store or Brand)',
   },
   'api::menu.menu': {
     notification: 'Notification',
@@ -1318,6 +1378,26 @@ async function ensureSortableListColumns(strapi: Core.Strapi): Promise<void> {
 
 export default {
   async register({ strapi }: { strapi: Core.Strapi }) {
+    // The Checkout Merchant custom field, which is what lets ONE dropdown
+    // offer Stores and Brands together in the main edit form (a relation can
+    // only target one content type — src/constants/checkout-merchant.ts has
+    // the full reasoning).
+    //
+    // Registering HERE is mandatory, not stylistic: Strapi.register() runs the
+    // user register lifecycle and only THEN calls convertCustomFieldType(),
+    // which swaps `"type": "customField"` in the offer schemas for this
+    // field's underlying `string`. Register any later and both schemas fail to
+    // load with "Could not find Custom Field: global::checkout-merchant".
+    //
+    // No `plugin` key, so the registry derives the `global::` uid the two
+    // schema.json files name. The admin half registers the matching Input in
+    // src/admin/app.tsx.
+    strapi.customFields.register({
+      name: CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME,
+      type: 'string',
+      inputSize: { default: 6, isResizable: true },
+    });
+
     // NOTE: no custom /_health route — Strapi core already serves /_health
     // (all methods, 204, no auth) and registers it BEFORE this lifecycle,
     // so a route here would be dead code. The docker healthcheck and
@@ -1435,6 +1515,96 @@ export default {
       ],
     } as any);
 
+    // Edit-lock endpoints for the Content Manager edit view (RecordLockPanel
+    // in src/admin/app.tsx). Admin router for the same reason as the
+    // entity-deal-page settings routes above: src/api/*/routes cannot
+    // authenticate an admin session.
+    strapi.server.routes({
+      type: 'admin',
+      prefix: '/record-lock',
+      routes: [
+        {
+          method: 'POST',
+          path: '/acquire',
+          handler: 'api::record-lock.record-lock.acquire',
+          config: { policies: ['admin::isAuthenticatedAdmin'] },
+        },
+        {
+          method: 'POST',
+          path: '/release',
+          handler: 'api::record-lock.record-lock.release',
+          config: { policies: ['admin::isAuthenticatedAdmin'] },
+        },
+      ],
+    } as any);
+
+    // Enforce edit locks server-side. The RecordLockPanel warning alone would
+    // be advisory — an admin who ignores it (or opened the entry before the
+    // panel loaded) could still overwrite the holder's work. Scoped to
+    // Content Manager requests carrying an admin user so crons, the ISR
+    // outbox, redeem flows and other server-initiated writes are untouched.
+    strapi.documents.use(async (context: any, next: any) => {
+      // Cheap action gate FIRST: this middleware sits in front of every
+      // document-service call — findMany/findOne/count on public API
+      // requests, crons, the ISR outbox — and getModel() is an O(registry)
+      // scan, so it must only run for actions that can possibly be enforced.
+      const enforceable =
+        LOCK_ENFORCED_ACTIONS.has(context.action) ||
+        context.action === 'create';
+      if (!enforceable) return next();
+      const isSingleType =
+        strapi.getModel(context.uid as any)?.kind === 'singleType';
+      // Single types additionally enforce `create`: their FIRST-ever save
+      // runs as the create action (no document row exists yet), but they are
+      // locked regardless of existence — without this, two admins could race
+      // on a never-saved single type straight past each other's lock.
+      // Collection-type create stays exempt: nothing exists to lock.
+      if (context.action === 'create' && !isSingleType) return next();
+      const documentId = context.params?.documentId;
+      if (
+        !isSingleType &&
+        (typeof documentId !== 'string' || documentId === '')
+      ) {
+        return next();
+      }
+      const ctx = strapi.requestContext.get();
+      const user = ctx?.state?.user;
+      if (!user || !ctx?.request?.url?.startsWith('/content-manager/')) {
+        return next();
+      }
+      // The record-lock service resolves the single-type pseudo id itself —
+      // pass documentId through as-is (undefined for single types).
+      const holder = await strapi
+        .service('api::record-lock.record-lock')
+        .activeHolder(context.uid, isSingleType ? undefined : documentId);
+      // No active lock: ALLOW. Locks exist only while an edit view is open
+      // on this entry — list-view row delete, bulk publish/unpublish and
+      // plugin content types (which the panel never locks) all arrive
+      // without one and must keep working. This guard's only job is to
+      // protect a HELD lock from every other session.
+      if (!holder) return next();
+      if (holder.adminUserId !== user.id) {
+        throw new errors.ApplicationError(
+          `This entry is currently being edited by ${holder.holderName}. ` +
+            'Come back later — your change was NOT saved.',
+        );
+      }
+      const leaseId =
+        ctx.get?.(RECORD_LOCK_LEASE_HEADER) ??
+        ctx.request?.headers?.[RECORD_LOCK_LEASE_HEADER];
+      if (typeof leaseId !== 'string' || holder.leaseId !== leaseId) {
+        // Same admin, but the write does not come from the tab holding the
+        // lease (another tab, a list-view bulk action, a reload's new
+        // session) — the holding tab's work must not be overwritten.
+        throw new errors.ApplicationError(
+          'This entry is locked by another of your browser tabs. Your change ' +
+            'was NOT saved. Finish there, or use "Take over editing here" on ' +
+            'this entry’s edit screen.',
+        );
+      }
+      return next();
+    });
+
     strapi.documents.use(async (context: any, next: any) => {
       if (!DOCUMENT_WRITE_ACTIONS.has(context.action)) return next();
 
@@ -1543,6 +1713,32 @@ export default {
           }
         }
 
+        // Festive fields BEFORE the write. The content-manager form submits
+        // the full document, so computeScope cannot tell "festive edited"
+        // from "festive merely present" by looking at the payload — without
+        // this snapshot every Store/Brand save would escalate to a full-site
+        // rebuild (see festiveOfferChanged in isr-outbox/scopes.ts). A failed
+        // read stays null, which fails toward invalidation, never away.
+        let festiveOfferBefore: FestiveOfferSnapshot | null = null;
+        if (
+          context.action === 'update' &&
+          FESTIVE_OFFER_ENTITY_UIDS.has(context.uid) &&
+          context.params?.documentId
+        ) {
+          try {
+            festiveOfferBefore = await strapi.documents(context.uid).findOne({
+              documentId: context.params.documentId,
+              fields: [
+                'isFestiveOffer',
+                'festiveOfferTitle',
+                'festiveOfferDescription',
+              ] as any,
+            });
+          } catch {
+            festiveOfferBefore = null;
+          }
+        }
+
         return await runContentTransaction(
           strapi,
           () => next(),
@@ -1561,6 +1757,49 @@ export default {
                 result,
                 context.params?.documentId,
               );
+            }
+
+            // checkoutMerchant is a custom STRING field, not a relation, so
+            // deleting a Store or Brand leaves every offer that pointed at it
+            // holding a reference to a row that is gone — the one thing a
+            // foreign key's ON DELETE SET NULL would have handled for free.
+            // Do it by hand, in this transaction, so the clear commits with
+            // the delete or not at all.
+            //
+            // strapi.db.query joins the ambient transaction through
+            // AsyncLocalStorage (AGENTS.md); a raw strapi.db.connection write
+            // here would take a second pool connection and deadlock against
+            // the row locks the delete still holds.
+            if (
+              context.action === 'delete' &&
+              context.params?.documentId &&
+              (context.uid === 'api::store.store' ||
+                context.uid === 'api::brand.brand')
+            ) {
+              try {
+                const cleared = await clearDeletedCheckoutMerchant(
+                  strapi,
+                  context.uid === 'api::store.store' ? 'store' : 'brand',
+                  context.params.documentId,
+                );
+                if (cleared > 0) {
+                  strapi.log.info(
+                    `[${CHECKOUT_MERCHANT_FIELD}] cleared ${cleared} offer ` +
+                      `reference(s) to deleted ${context.uid} ` +
+                      `${context.params.documentId}`,
+                  );
+                }
+              } catch (err: any) {
+                // Never block the delete on the cleanup. A leftover reference
+                // is caught by validateCheckoutMerchantForWrite on the next
+                // save of that offer, which is a recoverable state; a delete
+                // that half-fails inside a content transaction is not.
+                strapi.log.warn(
+                  `[${CHECKOUT_MERCHANT_FIELD}] cleanup failed for ` +
+                    `${context.uid} ${context.params.documentId}: ` +
+                    `${err?.message ?? err}`,
+                );
+              }
             }
 
             if (
@@ -1590,6 +1829,7 @@ export default {
                     context.action,
                     documentId,
                     context.params?.data,
+                    festiveOfferBefore,
                   );
             let scope =
               context.action === 'delete'

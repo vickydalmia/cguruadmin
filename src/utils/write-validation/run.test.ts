@@ -25,6 +25,7 @@ describe('write-validation step order', () => {
       'sanitizeRichtextData',
       'normaliseTextFields',
       'normaliseCouponTypeFields',
+      'normaliseFestiveOfferFields',
     ]);
   });
 
@@ -39,6 +40,7 @@ describe('write-validation step order', () => {
       'validateMenuNotification',
       'validateDealOfTheDaySectionLimits',
       'validateContentManagerOfferStore',
+      'validateCheckoutMerchantForWrite',
       'validateEntityTopPickCoupons',
       'validateEntityOrderedCoupons',
       'validateOfferFieldsForWrite',

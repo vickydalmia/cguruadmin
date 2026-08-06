@@ -49,7 +49,19 @@ const SLUG_PATTERN = /^[a-z0-9]+(?:[-.][a-z0-9]+)*$/u;
 const JOB_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const WEBSITE_PATTERN =
   /^https?:\/\/[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}(?::\d{2,5})?(?:[/?#][^\s]*)?$/u;
-const HTTP_URL_PATTERN = /^https?:\/\/[^\s]+$/iu;
+const UNSAFE_URL_CHARS_PATTERN = /[<>\u0000-\u001f\u007f]/u;
+
+function isHttpUrl(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || UNSAFE_URL_CHARS_PATTERN.test(trimmed)) return false;
+
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
 // The path classes exclude backslashes and control characters on top of
 // whitespace/`<>?#`: WHATWG URL resolution folds "\" to "/" in http(s)
 // contexts, so a canonical of "/\evil.example/" would resolve to
@@ -133,6 +145,21 @@ const TOP_LEVEL_RULES: Rule[] = [
       'Complete http(s) address with a valid domain.',
     ),
   ),
+  // Schema `maxLength: 60` on this field is enforced CLIENT-side only (see
+  // AGENTS.md, "The two-layer reality"), so it stops an editor typing past the
+  // cap but nothing else — an import or a REST write sails straight past it.
+  // This is the server-side half, and it is where the "Up to 60 characters."
+  // hint under the field comes from, so the shown limit cannot drift from the
+  // enforced one.
+  ...['api::store.store', 'api::brand.brand'].map((uid) =>
+    topRule(
+      uid,
+      'festiveOfferTitle',
+      maxLength(60),
+      'Festive offer title must be at most 60 characters.',
+      'Up to 60 characters.',
+    ),
+  ),
   ...['api::coupon.coupon', 'api::deal.deal'].map((uid) =>
     topRule(
       uid,
@@ -153,9 +180,9 @@ const TOP_LEVEL_RULES: Rule[] = [
     topRule(
       uid,
       'affiliateLink',
-      optionalString((value) => HTTP_URL_PATTERN.test(value)),
-      'Affiliate link must be a complete http(s) URL without spaces.',
-      'Complete http(s) URL with no spaces.',
+      optionalString(isHttpUrl),
+      'Affiliate link must be a complete http(s) URL.',
+      'Complete http(s) URL.',
     ),
   ),
   topRule(

@@ -73,8 +73,11 @@ export const RICHTEXT_FIELDS: Record<string, string[]> = {
   'api::coupon.coupon': ['content'],
   'api::category.category': ['description'],
   'api::bank.bank': ['description'],
-  'api::brand.brand': ['description'],
-  'api::store.store': ['description'],
+  // festiveOfferDescription is rendered raw like every other richtext field,
+  // so it goes through the same allowlist. Listing it here is not optional:
+  // an unlisted richtext field is stored exactly as the editor sent it.
+  'api::brand.brand': ['description', 'festiveOfferDescription'],
+  'api::store.store': ['description', 'festiveOfferDescription'],
 };
 
 const LEGAL_PAGE_UIDS = new Set([

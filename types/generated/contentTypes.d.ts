@@ -662,6 +662,16 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
     >;
     faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     faqs: Schema.Attribute.Component<'shared.faq-item', true>;
+    festiveOfferDescription: Schema.Attribute.RichText &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 50000;
+      }>;
+    festiveOfferTitle: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    isFestiveOffer: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
     isVerified: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::brand.brand'> &
@@ -925,6 +935,11 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
       'manyToMany',
       'api::category.category'
     >;
+    checkoutMerchant: Schema.Attribute.String &
+      Schema.Attribute.CustomField<'global::checkout-merchant'> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 64;
+      }>;
     code: Schema.Attribute.String &
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 64;
@@ -1122,6 +1137,11 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
       'manyToMany',
       'api::category.category'
     >;
+    checkoutMerchant: Schema.Attribute.String &
+      Schema.Attribute.CustomField<'global::checkout-merchant'> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 64;
+      }>;
     code: Schema.Attribute.Text;
     content: Schema.Attribute.RichText &
       Schema.Attribute.SetMinMaxLength<{
@@ -1705,6 +1725,106 @@ export interface ApiPrivacyPolicyPagePrivacyPolicyPage
   };
 }
 
+export interface ApiRecordLockCancellationRecordLockCancellation
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'record_lock_cancellations';
+  info: {
+    description: 'Short-lived fences preventing late edit-lock acquires';
+    displayName: 'Record Lock Cancellation';
+    pluralName: 'record-lock-cancellations';
+    singularName: 'record-lock-cancellation';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  pluginOptions: {
+    'content-manager': {
+      visible: false;
+    };
+    'content-type-builder': {
+      visible: false;
+    };
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    expiresAt: Schema.Attribute.DateTime &
+      Schema.Attribute.Required &
+      Schema.Attribute.Private;
+    leaseId: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Private &
+      Schema.Attribute.Unique;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::record-lock-cancellation.record-lock-cancellation'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiRecordLockRecordLock extends Struct.CollectionTypeSchema {
+  collectionName: 'record_locks';
+  info: {
+    description: 'Short-lived edit locks preventing two admins from editing the same entry';
+    displayName: 'Record Lock';
+    pluralName: 'record-locks';
+    singularName: 'record-lock';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  pluginOptions: {
+    'content-manager': {
+      visible: false;
+    };
+    'content-type-builder': {
+      visible: false;
+    };
+  };
+  attributes: {
+    adminUserId: Schema.Attribute.Integer &
+      Schema.Attribute.Required &
+      Schema.Attribute.Private;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    entryDocumentId: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Private;
+    expiresAt: Schema.Attribute.DateTime &
+      Schema.Attribute.Required &
+      Schema.Attribute.Private;
+    holderName: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Private;
+    key: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Private &
+      Schema.Attribute.Unique;
+    leaseId: Schema.Attribute.String & Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::record-lock.record-lock'
+    > &
+      Schema.Attribute.Private;
+    model: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiRedirectRedirect extends Struct.CollectionTypeSchema {
   collectionName: 'redirects';
   info: {
@@ -1786,7 +1906,17 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
     >;
     faqEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     faqs: Schema.Attribute.Component<'shared.faq-item', true>;
+    festiveOfferDescription: Schema.Attribute.RichText &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 50000;
+      }>;
+    festiveOfferTitle: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
     isCjEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    isFestiveOffer: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
     isVerified: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::store.store'> &
@@ -2597,6 +2727,8 @@ declare module '@strapi/strapi' {
       'api::menu.menu': ApiMenuMenu;
       'api::partner-with-us-page.partner-with-us-page': ApiPartnerWithUsPagePartnerWithUsPage;
       'api::privacy-policy-page.privacy-policy-page': ApiPrivacyPolicyPagePrivacyPolicyPage;
+      'api::record-lock-cancellation.record-lock-cancellation': ApiRecordLockCancellationRecordLockCancellation;
+      'api::record-lock.record-lock': ApiRecordLockRecordLock;
       'api::redirect.redirect': ApiRedirectRedirect;
       'api::store.store': ApiStoreStore;
       'api::terms-and-conditions-page.terms-and-conditions-page': ApiTermsAndConditionsPageTermsAndConditionsPage;
