@@ -3,6 +3,9 @@ name: Build and Push
 on:
   release:
     types: [published]
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
