@@ -33,13 +33,15 @@ export async function validateIndependenceDaySale(
   });
   const problems: Problem[] = [];
   const countdown = data.countdown ?? current?.countdown;
-  const start = dateValue(countdown?.saleStartAt);
-  const end = dateValue(countdown?.saleEndAt);
-  if (start === null || end === null || start >= end) {
-    problems.push({
-      path: ['countdown'],
-      message: 'Sale start and end must be valid timestamps, with the end after the start.',
-    });
+  if (countdown?.enabled !== false) {
+    const start = dateValue(countdown?.saleStartAt);
+    const end = dateValue(countdown?.saleEndAt);
+    if (start === null || end === null || start >= end) {
+      problems.push({
+        path: ['countdown'],
+        message: 'An enabled clock needs valid sale start and end timestamps, with the end after the start.',
+      });
+    }
   }
 
   const relationLimits = [

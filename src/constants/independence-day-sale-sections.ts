@@ -21,7 +21,7 @@ export const INDEPENDENCE_DAY_SALE_SECTION_LABELS: SectionLabel[] = [
   {
     attr: 'countdown',
     label: '1 · Sale countdown',
-    description: 'Sale start/end timestamps and the pre-sale/live labels and links.',
+    description: 'Switch the live clock on or off. Dates and labels are required only while the clock is enabled.',
   },
   {
     attr: 'hero',

@@ -12,6 +12,7 @@ function strapiWithCurrent(current: any = {}) {
 }
 
 const countdown = {
+  enabled: true,
   saleStartAt: '2026-08-01T00:00:00.000Z',
   saleEndAt: '2026-08-15T23:59:59.000Z',
 };
@@ -82,6 +83,16 @@ describe('Independence Day sale validation', () => {
     ).rejects.toMatchObject({
       details: { errors: [{ path: ['countdown'] }] },
     });
+  });
+
+  it('accepts a disabled countdown without dates', async () => {
+    const { strapi } = strapiWithCurrent();
+
+    await expect(
+      validateIndependenceDaySale(strapi, {
+        countdown: { enabled: false },
+      }),
+    ).resolves.toBeUndefined();
   });
 
   it('counts nested tab connect/disconnect updates against the saved relation', async () => {
