@@ -1225,6 +1225,133 @@ export interface FaqSupportCta extends Struct.ComponentSchema {
   };
 }
 
+export interface FestivalCampaignHero extends Struct.ComponentSchema {
+  collectionName: 'components_festival_campaign_heroes';
+  info: {
+    displayName: 'Festival Campaign Hero';
+    icon: 'picture';
+  };
+  attributes: {
+    altText: Schema.Attribute.String & Schema.Attribute.Required;
+    image: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
+  };
+}
+
+export interface FestivalCouponCategoryTab extends Struct.ComponentSchema {
+  collectionName: 'components_festival_coupon_category_tabs';
+  info: {
+    description: 'One of the four category tabs, with an optional campaign-specific image';
+    displayName: 'Festival Coupon Category Tab';
+    icon: 'grid';
+  };
+  attributes: {
+    category: Schema.Attribute.Relation<'oneToOne', 'api::category.category'>;
+    iconOverride: Schema.Attribute.Media<'images'>;
+    labelOverride: Schema.Attribute.String;
+    offers: Schema.Attribute.Relation<'oneToMany', 'api::coupon.coupon'>;
+    viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
+  };
+}
+
+export interface FestivalCouponStoreTab extends Struct.ComponentSchema {
+  collectionName: 'components_festival_coupon_store_tabs';
+  info: {
+    displayName: 'Festival Coupon Store Tab';
+    icon: 'shoppingCart';
+  };
+  attributes: {
+    labelOverride: Schema.Attribute.String;
+    offers: Schema.Attribute.Relation<'oneToMany', 'api::coupon.coupon'>;
+    store: Schema.Attribute.Relation<'oneToOne', 'api::store.store'>;
+  };
+}
+
+export interface FestivalCouponsByCategory extends Struct.ComponentSchema {
+  collectionName: 'components_festival_coupons_by_categories';
+  info: {
+    description: 'Festival-only category section limited to four tabs';
+    displayName: 'Festival Coupons By Category';
+    icon: 'grid';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Explore By Category'>;
+    tabs: Schema.Attribute.Component<'festival.coupon-category-tab', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 4;
+          min: 1;
+        },
+        number
+      >;
+    viewAllCta: Schema.Attribute.Component<'shared.cta', false>;
+  };
+}
+
+export interface FestivalCouponsByStore extends Struct.ComponentSchema {
+  collectionName: 'components_festival_coupons_by_stores';
+  info: {
+    displayName: 'Festival Coupons By Store';
+    icon: 'shoppingCart';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Explore By Stores'>;
+    tabs: Schema.Attribute.Component<'festival.coupon-store-tab', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 8;
+        },
+        number
+      >;
+  };
+}
+
+export interface FestivalPromoStrip extends Struct.ComponentSchema {
+  collectionName: 'components_festival_promo_strips';
+  info: {
+    displayName: 'Festival Promo Strip';
+    icon: 'apps';
+  };
+  attributes: {
+    cta: Schema.Attribute.Component<'shared.cta', false>;
+    description: Schema.Attribute.Text &
+      Schema.Attribute.DefaultTo<'LIMITED TIME ONLY \u26A1'>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'FLASH DEALS'>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'UP TO 70% OFF'>;
+  };
+}
+
+export interface FestivalSaleCountdown extends Struct.ComponentSchema {
+  collectionName: 'components_festival_sale_countdowns';
+  info: {
+    displayName: 'Festival Sale Countdown';
+    icon: 'clock';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    liveCtaHref: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'#all-coupons'>;
+    liveCtaLabel: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Offers live'>;
+    liveLabel: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Sale ends in'>;
+    preSaleCtaHref: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'#top-picks'>;
+    preSaleCtaLabel: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Reserve offers now'>;
+    preSaleLabel: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Sale starts in'>;
+    saleEndAt: Schema.Attribute.DateTime;
+    saleStartAt: Schema.Attribute.DateTime;
+  };
+}
+
 export interface FooterCountry extends Struct.ComponentSchema {
   collectionName: 'components_footer_countries';
   info: {
@@ -2835,6 +2962,13 @@ declare module '@strapi/strapi' {
       'faq.category': FaqCategory;
       'faq.faq-item': FaqFaqItem;
       'faq.support-cta': FaqSupportCta;
+      'festival.campaign-hero': FestivalCampaignHero;
+      'festival.coupon-category-tab': FestivalCouponCategoryTab;
+      'festival.coupon-store-tab': FestivalCouponStoreTab;
+      'festival.coupons-by-category': FestivalCouponsByCategory;
+      'festival.coupons-by-store': FestivalCouponsByStore;
+      'festival.promo-strip': FestivalPromoStrip;
+      'festival.sale-countdown': FestivalSaleCountdown;
       'footer.country': FooterCountry;
       'footer.google-preferred-card': FooterGooglePreferredCard;
       'footer.link-section': FooterLinkSection;
