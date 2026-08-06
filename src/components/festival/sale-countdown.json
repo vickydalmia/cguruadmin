@@ -5,13 +5,15 @@
     "icon": "clock"
   },
   "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
     "saleStartAt": {
-      "type": "datetime",
-      "required": true
+      "type": "datetime"
     },
     "saleEndAt": {
-      "type": "datetime",
-      "required": true
+      "type": "datetime"
     },
     "preSaleLabel": {
       "type": "string",

@@ -1334,6 +1334,7 @@ export interface FestivalSaleCountdown extends Struct.ComponentSchema {
     icon: 'clock';
   };
   attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     liveCtaHref: Schema.Attribute.String &
       Schema.Attribute.DefaultTo<'#all-coupons'>;
     liveCtaLabel: Schema.Attribute.String &
@@ -1346,8 +1347,8 @@ export interface FestivalSaleCountdown extends Struct.ComponentSchema {
       Schema.Attribute.DefaultTo<'Reserve offers now'>;
     preSaleLabel: Schema.Attribute.String &
       Schema.Attribute.DefaultTo<'Sale starts in'>;
-    saleEndAt: Schema.Attribute.DateTime & Schema.Attribute.Required;
-    saleStartAt: Schema.Attribute.DateTime & Schema.Attribute.Required;
+    saleEndAt: Schema.Attribute.DateTime;
+    saleStartAt: Schema.Attribute.DateTime;
   };
 }
 
