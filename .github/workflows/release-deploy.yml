@@ -7,6 +7,16 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Immutable CMS image tag, for example v1.1.5"
+        required: true
+        type: string
+      git_ref:
+        description: "Reviewed branch, tag, or commit to build"
+        required: true
+        default: main
+        type: string
 
 permissions:
   contents: read
@@ -40,6 +50,24 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.git_ref || github.ref }}
+
+      - name: Validate manual image tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          CMS_IMAGE_TAG: ${{ inputs.image_tag }}
+        shell: bash
+        run: |
+          if [[ ! "$CMS_IMAGE_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
+            echo "Invalid image tag: use letters, numbers, dot, underscore, or hyphen." >&2
+            exit 1
+          fi
+
+      - id: source
+        name: Resolve source commit
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -79,9 +107,12 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
-            type=sha,prefix=sha-,format=long
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ inputs.image_tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=sha,prefix=sha-,format=long,enable=${{ github.event_name != 'workflow_dispatch' }}
+            type=raw,value=sha-${{ steps.source.outputs.sha }},enable=${{ github.event_name == 'workflow_dispatch' }}
             type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+          labels: |
+            org.opencontainers.image.revision=${{ steps.source.outputs.sha }}
 
       - name: Build and push image
         uses: docker/build-push-action@v6
