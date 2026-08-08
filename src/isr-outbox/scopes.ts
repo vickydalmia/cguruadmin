@@ -81,7 +81,9 @@ const ERROR_DOCUMENT_SLUGS = [
   'error-pages/template',
 ] as const;
 
-function withOfferLandingSlugs(uid: string, slugs: string[]): string[] {
+// Exported for the affiliate-flip cascade in src/index.ts, whose swept offers
+// must invalidate the same landing pages a direct offer write would.
+export function withOfferLandingSlugs(uid: string, slugs: string[]): string[] {
   return [
     ...new Set([
       ...slugs,

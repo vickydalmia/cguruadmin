@@ -1,5 +1,10 @@
 import type { Core } from '@strapi/strapi';
 
+import {
+  isAffiliateEntityUid,
+  validateEntityOfferAffiliateConnections,
+  validateOfferAffiliateBrands,
+} from '../affiliate-brand-validation';
 import { validateChangedFields } from '../changed-field-validation';
 import { validateCheckoutMerchantForWrite } from '../checkout-merchant-validation';
 import { isCheckoutMerchantOfferUid } from '../../constants/checkout-merchant';
@@ -351,6 +356,46 @@ export const LOCKED_STEPS: readonly ValidationStep[] = [
     name: 'validateJobSlug',
     run: ({ strapi, uid, action, data, documentId }) =>
       validateJobSlug(strapi, uid, action, data, documentId),
+  },
+  {
+    // An affiliate brand is an offer's ONLY merchant: no Store, no other
+    // brands, no checkout merchant pointing elsewhere. A data invariant, so
+    // it runs for EVERY write path, not just Content Manager saves — and it
+    // sits in the LOCKED group because it is read-then-write against rows a
+    // concurrent Brand flip mutates: the 'affiliate' serialization domain
+    // (write-validation/run.ts) holds offer writes and brand flips apart
+    // across validate + commit, and this check must run under that lock.
+    name: 'validateOfferAffiliateBrands',
+    applies: isOfferStoreUid,
+    run: ({ strapi, uid, action, data, documentId, strict }) =>
+      isOfferStoreUid(uid)
+        ? validateOfferAffiliateBrands(
+            strapi,
+            uid,
+            action,
+            data,
+            documentId,
+            strict,
+          )
+        : undefined,
+  },
+  {
+    // The inverse side of the same invariant: brand.coupons / store.deals
+    // etc. are writable mappings, so a Store/Brand save can attach offers
+    // without ever producing an offer write. Judges only NEWLY connected
+    // offers, under the same 'affiliate' lock domain.
+    name: 'validateEntityOfferAffiliateConnections',
+    applies: isAffiliateEntityUid,
+    run: ({ strapi, uid, action, data, documentId }) =>
+      isAffiliateEntityUid(uid)
+        ? validateEntityOfferAffiliateConnections(
+            strapi,
+            uid,
+            action,
+            data,
+            documentId,
+          )
+        : undefined,
   },
 ];
 

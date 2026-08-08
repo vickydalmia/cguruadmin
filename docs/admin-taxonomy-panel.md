@@ -225,6 +225,47 @@ or choose any Store radio to reduce the relation immediately to that Store. The
 next Content Manager save is rejected until exactly one remains, even if the
 editor changed only an unrelated field.
 
+### Affiliate brand exclusivity
+
+A Brand with `isAffiliate: true` is an offer's ONLY merchant: it may never
+share a Coupon/Deal with a Store, another brand, or a `checkoutMerchant`
+pointing anywhere but at itself. The panel enforces the rule as UX; the server
+guarantee is `validateOfferAffiliateBrands`
+(`src/utils/affiliate-brand-validation.ts`), which runs for every write path,
+plus the flip cascade `detachAffiliateBrand` invoked from the documents
+middleware when a Brand becomes affiliate.
+
+Panel mechanics (`affiliateRule` on the stores/brands `RELATION_CONFIG`
+entries):
+
+- Each of the two sections reports its resolved selection up to `PanelBody`,
+  which derives one shared context. Candidate rows carry `isAffiliate` off the
+  collection-types fetch; persisted selections do not (the relations endpoint
+  returns no custom fields), so `PanelBody` resolves those with one filtered
+  lookup. The lookup cache is scoped to the edited entry (reset on
+  model/documentId change, so another editor's flag flip is picked up on the
+  next entry open) and a failed lookup auto-retries a few times with backoff
+  before staying fail-safe-blocked.
+- Brands section: affiliate candidates are disabled (labelled "— affiliate")
+  while a Store is selected, any other brand is selected, or the checkout
+  merchant points elsewhere; non-affiliate candidates are disabled while an
+  affiliate brand is selected. A warning note names the reason.
+- Stores section: every radio is disabled while an affiliate brand is
+  selected. The Store remove button stays enabled — legacy conflicts are
+  resolvable from either side, and a selected row is never disabled
+  (deselection is the escape hatch, per the coupon-layout precedent).
+- Checkout merchant: `PanelBody` publishes the verdict through
+  `src/admin/features/affiliate-exclusion/affiliate-state.ts` (module state —
+  the input renders in a different React tree) and the dropdown disables
+  itself with an explanatory note.
+- Unknown state — a sibling section still loading, the affiliate-flag lookup
+  unresolved — always blocks the ADD, never allows it. Pure decision rules
+  live in `src/admin/utils/affiliate-exclusion.ts` with colocated tests.
+
+The public site renders an affiliate brand's page with the store presentation
+(`displayKind` in cguru-ui's `build-unified-entity-page-view.ts`); the brand
+keeps its flat URL.
+
 ---
 
 ## 4. The Top Pick Coupons panel

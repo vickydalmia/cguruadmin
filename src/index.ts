@@ -44,7 +44,9 @@ import {
   computeScope,
   FESTIVE_OFFER_ENTITY_UIDS,
   isRedirectNoteOnlyChange,
+  offerRelationScope,
   preDeleteScope,
+  withOfferLandingSlugs,
   type FestiveOfferSnapshot,
 } from './isr-outbox/scopes';
 import {
@@ -91,6 +93,16 @@ import {
   CHECKOUT_MERCHANT_FIELD,
 } from './constants/checkout-merchant';
 import { clearDeletedCheckoutMerchant } from './utils/checkout-merchant-validation';
+import {
+  detachAffiliateBrand,
+  diffEntityOfferSnapshots,
+  EMPTY_ENTITY_OFFER_SNAPSHOT,
+  isAffiliateEntityUid,
+  snapshotEntityOfferRelations,
+  touchesEntityOfferRelations,
+  type AffiliateCascadeResult,
+  type EntityOfferSnapshot,
+} from './utils/affiliate-brand-validation';
 const HIDE_FROM_EDIT: Record<string, string[]> = {
   'api::deal.deal': ['stores', 'brands', 'categories', 'banks'],
   'api::coupon.coupon': ['stores', 'brands', 'categories', 'banks'],
@@ -792,6 +804,18 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
         'on the site.',
     },
   ]),
+  // Mirrors affiliate-brand-validation.ts: an affiliate brand is an offer's
+  // only merchant (no Store, no other brands, no conflicting checkout
+  // merchant), and flipping the toggle ON sweeps existing offers clean.
+  {
+    uid: 'api::brand.brand',
+    field: 'isAffiliate',
+    hint:
+      "Affiliate brands are an offer's ONLY merchant — never combined with a " +
+      'Store or other brands on a Coupon/Product Deal. Turning this ON ' +
+      'immediately detaches this brand from every offer that has a Store or ' +
+      'other brands, and clears conflicting checkout merchants.',
+  },
   // Mirrors redirect-validation.ts: from must be a rooted on-site path that
   // shadows nothing live; to must be a rooted path or absolute http(s) URL
   // and must not close a loop.
@@ -964,6 +988,12 @@ const CONTENT_TYPE_FIELD_LABELS: Record<string, Record<string, string>> = {
       { showTrendingDeals: 'Show Trending Deals' },
     ]),
   ),
+  // Spread AFTER the fan-out: a later duplicate key replaces the whole object,
+  // so the shared label must be restated here.
+  'api::brand.brand': {
+    showTrendingDeals: 'Show Trending Deals',
+    isAffiliate: 'Affiliate brand',
+  },
 };
 
 // Content-type counterpart of ensureComponentFieldDescriptions: pins the
@@ -1744,6 +1774,65 @@ export default {
           }
         }
 
+        // A Store/Brand payload can rewire offers through its coupons/deals
+        // inverses without naming the ones it REMOVES (replacement arrays and
+        // `[]`/null clears carry no removed ids), so ISR needs the membership
+        // BEFORE the write to diff against the state after it. Create and
+        // clone start from an empty baseline — the written document did not
+        // exist yet. A failed read stays null, which fails toward the full
+        // sweep in the transaction callback, never toward a stale page.
+        let entityOfferSweep = false;
+        let entityOffersBefore: EntityOfferSnapshot | null =
+          EMPTY_ENTITY_OFFER_SNAPSHOT;
+        if (
+          isAffiliateEntityUid(context.uid) &&
+          ['create', 'update', 'clone'].includes(context.action) &&
+          // A clone sweeps REGARDLESS of payload: Strapi deep-copies the
+          // source's relations before merging the submitted data, so a bare
+          // {name, slug} clone still rewires every inherited offer — and the
+          // per-offer invalidations are what clears the gateway's redeem
+          // cache. The empty baseline below then diffs to exactly those.
+          (touchesEntityOfferRelations(context.params?.data) ||
+            context.action === 'clone')
+        ) {
+          entityOfferSweep = true;
+          if (context.action === 'update' && context.params?.documentId) {
+            try {
+              entityOffersBefore = await snapshotEntityOfferRelations(
+                strapi,
+                context.uid,
+                context.params.documentId,
+              );
+            } catch {
+              entityOffersBefore = null;
+            }
+          }
+        }
+
+        // Brand affiliate flag BEFORE the write, so the transaction callback
+        // can tell a No→Yes flip (which sweeps offers clean, see
+        // detachAffiliateBrand) from a save that merely keeps it on. A failed
+        // read stays null, which fails toward RUNNING the idempotent sweep,
+        // never away from it.
+        let brandAffiliateBefore: boolean | null = null;
+        if (
+          context.uid === 'api::brand.brand' &&
+          context.action === 'update' &&
+          context.params?.documentId
+        ) {
+          try {
+            const before: any = await strapi
+              .documents('api::brand.brand')
+              .findOne({
+                documentId: context.params.documentId,
+                fields: ['isAffiliate'] as any,
+              });
+            brandAffiliateBefore = before?.isAffiliate === true;
+          } catch {
+            brandAffiliateBefore = null;
+          }
+        }
+
         return await runContentTransaction(
           strapi,
           () => next(),
@@ -1825,6 +1914,65 @@ export default {
 
             const documentId =
               (result as any)?.documentId ?? context.params?.documentId;
+
+            // Affiliate flip cascade. Runs INSIDE the write transaction
+            // (strapi.db.query joins the ambient one), so the flip and the
+            // offer sweep commit together — a renderer can never observe a
+            // Brand that is affiliate while its offers still pair it with
+            // Stores or other brands. Errors deliberately PROPAGATE: a
+            // half-done sweep would leave the invariant durably broken with
+            // nothing left to repair it, so the brand save must roll back.
+            //
+            // The sweep also runs when an already-affiliate brand's payload
+            // touches its offer relations (a brand-side connect would bypass
+            // the offer-side validator) and on create/clone with the flag on
+            // (clone copies relations). Over-triggering is safe — the sweep
+            // is idempotent and one indexed query per offer type when clean.
+            let affiliateCascade: AffiliateCascadeResult | null = null;
+            if (
+              context.uid === 'api::brand.brand' &&
+              ['create', 'update', 'clone'].includes(context.action) &&
+              documentId
+            ) {
+              const resultAffiliate = (result as any)?.isAffiliate;
+              let finalAffiliate = resultAffiliate === true;
+              if (resultAffiliate === undefined) {
+                const after: any = await strapi
+                  .documents('api::brand.brand')
+                  .findOne({
+                    documentId,
+                    fields: ['isAffiliate'] as any,
+                  });
+                finalAffiliate = after?.isAffiliate === true;
+              }
+              const touchesOfferRelations =
+                context.params?.data &&
+                (Object.prototype.hasOwnProperty.call(
+                  context.params.data,
+                  'coupons',
+                ) ||
+                  Object.prototype.hasOwnProperty.call(
+                    context.params.data,
+                    'deals',
+                  ));
+              const flipped =
+                context.action !== 'update' || brandAffiliateBefore !== true;
+              if (finalAffiliate && (flipped || touchesOfferRelations)) {
+                affiliateCascade = await detachAffiliateBrand(
+                  strapi,
+                  documentId,
+                );
+                if (affiliateCascade.affected.length > 0) {
+                  strapi.log.info(
+                    `[affiliate-brand] brand ${documentId}: detached from ` +
+                      `${affiliateCascade.detachedCount} offer(s), cleared ` +
+                      `${affiliateCascade.merchantsClearedCount} checkout ` +
+                      `merchant(s)`,
+                  );
+                }
+              }
+            }
+
             const afterScope =
               context.action === 'delete' && preScope
                 ? null
@@ -1932,6 +2080,107 @@ export default {
               ].includes(context.action)
             ) {
               offerInvalidations.push({ entityType, documentId });
+            }
+
+            // Offers rewired WITHOUT an offer write still change publicly
+            // (brand chip, checkout merchant, membership) and never re-enter
+            // this middleware — their invalidation rides THIS event. Two
+            // sources: the affiliate flip's db-layer sweep, and a Store/Brand
+            // payload naming offers through its coupons/deals inverses
+            // (connects AND disconnects — over-invalidation is harmless, a
+            // missed rewired offer is a stale page).
+            const reroutedOffers = new Map<
+              string,
+              { uid: 'api::coupon.coupon' | 'api::deal.deal'; documentId: string }
+            >();
+            if (affiliateCascade) {
+              for (const offer of affiliateCascade.affected) {
+                reroutedOffers.set(`${offer.uid}:${offer.documentId}`, offer);
+              }
+            }
+            if (entityOfferSweep && isAffiliateEntityUid(context.uid)) {
+              if (entityOffersBefore === null || !documentId) {
+                // Unknown baseline (failed pre-write read) or no id to read
+                // the after-state from — fail toward the full sweep instead
+                // of a stale page.
+                scope = mergeScope(scope, { full: true });
+              } else {
+                try {
+                  const entityOffersAfter = await snapshotEntityOfferRelations(
+                    strapi,
+                    context.uid,
+                    documentId,
+                  );
+                  // Exactly the offers whose membership changed — added AND
+                  // removed. Unioning the whole baseline instead would push a
+                  // large store's single connect past the cap below into a
+                  // needless full rebuild.
+                  for (const offer of diffEntityOfferSnapshots(
+                    entityOffersBefore,
+                    entityOffersAfter,
+                  )) {
+                    reroutedOffers.set(
+                      `${offer.uid}:${offer.documentId}`,
+                      offer,
+                    );
+                  }
+                } catch (err: any) {
+                  // Never fail the entity save over an invalidation lookup.
+                  strapi.log.warn(
+                    `[affiliate-brand] offer membership diff failed for ` +
+                      `${context.uid} ${documentId}: ${err?.message ?? err}`,
+                  );
+                  scope = mergeScope(scope, { full: true });
+                }
+              }
+            }
+
+            if (reroutedOffers.size > 0) {
+              // Relation scopes are read AFTER the write; the one page that
+              // can drop out of them (this brand's own) is already in the
+              // entity save's scope above. Past the cap, one full rebuild
+              // beats dozens of per-offer scope queries in the transaction.
+              const REROUTED_OFFER_SCOPE_CAP = 25;
+              if (reroutedOffers.size > REROUTED_OFFER_SCOPE_CAP) {
+                scope = mergeScope(scope, { full: true });
+              } else {
+                for (const offer of reroutedOffers.values()) {
+                  const offerScope = await offerRelationScope(
+                    strapi,
+                    offer.uid,
+                    offer.documentId,
+                  );
+                  // An unresolvable offer fails toward the full sweep rather
+                  // than a silently stale page. Resolvable ones take the same
+                  // landing-page slugs a direct offer write would (the sale
+                  // page, plus deal-of-the-day for Deals) — those pages render
+                  // the rerouted offers' merchant too. homepage/sitemap
+                  // already ride the entity save's own scope.
+                  scope = mergeScope(
+                    scope,
+                    offerScope
+                      ? {
+                          slugs: withOfferLandingSlugs(
+                            offer.uid,
+                            offerScope.slugs,
+                          ),
+                          ...(offerScope.optionalSlugs.length > 0
+                            ? { optionalSlugs: offerScope.optionalSlugs }
+                            : {}),
+                        }
+                      : { full: true },
+                  );
+                }
+              }
+              for (const offer of reroutedOffers.values()) {
+                const offerEntityType = offerEntityTypeFromUid(offer.uid);
+                if (offerEntityType) {
+                  offerInvalidations.push({
+                    entityType: offerEntityType,
+                    documentId: offer.documentId,
+                  });
+                }
+              }
             }
 
             if (!scope && offerInvalidations.length === 0) return null;

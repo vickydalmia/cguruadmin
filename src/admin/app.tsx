@@ -34,7 +34,22 @@ import {
   DOTD_UID,
 } from '../constants/deal-of-the-day-sections';
 import { HOMEPAGE_IMAGE_RULES } from '../constants/homepage-images';
-import { CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME } from '../constants/checkout-merchant';
+import {
+  CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME,
+  CHECKOUT_MERCHANT_FIELD,
+  parseCheckoutMerchant,
+  type CheckoutMerchantRef,
+} from '../constants/checkout-merchant';
+import {
+  affiliateBlockNote,
+  brandCandidateBlocked,
+  storeAddBlocked,
+  storeBlockNote,
+} from './utils/affiliate-exclusion';
+import {
+  clearAffiliateState,
+  publishAffiliateState,
+} from './features/affiliate-exclusion/affiliate-state';
 import RichTextEditor from './components/RichTextEditor';
 import DateTimeInput from './components/DateTimeInput';
 import BooleanConfirmInput from './components/BooleanConfirmInput';
@@ -77,6 +92,13 @@ type RelationConfig = {
   maxSelections?: number;
   description?: string;
   reorderable?: boolean;
+  /**
+   * Marks the two sections bound by the affiliate-brand exclusivity rule (an
+   * affiliate brand is an offer's ONLY merchant — utils/affiliate-exclusion).
+   * Sections without it — categories, banks, the curated-coupon reuses of
+   * RelationSection — are untouched by the rule.
+   */
+  affiliateRule?: 'stores' | 'brands';
 };
 
 const RELATION_CONFIG: Record<string, RelationConfig[]> = {
@@ -87,8 +109,14 @@ const RELATION_CONFIG: Record<string, RelationConfig[]> = {
       label: 'Store',
       minSelections: 0,
       maxSelections: 1,
+      affiliateRule: 'stores',
     },
-    { field: 'brands', target: 'api::brand.brand', label: 'Brands' },
+    {
+      field: 'brands',
+      target: 'api::brand.brand',
+      label: 'Brands',
+      affiliateRule: 'brands',
+    },
     { field: 'categories', target: 'api::category.category', label: 'Categories' },
     { field: 'banks', target: 'api::bank.bank', label: 'Banks' },
   ],
@@ -99,11 +127,37 @@ const RELATION_CONFIG: Record<string, RelationConfig[]> = {
       label: 'Store',
       minSelections: 0,
       maxSelections: 1,
+      affiliateRule: 'stores',
     },
-    { field: 'brands', target: 'api::brand.brand', label: 'Brands' },
+    {
+      field: 'brands',
+      target: 'api::brand.brand',
+      label: 'Brands',
+      affiliateRule: 'brands',
+    },
     { field: 'categories', target: 'api::category.category', label: 'Categories' },
     { field: 'banks', target: 'api::bank.bank', label: 'Banks' },
   ],
+};
+
+/**
+ * Everything the two affiliate-rule sections need to know about each other,
+ * derived once in PanelBody from the sections' own selection reports (their
+ * resolved persisted+diff state — the form value alone cannot provide it).
+ */
+type AffiliateContext = {
+  storeCount: number;
+  storesReady: boolean;
+  brandsReady: boolean;
+  affiliateFlagsReady: boolean;
+  affiliateSelectedDocIds: ReadonlySet<string>;
+  affiliateSelectedNames: readonly string[];
+  merchant: CheckoutMerchantRef | null;
+};
+
+type SelectionReport = {
+  entries: Array<{ documentId: string; name: string; isAffiliate?: boolean }>;
+  ready: boolean;
 };
 
 const PAGE_SIZE = 30;
@@ -260,11 +314,15 @@ function RelationSection({
   deferred,
   model,
   documentId,
+  affiliateContext,
+  reportSelection,
 }: {
   config: RelationConfig;
   deferred: boolean;
   model: string;
   documentId?: string;
+  affiliateContext?: AffiliateContext | null;
+  reportSelection?: (field: string, report: SelectionReport) => void;
 }) {
   const { get } = useFetchClient();
 
@@ -428,6 +486,30 @@ function RelationSection({
     [selectedList]
   );
 
+  // Feed the resolved selection up to PanelBody, which derives the
+  // affiliate-exclusion context both bound sections consume. The form value
+  // alone cannot replace this: it is only a diff over a persisted baseline
+  // that lives in THIS section's state.
+  React.useEffect(() => {
+    if (!config.affiliateRule || !reportSelection) return;
+    reportSelection(config.field, {
+      entries: selectedList.map((candidate) => ({
+        documentId: candidate.documentId,
+        name: candidate.name,
+        ...(candidate.isAffiliate !== undefined
+          ? { isAffiliate: candidate.isAffiliate }
+          : {}),
+      })),
+      ready: selectedRelationsReady,
+    });
+  }, [
+    config.affiliateRule,
+    config.field,
+    reportSelection,
+    selectedList,
+    selectedRelationsReady,
+  ]);
+
   const [candidates, setCandidates] = React.useState<Candidate[]>([]);
   const [page, setPage] = React.useState(1);
   const [pageCount, setPageCount] = React.useState(1);
@@ -489,6 +571,12 @@ function RelationSection({
           id: r.id,
           documentId: r.documentId,
           name: r.name ?? r.title ?? String(r.id),
+          // Only Brand rows carry the attribute; everywhere else this is
+          // simply undefined. The full CM find returns scalars, so no extra
+          // fields param is needed.
+          ...(typeof r.isAffiliate === 'boolean'
+            ? { isAffiliate: r.isAffiliate }
+            : {}),
         }));
         setCandidates((prev) => (page === 1 ? list : [...prev, ...list]));
         setPageCount(body?.pagination?.pageCount ?? 1);
@@ -542,8 +630,41 @@ function RelationSection({
     onChangeForm(config.field, result.formValue);
   };
 
+  // The affiliate exclusivity verdict for ADDING this candidate. Shared by
+  // the disabled props and the toggle/select guards so a bypassed DOM
+  // attribute cannot sneak an invalid tick in. Selected rows always pass —
+  // deselection is the escape hatch on legacy conflicts.
+  const affiliateAddBlocked = (candidate: Candidate): boolean => {
+    const ctx = affiliateContext;
+    if (!ctx || !config.affiliateRule) return false;
+    const isSelected = selectedDocIds.has(candidate.documentId);
+    if (config.affiliateRule === 'brands') {
+      return brandCandidateBlocked({
+        isSelected,
+        isAffiliate: candidate.isAffiliate,
+        storeCount: ctx.storeCount,
+        storesReady: ctx.storesReady,
+        selectedBrandCount: selectedList.length,
+        brandsReady: selectedRelationsReady,
+        affiliateFlagsReady: ctx.affiliateFlagsReady,
+        affiliateSelectedCount: ctx.affiliateSelectedDocIds.size,
+        merchant: ctx.merchant,
+        candidateDocumentId: candidate.documentId,
+      });
+    }
+    return (
+      !isSelected &&
+      storeAddBlocked({
+        brandsReady: ctx.brandsReady,
+        affiliateFlagsReady: ctx.affiliateFlagsReady,
+        affiliateSelectedCount: ctx.affiliateSelectedDocIds.size,
+      })
+    );
+  };
+
   const toggle = (c: Candidate) => {
     const exists = selectedList.some((s) => s.documentId === c.documentId);
+    if (!exists && affiliateAddBlocked(c)) return;
     if (
       !exists &&
       config.maxSelections != null &&
@@ -681,6 +802,33 @@ function RelationSection({
   const hasLegacySingleChoiceSelection =
     isSingleChoice && selectedList.length > 1;
 
+  // Explain a greyed-out control, per the coupon-layout blockedNote house
+  // rule. The brand-side note only renders while a visible affiliate row is
+  // actually blocked (or an affiliate brand is selected) — a permanent banner
+  // on every multi-brand offer would be noise.
+  const affiliateNote = React.useMemo((): string | null => {
+    const ctx = affiliateContext;
+    if (!ctx || !config.affiliateRule) return null;
+    if (config.affiliateRule === 'stores') {
+      return storeBlockNote({
+        affiliateSelectedNames: ctx.affiliateSelectedNames,
+      });
+    }
+    const blockedAffiliateVisible = candidates.some(
+      (candidate) =>
+        candidate.isAffiliate === true &&
+        !selectedDocIds.has(candidate.documentId),
+    );
+    if (ctx.affiliateSelectedNames.length === 0 && !blockedAffiliateVisible) {
+      return null;
+    }
+    return affiliateBlockNote({
+      storeCount: ctx.storeCount,
+      selectedBrandCount: selectedList.length,
+      affiliateSelectedNames: ctx.affiliateSelectedNames,
+    });
+  }, [affiliateContext, config.affiliateRule, candidates, selectedDocIds, selectedList]);
+
   React.useEffect(() => {
     const el = sentinelRef.current;
     if (!el || !hasMore || loading) return;
@@ -740,6 +888,20 @@ function RelationSection({
           <Typography variant="pi" textColor="warning600">
             This legacy entry has {selectedList.length} Stores. Choose one
             Store below, or remove Stores until one remains, before saving.
+          </Typography>
+        </Box>
+      ) : null}
+
+      {affiliateNote ? (
+        <Box
+          hasRadius
+          background="warning100"
+          borderColor="warning200"
+          padding={2}
+          marginBottom={2}
+        >
+          <Typography variant="pi" textColor="warning600">
+            {affiliateNote}
           </Typography>
         </Box>
       ) : null}
@@ -838,7 +1000,7 @@ function RelationSection({
                   const candidate = candidates.find(
                     (item) => item.documentId === documentId,
                   );
-                  if (candidate) {
+                  if (candidate && !affiliateAddBlocked(candidate)) {
                     applySingleRelationChange({
                       type: 'select',
                       candidate,
@@ -851,7 +1013,10 @@ function RelationSection({
                     <Radio.Item
                       key={candidate.documentId}
                       value={candidate.documentId}
-                      disabled={!selectedRelationsReady}
+                      disabled={
+                        !selectedRelationsReady ||
+                        affiliateAddBlocked(candidate)
+                      }
                     >
                       {candidate.name}
                     </Radio.Item>
@@ -864,11 +1029,12 @@ function RelationSection({
                   <Checkbox
                     checked={selectedDocIds.has(c.documentId)}
                     disabled={
-                      !selectedDocIds.has(c.documentId) && atSelectionLimit
+                      (!selectedDocIds.has(c.documentId) && atSelectionLimit) ||
+                      affiliateAddBlocked(c)
                     }
                     onCheckedChange={() => toggle(c)}
                   >
-                    {c.name}
+                    {c.isAffiliate === true ? `${c.name} — affiliate` : c.name}
                   </Checkbox>
                 </Box>
               ))
@@ -904,8 +1070,240 @@ function PanelBody({
   documentId?: string;
 }) {
   const deferred = useDeferredMount();
+  const { get } = useFetchClient();
+
+  const hasAffiliateRule = RELATION_CONFIG[model].some(
+    (cfg) => cfg.affiliateRule,
+  );
+
+  // Resolved selections reported by the stores and brands sections. Until a
+  // section's first report lands its state is unknown, which every consumer
+  // treats as "block adds" — fail-safe by construction.
+  const [reports, setReports] = React.useState<
+    Record<string, SelectionReport>
+  >({});
+  const reportSelection = React.useCallback(
+    (field: string, report: SelectionReport) => {
+      setReports((prev) => {
+        const existing = prev[field];
+        const unchanged =
+          existing &&
+          existing.ready === report.ready &&
+          existing.entries.length === report.entries.length &&
+          existing.entries.every((entry, index) => {
+            const next = report.entries[index];
+            return (
+              entry.documentId === next.documentId &&
+              entry.name === next.name &&
+              entry.isAffiliate === next.isAffiliate
+            );
+          });
+        return unchanged ? prev : { ...prev, [field]: report };
+      });
+    },
+    [],
+  );
+  React.useEffect(() => {
+    setReports({});
+    // Another editor may have flipped a brand's affiliate flag since this
+    // panel last resolved it — a stale (especially stale-negative) entry
+    // would let this entry build an invalid selection the server then
+    // rejects. Re-resolve per entry; within one entry the flags stay cached.
+    flagCacheRef.current = new Map();
+    setFlagsAttempt(0);
+    setFlagsError(false);
+  }, [model, documentId]);
+
+  const storesReport = reports['stores'];
+  const brandsReport = reports['brands'];
+
+  // Affiliate flags of SELECTED brands. A brand ticked in-session carries the
+  // flag on its candidate row; persisted selections do not (the relations
+  // endpoint returns no custom fields) — resolve those with one filtered
+  // lookup, cached per documentId for this ENTRY (reset above when the
+  // edited document changes).
+  const flagCacheRef = React.useRef(new Map<string, boolean>());
+  const [flagsVersion, setFlagsVersion] = React.useState(0);
+  // Bounded auto-retry for a failed lookup, then a visible manual Retry —
+  // without either, a single network hiccup left the panel blocked
+  // (fail-safe, but unrecoverable) until a reload. The attempt counter IS
+  // the request counter: MAX means that many requests in total.
+  const [flagsAttempt, setFlagsAttempt] = React.useState(0);
+  const [flagsError, setFlagsError] = React.useState(false);
+  const FLAG_LOOKUP_MAX_ATTEMPTS = 3;
+
+  const unknownFlagDocIds = React.useMemo(() => {
+    const cache = flagCacheRef.current;
+    return (brandsReport?.entries ?? [])
+      .filter(
+        (entry) =>
+          entry.isAffiliate === undefined && !cache.has(entry.documentId),
+      )
+      .map((entry) => entry.documentId);
+    // flagsVersion re-runs this after a lookup fills the cache.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brandsReport, flagsVersion]);
+
+  const unknownFlagKey = unknownFlagDocIds.join('|');
+  React.useEffect(() => {
+    // A different unknown set is a fresh question — retry budget resets.
+    setFlagsAttempt(0);
+    setFlagsError(false);
+  }, [unknownFlagKey]);
+
+  React.useEffect(() => {
+    if (!hasAffiliateRule || unknownFlagDocIds.length === 0) return;
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const run = async () => {
+      // Clear the error as each request STARTS, so the exhausted-budget
+      // banner cannot flash (with a Retry that would cancel this attempt)
+      // while the final automatic request is still in flight — it appears
+      // only once that request has actually failed.
+      setFlagsError(false);
+      try {
+        const params = new URLSearchParams({
+          page: '1',
+          pageSize: '100',
+          'fields[0]': 'documentId',
+          'filters[isAffiliate][$eq]': 'true',
+        });
+        unknownFlagDocIds.slice(0, 100).forEach((docId, index) => {
+          params.set(`filters[documentId][$in][${index}]`, docId);
+        });
+        const res = await get(
+          `/content-manager/collection-types/api::brand.brand?${params.toString()}`,
+        );
+        if (cancelled) return;
+        const body = res?.data?.data ?? res?.data;
+        const results: any[] = body?.results ?? [];
+        const affiliateIds = new Set(
+          results
+            .map((row: any) => row?.documentId)
+            .filter((value: unknown): value is string => typeof value === 'string'),
+        );
+        const cache = flagCacheRef.current;
+        for (const docId of unknownFlagDocIds) {
+          cache.set(docId, affiliateIds.has(docId));
+        }
+        setFlagsError(false);
+        setFlagsVersion((version) => version + 1);
+      } catch (err) {
+        // Unresolved flags keep the affected adds blocked (fail-safe), so an
+        // error degrades to a stricter panel, never an invalid save. Retry a
+        // few times so one hiccup doesn't wedge the panel; past the budget
+        // the visible Retry below (or a selection change) re-arms it.
+        console.error(
+          '[taxonomy-panel] Failed to resolve affiliate brand flags',
+          err,
+        );
+        if (cancelled) return;
+        setFlagsError(true);
+        // This run was request number flagsAttempt + 1.
+        if (flagsAttempt + 1 < FLAG_LOOKUP_MAX_ATTEMPTS) {
+          retryTimer = setTimeout(
+            () => setFlagsAttempt((attempt) => attempt + 1),
+            1500 * (flagsAttempt + 1),
+          );
+        }
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [get, hasAffiliateRule, unknownFlagDocIds, flagsAttempt]);
+
+  const merchantValue = useForm(
+    'PanelBody',
+    (state) => state.values?.[CHECKOUT_MERCHANT_FIELD],
+  );
+
+  const affiliateContext = React.useMemo((): AffiliateContext | null => {
+    if (!hasAffiliateRule) return null;
+    const cache = flagCacheRef.current;
+    const brandEntries = brandsReport?.entries ?? [];
+    const affiliateSelected = brandEntries.filter(
+      (entry) => (entry.isAffiliate ?? cache.get(entry.documentId)) === true,
+    );
+    return {
+      storeCount: storesReport?.entries.length ?? 0,
+      storesReady: storesReport?.ready ?? false,
+      brandsReady: brandsReport?.ready ?? false,
+      affiliateFlagsReady: brandEntries.every(
+        (entry) =>
+          entry.isAffiliate !== undefined || cache.has(entry.documentId),
+      ),
+      affiliateSelectedDocIds: new Set(
+        affiliateSelected.map((entry) => entry.documentId),
+      ),
+      affiliateSelectedNames: affiliateSelected.map((entry) => entry.name),
+      merchant: parseCheckoutMerchant(merchantValue),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasAffiliateRule, storesReport, brandsReport, flagsVersion, merchantValue]);
+
+  // Mirror the verdict to the checkout-merchant input, which renders in the
+  // edit form's own tree and cannot receive props from this panel.
+  const merchantBlocked = affiliateContext
+    ? storeAddBlocked({
+        brandsReady: affiliateContext.brandsReady,
+        affiliateFlagsReady: affiliateContext.affiliateFlagsReady,
+        affiliateSelectedCount: affiliateContext.affiliateSelectedDocIds.size,
+      })
+    : false;
+  const affiliateNames = affiliateContext?.affiliateSelectedNames ?? [];
+  const affiliateNamesKey = affiliateNames.join('\u0000');
+  React.useEffect(() => {
+    if (!hasAffiliateRule) return;
+    publishAffiliateState(model, documentId, {
+      blocked: merchantBlocked,
+      brandNames: affiliateNames,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasAffiliateRule, model, documentId, merchantBlocked, affiliateNamesKey]);
+  React.useEffect(() => {
+    if (!hasAffiliateRule) return;
+    return () => clearAffiliateState(model, documentId);
+  }, [hasAffiliateRule, model, documentId]);
+
+  // Auto-retries are exhausted and flags are still unresolved: the panel is
+  // fail-safe blocked, so give the editor a way out that is not a reload.
+  const flagsRetryVisible =
+    flagsError &&
+    unknownFlagDocIds.length > 0 &&
+    flagsAttempt + 1 >= FLAG_LOOKUP_MAX_ATTEMPTS;
+
   return (
     <Box width="100%">
+      {flagsRetryVisible ? (
+        <Box
+          hasRadius
+          background="danger100"
+          borderColor="danger200"
+          padding={2}
+          marginBottom={2}
+        >
+          <Flex direction="column" alignItems="flex-start" gap={1}>
+            <Typography variant="pi" textColor="danger600">
+              Could not check the selected brands for affiliate status. Store,
+              brand and checkout-merchant changes stay disabled until this
+              succeeds.
+            </Typography>
+            <Button
+              variant="danger-light"
+              size="S"
+              onClick={() => {
+                setFlagsError(false);
+                setFlagsAttempt(0);
+              }}
+            >
+              Retry
+            </Button>
+          </Flex>
+        </Box>
+      ) : null}
       {RELATION_CONFIG[model].map((cfg, idx) => (
         <React.Fragment key={cfg.field}>
           {idx > 0 ? <Divider /> : null}
@@ -914,6 +1312,8 @@ function PanelBody({
             deferred={deferred}
             model={model}
             documentId={documentId}
+            affiliateContext={cfg.affiliateRule ? affiliateContext : null}
+            reportSelection={cfg.affiliateRule ? reportSelection : undefined}
           />
         </React.Fragment>
       ))}

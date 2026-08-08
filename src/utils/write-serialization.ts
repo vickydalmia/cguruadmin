@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { errors } from '@strapi/utils';
 
 // Cross-row invariants (one flat route slug across the four taxonomies,
 // redirect duplicate/cycle detection) are validated with plain reads before an
@@ -13,19 +14,31 @@ import type { Core } from '@strapi/strapi';
 
 const LOCK_NAMESPACE = 'cguru:document-write';
 
-export type WriteLockDomain = 'identity' | 'redirect' | 'job';
+export type WriteLockDomain = 'identity' | 'redirect' | 'job' | 'affiliate';
 
 export type WriteLockRelease = () => Promise<void>;
 
 /**
  * Serialize validate+commit for a write domain. Returns a release function,
- * or null when serialization is unavailable (non-Postgres dialect, lock
- * timeout, connection failure) — the caller proceeds unserialized, which is
- * the pre-existing rare race, never an outage.
+ * or null when serialization is unavailable on a non-Postgres dialect (no
+ * advisory locks exist there at all).
+ *
+ * What happens when Postgres HAS the lock but this caller cannot get it
+ * (timeout behind a long holder, connection failure) depends on
+ * `onUnavailable`:
+ *  - 'open' (default): warn and return null — the caller proceeds
+ *    unserialized. Fine for the slug/redirect uniqueness checks, whose race
+ *    was always rare and merely re-creates a legacy-style duplicate.
+ *  - 'closed': throw an editor-facing retryable error. Required for the
+ *    affiliate domain — its lock guards a claimed data invariant, and a
+ *    Brand cascade can legitimately hold it longer than the timeout; a
+ *    waiter that proceeded unserialized could validate against the old flag
+ *    and commit an invalid offer.
  */
 export async function acquireWriteSerializationLock(
   strapi: Core.Strapi,
   domain: WriteLockDomain,
+  options: { onUnavailable?: 'open' | 'closed' } = {},
 ): Promise<WriteLockRelease | null> {
   const knex = (strapi.db as any)?.connection;
   const client: string = knex?.client?.config?.client ?? '';
@@ -44,10 +57,19 @@ export async function acquireWriteSerializationLock(
       domain,
     ]);
   } catch (err: any) {
+    if (trx) await trx.rollback().catch(() => {});
+    if ((options.onUnavailable ?? 'open') === 'closed') {
+      strapi.log.warn(
+        `[write-lock] ${domain} advisory lock unavailable (${err?.message ?? err}) — rejecting the save (fail-closed domain)`
+      );
+      throw new errors.ApplicationError(
+        'Another save touching related records is still in progress. ' +
+          'Nothing was saved — wait a few seconds and try again.',
+      );
+    }
     strapi.log.warn(
       `[write-lock] ${domain} advisory lock unavailable (${err?.message ?? err}) — proceeding unserialized`
     );
-    if (trx) await trx.rollback().catch(() => {});
     return null;
   }
 

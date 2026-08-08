@@ -52,11 +52,13 @@ describe('write-validation step order', () => {
     ]);
   });
 
-  it('keeps identity, redirect and job slug together under the lock', () => {
+  it('keeps identity, redirect, job slug and affiliate together under the lock', () => {
     expect(names(LOCKED_STEPS)).toEqual([
       'validateIdentity',
       'validateRedirect',
       'validateJobSlug',
+      'validateOfferAffiliateBrands',
+      'validateEntityOfferAffiliateConnections',
     ]);
   });
 

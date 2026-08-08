@@ -2,6 +2,13 @@ export type RelationCandidate = {
   id: number;
   documentId: string;
   name: string;
+  /**
+   * Present only on brand candidates (copied off the collection-types fetch).
+   * The relations endpoint returns no custom fields, so a candidate resolved
+   * from a persisted selection leaves this undefined = "unknown" — the
+   * affiliate-exclusion helpers treat unknown as fail-safe-blocked.
+   */
+  isAffiliate?: boolean;
 };
 
 export type RelationCommand = RelationCandidate & {

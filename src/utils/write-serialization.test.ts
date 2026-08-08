@@ -75,4 +75,37 @@ describe('acquireWriteSerializationLock', () => {
     ).resolves.toBeNull();
     expect(strapi.log.warn).toHaveBeenCalled();
   });
+
+  it('rejects the save on lock timeout when the domain fails closed', async () => {
+    const trx = {
+      raw: vi.fn(async (sql: string) => {
+        if (sql.includes('pg_advisory_xact_lock')) {
+          throw new Error('canceling statement due to lock timeout');
+        }
+        return {};
+      }),
+      commit: vi.fn(async () => {}),
+      rollback: vi.fn(async () => {}),
+    };
+    const strapi = strapiWithKnex('pg', trx);
+
+    await expect(
+      acquireWriteSerializationLock(strapi, 'affiliate', {
+        onUnavailable: 'closed',
+      }),
+    ).rejects.toThrow(/still in progress.*try again/s);
+    expect(trx.rollback).toHaveBeenCalledTimes(1);
+    expect(strapi.log.warn).toHaveBeenCalledWith(
+      expect.stringContaining('fail-closed'),
+    );
+  });
+
+  it('fail-closed still no-ops on non-Postgres (no lock exists to wait on)', async () => {
+    const strapi = strapiWithKnex('better-sqlite3', {});
+    await expect(
+      acquireWriteSerializationLock(strapi, 'affiliate', {
+        onUnavailable: 'closed',
+      }),
+    ).resolves.toBeNull();
+  });
 });

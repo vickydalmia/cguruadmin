@@ -1,5 +1,10 @@
 import type { Core } from '@strapi/strapi';
 
+import {
+  touchesAffiliateFields,
+  touchesEntityOfferRelations,
+} from '../affiliate-brand-validation';
+import { isOfferStoreUid } from '../content-manager-offer-store-validation';
 import { isIdentityUid } from '../identity-validation';
 import { JOB_UID } from '../job-slug-validation';
 import { isHumanWrite } from '../write-origin';
@@ -90,17 +95,17 @@ export async function runWriteValidation(
     await step.run(ctx);
   }
 
-  // --- Group C: cross-row invariants, under the advisory lock.
-  const domain = lockDomainFor(uid);
-  if (!domain) {
-    // No lock needed, but the two validators still run for every uid — each
+  // --- Group C: cross-row invariants, under the advisory lock(s).
+  const domains = lockDomainsFor(uid, ctx.data, action);
+  if (domains.length === 0) {
+    // No lock needed, but the locked validators still run for every uid — each
     // no-ops internally on a type it does not own. Unchanged from the original
-    // middleware, which also called both unconditionally.
+    // middleware, which also called them unconditionally.
     await collectLockedSteps(ctx);
     return null;
   }
 
-  const release = await acquireWriteSerializationLock(strapi, domain);
+  const release = await acquireLocks(strapi, domains);
   try {
     await collectLockedSteps(ctx);
   } catch (error) {
@@ -110,6 +115,47 @@ export async function runWriteValidation(
     throw error;
   }
   return release;
+}
+
+/**
+ * Domains whose lock guards a hard data invariant rather than a uniqueness
+ * nicety: unavailability rejects the save (retryable error) instead of
+ * proceeding unserialized. See acquireWriteSerializationLock's contract.
+ */
+const FAIL_CLOSED_DOMAINS: ReadonlySet<WriteLockDomain> = new Set(['affiliate']);
+
+/**
+ * Acquire every domain lock in the given order (every caller lists domains in
+ * the same fixed order, so two writes can never wait on each other's held
+ * lock). A fail-open lock that is unavailable is skipped — partial
+ * serialization beats none; a fail-closed one throws, and any locks already
+ * acquired are released before the error propagates. Releases run in reverse
+ * acquisition order.
+ */
+async function acquireLocks(
+  strapi: Core.Strapi,
+  domains: readonly WriteLockDomain[],
+): Promise<WriteLockRelease | null> {
+  const releases: WriteLockRelease[] = [];
+  const releaseAll = async () => {
+    for (const release of releases.reverse()) {
+      await release();
+    }
+  };
+  for (const domain of domains) {
+    let release: WriteLockRelease | null;
+    try {
+      release = await acquireWriteSerializationLock(strapi, domain, {
+        onUnavailable: FAIL_CLOSED_DOMAINS.has(domain) ? 'closed' : 'open',
+      });
+    } catch (error) {
+      await releaseAll();
+      throw error;
+    }
+    if (release) releases.push(release);
+  }
+  if (releases.length === 0) return null;
+  return releaseAll;
 }
 
 function applicable(
@@ -129,14 +175,45 @@ async function collectLockedSteps(ctx: StepContext): Promise<void> {
 }
 
 /**
- * Which advisory-lock domain this uid's cross-row invariants belong to, or null
- * when it has none. Identity and redirect are the middleware's original
- * selection; job was added with the slug uid→string conversion, whose
+ * Which advisory-lock domains this write's cross-row invariants belong to, in
+ * the fixed acquisition order. Identity and redirect are the middleware's
+ * original selection; job was added with the slug uid→string conversion, whose
  * uniqueness guard is read-then-write like the other two.
+ *
+ * 'affiliate' serializes the write paths that can otherwise race the
+ * affiliate-brand exclusivity invariant past each other:
+ *  - an offer write whose payload touches brands/stores/checkoutMerchant
+ *    (validateOfferAffiliateBrands judges it in the LOCKED pass);
+ *  - an offer CLONE regardless of payload — Strapi copies the source's
+ *    relations even when the submitted data omits every relation field, so
+ *    the validator judges inherited state the payload cannot reveal;
+ *  - ANY brand save (it may set isAffiliate and run detachAffiliateBrand
+ *    inside its transaction; brand saves are rare, so taking the lock without
+ *    pre-reading the payload costs nothing);
+ *  - a store save whose payload touches its coupons/deals inverses
+ *    (validateEntityOfferAffiliateConnections judges the connected offers).
+ * With every side holding the lock across validate + commit: offer-first, the
+ * flip's cascade sees the committed connect and detaches; flip-first, the
+ * offer validates against the committed flag and is rejected. Non-Postgres
+ * proceeds unserialized — the pre-existing accepted policy.
  */
-function lockDomainFor(uid: string): WriteLockDomain | null {
-  if (isIdentityUid(uid)) return 'identity';
-  if (uid === 'api::redirect.redirect') return 'redirect';
-  if (uid === JOB_UID) return 'job';
-  return null;
+function lockDomainsFor(
+  uid: string,
+  data: unknown,
+  action: string,
+): WriteLockDomain[] {
+  if (uid === 'api::brand.brand') return ['affiliate', 'identity'];
+  if (uid === 'api::store.store' && touchesEntityOfferRelations(data)) {
+    return ['affiliate', 'identity'];
+  }
+  if (isIdentityUid(uid)) return ['identity'];
+  if (uid === 'api::redirect.redirect') return ['redirect'];
+  if (uid === JOB_UID) return ['job'];
+  if (
+    isOfferStoreUid(uid) &&
+    (touchesAffiliateFields(data) || action === 'clone')
+  ) {
+    return ['affiliate'];
+  }
+  return [];
 }

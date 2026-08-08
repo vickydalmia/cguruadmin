@@ -7,11 +7,16 @@ import {
   Typography,
 } from '@strapi/design-system';
 import { useFetchClient } from '@strapi/strapi/admin';
+import { unstable_useContentManagerContext } from '@strapi/content-manager/strapi-admin';
 
 import {
   parseCheckoutMerchant,
   type CheckoutMerchantRef,
 } from '../../../../constants/checkout-merchant';
+import {
+  getAffiliateState,
+  subscribeAffiliateState,
+} from '../../affiliate-exclusion/affiliate-state';
 import {
   findMerchantByRef,
   searchMerchants,
@@ -69,6 +74,18 @@ const CheckoutMerchantInput = React.forwardRef<
   // Stable identity: both effects below take the client as a dependency, and a
   // fresh object each render would re-fetch the whole list every render.
   const client = React.useMemo(() => ({ get }), [get]);
+
+  // Affiliate exclusivity: while the Taxonomies panel reports an affiliate
+  // brand selected (or still unresolved), the merchant may not be edited —
+  // an affiliate brand is the offer's only merchant. The panel publishes the
+  // verdict through module state because it renders in a separate React tree
+  // (features/affiliate-exclusion/affiliate-state.ts). The server validator
+  // remains the guarantee; this is the matching UX.
+  const { model, id: entryDocumentId } = unstable_useContentManagerContext();
+  const affiliateState = React.useSyncExternalStore(subscribeAffiliateState, () =>
+    getAffiliateState(model, entryDocumentId),
+  );
+  const affiliateBlocked = affiliateState?.blocked === true;
 
   const [search, setSearch] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
@@ -180,7 +197,7 @@ const CheckoutMerchantInput = React.forwardRef<
         ref={forwardedRef}
         name={name}
         value={value ?? undefined}
-        disabled={disabled}
+        disabled={disabled || affiliateBlocked}
         required={required}
         hasError={Boolean(error)}
         placeholder={placeholder ?? 'Select a Store or Brand'}
@@ -223,6 +240,15 @@ const CheckoutMerchantInput = React.forwardRef<
           The selected {missingRef.kind === 'store' ? 'Store' : 'Brand'} (
           {missingRef.documentId}) no longer exists. Pick another merchant, or
           clear the field — saving will be rejected until you do.
+        </Typography>
+      ) : null}
+      {affiliateBlocked ? (
+        <Typography variant="pi" textColor="warning600" tag="p">
+          {affiliateState && affiliateState.brandNames.length > 0
+            ? `Disabled: affiliate brand ${affiliateState.brandNames.join(', ')} ` +
+              `is this offer's merchant. Remove it in the Taxonomies panel to ` +
+              `pick a different checkout merchant.`
+            : 'Disabled while the selected brands are checked for affiliate status.'}
         </Typography>
       ) : null}
       <Field.Hint />

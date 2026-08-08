@@ -670,6 +670,7 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 60;
       }>;
+    isAffiliate: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     isFestiveOffer: Schema.Attribute.Boolean &
       Schema.Attribute.DefaultTo<false>;
     isVerified: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
