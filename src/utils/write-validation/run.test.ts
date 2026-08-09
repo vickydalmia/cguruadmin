@@ -26,6 +26,7 @@ describe('write-validation step order', () => {
       'normaliseTextFields',
       'normaliseCouponTypeFields',
       'normaliseFestiveOfferFields',
+      'normaliseAffiliateOfferFields',
     ]);
   });
 
@@ -41,6 +42,8 @@ describe('write-validation step order', () => {
       'validateDealOfTheDaySectionLimits',
       'validateIndependenceDaySale',
       'validateContentManagerOfferStore',
+      'validateAffiliateOfferForWrite',
+      'validateAffiliateBrandFlip',
       'validateCheckoutMerchantForWrite',
       'validateEntityTopPickCoupons',
       'validateEntityOrderedCoupons',

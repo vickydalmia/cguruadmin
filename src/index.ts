@@ -137,6 +137,9 @@ const HIDE_FROM_EDIT: Record<string, string[]> = {
 // (src/admin/components/OfferBenefitsPanel.tsx) so they read as one group.
 // Product Deal discount prefix/amount live there too: the panel owns their
 // paired validation and final-label preview.
+// The affiliate toggle lives in the Taxonomies panel (AffiliateOfferToggle in
+// src/admin/app.tsx) next to the Store/Brand pickers it gates — a second
+// main-form control would duplicate it.
 // Unlike HIDE_FROM_EDIT these stay in the LIST layout: lifecycle fields are
 // exactly the columns editors sort and filter offers by.
 const OFFER_PANEL_ONLY_FIELDS = [
@@ -147,6 +150,7 @@ const OFFER_PANEL_ONLY_FIELDS = [
   'cashbackText',
   'bankOfferText',
   'prepaidText',
+  'isForAffiliateBrand',
 ];
 const HIDE_FROM_EDIT_FORM_ONLY: Record<string, string[]> = {
   'api::coupon.coupon': OFFER_PANEL_ONLY_FIELDS,
@@ -698,7 +702,8 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
       field: 'logoStore',
       hint:
         'Optional image source only. The site borrows this Store logo; it does ' +
-        'not add Store membership, ownership, search matching, or Store-page placement.',
+        'not add Store membership, ownership, search matching, or Store-page placement. ' +
+        'Hidden and cleared automatically for affiliate-brand offers.',
     },
     // Mirrors checkout-merchant-validation.ts: the reference must resolve to a
     // live row, and it is nulled automatically if that row is later deleted.
@@ -709,7 +714,8 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
         'Optional. One Store OR Brand — the merchant the shopper actually ' +
         'checks out with. Search the dropdown to see both; each option is ' +
         'tagged Store or Brand. Like Logo Store, this adds no membership, ' +
-        'ownership or search matching.',
+        'ownership or search matching. Hidden and cleared automatically for ' +
+        'affiliate-brand offers.',
     },
     // Mirrors offer-lifecycle-validation.ts: past dates rejected, scheduledAt
     // must precede expiresAt, contentStatus derived from these two dates.
@@ -792,6 +798,16 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
         'on the site.',
     },
   ]),
+  // Mirrors affiliate-offer-consistency.ts: affiliate-brand offers can only
+  // select affiliate Brands, and the flag cannot be dropped while referenced.
+  {
+    uid: 'api::brand.brand',
+    field: 'isAffiliateStore',
+    hint:
+      'Marks this Brand as an affiliate store. Offers with the "Affiliate ' +
+      'brand offer" toggle on can only select affiliate Brands. Cannot be ' +
+      'switched off while such offers still reference this Brand.',
+  },
   // Mirrors redirect-validation.ts: from must be a rooted on-site path that
   // shadows nothing live; to must be a rooted path or absolute http(s) URL
   // and must not close a loop.
@@ -942,11 +958,13 @@ const CONTENT_TYPE_FIELD_LABELS: Record<string, Record<string, string>> = {
     publishedOn: 'Published date',
     logoStore: 'Logo Store (image only)',
     checkoutMerchant: 'Checkout merchant (Store or Brand)',
+    isForAffiliateBrand: 'Affiliate brand offer',
   },
   'api::deal.deal': {
     publishedOn: 'Published date',
     logoStore: 'Logo Store (image only)',
     checkoutMerchant: 'Checkout merchant (Store or Brand)',
+    isForAffiliateBrand: 'Affiliate brand offer',
   },
   'api::menu.menu': {
     notification: 'Notification',
@@ -959,11 +977,17 @@ const CONTENT_TYPE_FIELD_LABELS: Record<string, Record<string, string>> = {
     categoriesViewAllUrl: 'All Categories button URL',
   },
   ...Object.fromEntries(
-    ['store', 'brand', 'category', 'bank'].map((name) => [
+    ['store', 'category', 'bank'].map((name) => [
       `api::${name}.${name}`,
       { showTrendingDeals: 'Show Trending Deals' },
     ]),
   ),
+  // Brand gets the shared label plus its own — an explicit key after the
+  // spread REPLACES the spread's entry, so both must live here together.
+  'api::brand.brand': {
+    showTrendingDeals: 'Show Trending Deals',
+    isAffiliateStore: 'Affiliate Store',
+  },
 };
 
 // Content-type counterpart of ensureComponentFieldDescriptions: pins the

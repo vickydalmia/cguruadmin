@@ -35,6 +35,11 @@ import {
 } from '../constants/deal-of-the-day-sections';
 import { HOMEPAGE_IMAGE_RULES } from '../constants/homepage-images';
 import { CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME } from '../constants/checkout-merchant';
+import {
+  AFFILIATE_OFFER_TOGGLE_FIELD,
+  BRAND_AFFILIATE_FLAG_FIELD,
+  isAffiliateOfferUid,
+} from '../constants/affiliate-offer';
 import RichTextEditor from './components/RichTextEditor';
 import DateTimeInput from './components/DateTimeInput';
 import BooleanConfirmInput from './components/BooleanConfirmInput';
@@ -260,13 +265,39 @@ function RelationSection({
   deferred,
   model,
   documentId,
+  selectionDisabled = false,
+  selectionDisabledHint,
+  extraCandidateFilters,
+  onSelectedState,
 }: {
   config: RelationConfig;
   deferred: boolean;
   model: string;
   documentId?: string;
+  /**
+   * Blocks NEW selections only (radios/unchecked boxes disabled, select
+   * handlers no-op). Removal stays enabled on purpose: a row that violates an
+   * invariant server-side (e.g. a legacy affiliate offer with a Store) must be
+   * cleanable from the panel, or the strict validator strands the editor.
+   */
+  selectionDisabled?: boolean;
+  selectionDisabledHint?: string;
+  /** Extra query params for the candidate fetch, e.g. an affiliate filter. */
+  extraCandidateFilters?: Readonly<Record<string, string>>;
+  onSelectedState?: (
+    field: string,
+    state: { count: number; ready: boolean },
+  ) => void;
 }) {
   const { get } = useFetchClient();
+
+  // Key the filters by VALUE so flipping the toggle resets pagination and
+  // refetches page 1 even if a caller passes a fresh object every render.
+  const extraFilterKey = JSON.stringify(extraCandidateFilters ?? null);
+  const stableExtraFilters = React.useMemo<Record<string, string> | null>(
+    () => JSON.parse(extraFilterKey),
+    [extraFilterKey],
+  );
 
   const formValue = useForm(
     'RelationSection',
@@ -428,6 +459,15 @@ function RelationSection({
     [selectedList]
   );
 
+  // Reports the live selection (persisted relations + form diff replayed) so
+  // PanelBody can gate the affiliate toggle without recomputing it.
+  React.useEffect(() => {
+    onSelectedState?.(config.field, {
+      count: selectedList.length,
+      ready: selectedRelationsReady,
+    });
+  }, [onSelectedState, config.field, selectedList.length, selectedRelationsReady]);
+
   const [candidates, setCandidates] = React.useState<Candidate[]>([]);
   const [page, setPage] = React.useState(1);
   const [pageCount, setPageCount] = React.useState(1);
@@ -446,7 +486,13 @@ function RelationSection({
     setPage(1);
     setPageCount(1);
     setInitialLoaded(false);
-  }, [debouncedSearch, config.target, config.scopeRelationField, documentId]);
+  }, [
+    debouncedSearch,
+    config.target,
+    config.scopeRelationField,
+    documentId,
+    stableExtraFilters,
+  ]);
 
   React.useEffect(() => {
     if (!deferred || (config.scopeRelationField && !documentId)) return;
@@ -478,6 +524,11 @@ function RelationSection({
             'filters[$or][1][expiresAt][$gt]',
             new Date().toISOString(),
           );
+        }
+        if (stableExtraFilters) {
+          for (const [key, value] of Object.entries(stableExtraFilters)) {
+            params.set(key, value);
+          }
         }
         const res = await get(
           `/content-manager/collection-types/${config.target}?${params.toString()}`
@@ -512,6 +563,7 @@ function RelationSection({
     config.mainField,
     config.scopeRelationField,
     documentId,
+    stableExtraFilters,
     get,
   ]);
 
@@ -524,6 +576,7 @@ function RelationSection({
   ) => {
     const persistedDocumentIds = persistedDocumentIdsRef.current;
     if (!selectedRelationsReady || !persistedDocumentIds) return;
+    if (change.type === 'select' && selectionDisabled) return;
 
     const result = singleRelationChange({
       change,
@@ -544,6 +597,7 @@ function RelationSection({
 
   const toggle = (c: Candidate) => {
     const exists = selectedList.some((s) => s.documentId === c.documentId);
+    if (!exists && selectionDisabled) return;
     if (
       !exists &&
       config.maxSelections != null &&
@@ -764,6 +818,14 @@ function RelationSection({
         </Box>
       ) : null}
 
+      {selectionDisabled && selectionDisabledHint ? (
+        <Box paddingBottom={2} width="100%">
+          <Typography variant="pi" textColor="neutral600">
+            {selectionDisabledHint}
+          </Typography>
+        </Box>
+      ) : null}
+
       {selectedList.length > 0 ? (
         <Box paddingBottom={2} width="100%">
           <Flex direction="column" alignItems="stretch" gap={2} width="100%">
@@ -851,7 +913,7 @@ function RelationSection({
                     <Radio.Item
                       key={candidate.documentId}
                       value={candidate.documentId}
-                      disabled={!selectedRelationsReady}
+                      disabled={!selectedRelationsReady || selectionDisabled}
                     >
                       {candidate.name}
                     </Radio.Item>
@@ -864,7 +926,8 @@ function RelationSection({
                   <Checkbox
                     checked={selectedDocIds.has(c.documentId)}
                     disabled={
-                      !selectedDocIds.has(c.documentId) && atSelectionLimit
+                      !selectedDocIds.has(c.documentId) &&
+                      (atSelectionLimit || selectionDisabled)
                     }
                     onCheckedChange={() => toggle(c)}
                   >
@@ -896,6 +959,62 @@ function RelationSection({
   );
 }
 
+// Only brands flagged "Affiliate Store" are listed while the affiliate toggle
+// is ON. `$eq: true` correctly excludes legacy NULL rows (no DB default).
+// Module-level for reference stability across renders.
+const AFFILIATE_BRAND_CANDIDATE_FILTER: Readonly<Record<string, string>> = {
+  [`filters[${BRAND_AFFILIATE_FLAG_FIELD}][$eq]`]: 'true',
+};
+
+type SelectedRelationState = { count: number; ready: boolean };
+
+/**
+ * The `isForAffiliateBrand` toggle, rendered at the top of the Taxonomies
+ * panel next to the pickers it gates (the field is hidden from the main edit
+ * form via OFFER_PANEL_ONLY_FIELDS in src/index.ts). Reuses BooleanConfirmInput
+ * so it keeps the same confirm-on-flip behaviour as every other boolean.
+ *
+ * Enable gate: turning OFF is always allowed; turning ON requires zero Stores
+ * AND zero Brands currently selected (live form state). An unknown baseline
+ * (selected relations still loading) counts as blocked — it must not enable
+ * the gate.
+ */
+function AffiliateOfferToggle({
+  isOn,
+  selectionState,
+}: {
+  isOn: boolean;
+  selectionState: Record<string, SelectedRelationState>;
+}) {
+  const storesState = selectionState.stores;
+  const brandsState = selectionState.brands;
+  const selectionsPending = !storesState?.ready || !brandsState?.ready;
+  const hasSelections =
+    (storesState?.count ?? 0) > 0 || (brandsState?.count ?? 0) > 0;
+  const disabled = !isOn && (selectionsPending || hasSelections);
+
+  const hint = isOn
+    ? 'Stores are disabled and only affiliate Brands are listed. Logo Store ' +
+      'and Checkout merchant are hidden and cleared on save.'
+    : hasSelections
+      ? 'Untick all Stores and Brands first to enable this.'
+      : selectionsPending
+        ? 'Checking current Store/Brand selections…'
+        : 'Turns this into an affiliate-brand offer: affiliate Brands only, ' +
+          'no Stores, no Logo Store, no Checkout merchant.';
+
+  return (
+    <Box paddingTop={3} paddingBottom={3} width="100%">
+      <BooleanConfirmInput
+        name={AFFILIATE_OFFER_TOGGLE_FIELD}
+        label="Affiliate brand offer"
+        hint={hint}
+        disabled={disabled}
+      />
+    </Box>
+  );
+}
+
 function PanelBody({
   model,
   documentId,
@@ -904,8 +1023,42 @@ function PanelBody({
   documentId?: string;
 }) {
   const deferred = useDeferredMount();
+  const isAffiliateModel = isAffiliateOfferUid(model);
+  const affiliateOn = useForm(
+    'AffiliatePanelBody',
+    (state) => state.values?.[AFFILIATE_OFFER_TOGGLE_FIELD] === true,
+  );
+  const [selectionState, setSelectionState] = React.useState<
+    Record<string, SelectedRelationState>
+  >({});
+  const handleSelectedState = React.useCallback(
+    (field: string, state: SelectedRelationState) => {
+      setSelectionState((current) => {
+        const existing = current[field];
+        if (
+          existing &&
+          existing.count === state.count &&
+          existing.ready === state.ready
+        ) {
+          return current;
+        }
+        return { ...current, [field]: state };
+      });
+    },
+    [],
+  );
+
   return (
     <Box width="100%">
+      {isAffiliateModel ? (
+        <>
+          <AffiliateOfferToggle
+            isOn={affiliateOn}
+            selectionState={selectionState}
+          />
+          <Divider />
+        </>
+      ) : null}
       {RELATION_CONFIG[model].map((cfg, idx) => (
         <React.Fragment key={cfg.field}>
           {idx > 0 ? <Divider /> : null}
@@ -914,6 +1067,25 @@ function PanelBody({
             deferred={deferred}
             model={model}
             documentId={documentId}
+            selectionDisabled={
+              isAffiliateModel && affiliateOn && cfg.field === 'stores'
+            }
+            selectionDisabledHint={
+              cfg.field === 'stores'
+                ? 'Stores are disabled for affiliate-brand offers.'
+                : undefined
+            }
+            extraCandidateFilters={
+              isAffiliateModel && affiliateOn && cfg.field === 'brands'
+                ? AFFILIATE_BRAND_CANDIDATE_FILTER
+                : undefined
+            }
+            onSelectedState={
+              isAffiliateModel &&
+              (cfg.field === 'stores' || cfg.field === 'brands')
+                ? handleSelectedState
+                : undefined
+            }
           />
         </React.Fragment>
       ))}
