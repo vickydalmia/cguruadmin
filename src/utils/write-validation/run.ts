@@ -1,6 +1,7 @@
 import type { Core } from '@strapi/strapi';
 
 import {
+  isAffiliateEntityUid,
   touchesAffiliateFields,
   touchesEntityOfferRelations,
 } from '../affiliate-brand-validation';
@@ -57,7 +58,14 @@ export async function runWriteValidation(
   context: { uid: string; action: string; params?: { data?: any; documentId?: string } },
 ): Promise<WriteLockRelease | null> {
   const { uid, action } = context;
-  if (!WRITE_ACTIONS.includes(action as (typeof WRITE_ACTIONS)[number])) return null;
+  if (!WRITE_ACTIONS.includes(action as (typeof WRITE_ACTIONS)[number])) {
+    // Store/Brand deletion clears checkoutMerchant references in its content
+    // transaction. Hold the same fail-closed affiliate lock as offer writes,
+    // otherwise an offer can validate the target, lose a delete race, and
+    // commit a dangling string reference after the delete has finished.
+    if (action !== 'delete' || !isAffiliateEntityUid(uid)) return null;
+    return acquireLocks(strapi, lockDomainsFor(uid, undefined, action));
+  }
 
   const ctx: StepContext = {
     strapi,
@@ -125,37 +133,21 @@ export async function runWriteValidation(
 const FAIL_CLOSED_DOMAINS: ReadonlySet<WriteLockDomain> = new Set(['affiliate']);
 
 /**
- * Acquire every domain lock in the given order (every caller lists domains in
- * the same fixed order, so two writes can never wait on each other's held
- * lock). A fail-open lock that is unavailable is skipped — partial
- * serialization beats none; a fail-closed one throws, and any locks already
- * acquired are released before the error propagates. Releases run in reverse
- * acquisition order.
+ * All domains are taken on ONE dedicated lock connection inside
+ * acquireWriteSerializationLock, all-or-nothing (a failed statement poisons
+ * the lock transaction, so partial acquisition cannot exist). A save whose
+ * domain set contains a fail-closed domain therefore rejects on ANY
+ * acquisition failure; pure fail-open sets proceed unserialized as before.
  */
 async function acquireLocks(
   strapi: Core.Strapi,
   domains: readonly WriteLockDomain[],
 ): Promise<WriteLockRelease | null> {
-  const releases: WriteLockRelease[] = [];
-  const releaseAll = async () => {
-    for (const release of releases.reverse()) {
-      await release();
-    }
-  };
-  for (const domain of domains) {
-    let release: WriteLockRelease | null;
-    try {
-      release = await acquireWriteSerializationLock(strapi, domain, {
-        onUnavailable: FAIL_CLOSED_DOMAINS.has(domain) ? 'closed' : 'open',
-      });
-    } catch (error) {
-      await releaseAll();
-      throw error;
-    }
-    if (release) releases.push(release);
-  }
-  if (releases.length === 0) return null;
-  return releaseAll;
+  return acquireWriteSerializationLock(strapi, domains, {
+    onUnavailable: domains.some((domain) => FAIL_CLOSED_DOMAINS.has(domain))
+      ? 'closed'
+      : 'open',
+  });
 }
 
 function applicable(
@@ -197,13 +189,28 @@ async function collectLockedSteps(ctx: StepContext): Promise<void> {
  * offer validates against the committed flag and is rejected. Non-Postgres
  * proceeds unserialized — the pre-existing accepted policy.
  */
-function lockDomainsFor(
+export function lockDomainsFor(
   uid: string,
   data: unknown,
   action: string,
 ): WriteLockDomain[] {
+  if (action === 'delete') {
+    // A Store/Brand delete clears checkoutMerchant references in its content
+    // transaction — the affiliate domain serializes that against offer
+    // writes validating the target. The identity lock is deliberately NOT
+    // taken: deletion FREES identifiers (no uniqueness race to serialize),
+    // and identity is the hottest domain — holding it fail-closed across a
+    // delete's relation cascade would reject every concurrent taxonomy save
+    // that outwaits lock_timeout.
+    return isAffiliateEntityUid(uid) ? ['affiliate'] : [];
+  }
   if (uid === 'api::brand.brand') return ['affiliate', 'identity'];
-  if (uid === 'api::store.store' && touchesEntityOfferRelations(data)) {
+  if (
+    uid === 'api::store.store' &&
+    (touchesEntityOfferRelations(data) || action === 'clone')
+  ) {
+    // A store CLONE inherits the source's coupons/deals connections without
+    // the payload ever naming them — same reason offer clones lock below.
     return ['affiliate', 'identity'];
   }
   if (isIdentityUid(uid)) return ['identity'];

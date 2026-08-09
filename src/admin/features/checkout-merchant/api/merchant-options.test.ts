@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   findMerchantByRef,
   searchMerchants,
+  withAffiliateOptions,
   withSelectedOption,
   type MerchantOption,
 } from './merchant-options';
@@ -184,6 +185,67 @@ describe('withSelectedOption', () => {
   it('returns a copy when there is no selection', () => {
     const options = [option('store:a')];
     const result = withSelectedOption(options, null);
+    expect(result).toEqual(options);
+    expect(result).not.toBe(options);
+  });
+});
+
+describe('withAffiliateOptions', () => {
+  const option = (value: string): MerchantOption => ({
+    value,
+    kind: 'store',
+    kindLabel: 'Store',
+    documentId: value.split(':')[1],
+    name: value,
+  });
+
+  it('injects an affiliate brand absent from the current page', () => {
+    // The restricted filter alone can produce an EMPTY dropdown while the
+    // hint says the brand is pickable — the legal pick must be synthesized.
+    const result = withAffiliateOptions(
+      [],
+      [{ documentId: 'aff-1', name: 'Zomato' }],
+    );
+    expect(result).toEqual([
+      {
+        value: 'brand:aff-1',
+        kind: 'brand',
+        kindLabel: 'Brand',
+        documentId: 'aff-1',
+        name: 'Zomato',
+      },
+    ]);
+  });
+
+  it('prepends the brand ahead of surviving page options', () => {
+    const result = withAffiliateOptions(
+      [option('store:s1')],
+      [{ documentId: 'aff-1', name: 'Zomato' }],
+    );
+    expect(result.map((item) => item.value)).toEqual([
+      'brand:aff-1',
+      'store:s1',
+    ]);
+  });
+
+  it('does not duplicate a brand the page already carries', () => {
+    const existing: MerchantOption = {
+      value: 'brand:aff-1',
+      kind: 'brand',
+      kindLabel: 'Brand',
+      documentId: 'aff-1',
+      name: 'Zomato',
+    };
+    const result = withAffiliateOptions(
+      [existing],
+      [{ documentId: 'aff-1', name: 'Zomato' }],
+    );
+    expect(result).toEqual([existing]);
+  });
+
+  it('returns a copy when every ref is present', () => {
+    const options = [option('store:a')];
+    const result = withAffiliateOptions(options, []);
     expect(result).toEqual(options);
     expect(result).not.toBe(options);
   });

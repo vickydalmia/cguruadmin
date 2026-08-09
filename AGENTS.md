@@ -91,8 +91,9 @@ move it below `COPY . .`.
 
 ## Write validation
 
-All content validation runs from a single document-service middleware
-(`src/index.ts`), which delegates to `src/utils/write-validation/`:
+All content validation runs from the content-write Document Service middleware
+(`src/document-middlewares/content-write-document-middleware.ts`), which
+delegates to `src/utils/write-validation/`:
 
 - `problems.ts` — the shared `Problem` shape, `toValidationError`, and
   `ProblemCollector`.
@@ -160,8 +161,8 @@ Two writes sit side by side in that same callback:
 
 - `touchEntityPageUpdatedAt` — raw connection → **deadlocked** (now takes `trx`
   as a required argument, and throws if it is missing).
-- `fillHomepageOverrides` (`src/index.ts`) — `strapi.db.query(...).update(...)` →
-  joins the transaction → fine.
+- `fillHomepageOverrides` (`src/utils/homepage-overrides.ts`) —
+  `strapi.db.query(...).update(...)` → joins the transaction → fine.
 
 Nothing in the code makes that difference visible, which is exactly why `trx` is
 a required positional parameter rather than an option.

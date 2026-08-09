@@ -63,11 +63,25 @@ describe('site selection compatibility reconciliation', () => {
   });
 
   it('runs after schema sync and before search starts serving', () => {
-    const source = readFileSync(resolve(__dirname, '../index.ts'), 'utf8');
-    const bootstrap = source.slice(source.indexOf('async bootstrap'));
-    expect(bootstrap).toContain('reconcileSiteSelectionsAfterSchemaSync(');
+    const bootstrap = readFileSync(
+      resolve(__dirname, '../lifecycles/bootstrap-application.ts'),
+      'utf8',
+    );
+    const reconciliation = readFileSync(
+      resolve(__dirname, '../lifecycles/bootstrap-reconciliation.ts'),
+      'utf8',
+    );
+    expect(reconciliation).toContain('reconcileSiteSelectionsAfterSchemaSync(');
+    // Presence guards FIRST: indexOf's -1 for a missing needle would make
+    // the ordering assertion below pass vacuously.
     expect(
-      bootstrap.indexOf('reconcileSiteSelectionsAfterSchemaSync('),
+      bootstrap.indexOf('reconcileDatabaseAfterSchemaSync(strapi)'),
+    ).toBeGreaterThan(-1);
+    expect(bootstrap.indexOf('initializeSearchRuntime(strapi)')).toBeGreaterThan(
+      -1,
+    );
+    expect(
+      bootstrap.indexOf('reconcileDatabaseAfterSchemaSync(strapi)'),
     ).toBeLessThan(bootstrap.indexOf('initializeSearchRuntime(strapi)'));
   });
 

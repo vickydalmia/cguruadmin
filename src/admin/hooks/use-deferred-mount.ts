@@ -1,9 +1,6 @@
 import * as React from 'react';
 
-/**
- * Wait for the edit view to settle before firing this feature's requests, so
- * the sidebar summary never competes with the document load itself.
- */
+/** Wait for the edit view to settle before firing secondary requests. */
 export function useDeferredMount(): boolean {
   const [ready, setReady] = React.useState(false);
 

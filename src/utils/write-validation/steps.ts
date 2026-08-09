@@ -6,7 +6,10 @@ import {
   validateOfferAffiliateBrands,
 } from '../affiliate-brand-validation';
 import { validateChangedFields } from '../changed-field-validation';
-import { validateCheckoutMerchantForWrite } from '../checkout-merchant-validation';
+import {
+  touchesCheckoutMerchant,
+  validateCheckoutMerchantForWrite,
+} from '../checkout-merchant-validation';
 import { isCheckoutMerchantOfferUid } from '../../constants/checkout-merchant';
 import {
   isOfferStoreUid,
@@ -49,6 +52,8 @@ import { validateRedirect } from '../redirect-validation';
 import { warnUndersizedSeoOgImage } from '../seo-og-image-validation';
 import { sanitizeRichtextData } from '../sanitize-richtext';
 import { normaliseTextFields, validateTextFieldsForWrite } from '../text-field-validation';
+import { collectCloneRelationProblems } from '../../document-middlewares/clone-relation-overrides';
+import { toValidationError } from './problems';
 
 import { DOTD_UID } from '../../constants/deal-of-the-day-sections';
 import { HOMEPAGE_UID } from '../../constants/homepage-sections';
@@ -261,6 +266,25 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
       ),
   },
   {
+    // A clone's relation payload can name rows deleted since the editor
+    // loaded the entry. The authoritative (race-proof) resolution runs inside
+    // the clone transaction, but alone it would surface AFTER this aggregated
+    // pass — this advisory duplicate lets a vanished relation report together
+    // with every other problem of the same save.
+    name: 'validateCloneRelationTargets',
+    actions: ['clone'],
+    applies: (uid) => isAffiliateEntityUid(uid) || isOfferStoreUid(uid),
+    run: async ({ strapi, uid, action, data }) => {
+      const problems = await collectCloneRelationProblems(
+        strapi,
+        uid,
+        action,
+        data,
+      );
+      if (problems.length) throw toValidationError(problems);
+    },
+  },
+  {
     name: 'validateEntityTopPickCoupons',
     actions: CREATE_UPDATE,
     applies: isEntityTopPickUid,
@@ -356,6 +380,29 @@ export const LOCKED_STEPS: readonly ValidationStep[] = [
     name: 'validateJobSlug',
     run: ({ strapi, uid, action, data, documentId }) =>
       validateJobSlug(strapi, uid, action, data, documentId),
+  },
+  {
+    // The collected pass gives editors an aggregated error, but Store/Brand
+    // deletion is serialized only after that pass. Re-read a touched (or
+    // inherited clone) checkoutMerchant while the affiliate lock is held so
+    // a target cannot commit its delete between validation and this write.
+    // failClosed: a read failure here REJECTS the save (retryable) — passing
+    // on a failed read would commit the exact dangling reference this locked
+    // re-check exists to prevent.
+    name: 'revalidateCheckoutMerchantForWrite',
+    applies: isCheckoutMerchantOfferUid,
+    run: ({ strapi, uid, action, data, documentId, strict }) =>
+      action === 'clone' || touchesCheckoutMerchant(data)
+        ? validateCheckoutMerchantForWrite(
+            strapi,
+            uid,
+            action,
+            data,
+            documentId,
+            strict,
+            true,
+          )
+        : undefined,
   },
   {
     // An affiliate brand is an offer's ONLY merchant: no Store, no other

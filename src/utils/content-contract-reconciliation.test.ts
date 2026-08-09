@@ -131,11 +131,25 @@ describe("post-schema content contract reconciliation", () => {
   });
 
   it("runs before search initialization in Strapi bootstrap", () => {
-    const source = readFileSync(resolve(__dirname, "../index.ts"), "utf8");
-    const bootstrap = source.slice(source.indexOf("async bootstrap"));
-    expect(bootstrap).toContain("reconcileContentContractAfterSchemaSync(");
+    const bootstrap = readFileSync(
+      resolve(__dirname, "../lifecycles/bootstrap-application.ts"),
+      "utf8",
+    );
+    const reconciliation = readFileSync(
+      resolve(__dirname, "../lifecycles/bootstrap-reconciliation.ts"),
+      "utf8",
+    );
+    expect(reconciliation).toContain("reconcileContentContractAfterSchemaSync(");
+    // Presence guards FIRST: indexOf's -1 for a missing needle would make
+    // the ordering assertion below pass vacuously.
     expect(
-      bootstrap.indexOf("reconcileContentContractAfterSchemaSync("),
+      bootstrap.indexOf("reconcileDatabaseAfterSchemaSync(strapi)"),
+    ).toBeGreaterThan(-1);
+    expect(bootstrap.indexOf("initializeSearchRuntime(strapi)")).toBeGreaterThan(
+      -1,
+    );
+    expect(
+      bootstrap.indexOf("reconcileDatabaseAfterSchemaSync(strapi)"),
     ).toBeLessThan(bootstrap.indexOf("initializeSearchRuntime(strapi)"));
   });
 });

@@ -29,16 +29,20 @@ function transactionHarness(options: { failInsert?: boolean } = {}) {
       },
     },
   } as any;
-  return { strapi, rows };
+  return { strapi, rows, trx };
 }
 
 describe('runContentTransaction', () => {
   it('commits the content result and outbox event together, then wakes delivery', async () => {
-    const { strapi, rows } = transactionHarness();
+    const { strapi, rows, trx } = transactionHarness();
     const afterCommit = vi.fn();
+    let writeTransaction: unknown;
     const result = await runContentTransaction(
       strapi,
-      async () => ({ documentId: 'coupon-1' }),
+      async (activeTrx) => {
+        writeTransaction = activeTrx;
+        return { documentId: 'coupon-1' };
+      },
       async () => ({
         eventKey: 'event-1',
         reason: 'coupon update',
@@ -48,6 +52,7 @@ describe('runContentTransaction', () => {
     );
 
     expect(result).toEqual({ documentId: 'coupon-1' });
+    expect(writeTransaction).toBe(trx);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       event_key: 'event-1',

@@ -88,7 +88,8 @@ the Deal section is rendered.
 Both relations are edited together in the **Coupon layout** dialog, opened from
 the entity's edit-view sidebar (`src/admin/features/coupon-layout/`). Their raw
 relation inputs stay hidden from the edit form (`HIDE_FROM_EDIT` in
-`src/index.ts`), so the dialog is the only way in.
+[`src/lifecycles/content-manager/layout-visibility.ts`](../src/lifecycles/content-manager/layout-visibility.ts)),
+so the dialog is the only way in.
 
 They share one screen because they interact: a Coupon displayed as a Top Pick
 is removed from the main list, so it cannot also hold an Ordered Coupons

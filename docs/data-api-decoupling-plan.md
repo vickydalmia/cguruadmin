@@ -37,7 +37,9 @@ New reconciler in `cguruadmin/database/` following the existing `runOptionalDdl`
 - `(content_status, expires_at)`
 - `(content_status, scheduled_at)`
 - functional `LOWER(slug)` on `stores/brands/categories/banks` per audit recommendation
-Wire into boot reconciliation next to `reconcileSearchIndexesAfterSchemaSync` (`src/index.ts:1779-1802`).
+Wire into the ordered post-schema bootstrap reconciliation beside
+`reconcileSearchIndexesAfterSchemaSync` in
+[`src/lifecycles/bootstrap-reconciliation.ts`](../src/lifecycles/bootstrap-reconciliation.ts).
 
 ### A2. Operator actions (user runs; already documented as pending in PERFORMANCE-HA-PLAN §0.1)
 - `ALTER DATABASE ... SET jit = off` + off-peak `VACUUM (ANALYZE)` (search-504 leftovers). Note: the query-shape fix is the real guard; this is belt-and-braces.

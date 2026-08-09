@@ -181,6 +181,28 @@ describe.each(['api::coupon.coupon', 'api::deal.deal'] as OfferStoreUid[])(
 describe('validateOfferAffiliateBrands — relation payload shapes', () => {
   const uid: OfferStoreUid = 'api::coupon.coupon';
 
+  it('judges a payload-less clone against inherited relations', async () => {
+    const { strapi } = harness({
+      current: {
+        stores: [STORE],
+        brands: [AFFILIATE],
+        checkoutMerchant: null,
+      },
+      affiliateRows: [AFFILIATE],
+    });
+    const caught = await catchFrom(() =>
+      validateOfferAffiliateBrands(
+        strapi,
+        uid,
+        'clone',
+        undefined,
+        'offer-1',
+        false,
+      ),
+    );
+    expect((caught as Error).message).toContain('cannot be combined with a Store');
+  });
+
   it('resolves connect deltas against the stored brands', async () => {
     const { strapi } = harness({
       current: { stores: [], brands: [OTHER_BRAND], checkoutMerchant: null },
@@ -262,6 +284,152 @@ describe('validateOfferAffiliateBrands — relation payload shapes', () => {
     );
     expect(errorPaths(caught)).toEqual([['checkoutMerchant']]);
   });
+
+  it('falls back to the STORED brands for an unrecognized payload shape', async () => {
+    // `brands: {}` is an ORM no-op — resolving it to "no brands" would let
+    // the stored affiliate brand slip past the check.
+    const { strapi } = harness({
+      current: { stores: [STORE], brands: [AFFILIATE], checkoutMerchant: null },
+      affiliateRows: [AFFILIATE],
+    });
+    const caught = await catchFrom(() =>
+      validateOfferAffiliateBrands(
+        strapi,
+        uid,
+        'update',
+        { brands: {} },
+        'offer-1',
+      ),
+    );
+    expect((caught as Error).message).toContain('cannot be combined with a Store');
+  });
+});
+
+describe('validateOfferAffiliateBrands — merchant references', () => {
+  const uid: OfferStoreUid = 'api::coupon.coupon';
+  const AFF2 = { id: 10, documentId: 'brand-aff2', name: 'AffBrand2' };
+
+  it('accepts an affiliate merchant reference on a bare offer', async () => {
+    const { strapi } = harness({ affiliateRows: [AFF2] });
+    await expect(
+      validateOfferAffiliateBrands(strapi, uid, 'create', {
+        checkoutMerchant: 'brand:brand-aff2',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('rejects an affiliate merchant reference combined with a store', async () => {
+    const { strapi } = harness({ affiliateRows: [AFF2] });
+    const caught = await catchFrom(() =>
+      validateOfferAffiliateBrands(strapi, uid, 'create', {
+        stores: [STORE],
+        checkoutMerchant: 'brand:brand-aff2',
+      }),
+    );
+    expect(errorPaths(caught)).toEqual([['checkoutMerchant']]);
+    expect((caught as Error).message).toContain('cannot be combined with a Store');
+  });
+
+  it('rejects an affiliate merchant reference combined with plain brands', async () => {
+    const { strapi } = harness({ affiliateRows: [AFF2] });
+    const caught = await catchFrom(() =>
+      validateOfferAffiliateBrands(strapi, uid, 'create', {
+        brands: [OTHER_BRAND],
+        checkoutMerchant: 'brand:brand-aff2',
+      }),
+    );
+    expect(errorPaths(caught)).toEqual([['checkoutMerchant']]);
+    expect((caught as Error).message).toContain('combined with other brands');
+  });
+
+  it('reports ONE problem when a selected affiliate meets a different affiliate merchant', async () => {
+    // The selected-affiliate block already rejects the merchant conflict;
+    // the merchant-reference block must not duplicate it on the same path.
+    const { strapi } = harness({ affiliateRows: [AFFILIATE, AFF2] });
+    const caught = await catchFrom(() =>
+      validateOfferAffiliateBrands(strapi, uid, 'create', {
+        brands: [AFFILIATE],
+        checkoutMerchant: 'brand:brand-aff2',
+      }),
+    );
+    expect(errorPaths(caught)).toEqual([['checkoutMerchant']]);
+  });
+
+  it('skips the brand lookup when neither brands nor a brand merchant exist', async () => {
+    const { strapi, brandFindMany } = harness();
+    await expect(
+      validateOfferAffiliateBrands(strapi, uid, 'create', {
+        stores: [STORE],
+        checkoutMerchant: 'store:store-1',
+      }),
+    ).resolves.toBeUndefined();
+    expect(brandFindMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('validateOfferAffiliateBrands — untouched-strict recheck', () => {
+  const uid: OfferStoreUid = 'api::coupon.coupon';
+  const VIOLATING = {
+    stores: [STORE],
+    brands: [AFFILIATE],
+    checkoutMerchant: null,
+  };
+  const CLEAN = { stores: [], brands: [AFFILIATE], checkoutMerchant: null };
+
+  it('retries exactly once on a persistent untouched-strict violation', async () => {
+    const { strapi, findOne, brandFindMany } = harness({
+      current: VIOLATING,
+      affiliateRows: [AFFILIATE],
+    });
+    const caught = await catchFrom(() =>
+      validateOfferAffiliateBrands(
+        strapi,
+        uid,
+        'update',
+        { title: 'unrelated' },
+        'offer-1',
+        true,
+      ),
+    );
+    expect((caught as Error).message).toContain('cannot be combined with a Store');
+    // One full re-resolution (fresh document + brand reads), then throw.
+    expect(findOne).toHaveBeenCalledTimes(2);
+    expect(brandFindMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears a transient violation on the fresh read', async () => {
+    // A concurrent flip tore the first read pair apart; the second read sees
+    // consistent (legal) state, so the save goes through.
+    const { strapi, findOne } = harness({ affiliateRows: [AFFILIATE] });
+    findOne
+      .mockResolvedValueOnce(VIOLATING)
+      .mockResolvedValueOnce(CLEAN);
+    await expect(
+      validateOfferAffiliateBrands(
+        strapi,
+        uid,
+        'update',
+        { title: 'unrelated' },
+        'offer-1',
+        true,
+      ),
+    ).resolves.toBeUndefined();
+    expect(findOne).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a TOUCHED violation', async () => {
+    // Touched saves run under the affiliate lock — their reads cannot tear,
+    // so a violation is final on the first evaluation.
+    const { strapi, brandFindMany } = harness({ affiliateRows: [AFFILIATE] });
+    const caught = await catchFrom(() =>
+      validateOfferAffiliateBrands(strapi, uid, 'create', {
+        brands: [AFFILIATE],
+        stores: [STORE],
+      }),
+    );
+    expect(caught).toBeDefined();
+    expect(brandFindMany).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('validateEntityOfferAffiliateConnections', () => {
@@ -294,21 +462,26 @@ describe('validateEntityOfferAffiliateConnections', () => {
     current = null as unknown,
     coupons = [] as unknown[],
     deals = [] as unknown[],
+    affiliateBrandRows = [] as unknown[],
   } = {}) {
     const findOne = vi.fn().mockResolvedValue(current);
     const couponFindMany = vi.fn().mockResolvedValue(coupons);
     const dealFindMany = vi.fn().mockResolvedValue(deals);
+    // Answers the merchant-reference resolution (already filtered to
+    // isAffiliate: true, like the real query).
+    const brandFindMany = vi.fn().mockResolvedValue(affiliateBrandRows);
     const strapi = {
       documents: vi.fn(() => ({ findOne })),
       db: {
-        query: vi.fn((uid: string) =>
-          uid === 'api::coupon.coupon'
+        query: vi.fn((uid: string) => {
+          if (uid === 'api::brand.brand') return { findMany: brandFindMany };
+          return uid === 'api::coupon.coupon'
             ? { findMany: couponFindMany }
-            : { findMany: dealFindMany },
-        ),
+            : { findMany: dealFindMany };
+        }),
       },
     } as any;
-    return { strapi, findOne, couponFindMany, dealFindMany };
+    return { strapi, findOne, couponFindMany, dealFindMany, brandFindMany };
   }
 
   it('skips a payload that does not touch the offer inverses', async () => {
@@ -476,6 +649,224 @@ describe('validateEntityOfferAffiliateConnections', () => {
     ).resolves.toBeUndefined();
     expect(couponFindMany).not.toHaveBeenCalled();
   });
+
+  describe('merchant-only affiliate references', () => {
+    const MERCHANT_ONLY_OFFER = {
+      id: 303,
+      documentId: 'offer-merchant-only',
+      title: 'Merchant-only offer',
+      checkoutMerchant: 'brand:brand-aff',
+      stores: [],
+      brands: [],
+    };
+
+    it('rejects connecting a Store to an offer checking out through an affiliate brand', async () => {
+      const { strapi, brandFindMany } = entityHarness({
+        current: { coupons: [] },
+        coupons: [MERCHANT_ONLY_OFFER],
+        affiliateBrandRows: [{ documentId: 'brand-aff', name: 'AffBrand' }],
+      });
+      const caught = await catchFrom(() =>
+        validateEntityOfferAffiliateConnections(
+          strapi,
+          'api::store.store',
+          'update',
+          { coupons: { connect: [{ documentId: 'offer-merchant-only' }] } },
+          'store-1',
+        ),
+      );
+      expect((caught as Error).message).toContain(
+        'checks out through affiliate brand AffBrand',
+      );
+      expect((caught as Error).message).toContain('a Store cannot be attached');
+      expect(errorPaths(caught)).toEqual([['coupons']]);
+      expect(brandFindMany).toHaveBeenCalledTimes(1);
+      expect(brandFindMany.mock.calls[0][0].where.documentId.$in).toEqual([
+        'brand-aff',
+      ]);
+    });
+
+    it('rejects connecting a plain brand to the same offer', async () => {
+      const { strapi } = entityHarness({
+        current: { isAffiliate: false, deals: [] },
+        deals: [MERCHANT_ONLY_OFFER],
+        affiliateBrandRows: [{ documentId: 'brand-aff', name: 'AffBrand' }],
+      });
+      const caught = await catchFrom(() =>
+        validateEntityOfferAffiliateConnections(
+          strapi,
+          'api::brand.brand',
+          'update',
+          { deals: { connect: [{ documentId: 'offer-merchant-only' }] } },
+          'brand-plain',
+        ),
+      );
+      expect((caught as Error).message).toContain(
+        'other brands cannot be attached',
+      );
+      expect(errorPaths(caught)).toEqual([['deals']]);
+    });
+
+    it('accepts when the merchant points at a NON-affiliate brand', async () => {
+      const { strapi, brandFindMany } = entityHarness({
+        current: { coupons: [] },
+        coupons: [
+          { ...MERCHANT_ONLY_OFFER, checkoutMerchant: 'brand:brand-plain' },
+        ],
+        affiliateBrandRows: [],
+      });
+      await expect(
+        validateEntityOfferAffiliateConnections(
+          strapi,
+          'api::store.store',
+          'update',
+          { coupons: { connect: [{ documentId: 'offer-merchant-only' }] } },
+          'store-1',
+        ),
+      ).resolves.toBeUndefined();
+      expect(brandFindMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips the brand lookup for store-kind merchants', async () => {
+      const { strapi, brandFindMany } = entityHarness({
+        current: { coupons: [] },
+        coupons: [
+          { ...MERCHANT_ONLY_OFFER, checkoutMerchant: 'store:store-2' },
+        ],
+      });
+      await expect(
+        validateEntityOfferAffiliateConnections(
+          strapi,
+          'api::store.store',
+          'update',
+          { coupons: { connect: [{ documentId: 'offer-merchant-only' }] } },
+          'store-1',
+        ),
+      ).resolves.toBeUndefined();
+      expect(brandFindMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('clone', () => {
+    it('judges a payload-less store clone against the inherited offers', async () => {
+      // Strapi's auto-clone can arrive with NO data at all — the validator
+      // must neither crash nor skip: the deep-copied connections re-attach
+      // the clone to every source offer.
+      const { strapi } = entityHarness({
+        current: { coupons: [{ documentId: 'offer-affiliate' }], deals: [] },
+        coupons: [AFFILIATE_OFFER],
+      });
+      const caught = await catchFrom(() =>
+        validateEntityOfferAffiliateConnections(
+          strapi,
+          'api::store.store',
+          'clone',
+          undefined,
+          'store-1',
+        ),
+      );
+      expect((caught as Error).message).toContain('a Store cannot be attached');
+      expect(errorPaths(caught)).toEqual([['coupons']]);
+    });
+
+    it('rejects cloning an affiliate brand that has offers', async () => {
+      // The inherited offers would pair the clone with the SOURCE brand;
+      // committing would only arm the cascade to silently strip the clone.
+      const { strapi } = entityHarness({
+        current: {
+          isAffiliate: true,
+          coupons: [{ documentId: 'offer-x' }],
+          deals: [],
+        },
+        coupons: [
+          {
+            id: 400,
+            documentId: 'offer-x',
+            title: 'Inherited',
+            checkoutMerchant: null,
+            stores: [],
+            brands: [
+              {
+                id: 9,
+                documentId: 'brand-aff',
+                name: 'AffBrand',
+                isAffiliate: true,
+              },
+            ],
+          },
+        ],
+      });
+      const caught = await catchFrom(() =>
+        validateEntityOfferAffiliateConnections(
+          strapi,
+          'api::brand.brand',
+          'clone',
+          { name: 'AffBrand copy' },
+          'brand-aff',
+        ),
+      );
+      expect((caught as Error).message).toContain(
+        'Cloning this affiliate brand',
+      );
+      expect(errorPaths(caught)).toEqual([['coupons']]);
+    });
+
+    it('accepts cloning an affiliate brand with no offers', async () => {
+      const { strapi } = entityHarness({
+        current: { isAffiliate: true, coupons: [], deals: [] },
+      });
+      await expect(
+        validateEntityOfferAffiliateConnections(
+          strapi,
+          'api::brand.brand',
+          'clone',
+          { name: 'AffBrand copy' },
+          'brand-aff',
+        ),
+      ).resolves.toBeUndefined();
+    });
+
+    it('accepts an affiliate-brand clone whose payload clears the offers', async () => {
+      const { strapi, couponFindMany, dealFindMany } = entityHarness({
+        current: {
+          isAffiliate: true,
+          coupons: [{ documentId: 'offer-x' }],
+          deals: [],
+        },
+      });
+      await expect(
+        validateEntityOfferAffiliateConnections(
+          strapi,
+          'api::brand.brand',
+          'clone',
+          { coupons: { set: [] }, deals: { set: [] } },
+          'brand-aff',
+        ),
+      ).resolves.toBeUndefined();
+      expect(couponFindMany).not.toHaveBeenCalled();
+      expect(dealFindMany).not.toHaveBeenCalled();
+    });
+
+    it('accepts cloning a plain brand over clean offers', async () => {
+      const { strapi } = entityHarness({
+        current: {
+          isAffiliate: false,
+          coupons: [{ documentId: 'offer-clean' }],
+          deals: [],
+        },
+        coupons: [CLEAN_OFFER],
+      });
+      await expect(
+        validateEntityOfferAffiliateConnections(
+          strapi,
+          'api::brand.brand',
+          'clone',
+          { name: 'Plain copy' },
+          'brand-plain',
+        ),
+      ).resolves.toBeUndefined();
+    });
+  });
 });
 
 describe('entity offer snapshots', () => {
@@ -558,56 +949,108 @@ describe('detachAffiliateBrand', () => {
     const brandFindOne = vi.fn().mockResolvedValue(brand);
     const couponFindMany = vi.fn().mockResolvedValue(coupons);
     const dealFindMany = vi.fn().mockResolvedValue(deals);
-    const couponUpdate = vi.fn().mockResolvedValue(undefined);
-    const dealUpdate = vi.fn().mockResolvedValue(undefined);
+    // Report a count matching the queued ids, like the real updateMany —
+    // merchantsClearedCount is asserted against this.
+    const updateManyCount = async (args: any) => ({
+      count: args?.where?.id?.$in?.length ?? 0,
+    });
+    const couponUpdateMany = vi.fn().mockImplementation(updateManyCount);
+    const dealUpdateMany = vi.fn().mockImplementation(updateManyCount);
+    const joinDeletes: Array<{
+      table: string;
+      brandColumn: [string, unknown];
+      offerIds: unknown[];
+    }> = [];
+    const trx = vi.fn((table: string) => {
+      const call = {
+        table,
+        brandColumn: ['', undefined] as [string, unknown],
+        offerIds: [] as unknown[],
+      };
+      return {
+        where(column: string, value: unknown) {
+          call.brandColumn = [column, value];
+          return this;
+        },
+        whereIn(_column: string, ids: unknown[]) {
+          call.offerIds = ids;
+          return this;
+        },
+        async delete() {
+          joinDeletes.push(call);
+        },
+      };
+    });
+    const joinTableFor = (uid: string) => ({
+      name: `${uid.includes('coupon') ? 'coupons' : 'deals'}_brands_lnk`,
+      joinColumn: { name: 'offer_id' },
+      inverseJoinColumn: { name: 'brand_id' },
+    });
     const strapi = {
       db: {
+        metadata: {
+          get: vi.fn((uid: string) => ({
+            attributes: { brands: { joinTable: joinTableFor(uid) } },
+          })),
+        },
         query: vi.fn((uid: string) => {
           if (uid === 'api::brand.brand') return { findOne: brandFindOne };
           if (uid === 'api::coupon.coupon')
-            return { findMany: couponFindMany, update: couponUpdate };
-          return { findMany: dealFindMany, update: dealUpdate };
+            return { findMany: couponFindMany, updateMany: couponUpdateMany };
+          return { findMany: dealFindMany, updateMany: dealUpdateMany };
         }),
       },
     } as any;
-    return { strapi, couponUpdate, dealUpdate };
+    return { strapi, trx, joinDeletes, couponUpdateMany, dealUpdateMany };
   }
 
+  const SELF = { id: 9, documentId: 'brand-aff' };
+  const OTHER = { id: 5, documentId: 'brand-plain' };
+
   it('returns empty for an unknown brand', async () => {
-    const { strapi, couponUpdate } = cascadeHarness({ brand: null });
-    const result = await detachAffiliateBrand(strapi, 'brand-gone');
+    const { strapi, trx } = cascadeHarness({ brand: null });
+    const result = await detachAffiliateBrand(strapi, trx, 'brand-gone');
     expect(result.affected).toEqual([]);
-    expect(couponUpdate).not.toHaveBeenCalled();
+    expect(trx).not.toHaveBeenCalled();
   });
 
-  it('disconnects the brand from offers holding a store or other brands', async () => {
-    const { strapi, couponUpdate } = cascadeHarness({
+  it('batch-detaches from conflicted offers, clearing a self-pointing merchant', async () => {
+    const { strapi, trx, joinDeletes, couponUpdateMany } = cascadeHarness({
       coupons: [
         {
           id: 100,
           documentId: 'offer-store',
-          checkoutMerchant: null,
+          // The brand leaves this offer — a merchant still pointing at it
+          // must be cleared WITH the disconnect, or it dangles unguarded.
+          checkoutMerchant: 'brand:brand-aff',
           stores: [{ id: 1 }],
-          brands: [{ id: 9 }],
+          brands: [SELF],
         },
         {
           id: 101,
           documentId: 'offer-multibrand',
           checkoutMerchant: null,
           stores: [],
-          brands: [{ id: 9 }, { id: 5 }],
+          brands: [SELF, OTHER],
         },
       ],
     });
 
-    const result = await detachAffiliateBrand(strapi, 'brand-aff');
+    const result = await detachAffiliateBrand(strapi, trx, 'brand-aff');
 
-    expect(couponUpdate).toHaveBeenCalledTimes(2);
-    expect(couponUpdate).toHaveBeenCalledWith({
-      where: { id: 100 },
-      data: { brands: { disconnect: [9] } },
+    expect(joinDeletes).toEqual([
+      {
+        table: 'coupons_brands_lnk',
+        brandColumn: ['brand_id', 9],
+        offerIds: [100, 101],
+      },
+    ]);
+    expect(couponUpdateMany).toHaveBeenCalledWith({
+      where: { id: { $in: [100] } },
+      data: { checkoutMerchant: null },
     });
     expect(result.detachedCount).toBe(2);
+    expect(result.merchantsClearedCount).toBe(1);
     expect(result.affected).toEqual([
       { uid: 'api::coupon.coupon', documentId: 'offer-store' },
       { uid: 'api::coupon.coupon', documentId: 'offer-multibrand' },
@@ -615,22 +1058,23 @@ describe('detachAffiliateBrand', () => {
   });
 
   it('clears a conflicting checkout merchant on offers the brand stays sole on', async () => {
-    const { strapi, couponUpdate } = cascadeHarness({
+    const { strapi, trx, joinDeletes, couponUpdateMany } = cascadeHarness({
       coupons: [
         {
           id: 102,
           documentId: 'offer-sole',
           checkoutMerchant: 'store:store-1',
           stores: [],
-          brands: [{ id: 9 }],
+          brands: [SELF],
         },
       ],
     });
 
-    const result = await detachAffiliateBrand(strapi, 'brand-aff');
+    const result = await detachAffiliateBrand(strapi, trx, 'brand-aff');
 
-    expect(couponUpdate).toHaveBeenCalledWith({
-      where: { id: 102 },
+    expect(joinDeletes).toEqual([]);
+    expect(couponUpdateMany).toHaveBeenCalledWith({
+      where: { id: { $in: [102] } },
       data: { checkoutMerchant: null },
     });
     expect(result.detachedCount).toBe(0);
@@ -640,52 +1084,95 @@ describe('detachAffiliateBrand', () => {
     ]);
   });
 
-  it('leaves clean sole-brand offers untouched', async () => {
-    const { strapi, couponUpdate, dealUpdate } = cascadeHarness({
+  it('clears a merchant-only reference on an offer with a store', async () => {
+    // The offer never held the brand in its relation — only checkoutMerchant
+    // points at it. A store-owned offer must not check out through an
+    // affiliate brand.
+    const { strapi, trx, joinDeletes, couponUpdateMany } = cascadeHarness({
       coupons: [
         {
-          id: 103,
-          documentId: 'offer-clean',
+          id: 105,
+          documentId: 'offer-merchant-only',
           checkoutMerchant: 'brand:brand-aff',
-          stores: [],
-          brands: [{ id: 9 }],
-        },
-        {
-          id: 104,
-          documentId: 'offer-empty-merchant',
-          checkoutMerchant: null,
-          stores: [],
-          brands: [{ id: 9 }],
+          stores: [{ id: 1 }],
+          brands: [],
         },
       ],
     });
 
-    const result = await detachAffiliateBrand(strapi, 'brand-aff');
+    const result = await detachAffiliateBrand(strapi, trx, 'brand-aff');
 
-    expect(couponUpdate).not.toHaveBeenCalled();
-    expect(dealUpdate).not.toHaveBeenCalled();
+    expect(joinDeletes).toEqual([]);
+    expect(couponUpdateMany).toHaveBeenCalledWith({
+      where: { id: { $in: [105] } },
+      data: { checkoutMerchant: null },
+    });
+    expect(result.merchantsClearedCount).toBe(1);
+    expect(result.affected).toEqual([
+      { uid: 'api::coupon.coupon', documentId: 'offer-merchant-only' },
+    ]);
+  });
+
+  it('leaves clean sole-brand and bare merchant-only offers untouched', async () => {
+    const { strapi, trx, joinDeletes, couponUpdateMany, dealUpdateMany } =
+      cascadeHarness({
+        coupons: [
+          {
+            id: 103,
+            documentId: 'offer-clean',
+            checkoutMerchant: 'brand:brand-aff',
+            stores: [],
+            brands: [SELF],
+          },
+          {
+            id: 104,
+            documentId: 'offer-empty-merchant',
+            checkoutMerchant: null,
+            stores: [],
+            brands: [SELF],
+          },
+          {
+            id: 106,
+            documentId: 'offer-bare-merchant-ref',
+            // Merchant-only reference with NO store and NO brands: the
+            // affiliate brand is effectively its only merchant — legal.
+            checkoutMerchant: 'brand:brand-aff',
+            stores: [],
+            brands: [],
+          },
+        ],
+      });
+
+    const result = await detachAffiliateBrand(strapi, trx, 'brand-aff');
+
+    expect(joinDeletes).toEqual([]);
+    expect(couponUpdateMany).not.toHaveBeenCalled();
+    expect(dealUpdateMany).not.toHaveBeenCalled();
     expect(result.affected).toEqual([]);
   });
 
   it('sweeps deals as well as coupons', async () => {
-    const { strapi, dealUpdate } = cascadeHarness({
+    const { strapi, trx, joinDeletes } = cascadeHarness({
       deals: [
         {
           id: 200,
           documentId: 'deal-store',
           checkoutMerchant: null,
           stores: [{ id: 2 }],
-          brands: [{ id: 9 }],
+          brands: [SELF],
         },
       ],
     });
 
-    const result = await detachAffiliateBrand(strapi, 'brand-aff');
+    const result = await detachAffiliateBrand(strapi, trx, 'brand-aff');
 
-    expect(dealUpdate).toHaveBeenCalledWith({
-      where: { id: 200 },
-      data: { brands: { disconnect: [9] } },
-    });
+    expect(joinDeletes).toEqual([
+      {
+        table: 'deals_brands_lnk',
+        brandColumn: ['brand_id', 9],
+        offerIds: [200],
+      },
+    ]);
     expect(result.affected).toEqual([
       { uid: 'api::deal.deal', documentId: 'deal-store' },
     ]);

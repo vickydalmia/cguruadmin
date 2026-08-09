@@ -108,4 +108,71 @@ describe('acquireWriteSerializationLock', () => {
       }),
     ).resolves.toBeNull();
   });
+
+  it('takes EVERY domain of an array on ONE transaction, in order', async () => {
+    const trx = {
+      raw: vi.fn(async () => ({})),
+      commit: vi.fn(async () => {}),
+      rollback: vi.fn(async () => {}),
+    };
+    const strapi = strapiWithKnex('postgres', trx);
+
+    const release = await acquireWriteSerializationLock(strapi, [
+      'affiliate',
+      'identity',
+    ]);
+    expect(release).toBeTypeOf('function');
+    // One dedicated connection: a single transaction() call carrying both
+    // advisory locks, sequentially, in the caller's fixed order.
+    expect(strapi.db.connection.transaction).toHaveBeenCalledTimes(1);
+    const lockCalls = trx.raw.mock.calls.filter(([sql]) =>
+      String(sql).includes('pg_advisory_xact_lock'),
+    );
+    expect(lockCalls.map(([, params]) => params)).toEqual([
+      ['cguru:document-write', 'affiliate'],
+      ['cguru:document-write', 'identity'],
+    ]);
+
+    await release!();
+    expect(trx.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('is all-or-nothing for an array: a later lock failing releases everything', async () => {
+    const trx = {
+      raw: vi.fn(async (sql: string, params?: unknown[]) => {
+        if (
+          String(sql).includes('pg_advisory_xact_lock') &&
+          Array.isArray(params) &&
+          params[1] === 'identity'
+        ) {
+          throw new Error('canceling statement due to lock timeout');
+        }
+        return {};
+      }),
+      commit: vi.fn(async () => {}),
+      rollback: vi.fn(async () => {}),
+    };
+    const strapi = strapiWithKnex('pg', trx);
+
+    await expect(
+      acquireWriteSerializationLock(strapi, ['affiliate', 'identity'], {
+        onUnavailable: 'closed',
+      }),
+    ).rejects.toThrow(/still in progress/);
+    // The single rollback releases the already-acquired 'affiliate' lock too.
+    expect(trx.rollback).toHaveBeenCalledTimes(1);
+    expect(trx.commit).not.toHaveBeenCalled();
+    // The label names the whole set.
+    expect(strapi.log.warn).toHaveBeenCalledWith(
+      expect.stringContaining('affiliate+identity'),
+    );
+  });
+
+  it('returns null for an empty domain array without opening a transaction', async () => {
+    const strapi = strapiWithKnex('postgres', {});
+    await expect(
+      acquireWriteSerializationLock(strapi, []),
+    ).resolves.toBeNull();
+    expect(strapi.db.connection.transaction).not.toHaveBeenCalled();
+  });
 });

@@ -107,12 +107,18 @@ before running it against anything you care about.
 
 | Document | What it covers |
 |---|---|
-| [docs/deployment.md](./docs/deployment.md) | Strapi production environment, legacy-variable removal, immutable-image deployment, verification, outbox checks, and rollback |
+| [docs/architecture-and-file-map.md](./docs/architecture-and-file-map.md) | Runtime flows, modular lifecycle boundaries, and a file-by-file guide to every extracted admin and server module |
+| [docs/admin-taxonomy-panel.md](./docs/admin-taxonomy-panel.md) | Admin registration order, fields, actions, side panels, Taxonomies behavior, validation UX, and server support |
+| [docs/entity-deal-pages.md](./docs/entity-deal-pages.md) | Generated Product Deal pages, admin settings endpoints, permissions, and public output |
+| [docs/entity-page-offer-ordering.md](./docs/entity-page-offer-ordering.md) | Coupon membership, Top Picks, ordered Coupons, reconciliation, and entity-page offer precedence |
 | [docs/public-api.md](./docs/public-api.md) | The public read contract: search params/groups/envelope, directory, page aggregates, offer listings, ratings, redeem and unique-coupon endpoints, with each route's auth, rate limit and cache |
-| [docs/search-operations.md](./docs/search-operations.md) | Operator reference for search: execution modes, the 11 expected trigram indexes, `/api/search/status`, and automatic migration/bootstrap reconciliation |
 | [docs/related-stores-api.md](./docs/related-stores-api.md) | The four `/related-stores` endpoints: ranking, category profile, and the high-rated fallback |
-| [docs/admin-taxonomy-panel.md](./docs/admin-taxonomy-panel.md) | How the admin bundle is customized: the Taxonomies panel and the custom field components |
+| [docs/search-operations.md](./docs/search-operations.md) | Operator reference for search: execution modes, the 11 expected trigram indexes, `/api/search/status`, and automatic migration/bootstrap reconciliation |
+| [docs/deployment.md](./docs/deployment.md) | Strapi production environment, legacy-variable removal, immutable-image deployment, verification, outbox checks, and rollback |
+| [docs/production-database-to-local.md](./docs/production-database-to-local.md) | Safe production-to-local PostgreSQL cloning runbook without printing credentials |
+| [DB-DEBUG-GUIDE.md](./DB-DEBUG-GUIDE.md) | PostgreSQL activity, locks, pool pressure, slow-query, index, and maintenance diagnostics |
 | [docs/wordpress-migration.md](./docs/wordpress-migration.md) | Deep walkthrough of the migration pipeline's internals |
+| [docs/data-api-decoupling-plan.md](./docs/data-api-decoupling-plan.md) | Planned direct-Postgres runtime read service and associated security hardening; not current runtime behavior |
 
 Production operations live in the UI repository's
 [deployment](https://github.com/vickydalmia/cguru-ui/blob/main/docs/deployment.md)

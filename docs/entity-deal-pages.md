@@ -73,8 +73,9 @@ Only an authenticated Strapi Super Admin can call the settings endpoints.
 
 These two live on the **admin router**, not the content API, so they carry no
 `/api` prefix and authenticate with the admin-panel session — call them from
-admin-panel code, not with an API token. They are registered in `src/index.ts`
-rather than under `src/api/entity-deal-page/routes/` because Strapi forces
+admin-panel code, not with an API token. They are registered by
+[`src/lifecycles/admin-routes.ts`](../src/lifecycles/admin-routes.ts) rather
+than under `src/api/entity-deal-page/routes/` because Strapi forces
 `type: 'content-api'` on every router loaded from `src/api/*/routes`, and the
 content API cannot authenticate an admin session at all. `super-admin-only`
 asserts the admin strategy and fails closed anywhere else.

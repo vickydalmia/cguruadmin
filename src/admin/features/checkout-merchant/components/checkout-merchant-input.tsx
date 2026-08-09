@@ -16,10 +16,11 @@ import {
 import {
   getAffiliateState,
   subscribeAffiliateState,
-} from '../../affiliate-exclusion/affiliate-state';
+} from '../../../utils/affiliate-state';
 import {
   findMerchantByRef,
   searchMerchants,
+  withAffiliateOptions,
   withSelectedOption,
   type MerchantOption,
 } from '../api/merchant-options';
@@ -79,13 +80,35 @@ const CheckoutMerchantInput = React.forwardRef<
   // brand selected (or still unresolved), the merchant may not be edited —
   // an affiliate brand is the offer's only merchant. The panel publishes the
   // verdict through module state because it renders in a separate React tree
-  // (features/affiliate-exclusion/affiliate-state.ts). The server validator
-  // remains the guarantee; this is the matching UX.
+  // (src/admin/utils/affiliate-state.ts). The server validator remains the
+  // guarantee; this is the matching UX.
+  // KNOWN LIMITATION: this context resolves from URL params, so an offer
+  // edited inside a relation MODAL reads the HOST page's state — Strapi 5.50
+  // exports no modal-aware document context. The restriction below is UX
+  // sugar either way; the server validator rejects any actually-invalid
+  // merchant on save.
   const { model, id: entryDocumentId } = unstable_useContentManagerContext();
   const affiliateState = React.useSyncExternalStore(subscribeAffiliateState, () =>
     getAffiliateState(model, entryDocumentId),
   );
   const affiliateBlocked = affiliateState?.blocked === true;
+  // While an affiliate brand is selected the server still accepts exactly two
+  // edits — clearing the field, or pointing it at that brand — so RESTRICT
+  // the options to the affiliate brand(s) instead of disabling the control
+  // wholesale (which also killed onClear and made the validator's own fix
+  // instruction unfollowable). Hard-disable only while the state is UNKNOWN
+  // (blocked with no resolved refs yet).
+  const affiliateBrandRefs = affiliateState?.brandRefs ?? [];
+  const allowedAffiliateValues = React.useMemo(
+    () =>
+      new Set(affiliateBrandRefs.map((ref) => `brand:${ref.documentId}`)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [affiliateState],
+  );
+  const affiliateRestricted =
+    affiliateBlocked && allowedAffiliateValues.size > 0;
+  const affiliateDisabled =
+    affiliateBlocked && allowedAffiliateValues.size === 0;
 
   const [search, setSearch] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
@@ -177,10 +200,21 @@ const CheckoutMerchantInput = React.forwardRef<
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, ref, value]);
 
-  const visibleOptions = React.useMemo(
-    () => withSelectedOption(options, selected),
-    [options, selected],
-  );
+  const visibleOptions = React.useMemo(() => {
+    const merged = withSelectedOption(options, selected);
+    if (!affiliateRestricted) return merged;
+    // Keep the affiliate brand(s) pickable, plus the currently stored value
+    // (never hide what the field holds — the editor must see what to clear).
+    const restricted = merged.filter(
+      (option) =>
+        allowedAffiliateValues.has(option.value) || option.value === value,
+    );
+    // The brand is rarely on the current search page — inject the legal
+    // pick(s) from the panel's resolved refs so the dropdown is never an
+    // empty list under a hint that says the brand is allowed.
+    return withAffiliateOptions(restricted, affiliateBrandRefs);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [options, selected, affiliateRestricted, allowedAffiliateValues, value]);
 
   const handleChange = (nextValue?: string) => {
     // The Combobox emits undefined when its value is cleared. Null (not '')
@@ -197,7 +231,7 @@ const CheckoutMerchantInput = React.forwardRef<
         ref={forwardedRef}
         name={name}
         value={value ?? undefined}
-        disabled={disabled || affiliateBlocked}
+        disabled={disabled || affiliateDisabled}
         required={required}
         hasError={Boolean(error)}
         placeholder={placeholder ?? 'Select a Store or Brand'}
@@ -244,10 +278,11 @@ const CheckoutMerchantInput = React.forwardRef<
       ) : null}
       {affiliateBlocked ? (
         <Typography variant="pi" textColor="warning600" tag="p">
-          {affiliateState && affiliateState.brandNames.length > 0
-            ? `Disabled: affiliate brand ${affiliateState.brandNames.join(', ')} ` +
-              `is this offer's merchant. Remove it in the Taxonomies panel to ` +
-              `pick a different checkout merchant.`
+          {affiliateRestricted && affiliateState
+            ? `Affiliate brand ${affiliateState.brandNames.join(', ')} is this ` +
+              `offer's merchant — the checkout merchant can only be that ` +
+              `brand or empty. Remove the brand in the Taxonomies panel to ` +
+              `pick anything else.`
             : 'Disabled while the selected brands are checked for affiliate status.'}
         </Typography>
       ) : null}

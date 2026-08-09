@@ -194,3 +194,34 @@ export function withSelectedOption(
   }
   return [selected, ...options];
 }
+
+/**
+ * Prepend an option for every affiliate brand ref not already in the list.
+ *
+ * The restricted state filters the fetched page down to the affiliate
+ * brand(s) + the stored value — but the affiliate brand is very often NOT on
+ * the current page (pageSize 20, name:ASC), and a filter alone would render
+ * an empty dropdown right under a hint saying the brand is pickable. The
+ * panel already resolved each ref's documentId AND name, so the legal picks
+ * are synthesized directly instead of hoping search finds them.
+ */
+export function withAffiliateOptions(
+  options: readonly MerchantOption[],
+  brandRefs: ReadonlyArray<{ documentId: string; name: string }>,
+): MerchantOption[] {
+  const source = checkoutMerchantSource('brand');
+  const present = new Set(options.map((option) => option.value));
+  const missing = brandRefs
+    .map((ref): MerchantOption => ({
+      value: formatCheckoutMerchant({
+        kind: 'brand',
+        documentId: ref.documentId,
+      }),
+      kind: 'brand',
+      kindLabel: source.label,
+      documentId: ref.documentId,
+      name: ref.name,
+    }))
+    .filter((option) => !present.has(option.value));
+  return missing.length ? [...missing, ...options] : [...options];
+}

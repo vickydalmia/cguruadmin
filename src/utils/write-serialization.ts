@@ -37,13 +37,16 @@ export type WriteLockRelease = () => Promise<void>;
  */
 export async function acquireWriteSerializationLock(
   strapi: Core.Strapi,
-  domain: WriteLockDomain,
+  domain: WriteLockDomain | readonly WriteLockDomain[],
   options: { onUnavailable?: 'open' | 'closed' } = {},
 ): Promise<WriteLockRelease | null> {
+  const domains = Array.isArray(domain) ? domain : [domain];
+  if (domains.length === 0) return null;
   const knex = (strapi.db as any)?.connection;
   const client: string = knex?.client?.config?.client ?? '';
   if (!['pg', 'postgres', 'postgresql'].includes(client)) return null;
 
+  const label = domains.join('+');
   let trx: any;
   try {
     trx = await knex.transaction();
@@ -51,16 +54,24 @@ export async function acquireWriteSerializationLock(
     // advisory lock waits honor lock_timeout.
     await trx.raw("SET LOCAL lock_timeout = '8000ms'");
     // hashtext() keys the (int, int) advisory-lock form server-side, so the
-    // key space needs no coordination beyond these two strings.
-    await trx.raw('SELECT pg_advisory_xact_lock(hashtext(?), hashtext(?))', [
-      LOCK_NAMESPACE,
-      domain,
-    ]);
+    // key space needs no coordination beyond these two strings. Every domain
+    // is taken on this ONE dedicated connection, in the caller's fixed order
+    // (all callers list domains identically, so no lock-order deadlock) —
+    // one lock transaction per save instead of one per domain keeps a
+    // brand/store save at two pooled connections total, not three.
+    for (const one of domains) {
+      await trx.raw('SELECT pg_advisory_xact_lock(hashtext(?), hashtext(?))', [
+        LOCK_NAMESPACE,
+        one,
+      ]);
+    }
   } catch (err: any) {
+    // A failed statement poisons the whole lock transaction, so partial
+    // acquisition is not possible on one connection: all or nothing.
     if (trx) await trx.rollback().catch(() => {});
     if ((options.onUnavailable ?? 'open') === 'closed') {
       strapi.log.warn(
-        `[write-lock] ${domain} advisory lock unavailable (${err?.message ?? err}) — rejecting the save (fail-closed domain)`
+        `[write-lock] ${label} advisory lock unavailable (${err?.message ?? err}) — rejecting the save (fail-closed domain)`
       );
       throw new errors.ApplicationError(
         'Another save touching related records is still in progress. ' +
@@ -68,7 +79,7 @@ export async function acquireWriteSerializationLock(
       );
     }
     strapi.log.warn(
-      `[write-lock] ${domain} advisory lock unavailable (${err?.message ?? err}) — proceeding unserialized`
+      `[write-lock] ${label} advisory lock unavailable (${err?.message ?? err}) — proceeding unserialized`
     );
     return null;
   }

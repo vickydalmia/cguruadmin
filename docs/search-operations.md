@@ -201,9 +201,12 @@ Strapi 5 runs `database/migrations` **before** schema sync creates the content
 tables. On a completely fresh database the DDL therefore arrives when `stores`,
 `coupons` and friends do not exist yet, and an unguarded `CREATE INDEX` would
 abort boot with `42P01`. The migration therefore skips absent tables and logs
-one consolidated warning. After schema sync, Strapi bootstrap invokes the same
-helper again before search runtime diagnostics. That retry creates the indexes
-on a fresh database automatically.
+one consolidated warning. After schema sync,
+[`bootstrap-reconciliation.ts`](../src/lifecycles/bootstrap-reconciliation.ts)
+invokes the same helper again before
+[`initializeSearchRuntime`](../src/api/search/services/search.ts) runs its
+runtime diagnostics. That retry creates the indexes on a fresh database
+automatically.
 
 The post-schema-sync reconciliation runs on every PostgreSQL boot. Healthy
 indexes require catalog reads only. Missing indexes are created; malformed or

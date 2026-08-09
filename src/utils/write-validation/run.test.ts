@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Core } from '@strapi/strapi';
-import { runWriteValidation } from './run';
+import { lockDomainsFor, runWriteValidation } from './run';
 import {
   COLLECTED_STEPS,
   LOCKED_STEPS,
@@ -42,6 +42,7 @@ describe('write-validation step order', () => {
       'validateIndependenceDaySale',
       'validateContentManagerOfferStore',
       'validateCheckoutMerchantForWrite',
+      'validateCloneRelationTargets',
       'validateEntityTopPickCoupons',
       'validateEntityOrderedCoupons',
       'validateOfferFieldsForWrite',
@@ -52,11 +53,12 @@ describe('write-validation step order', () => {
     ]);
   });
 
-  it('keeps identity, redirect, job slug and affiliate together under the lock', () => {
+  it('keeps cross-row checks together under the lock', () => {
     expect(names(LOCKED_STEPS)).toEqual([
       'validateIdentity',
       'validateRedirect',
       'validateJobSlug',
+      'revalidateCheckoutMerchantForWrite',
       'validateOfferAffiliateBrands',
       'validateEntityOfferAffiliateConnections',
     ]);
@@ -311,12 +313,80 @@ describe('runWriteValidation — one save reports every problem', () => {
     expect(data.name).toBe('Amazon Pay');
   });
 
-  it('skips the whole pipeline for actions with no editable payload', async () => {
+  it('skips validators for actions with no editable payload', async () => {
     const strapi = fakeStrapi({ human: true });
-    for (const action of ['delete', 'publish', 'unpublish', 'discardDraft']) {
+    for (const action of ['publish', 'unpublish', 'discardDraft']) {
       await expect(
         runWriteValidation(strapi, write('api::store.store', {}, action)),
       ).resolves.toBeNull();
+    }
+    // Delete is asserted on a NON-affiliate uid: Store/Brand deletes now
+    // deliberately return the affiliate lock release (see the test below), so
+    // the null contract only holds for types outside that rule.
+    await expect(
+      runWriteValidation(strapi, write('api::category.category', {}, 'delete')),
+    ).resolves.toBeNull();
+  });
+
+  it('holds the fail-closed affiliate lock across a Store delete', async () => {
+    const strapi: any = fakeStrapi({ human: false });
+    const trx = {
+      raw: vi.fn(async () => ({})),
+      commit: vi.fn(async () => {}),
+      rollback: vi.fn(async () => {}),
+    };
+    strapi.db.connection = {
+      client: { config: { client: 'postgres' } },
+      transaction: vi.fn(async () => trx),
+    };
+
+    const release = await runWriteValidation(
+      strapi,
+      write('api::store.store', undefined, 'delete'),
+    );
+    expect(release).toBeTypeOf('function');
+    const lockCalls = trx.raw.mock.calls.filter(([sql]) =>
+      String(sql).includes('pg_advisory_xact_lock'),
+    );
+    expect(lockCalls.map(([, params]) => params?.[1])).toEqual(['affiliate']);
+
+    await release!();
+    expect(trx.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechecks a touched checkout merchant after reaching the locked pass', async () => {
+    const strapi: any = fakeStrapi({ human: false });
+    const unrelatedSteps = COLLECTED_STEPS.filter(
+      ({ name }) => name !== 'validateCheckoutMerchantForWrite',
+    ).map((step) => vi.spyOn(step, 'run').mockResolvedValue(undefined));
+    let merchantReads = 0;
+    strapi.documents = (uid: string) => ({
+      findOne: async () => {
+        if (uid !== 'api::store.store') return null;
+        merchantReads += 1;
+        return merchantReads === 1 ? { name: 'Live Store' } : null;
+      },
+      findMany: async () => [],
+      count: async () => 0,
+    });
+
+    try {
+      const error = await caught(() =>
+        runWriteValidation(
+          strapi,
+          write(
+            'api::coupon.coupon',
+            { checkoutMerchant: 'store:store-1' },
+            'update',
+          ),
+        ),
+      );
+      expect(merchantReads).toBe(2);
+      expect(error.details?.errors?.map(({ path }) => path)).toContainEqual([
+        'checkoutMerchant',
+      ]);
+    } finally {
+      for (const spy of unrelatedSteps) spy.mockRestore();
     }
   });
 
@@ -366,5 +436,94 @@ describe('runWriteValidation — the cron stays grandfathered', () => {
     );
 
     expect(error.details?.errors?.length).toBeGreaterThan(0);
+  });
+});
+
+describe('lockDomainsFor', () => {
+  it('locks every brand save on affiliate + identity', () => {
+    expect(lockDomainsFor('api::brand.brand', { name: 'Nike' }, 'update')).toEqual([
+      'affiliate',
+      'identity',
+    ]);
+  });
+
+  it('locks a store save touching its offer inverses on affiliate + identity', () => {
+    expect(
+      lockDomainsFor('api::store.store', { coupons: { connect: [1] } }, 'update'),
+    ).toEqual(['affiliate', 'identity']);
+    expect(
+      lockDomainsFor('api::store.store', { deals: [] }, 'update'),
+    ).toEqual(['affiliate', 'identity']);
+  });
+
+  it('locks a store CLONE on affiliate + identity even with no payload', () => {
+    // The clone inherits the source's coupons/deals connections without the
+    // payload ever naming them.
+    expect(lockDomainsFor('api::store.store', undefined, 'clone')).toEqual([
+      'affiliate',
+      'identity',
+    ]);
+  });
+
+  it('locks Store and Brand deletion on affiliate ONLY', () => {
+    // The delete clears checkoutMerchant references (affiliate domain); it
+    // FREES identifiers, so there is no uniqueness race for identity to
+    // serialize — and holding the hottest domain fail-closed across a
+    // delete's relation cascade would reject concurrent taxonomy saves.
+    expect(lockDomainsFor('api::store.store', undefined, 'delete')).toEqual([
+      'affiliate',
+    ]);
+    expect(lockDomainsFor('api::brand.brand', undefined, 'delete')).toEqual([
+      'affiliate',
+    ]);
+    // Non-affiliate deletes take no lock at all.
+    expect(lockDomainsFor('api::category.category', undefined, 'delete')).toEqual(
+      [],
+    );
+    expect(lockDomainsFor('api::coupon.coupon', undefined, 'delete')).toEqual([]);
+  });
+
+  it('locks a plain store/category save on identity only', () => {
+    expect(lockDomainsFor('api::store.store', { name: 'Amazon' }, 'update')).toEqual([
+      'identity',
+    ]);
+    expect(
+      lockDomainsFor('api::category.category', { name: 'Travel' }, 'create'),
+    ).toEqual(['identity']);
+  });
+
+  it('locks offers on affiliate when the payload touches affiliate fields or clones', () => {
+    expect(
+      lockDomainsFor('api::coupon.coupon', { checkoutMerchant: 'brand:x' }, 'update'),
+    ).toEqual(['affiliate']);
+    expect(lockDomainsFor('api::deal.deal', undefined, 'clone')).toEqual([
+      'affiliate',
+    ]);
+    expect(
+      lockDomainsFor('api::coupon.coupon', { contentStatus: 'expired' }, 'update'),
+    ).toEqual([]);
+  });
+
+  it('keeps redirect and job on their own domains', () => {
+    expect(lockDomainsFor('api::redirect.redirect', {}, 'update')).toEqual([
+      'redirect',
+    ]);
+    expect(lockDomainsFor('api::job.job', {}, 'create')).toEqual(['job']);
+  });
+
+  it('never emits identity before affiliate (fixed acquisition order)', () => {
+    // Every caller must list multi-domain sets in the same order, or two
+    // saves could deadlock waiting on each other's held lock.
+    const samples = [
+      lockDomainsFor('api::brand.brand', {}, 'update'),
+      lockDomainsFor('api::store.store', { coupons: [] }, 'update'),
+      lockDomainsFor('api::store.store', undefined, 'clone'),
+    ];
+    for (const domains of samples) {
+      const affiliateIndex = domains.indexOf('affiliate');
+      const identityIndex = domains.indexOf('identity');
+      expect(affiliateIndex).toBe(0);
+      expect(identityIndex).toBe(1);
+    }
   });
 });

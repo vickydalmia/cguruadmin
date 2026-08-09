@@ -2,6 +2,7 @@ import type { Core } from '@strapi/strapi';
 
 import {
   CHECKOUT_MERCHANT_FIELD,
+  formatCheckoutMerchant,
   parseCheckoutMerchant,
 } from '../constants/checkout-merchant';
 import {
@@ -10,10 +11,12 @@ import {
   type OfferStoreUid,
 } from './content-manager-offer-store-validation';
 import {
+  relationEntriesWhere,
   relationKeys,
   resultingRelations,
   type RelationEntry,
 } from './deal-of-the-day-validation';
+import { resolveWritePayload } from './write-validation/payload';
 import { toValidationError, type Problem } from './write-validation/problems';
 
 /**
@@ -30,8 +33,9 @@ import { toValidationError, type Problem } from './write-validation/problems';
  *   2. detachAffiliateBrand — the cascade behind flipping a Brand to
  *      affiliate: the brand is disconnected from every offer where it is not
  *      the sole merchant, and offers it stays on lose a conflicting checkout
- *      merchant. Invoked from the documents middleware in src/index.ts inside
- *      the brand write's transaction.
+ *      merchant. Invoked from
+ *      src/document-middlewares/apply-transactional-maintenance.ts inside the
+ *      brand write's transaction.
  *
  * Brand writes themselves get NO validator: flipping to affiliate is a legal
  * business action, and blocking it until every offer is hand-cleaned would
@@ -72,43 +76,6 @@ export function touchesEntityOfferRelations(data: unknown): boolean {
 }
 
 /**
- * WHERE clause matching rows by the mixed identifier forms a relation
- * payload may carry (numeric ids, documentIds, or objects holding either).
- * Same shape handling as deal-of-the-day-validation.ts's private
- * dealRelationWhere. Used against brand rows (offer-side validator) and
- * offer rows (entity-side validator + ISR payload resolution).
- */
-function relationEntriesWhere(
-  relations: readonly RelationEntry[],
-): Record<string, unknown> | null {
-  const ids = new Set<string | number>();
-  const documentIds = new Set<string>();
-
-  for (const relation of relations) {
-    if (typeof relation === 'number') {
-      ids.add(relation);
-      continue;
-    }
-    if (typeof relation === 'string') {
-      documentIds.add(relation);
-      continue;
-    }
-    if (!relation || typeof relation !== 'object') continue;
-    const id = relation.id;
-    const documentId = relation.documentId;
-    if (typeof id === 'string' || typeof id === 'number') ids.add(id);
-    if (typeof documentId === 'string') documentIds.add(documentId);
-  }
-
-  const clauses: Record<string, unknown>[] = [];
-  if (ids.size) clauses.push({ id: { $in: [...ids] } });
-  if (documentIds.size) {
-    clauses.push({ documentId: { $in: [...documentIds] } });
-  }
-  return clauses.length ? { $or: clauses } : null;
-}
-
-/**
  * Reject an offer write whose final state pairs an affiliate brand with a
  * Store, another brand, or a foreign checkout merchant.
  *
@@ -126,12 +93,18 @@ export async function validateOfferAffiliateBrands(
   data: unknown,
   documentId?: string,
   strict: boolean = false,
+  recheck: boolean = false,
 ): Promise<void> {
   if (!['create', 'update', 'clone'].includes(action)) return;
-  if (!data || typeof data !== 'object') return;
 
-  const touched = touchesAffiliateFields(data);
-  if (!touched && !strict) return;
+  // A bare clone still inherits every source relation and checkoutMerchant —
+  // its missing payload normalizes to an empty override so validation judges
+  // the copied state rather than silently accepting it.
+  const payload = resolveWritePayload(action, data);
+  if (!payload) return;
+
+  const touched = touchesAffiliateFields(payload);
+  if (!touched && !strict && action !== 'clone') return;
 
   // Updates and clones resolve partial relation commands (and the
   // untouched-strict effective record) against the stored row.
@@ -153,82 +126,158 @@ export async function validateOfferAffiliateBrands(
     ? current.brands
     : [];
 
-  const incomingStores = hasOwn(data, 'stores')
-    ? Reflect.get(data, 'stores')
+  const incomingStores = hasOwn(payload, 'stores')
+    ? Reflect.get(payload, 'stores')
     : undefined;
-  const incomingBrands = hasOwn(data, 'brands')
-    ? Reflect.get(data, 'brands')
+  const incomingBrands = hasOwn(payload, 'brands')
+    ? Reflect.get(payload, 'brands')
     : undefined;
 
+  // An unrecognized relation payload shape falls back to the STORED state,
+  // never to "no relations" — the ORM treats e.g. `brands: {}` as a no-op,
+  // so coercing it to empty would let a Store connect slip past the check
+  // while the stored affiliate brand survives the write.
   const stores =
     incomingStores === undefined
       ? currentStores
       : (resultingRelations(
           normalizeRelationShorthand(incomingStores),
           currentStores,
-        ) ?? []);
+        ) ?? currentStores);
   const brands =
     incomingBrands === undefined
       ? currentBrands
       : (resultingRelations(
           normalizeRelationShorthand(incomingBrands),
           currentBrands,
-        ) ?? []);
-  if (!brands.length) return;
+        ) ?? currentBrands);
 
-  const merchantValue = hasOwn(data, CHECKOUT_MERCHANT_FIELD)
-    ? Reflect.get(data, CHECKOUT_MERCHANT_FIELD)
+  const merchantValue = hasOwn(payload, CHECKOUT_MERCHANT_FIELD)
+    ? Reflect.get(payload, CHECKOUT_MERCHANT_FIELD)
     : current?.[CHECKOUT_MERCHANT_FIELD];
   const merchant = parseCheckoutMerchant(merchantValue);
+  if (!brands.length && !(merchant?.kind === 'brand')) return;
 
-  const where = relationEntriesWhere(brands);
-  if (!where) return;
-  const affiliates: any[] = await strapi.db.query(BRAND_UID).findMany({
-    where: { $and: [where, { [AFFILIATE_FLAG]: true }] },
-    select: ['id', 'documentId', 'name'],
-  });
-  if (!affiliates.length) return;
-
-  const names = affiliates
-    .map((brand) => brand?.name ?? brand?.documentId ?? String(brand?.id))
-    .join(', ');
-  const label = affiliates.length === 1 ? 'brand' : 'brands';
-  const affiliateDocIds = new Set(
-    affiliates
-      .map((brand) => brand?.documentId)
-      .filter((value): value is string => typeof value === 'string'),
-  );
-
-  const problems: Problem[] = [];
-  if (brands.length > 1) {
-    problems.push({
-      path: ['brands'],
-      message:
-        `Affiliate ${label} ${names} must be the ONLY brand on this offer. ` +
-        `Remove the other brand(s), or remove the affiliate ${label}.`,
+  const evaluate = async (): Promise<Problem[]> => {
+    // One lookup covers the relation brands AND a brand-kind merchant, so a
+    // store-only offer pointing its checkout merchant at an affiliate brand
+    // (no brands relation at all) is judged by the same rule.
+    const lookupEntries: RelationEntry[] = [
+      ...brands,
+      ...(merchant?.kind === 'brand' ? [merchant.documentId] : []),
+    ];
+    const where = relationEntriesWhere(lookupEntries);
+    if (!where) return [];
+    const affiliateRows: any[] = await strapi.db.query(BRAND_UID).findMany({
+      where: { $and: [where, { [AFFILIATE_FLAG]: true }] },
+      select: ['id', 'documentId', 'name'],
     });
-  }
-  if (stores.length > 0) {
-    problems.push({
-      path: ['brands'],
-      message:
-        `Affiliate ${label} ${names} cannot be combined with a Store. ` +
-        `Remove the Store, or remove the affiliate ${label}.`,
-    });
-  }
-  if (
-    merchant &&
-    !(merchant.kind === 'brand' && affiliateDocIds.has(merchant.documentId))
-  ) {
-    problems.push({
-      path: [CHECKOUT_MERCHANT_FIELD],
-      message:
-        `Checkout merchant must be empty or the affiliate ${label} ${names} ` +
-        `while an affiliate brand is selected — it cannot point at a ` +
-        `${merchant.kind === 'store' ? 'Store' : 'different Brand'}.`,
-    });
-  }
+    if (!affiliateRows.length) return [];
 
+    const relationKeySet = new Set(brands.flatMap((b) => relationKeys(b)));
+    const affiliates = affiliateRows.filter((row) =>
+      [row?.documentId, row?.id]
+        .filter((key) => key !== undefined && key !== null)
+        .some((key) => relationKeySet.has(String(key))),
+    );
+    const merchantAffiliate =
+      merchant?.kind === 'brand'
+        ? (affiliateRows.find((row) => row?.documentId === merchant.documentId) ??
+          null)
+        : null;
+
+    const problems: Problem[] = [];
+
+    if (affiliates.length > 0) {
+      const names = affiliates
+        .map((brand) => brand?.name ?? brand?.documentId ?? String(brand?.id))
+        .join(', ');
+      const label = affiliates.length === 1 ? 'brand' : 'brands';
+      const affiliateDocIds = new Set(
+        affiliates
+          .map((brand) => brand?.documentId)
+          .filter((value): value is string => typeof value === 'string'),
+      );
+      if (brands.length > 1) {
+        problems.push({
+          path: ['brands'],
+          message:
+            `Affiliate ${label} ${names} must be the ONLY brand on this offer. ` +
+            `Remove the other brand(s), or remove the affiliate ${label}.`,
+        });
+      }
+      if (stores.length > 0) {
+        problems.push({
+          path: ['brands'],
+          message:
+            `Affiliate ${label} ${names} cannot be combined with a Store. ` +
+            `Remove the Store, or remove the affiliate ${label}.`,
+        });
+      }
+      if (
+        merchant &&
+        !(merchant.kind === 'brand' && affiliateDocIds.has(merchant.documentId))
+      ) {
+        problems.push({
+          path: [CHECKOUT_MERCHANT_FIELD],
+          message:
+            `Checkout merchant must be empty or the affiliate ${label} ${names} ` +
+            `while an affiliate brand is selected — it cannot point at a ` +
+            `${merchant.kind === 'store' ? 'Store' : 'different Brand'}.`,
+        });
+      }
+    }
+
+    // Merchant points at an affiliate brand that is NOT among the selected
+    // brands: the exclusivity rule follows the merchant reference too, or a
+    // store-owned offer could check out through an affiliate brand. Only
+    // when no affiliate brand is selected — otherwise the block above has
+    // already reported this exact merchant conflict on the same path.
+    if (merchantAffiliate && affiliates.length === 0) {
+      const name =
+        merchantAffiliate.name ?? merchantAffiliate.documentId ?? 'this brand';
+      if (stores.length > 0) {
+        problems.push({
+          path: [CHECKOUT_MERCHANT_FIELD],
+          message:
+            `Checkout merchant ${name} is an affiliate brand — it cannot be ` +
+            `combined with a Store. Clear the merchant or remove the Store.`,
+        });
+      }
+      if (brands.length > 0) {
+        problems.push({
+          path: [CHECKOUT_MERCHANT_FIELD],
+          message:
+            `Checkout merchant ${name} is an affiliate brand — it cannot be ` +
+            `combined with other brands. Clear the merchant or remove the ` +
+            `brand(s).`,
+        });
+      }
+    }
+
+    return problems;
+  };
+
+  const problems = await evaluate();
+  if (problems.length && !touched && !recheck && action !== 'clone') {
+    // Untouched-strict saves run WITHOUT the affiliate lock (nothing they
+    // write can create a violation), so a concurrent flip can tear the offer
+    // read and the brand-flag read apart and compose a state that never
+    // existed. Re-running the whole resolution once filters that transient
+    // out; a REAL legacy violation reproduces on fresh reads. Clones are
+    // exempt: they DO hold the affiliate lock (lockDomainsFor), so their
+    // reads cannot tear and a retry would only re-run both queries inside
+    // the lock window before throwing the same rejection.
+    return validateOfferAffiliateBrands(
+      strapi,
+      uid,
+      action,
+      data,
+      documentId,
+      strict,
+      true,
+    );
+  }
   if (problems.length) throw toValidationError(problems);
 }
 
@@ -265,10 +314,19 @@ function addedRelations(
  * validateOfferAffiliateBrands never sees it. This validator judges every
  * offer the payload NEWLY CONNECTS:
  *
- *   - a Store may not join an offer that has an affiliate brand;
- *   - a plain Brand may not join an offer that has an affiliate brand;
+ *   - a Store may not join an offer that has an affiliate brand — related OR
+ *     referenced through `checkoutMerchant` (a store-only offer may legally
+ *     check out through an affiliate brand, so the reference alone must
+ *     block the connection);
+ *   - a plain Brand may not join such an offer either;
  *   - an affiliate Brand may only join an offer with no Store, no other
- *     brand, and no checkout merchant pointing anywhere but at itself.
+ *     brand, and no checkout merchant pointing anywhere but at itself;
+ *   - CLONING an affiliate Brand that has offers is rejected outright: the
+ *     deep-copied connections would pair the clone with the SOURCE brand on
+ *     every offer, and the post-write cascade would then silently strip the
+ *     clone again — reject up front instead of committing a self-destructing
+ *     write. (Overriding the clone payload with empty `coupons`/`deals`
+ *     still passes.)
  *
  * Disconnects are ignored (removal cannot create a violation), and already-
  * connected offers are filtered out of full-replacement (array/set) payloads,
@@ -284,11 +342,17 @@ export async function validateEntityOfferAffiliateConnections(
   documentId?: string,
 ): Promise<void> {
   if (!['create', 'update', 'clone'].includes(action)) return;
-  if (!touchesEntityOfferRelations(data)) return;
+  // A clone is judged REGARDLESS of payload: Strapi deep-copies the source's
+  // relations before merging the submitted data, so a bare {name, slug}
+  // duplicate still re-attaches this entity to every source offer.
+  const payload = resolveWritePayload(action, data);
+  if (!payload) return;
+  if (!touchesEntityOfferRelations(payload) && action !== 'clone') return;
 
-  const touchedFields = ENTITY_OFFER_FIELDS.filter(({ field }) =>
-    hasOwn(data as object, field),
-  );
+  const touchedFields =
+    action === 'clone'
+      ? [...ENTITY_OFFER_FIELDS]
+      : ENTITY_OFFER_FIELDS.filter(({ field }) => hasOwn(payload, field));
 
   // Current inverse relations resolve full-replacement payloads into a
   // NEWLY-ADDED set; for a brand the stored flag also decides which rule
@@ -308,8 +372,8 @@ export async function validateEntityOfferAffiliateConnections(
 
   const savedBrandAffiliate =
     uid === BRAND_UID &&
-    (hasOwn(data as object, AFFILIATE_FLAG)
-      ? Reflect.get(data as object, AFFILIATE_FLAG) === true
+    (hasOwn(payload, AFFILIATE_FLAG)
+      ? Reflect.get(payload, AFFILIATE_FLAG) === true
       : current?.[AFFILIATE_FLAG] === true);
 
   const problems: Problem[] = [];
@@ -318,12 +382,22 @@ export async function validateEntityOfferAffiliateConnections(
     const currentEntries: RelationEntry[] = Array.isArray(current?.[field])
       ? current[field]
       : [];
-    const final =
-      resultingRelations(
-        normalizeRelationShorthand(Reflect.get(data as object, field)),
-        currentEntries,
-      ) ?? [];
-    const added = addedRelations(final, currentEntries);
+    const incoming = hasOwn(payload, field)
+      ? (resultingRelations(
+          normalizeRelationShorthand(Reflect.get(payload, field)),
+          currentEntries,
+          // Unknown payload shape falls back to the stored/copied state, not
+          // to "no relations" — same rule as the offer-side validator.
+        ) ?? currentEntries)
+      : currentEntries;
+    // For a clone every connection is NEW: `current` describes the SOURCE
+    // document, but the WRITTEN document did not exist, so its baseline is
+    // empty — diffing against the source would wrongly subtract the
+    // inherited set and validate nothing.
+    const added =
+      action === 'clone'
+        ? incoming
+        : addedRelations(incoming, currentEntries);
     if (!added.length) continue;
 
     const where = relationEntriesWhere(added);
@@ -337,6 +411,37 @@ export async function validateEntityOfferAffiliateConnections(
       },
     } as any);
 
+    // A brand-kind checkout merchant is a merchant reference the offer-side
+    // validator honours even with NO brands relation, so this side must too.
+    // The referenced brand is usually not among the populated offer brands
+    // (that is the merchant-only case) — resolve all referenced brands'
+    // affiliate flags in one batch.
+    const merchantBrandDocIds = [
+      ...new Set(
+        offers
+          .map((offer) =>
+            parseCheckoutMerchant(offer?.[CHECKOUT_MERCHANT_FIELD]),
+          )
+          .filter((ref) => ref?.kind === 'brand')
+          .map((ref) => (ref as { documentId: string }).documentId),
+      ),
+    ];
+    const affiliateMerchantBrands = new Map<string, { name?: string }>();
+    if (merchantBrandDocIds.length) {
+      const rows: any[] = await strapi.db.query(BRAND_UID).findMany({
+        where: {
+          documentId: { $in: merchantBrandDocIds },
+          [AFFILIATE_FLAG]: true,
+        },
+        select: ['documentId', 'name'],
+      });
+      for (const row of rows) {
+        if (typeof row?.documentId === 'string') {
+          affiliateMerchantBrands.set(row.documentId, { name: row?.name });
+        }
+      }
+    }
+
     for (const offer of offers) {
       const title = offer?.title ?? offer?.documentId ?? String(offer?.id);
       const offerBrands: any[] = Array.isArray(offer?.brands)
@@ -347,31 +452,73 @@ export async function validateEntityOfferAffiliateConnections(
       );
 
       if (uid === 'api::store.store' || !savedBrandAffiliate) {
-        if (affiliateOnOffer.length === 0) continue;
-        const names = affiliateOnOffer
-          .map((brand) => brand?.name ?? brand?.documentId)
-          .join(', ');
         const attached = uid === 'api::store.store' ? 'a Store' : 'other brands';
-        problems.push({
-          path: [field],
-          message:
-            `${label} "${title}" belongs to affiliate brand ${names}, ` +
-            `which must stay its only merchant — ${attached} cannot be ` +
-            `attached to it. Remove that offer from this selection.`,
-        });
+        if (affiliateOnOffer.length > 0) {
+          const names = affiliateOnOffer
+            .map((brand) => brand?.name ?? brand?.documentId)
+            .join(', ');
+          problems.push({
+            path: [field],
+            message:
+              `${label} "${title}" belongs to affiliate brand ${names}, ` +
+              `which must stay its only merchant — ${attached} cannot be ` +
+              `attached to it. Remove that offer from this selection.`,
+          });
+          continue;
+        }
+        const merchantRef = parseCheckoutMerchant(
+          offer?.[CHECKOUT_MERCHANT_FIELD],
+        );
+        const merchantAffiliate =
+          merchantRef?.kind === 'brand'
+            ? (affiliateMerchantBrands.get(merchantRef.documentId) ?? null)
+            : null;
+        if (merchantAffiliate) {
+          const name = merchantAffiliate.name ?? merchantRef!.documentId;
+          problems.push({
+            path: [field],
+            message:
+              `${label} "${title}" checks out through affiliate brand ` +
+              `${name} (its checkout merchant), which must stay its only ` +
+              `merchant — ${attached} cannot be attached to it. Remove that ` +
+              `offer from this selection, or clear its checkout merchant ` +
+              `first.`,
+          });
+        }
         continue;
       }
 
-      // The saved brand IS affiliate: it may only join a bare offer.
+      // The saved brand IS affiliate: it may only join a bare offer. For a
+      // CLONE the written brand is a brand-new document, so relative to it
+      // the SOURCE brand on each inherited offer is another brand, and a
+      // merchant pointing at the source is foreign — no filtering by the
+      // source documentId (which is what `documentId` holds during a clone).
       const storeCount = Array.isArray(offer?.stores) ? offer.stores.length : 0;
-      const otherBrands = offerBrands.filter(
-        (brand) => brand?.documentId !== documentId,
-      );
+      const otherBrands =
+        action === 'clone'
+          ? offerBrands
+          : offerBrands.filter((brand) => brand?.documentId !== documentId);
       const merchant = parseCheckoutMerchant(offer?.[CHECKOUT_MERCHANT_FIELD]);
       const merchantForeign =
         merchant &&
-        !(merchant.kind === 'brand' && merchant.documentId === documentId);
+        !(
+          action !== 'clone' &&
+          merchant.kind === 'brand' &&
+          merchant.documentId === documentId
+        );
       if (storeCount === 0 && otherBrands.length === 0 && !merchantForeign) {
+        continue;
+      }
+      if (action === 'clone') {
+        problems.push({
+          path: [field],
+          message:
+            `Cloning this affiliate brand would attach a second affiliate ` +
+            `brand to ${label} "${title}" — an affiliate brand must be its ` +
+            `only merchant. Clone it without offers (clear Coupons and ` +
+            `Product Deals on the clone), or detach the offers from the ` +
+            `source brand first.`,
+        });
         continue;
       }
       problems.push({
@@ -473,6 +620,7 @@ export type AffiliateCascadeResult = {
  */
 export async function detachAffiliateBrand(
   strapi: Core.Strapi,
+  trx: any,
   brandDocumentId: string,
 ): Promise<AffiliateCascadeResult> {
   const result: AffiliateCascadeResult = {
@@ -487,46 +635,118 @@ export async function detachAffiliateBrand(
   });
   if (!brand) return result;
 
-  const allowedMerchant = `brand:${brandDocumentId}`;
+  const allowedMerchant = formatCheckoutMerchant({
+    kind: 'brand',
+    documentId: brandDocumentId,
+  });
 
   for (const uid of OFFER_STORE_UIDS) {
     const query = strapi.db.query(uid);
+    // One pass covers BOTH reference forms: offers holding the brand in
+    // their relation, and offers merely POINTING their checkout merchant at
+    // it (a flip must not leave a store-owned offer checking out through an
+    // affiliate brand it is not even related to).
     const offers: any[] = await query.findMany({
-      where: { brands: { documentId: brandDocumentId } },
+      where: {
+        $or: [
+          { brands: { documentId: brandDocumentId } },
+          { [CHECKOUT_MERCHANT_FIELD]: allowedMerchant },
+        ],
+      },
       select: ['id', 'documentId', CHECKOUT_MERCHANT_FIELD],
       populate: {
         stores: { select: ['id'] },
-        brands: { select: ['id'] },
+        brands: { select: ['id', 'documentId'] },
       },
     } as any);
 
+    const detachIds: Array<string | number> = [];
+    const merchantClearIds: Array<string | number> = [];
     for (const offer of offers) {
+      const offerBrands: any[] = Array.isArray(offer?.brands)
+        ? offer.brands
+        : [];
       const storeCount = Array.isArray(offer?.stores) ? offer.stores.length : 0;
-      const brandCount = Array.isArray(offer?.brands) ? offer.brands.length : 0;
+      const holdsBrand = offerBrands.some(
+        (row) => row?.documentId === brandDocumentId,
+      );
+      const otherBrandCount = offerBrands.filter(
+        (row) => row?.documentId !== brandDocumentId,
+      ).length;
+      const merchantRaw = offer?.[CHECKOUT_MERCHANT_FIELD];
+      const merchantValue =
+        typeof merchantRaw === 'string' ? merchantRaw.trim() : '';
+      const conflicted = storeCount > 0 || otherBrandCount > 0;
+      let changed = false;
 
-      if (storeCount > 0 || brandCount > 1) {
-        await query.update({
-          where: { id: offer.id },
-          data: { brands: { disconnect: [brand.id] } },
-        } as any);
+      if (holdsBrand && conflicted) {
+        detachIds.push(offer.id);
         result.detachedCount += 1;
-        result.affected.push({ uid, documentId: offer.documentId });
-        continue;
+        changed = true;
+        // The brand leaves this offer, so a merchant still POINTING at it
+        // would dangle unguarded (the offer-side validator no-ops once the
+        // brands relation is empty of affiliates) — clear it with the
+        // disconnect, not just on the sole-brand path.
+        if (merchantValue === allowedMerchant) {
+          merchantClearIds.push(offer.id);
+        }
+      } else if (holdsBrand) {
+        // Sole merchant: the brand stays; a merchant pointing anywhere else
+        // is cleared.
+        if (merchantValue !== '' && merchantValue !== allowedMerchant) {
+          merchantClearIds.push(offer.id);
+          changed = true;
+        }
+      } else if (merchantValue === allowedMerchant && conflicted) {
+        // Merchant-only reference on an offer with a store/other brands.
+        merchantClearIds.push(offer.id);
+        changed = true;
       }
 
-      const merchant = offer?.[CHECKOUT_MERCHANT_FIELD];
-      if (
-        typeof merchant === 'string' &&
-        merchant.trim() !== '' &&
-        merchant.trim() !== allowedMerchant
-      ) {
-        await query.update({
-          where: { id: offer.id },
-          data: { [CHECKOUT_MERCHANT_FIELD]: null },
-        } as any);
-        result.merchantsClearedCount += 1;
+      if (changed) {
         result.affected.push({ uid, documentId: offer.documentId });
       }
+    }
+
+    // Batched writes: a legacy brand can sit on hundreds of offers, and this
+    // runs inside the brand write's transaction while the fail-closed
+    // 'affiliate' advisory lock is held — per-offer relation updates would
+    // stretch the hold past waiters' lock_timeout and turn their saves into
+    // rejections. The join-table delete goes through `trx` (the SAME
+    // transaction the documents middleware passes in), never a second pool
+    // connection.
+    if (detachIds.length > 0) {
+      const joinTable = (strapi.db.metadata.get(uid) as any)?.attributes
+        ?.brands?.joinTable;
+      if (joinTable?.name) {
+        // Deleting link rows directly leaves the join table's order columns
+        // un-renumbered (gaps, not reorders) — Strapi renumbers on the next
+        // ORM relation write, and nothing reads the columns as contiguous.
+        await trx(joinTable.name)
+          .where(joinTable.inverseJoinColumn.name, brand.id)
+          .whereIn(joinTable.joinColumn.name, detachIds)
+          .delete();
+      } else {
+        // Metadata shape drift: fall back to per-offer ORM disconnects
+        // rather than silently skipping the sweep.
+        for (const id of detachIds) {
+          await query.update({
+            where: { id },
+            data: { brands: { disconnect: [brand.id] } },
+          } as any);
+        }
+      }
+    }
+    if (merchantClearIds.length > 0) {
+      const updated: any = await query.updateMany({
+        where: { id: { $in: merchantClearIds } },
+        data: { [CHECKOUT_MERCHANT_FIELD]: null },
+      } as any);
+      // Count what the write reports, not what was queued — the log line the
+      // caller prints should reflect rows actually changed.
+      result.merchantsClearedCount += Number(
+        updated?.count ?? merchantClearIds.length,
+      );
     }
   }
 

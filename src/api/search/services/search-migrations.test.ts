@@ -76,20 +76,30 @@ describe("search index migrations", () => {
   });
 
   it("runs post-schema reconciliation before search diagnostics in bootstrap", () => {
-    const source = readFileSync(
-      resolve(__dirname, "../../../index.ts"),
+    const bootstrap = readFileSync(
+      resolve(__dirname, "../../../lifecycles/bootstrap-application.ts"),
       "utf8",
     );
-    const bootstrap = source.slice(source.indexOf("async bootstrap"));
-    expect(bootstrap).toContain("(strapi as any).dirs.app.root");
-    expect(source).not.toContain(
+    const reconciliation = readFileSync(
+      resolve(__dirname, "../../../lifecycles/bootstrap-reconciliation.ts"),
+      "utf8",
+    );
+    expect(reconciliation).toContain("(strapi as any).dirs.app.root");
+    expect(reconciliation).not.toContain(
       "require('../database/search-index-migration')",
     );
+    expect(reconciliation).toContain("reconcileSearchIndexesAfterSchemaSync(");
+    // Presence guards FIRST: indexOf returns -1 for a missing needle, and
+    // -1 < anything would let the ordering assertion pass vacuously with
+    // reconciliation deleted from bootstrap entirely.
     expect(
-      bootstrap.indexOf("reconcileSearchIndexesAfterSchemaSync("),
+      bootstrap.indexOf("reconcileDatabaseAfterSchemaSync(strapi)"),
     ).toBeGreaterThan(-1);
+    expect(bootstrap.indexOf("initializeSearchRuntime(strapi)")).toBeGreaterThan(
+      -1,
+    );
     expect(
-      bootstrap.indexOf("reconcileSearchIndexesAfterSchemaSync("),
+      bootstrap.indexOf("reconcileDatabaseAfterSchemaSync(strapi)"),
     ).toBeLessThan(bootstrap.indexOf("initializeSearchRuntime(strapi)"));
   });
 

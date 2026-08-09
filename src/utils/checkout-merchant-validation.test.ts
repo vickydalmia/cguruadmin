@@ -229,6 +229,161 @@ describe('validateCheckoutMerchantForWrite', () => {
       ).resolves.toBeUndefined();
     });
   });
+
+  describe('clone', () => {
+    it('validates an inherited merchant when the clone has no data payload', async () => {
+      const { strapi } = strapiWith({
+        [`${COUPON}:coupon1`]: {
+          checkoutMerchant: 'store:deletedStore',
+        },
+      });
+      await expect(
+        validateCheckoutMerchantForWrite(
+          strapi,
+          COUPON,
+          'clone',
+          undefined,
+          'coupon1',
+          false,
+        ),
+      ).rejects.toThrow(/no longer exists/);
+    });
+
+    it('accepts a bare clone whose inherited merchant still exists', async () => {
+      const { strapi } = strapiWith({
+        [`${DEAL}:deal1`]: { checkoutMerchant: 'brand:brand456' },
+        ...LIVE,
+      });
+      await expect(
+        validateCheckoutMerchantForWrite(
+          strapi,
+          DEAL,
+          'clone',
+          undefined,
+          'deal1',
+          false,
+        ),
+      ).resolves.toBeUndefined();
+    });
+
+    it('writes the canonical spelling of an inherited legacy value into the payload', async () => {
+      // The source stored a padded legacy spelling. Copying it verbatim would
+      // hand the NEW row a value every equality consumer
+      // (clearDeletedCheckoutMerchant, detachAffiliateBrand, the festive ISR
+      // scope filter) silently misses — the clone override must canonicalize.
+      const { strapi } = strapiWith({
+        [`${COUPON}:coupon1`]: { checkoutMerchant: ' store:store123 ' },
+        ...LIVE,
+      });
+      const payload: any = {};
+      await expect(
+        validateCheckoutMerchantForWrite(
+          strapi,
+          COUPON,
+          'clone',
+          payload,
+          'coupon1',
+          false,
+        ),
+      ).resolves.toBeUndefined();
+      expect(payload.checkoutMerchant).toBe('store:store123');
+    });
+
+    it('normalizes an inherited whitespace-blank merchant to an explicit null', async () => {
+      const { strapi } = strapiWith({
+        [`${COUPON}:coupon1`]: { checkoutMerchant: '   ' },
+      });
+      const payload: any = {};
+      await validateCheckoutMerchantForWrite(
+        strapi,
+        COUPON,
+        'clone',
+        payload,
+        'coupon1',
+        false,
+      );
+      expect(payload.checkoutMerchant).toBeNull();
+    });
+
+    it('leaves the payload alone when the inherited value is already canonical', async () => {
+      const { strapi } = strapiWith({
+        [`${DEAL}:deal1`]: { checkoutMerchant: 'brand:brand456' },
+        ...LIVE,
+      });
+      const payload: any = {};
+      await validateCheckoutMerchantForWrite(
+        strapi,
+        DEAL,
+        'clone',
+        payload,
+        'deal1',
+        false,
+      );
+      expect('checkoutMerchant' in payload).toBe(false);
+    });
+  });
+
+  describe('failClosed (the LOCKED revalidation pass)', () => {
+    const failingStrapi = (mode: 'stored-read' | 'name-lookup') =>
+      ({
+        documents: (uid: string) => ({
+          findOne: async () => {
+            if (mode === 'stored-read' && uid === COUPON) {
+              throw new Error('pool timeout');
+            }
+            if (mode === 'name-lookup' && uid !== COUPON) {
+              throw new Error('pool timeout');
+            }
+            return { checkoutMerchant: 'store:store123' };
+          },
+        }),
+      }) as any;
+
+    it('rejects the save when the stored-value fallback read fails', async () => {
+      // Fail-open here would commit the exact dangling reference the
+      // fail-closed affiliate lock exists to prevent.
+      await expect(
+        validateCheckoutMerchantForWrite(
+          failingStrapi('stored-read'),
+          COUPON,
+          'clone',
+          undefined,
+          'coupon1',
+          false,
+          true,
+        ),
+      ).rejects.toThrow(/Could not verify the checkout merchant/);
+    });
+
+    it('rejects the save when the merchant name lookup fails', async () => {
+      await expect(
+        validateCheckoutMerchantForWrite(
+          failingStrapi('name-lookup'),
+          COUPON,
+          'update',
+          { checkoutMerchant: 'store:store123' },
+          'coupon1',
+          false,
+          true,
+        ),
+      ).rejects.toThrow(/Could not verify the checkout merchant/);
+    });
+
+    it('still fails open in the aggregated collected pass (failClosed absent)', async () => {
+      // The locked revalidation is the authority; the collected pass may
+      // shrug a hiccup off rather than block the save twice.
+      await expect(
+        validateCheckoutMerchantForWrite(
+          failingStrapi('name-lookup'),
+          COUPON,
+          'update',
+          { checkoutMerchant: 'store:store123' },
+          'coupon1',
+          false,
+        ),
+      ).resolves.toBeUndefined();
+    });
+  });
 });
 
 describe('clearDeletedCheckoutMerchant', () => {

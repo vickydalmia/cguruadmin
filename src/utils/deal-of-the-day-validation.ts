@@ -95,7 +95,20 @@ export function resultingRelationCount(
   return resultingRelations(incoming, current)?.length ?? null;
 }
 
-function dealRelationWhere(relations: readonly RelationEntry[]) {
+/**
+ * WHERE clause matching rows by the mixed identifier forms a relation payload
+ * may carry (numeric ids, documentIds, or objects holding either). The SINGLE
+ * implementation — the affiliate validators and the clone relation override
+ * import it, so every consumer matches the same rows.
+ *
+ * A bare NUMERIC string goes into BOTH sets: this repo's convention treats
+ * strings as documentIds, but Strapi core treats numeric strings as entity
+ * ids — querying both keeps either caller's row in the result set (documentIds
+ * are cuid2, never purely numeric, so the id clause cannot mismatch).
+ */
+export function relationEntriesWhere(
+  relations: readonly RelationEntry[],
+): Record<string, unknown> | null {
   const ids = new Set<string | number>();
   const documentIds = new Set<string>();
 
@@ -106,6 +119,7 @@ function dealRelationWhere(relations: readonly RelationEntry[]) {
     }
     if (typeof relation === 'string') {
       documentIds.add(relation);
+      if (/^\d+$/.test(relation)) ids.add(Number(relation));
       continue;
     }
     if (!relation || typeof relation !== 'object') continue;
@@ -127,7 +141,7 @@ async function qualifyingSmartStackDealCount(
   strapi: Core.Strapi,
   relations: readonly RelationEntry[]
 ): Promise<number> {
-  const where = dealRelationWhere(relations);
+  const where = relationEntriesWhere(relations);
   if (!where) return 0;
 
   const deals = await strapi.db.query(DEAL_UID).findMany({
