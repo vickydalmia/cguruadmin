@@ -145,6 +145,7 @@ build
 migration/.env.migration
 migration/.checkpoints/
 migration/node_modules/
+migration/usa/
 migration/dist/
 migration/*.log
 # This is an audited DML script, not a database dump.
