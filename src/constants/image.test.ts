@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import pluginsConfig from "../../config/plugins";
-import { IMAGE_BREAKPOINTS, THUMBNAIL } from "./image";
+import {
+  CULTURE_GALLERY_IMAGE_OPTIMIZATION,
+  IMAGE_BREAKPOINTS,
+  IMAGE_OPTIMIZATION,
+  THUMBNAIL,
+} from "./image";
 
 // A minimal stand-in for Strapi's env helper: plain lookup with defaults plus
 // the .bool/.int accessors config/plugins.ts actually calls.
@@ -32,6 +37,21 @@ describe("image variant matrix constants", () => {
       xsmall: 320,
     });
     expect(THUMBNAIL).toEqual({ width: 245, height: 156 });
+  });
+
+  it("keeps a high-quality photographic master and encoder profile", () => {
+    expect(IMAGE_OPTIMIZATION.maxDimension).toBe(1920);
+    expect(IMAGE_OPTIMIZATION.quality).toBe(80);
+    expect(CULTURE_GALLERY_IMAGE_OPTIMIZATION.maxDimension).toBe(2560);
+    expect(CULTURE_GALLERY_IMAGE_OPTIMIZATION.quality).toBe(90);
+    expect(CULTURE_GALLERY_IMAGE_OPTIMIZATION.webp).toEqual({
+      effort: 4,
+      smartSubsample: true,
+    });
+    expect(CULTURE_GALLERY_IMAGE_OPTIMIZATION.avif).toEqual({
+      quality: 60,
+      effort: 4,
+    });
   });
 });
 

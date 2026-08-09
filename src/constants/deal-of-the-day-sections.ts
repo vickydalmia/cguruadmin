@@ -18,7 +18,7 @@ export const DOTD_SECTION_CAPS = {
   trendingNow: 10, // UI renders up to 6
   genZDrops: 6, // UI renders 3
   telegramDeals: 6, // UI renders 3
-  allDeals: 24, // UI shows 9 initially, remainder behind load-more
+  allDeals: 50, // UI shows 9 initially, remainder behind load-more
 } as const;
 
 export const DOTD_SMART_STACK_MINIMUM = 3;
@@ -111,9 +111,9 @@ export const DOTD_SECTION_LABELS: SectionLabel[] = [
     label: '9 · All Deals',
     description:
       'If Deals are selected, the grid uses only those Deals in the selected order ' +
-      '(maximum 24; the site shows 9 first with the rest behind load-more). If none ' +
-      'are selected, it uses the newest Deals from the full catalog. The two modes ' +
-      'never merge. Also controls the heading and "view all" link.',
+      '(maximum 50; the site shows 9 first with the rest behind load-more). If none ' +
+      'are selected, it uses the latest 50 live Deals sitewide, ordered by Published ' +
+      'date. The two modes never merge. Also controls the heading and "view all" link.',
   },
   {
     attr: 'seo',

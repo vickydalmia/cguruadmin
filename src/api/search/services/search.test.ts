@@ -9,6 +9,7 @@ import createSearchService, {
 function searchService() {
   const calls: Array<{ uid: string; operation: string; options: any }> = [];
   const coupon = {
+    id: 987,
     documentId: "coupon-no-code",
     title: "No-code fashion offer",
     code: null,
@@ -19,7 +20,9 @@ function searchService() {
     stores: [{ name: "Fashion Store", slug: "fashion-store-coupons" }],
   };
   const deal = {
+    id: 4321,
     documentId: "product-deal",
+    content: "<p>Free shipping over Rs. 999.</p>",
     title: "Running shoes",
     affiliateLink: "https://track.example.com/shoes",
     salePrice: 1299,
@@ -315,6 +318,7 @@ describe("public search entity boundaries", () => {
     expect(response.coupons[0]).toMatchObject({
       id: "coupon:coupon-no-code",
       documentId: "coupon-no-code",
+      couponId: 987,
       codeMode: "none",
       type: "coupon",
       name: "No-code fashion offer",
@@ -341,6 +345,9 @@ describe("public search entity boundaries", () => {
     expect(response.deals[0]).toMatchObject({
       id: "deal:product-deal",
       type: "deal",
+      dealId: 4321,
+      content: "<p>Free shipping over Rs. 999.</p>",
+      computedContent: expect.stringContaining("1,299"),
       price: "1299",
       originalPrice: null,
       discount: "Up To 40% OFF",

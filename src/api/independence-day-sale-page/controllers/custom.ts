@@ -16,6 +16,7 @@ import {
   hasSafeAffiliateLink,
   isActionableProductDeal,
   isLiveOffer,
+  latestActionableCatalog,
   sanitizeOutput,
   storeRef,
 } from '../../../utils/offer-visibility';
@@ -32,6 +33,8 @@ export const COUPON_FIELDS = [
   'couponType',
   'affiliateLink',
   'checkoutMerchant',
+  // Affiliate-brand offers render the BRAND logo in their identity slot.
+  'isForAffiliateBrand',
   'expiresAt',
   'scheduledAt',
   'contentStatus',
@@ -193,59 +196,6 @@ async function recentDeals(
     limit: BACKFILL_QUERY_LIMIT,
   } as any);
   return await sanitizeOutput(strapi, ctx, 'api::deal.deal', rows);
-}
-
-const CATALOG_QUERY_BATCH_SIZE = 100;
-
-async function latestActionableCatalog(
-  strapi: Core.Strapi,
-  ctx: any,
-  {
-    uid,
-    fields,
-    populate,
-    limit,
-    now,
-    accept,
-  }: {
-    uid: 'api::coupon.coupon' | 'api::deal.deal';
-    fields: readonly string[];
-    populate: Record<string, unknown>;
-    limit: number;
-    now: Date;
-    accept: (item: any, now: Date) => boolean;
-  },
-): Promise<any[]> {
-  const accepted: any[] = [];
-  const seen = new Set<string>();
-  let start = 0;
-
-  while (accepted.length < limit) {
-    const rows = await strapi.documents(uid).findMany({
-      filters: PUBLISHED_OFFER_FILTER,
-      fields: fields as any,
-      populate: populate as any,
-      sort: NEWEST_FIRST as any,
-      start,
-      limit: CATALOG_QUERY_BATCH_SIZE,
-    } as any);
-    const batch = Array.isArray(rows) ? rows : [];
-    if (batch.length === 0) break;
-
-    const sanitized = await sanitizeOutput(strapi, ctx, uid, batch);
-    for (const item of Array.isArray(sanitized) ? sanitized : []) {
-      const documentId = item?.documentId;
-      if (!documentId || seen.has(documentId) || !accept(item, now)) continue;
-      accepted.push(item);
-      seen.add(documentId);
-      if (accepted.length >= limit) break;
-    }
-
-    if (batch.length < CATALOG_QUERY_BATCH_SIZE) break;
-    start += batch.length;
-  }
-
-  return accepted;
 }
 
 export async function fillAllCouponHolder(

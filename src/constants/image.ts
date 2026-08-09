@@ -20,6 +20,19 @@ export const IMAGE_OPTIMIZATION = {
 } as const;
 
 /**
+ * Opt-in profile for original photography placed in the Culture Gallery
+ * Media Library folder. Keeping it separate prevents editorial photographs
+ * from making every logo, card image, and banner elsewhere on the site
+ * heavier.
+ */
+export const CULTURE_GALLERY_IMAGE_OPTIMIZATION = {
+  maxDimension: 2560,
+  quality: 90,
+  webp: { effort: 4, smartSubsample: true },
+  avif: { quality: 60, effort: 4 },
+} as const;
+
+/**
  * Responsive format sizes generated on upload (originals are capped at
  * maxDimension by src/extensions/upload — no 1920 breakpoint). xsmall serves
  * ~150px card slots at DPR 2 — without it the smallest variant is 500px and

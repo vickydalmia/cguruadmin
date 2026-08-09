@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Core } from "@strapi/strapi";
 import { normaliseImageBackgroundColour } from "../../../constants/image-background";
 import { publishedOnlyFilters } from "../../../utils/content-status";
+import { buildDealComputedContent } from "../../../utils/deal-computed-content";
 import { formatDealDiscount } from "../../../utils/deal-discount";
 import {
   asciiFold,
@@ -149,7 +150,14 @@ function mediaAlt(
     ) ?? fallback
   );
 }
-const COUPON_FIELDS = ["title", "code", "couponType", "affiliateLink"];
+const COUPON_FIELDS = [
+  "title",
+  "code",
+  "couponType",
+  "affiliateLink",
+  // Affiliate-brand offers resolve the BRAND logo/owner in mapOffer.
+  "isForAffiliateBrand",
+];
 const DEAL_FIELDS = [
   "title",
   "code",
@@ -160,6 +168,11 @@ const DEAL_FIELDS = [
   "discount",
   "discountPrefix",
   "expiresAt",
+  // Affiliate-brand offers resolve the BRAND logo/owner in mapOffer.
+  "isForAffiliateBrand",
+  // Feeds the search card's Show Details + redeem-modal bullets, matching
+  // every other Deal surface (computed price block + written content).
+  "content",
 ];
 
 function oneString(value: unknown): string | null {
@@ -322,6 +335,11 @@ function mapMedia(media: any, fallbackAlt: string) {
 }
 
 function relatedEntities(document: any): any[] {
+  // Affiliate-brand offers are owned by their BRAND — never a store — even
+  // if a programmatic write left a store attached.
+  if (document?.isForAffiliateBrand === true) {
+    return Array.isArray(document?.brands) ? document.brands : [];
+  }
   return [
     ...(Array.isArray(document?.stores) ? document.stores : []),
     ...(Array.isArray(document?.brands) ? document.brands : []),
@@ -341,13 +359,17 @@ function offerOwner(document: any, _source: "coupon" | "deal") {
 // (first) relation has neither. Attribution (name/subtitle/link) stays with
 // the owner.
 function couponIdentityMedia(document: any): { media: any; alt: string | null } | null {
-  const candidates = [
-    ...(Array.isArray(document?.stores) ? document.stores : []),
-    document?.logoStore,
-    ...(Array.isArray(document?.brands) ? document.brands : []),
-    ...(Array.isArray(document?.banks) ? document.banks : []),
-    ...(Array.isArray(document?.categories) ? document.categories : []),
-  ];
+  // Affiliate-brand offers show their BRAND's logo — never a store's.
+  const candidates =
+    document?.isForAffiliateBrand === true
+      ? [...(Array.isArray(document?.brands) ? document.brands : [])]
+      : [
+          ...(Array.isArray(document?.stores) ? document.stores : []),
+          document?.logoStore,
+          ...(Array.isArray(document?.brands) ? document.brands : []),
+          ...(Array.isArray(document?.banks) ? document.banks : []),
+          ...(Array.isArray(document?.categories) ? document.categories : []),
+        ];
   for (const relation of candidates) {
     const media = relation?.logo ?? relation?.icon ?? null;
     if (!media) continue;
@@ -506,6 +528,18 @@ function mapEntity(document: any, config: EntityConfig) {
   };
 }
 
+// The ranked-SQL path can surface ids as strings; accept both, emit a
+// positive safe integer or null.
+function numericOfferId(value: unknown): number | null {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && /^[1-9]\d{0,14}$/.test(value.trim())
+        ? Number(value.trim())
+        : Number.NaN;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 function mapOffer(document: any, type: "coupon" | "deal") {
   const name = cleanText(document?.title, 300);
   if (!name) return null;
@@ -518,11 +552,17 @@ function mapOffer(document: any, type: "coupon" | "deal") {
   const ownerMediaField = owner?.icon ? "icon" : "logo";
   const ownerAlt = mediaAlt(owner, ownerMediaField, ownerName);
   const identity = type === "coupon" ? couponIdentityMedia(document) : null;
-  const storeWithLogo = Array.isArray(document?.stores)
-    ? document.stores.find((store: any) => store?.logo)
-    : null;
+  // Affiliate-brand offers never borrow store artwork; the owner (already
+  // brand-first via relatedEntities) supplies the logo.
+  const affiliateBrandOffer = document?.isForAffiliateBrand === true;
+  const storeWithLogo =
+    !affiliateBrandOffer && Array.isArray(document?.stores)
+      ? document.stores.find((store: any) => store?.logo)
+      : null;
   const storeMedia = storeWithLogo?.logo ?? null;
-  const logoStoreMedia = document?.logoStore?.logo ?? null;
+  const logoStoreMedia = affiliateBrandOffer
+    ? null
+    : (document?.logoStore?.logo ?? null);
   const displayOwnerMedia = storeMedia ?? logoStoreMedia ?? ownerMedia;
   const displayOwnerAlt = storeMedia
     ? mediaAlt(storeWithLogo, "logo", ownerName ?? name)
@@ -561,6 +601,23 @@ function mapOffer(document: any, type: "coupon" | "deal") {
         : null,
     expiresAt:
       type === "deal" ? cleanText(document?.expiresAt, 80) : null,
+    // Numeric Strapi id per offer type: the storefront builds the public
+    // /deal/:id or /coupon/:id detail URL from it, so a search hit opens its
+    // detail page (with the redeem flow) instead of jumping straight to the
+    // affiliate link.
+    ...(type === "deal"
+      ? {
+          dealId: numericOfferId(document?.id),
+          // Show Details / redeem-modal source material, composed client-side
+          // exactly like other Deal cards. Content is CMS richtext already
+          // sanitised at write time (sanitizeRichtextData).
+          content:
+            typeof document?.content === "string" && document.content.trim()
+              ? document.content
+              : null,
+          computedContent: buildDealComputedContent(document ?? {}),
+        }
+      : { couponId: numericOfferId(document?.id) }),
     owner:
       type === "deal" && ownerName
         ? {

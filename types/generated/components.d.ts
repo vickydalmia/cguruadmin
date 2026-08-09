@@ -712,7 +712,7 @@ export interface CultureGalleryCategory extends Struct.ComponentSchema {
 export interface CultureGalleryPhoto extends Struct.ComponentSchema {
   collectionName: 'components_culture_gallery_photos';
   info: {
-    description: 'One photo in the life-at-CouponzGuru grid. Category Id must match one of the tabs above; leave it blank and the photo shows only under "All".';
+    description: 'One photo in the life-at-CouponzGuru grid. Upload the camera original into the dedicated Culture Gallery Media Library folder before selecting it here to use the high-quality photographic profile. Category Id must match one of the tabs above; leave it blank and the photo shows only under "All".';
     displayName: 'Culture Gallery Photo';
     icon: 'picture';
   };

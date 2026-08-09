@@ -50,6 +50,8 @@ const COUPON_FIELDS = [
   'affiliateLink',
   // Consumed and removed by the festive-offer walker.
   'checkoutMerchant',
+  // Affiliate-brand offers render the BRAND logo in their identity slot.
+  'isForAffiliateBrand',
   'expiresAt',
   'contentStatus',
 ];
@@ -69,12 +71,10 @@ const couponRef = {
   },
 };
 
-// Hero products are compact linked merchandising tiles. They do not render
-// expandable details, so keep their Deal payload free of unused rich text.
-const heroDealRef = {
-  ...dealRef,
-  fields: DEAL_FIELDS.filter((field) => field !== 'content'),
-};
+// Hero products use the full Deal projection: their CTA opens the shared
+// redeem modal, whose "Deal Details" section is composed from
+// computedContent + written `content` like every other Deal surface.
+const heroDealRef = { ...dealRef };
 
 const publishedCouponRef = {
   ...couponRef,

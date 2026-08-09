@@ -8,6 +8,7 @@ import {
   INDEPENDENCE_DAY_SALE_UID,
 } from './constants/independence-day-sale-sections';
 import { HOMEPAGE_IMAGE_RULES, imageRuleDescription } from './constants/homepage-images';
+import { CULTURE_GALLERY_MEDIA_FOLDER_NAME } from './constants/media-folders';
 import {
   HOMEPAGE_SECTION_LABELS,
   HOMEPAGE_UID,
@@ -342,6 +343,25 @@ async function ensureUploadSettings(strapi: Core.Strapi): Promise<void> {
   }
 }
 
+async function ensureCultureGalleryMediaFolder(
+  strapi: Core.Strapi,
+): Promise<void> {
+  const folders: any = strapi.db.query('plugin::upload.folder');
+  const existing = await folders.findOne({
+    where: { name: CULTURE_GALLERY_MEDIA_FOLDER_NAME },
+    select: ['id'],
+  });
+  if (existing) return;
+
+  await strapi.plugin('upload').service('folder').create({
+    name: CULTURE_GALLERY_MEDIA_FOLDER_NAME,
+    parent: null,
+  });
+  strapi.log.info(
+    `[upload] created ${CULTURE_GALLERY_MEDIA_FOLDER_NAME} media folder`,
+  );
+}
+
 // Content Manager "Entry title" per component — the text field shown as the
 // collapsed label of each repeatable entry (e.g. hero banners show altText
 // instead of the link URL). Strapi has no schema.json knob for this; it lives
@@ -619,6 +639,14 @@ COMPONENT_FIELD_DESCRIPTIONS['header.product-deal-notification'].imageOverride =
   'Coupon notifications. Add one row per Coupon; each row can configure its own title and image overrides.';
 COMPONENT_FIELD_DESCRIPTIONS['header.notification'].productDeal =
   'Product Deal notifications. Add one row per Product Deal; each row can configure its own title and image overrides.';
+// The upload service can select a quality profile only while it still has the
+// camera original. The dedicated folder is therefore the explicit editorial
+// signal; linking an already-compressed root-folder asset cannot restore lost
+// detail later when the Culture entry is saved.
+(COMPONENT_FIELD_DESCRIPTIONS['culture.gallery-photo'] ??= {}).image =
+  `Upload original photographs to the “${CULTURE_GALLERY_MEDIA_FOLDER_NAME}” Media Library folder, then select them here. ` +
+  'Use JPG, PNG or WebP at 2560px or more on the longest side; this folder keeps a 2560px quality-90 WebP master and single-generation responsive images. Other Media Library folders keep the standard lighter profile.';
+
 async function ensureComponentFieldDescriptions(strapi: Core.Strapi): Promise<void> {
   const service: any = strapi.plugin('content-manager').service('components');
   if (!service) return;
@@ -2160,6 +2188,7 @@ export default {
     await ensurePublicReadPermissions(strapi);
     await restrictSingleTypesToSuperAdmin(strapi);
     await ensureUploadSettings(strapi);
+    await ensureCultureGalleryMediaFolder(strapi);
     await ensureComponentEntryTitles(strapi);
     await ensureAdminRelationSearchFields(strapi);
     await ensureRelationTargetFieldReadability(strapi);

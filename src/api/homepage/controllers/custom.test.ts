@@ -55,7 +55,7 @@ function actionableDeal(index: number, overrides: Record<string, any> = {}) {
 }
 
 describe('homepage aggregate offer population', () => {
-  it('ships full offer card content while keeping hero references compact', async () => {
+  it('ships full offer card content on every deal surface, hero included', async () => {
     const harness = createHarness({});
 
     await harness.controller.homepageFull(harness.ctx as any);
@@ -79,8 +79,10 @@ describe('homepage aggregate offer population', () => {
       expect(ref.fields).not.toContain('excerpt');
     }
 
+    // The hero CTA opens the shared redeem modal, whose "Deal Details" is
+    // composed from written `content` — the hero projection must ship it.
     const heroDeal = populate.hero.populate.products.populate.deal;
-    expect(heroDeal.fields).not.toContain('content');
+    expect(heroDeal.fields).toContain('content');
     expect(heroDeal.fields).not.toContain('excerpt');
 
     expect(populate.popularStores.populate.featuredStore.fields).not.toContain(
