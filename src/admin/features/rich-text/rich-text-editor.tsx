@@ -1,25 +1,18 @@
 /**
  * WYSIWYG replacement for Strapi's built-in markdown editor on `richtext`
- * fields (registered via app.addFields({ type: 'richtext' }) in ../app.tsx).
+ * fields (registered via app.addFields({ type: 'richtext' }) in
+ * ../../app.tsx). Field integration lives here; the TipTap extension set is
+ * ./extensions, toolbar chrome ./toolbar-controls, link handling
+ * ./link-control.
  *
  * The fields store HTML (WP-migrated, rendered raw on the public site), so
  * this editor reads and writes HTML strings — no schema or data change.
- * Extension set is driven by what actually exists in content (tables, images,
- * sup, h1–h6); anything outside the server allowlist is stripped on save by
- * src/utils/sanitize-richtext.ts.
  */
 
 import * as React from 'react';
 import styled from 'styled-components';
 import { useField } from '@strapi/strapi/admin';
-import {
-  Box,
-  Field,
-  Flex,
-  IconButton,
-  Popover,
-  TextInput,
-} from '@strapi/design-system';
+import { Box, Field } from '@strapi/design-system';
 import {
   Bold,
   Italic,
@@ -27,35 +20,14 @@ import {
   StrikeThrough,
   BulletList,
   NumberList,
-  Link as LinkIcon,
   Minus,
 } from '@strapi/icons';
 import { useEditor, useEditorState, EditorContent, type Editor } from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
-import Link from '@tiptap/extension-link';
-import Underline from '@tiptap/extension-underline';
-import Image from '@tiptap/extension-image';
-import Superscript from '@tiptap/extension-superscript';
-import Table from '@tiptap/extension-table';
-import TableRow from '@tiptap/extension-table-row';
-import TableHeader from '@tiptap/extension-table-header';
-import TableCell from '@tiptap/extension-table-cell';
 
-import { normalizeBreaksToBlocks } from '../utils/normalize-breaks';
-
-const EXTENSIONS = [
-  // Legacy WP content has h1/h4-h6 — accept all levels so loading + saving a
-  // document never downgrades headings; the toolbar only offers H2/H3.
-  StarterKit.configure({ heading: { levels: [1, 2, 3, 4, 5, 6] }, codeBlock: false }),
-  Underline,
-  Superscript,
-  Link.configure({ openOnClick: false, autolink: true }),
-  Image,
-  Table.configure({ resizable: false }),
-  TableRow,
-  TableHeader,
-  TableCell,
-];
+import { normalizeBreaksToBlocks } from '../../utils/normalize-breaks';
+import { EXTENSIONS } from './extensions';
+import { GlyphButton, Toolbar, ToolbarButton } from './toolbar-controls';
+import { LinkControl } from './link-control';
 
 const EditorShell = styled(Box)<{ $error?: boolean }>`
   border: 1px solid
@@ -102,13 +74,6 @@ const EditorShell = styled(Box)<{ $error?: boolean }>`
   }
 `;
 
-const Toolbar = styled(Flex)`
-  border-bottom: 1px solid ${({ theme }) => theme.colors.neutral200};
-  padding: ${({ theme }) => theme.spaces[1]} ${({ theme }) => theme.spaces[2]};
-  flex-wrap: wrap;
-  gap: ${({ theme }) => theme.spaces[1]};
-`;
-
 /* Block-vs-inline is the recurring confusion in these fields: H2/H3 and the
    list buttons look like the bold/italic buttons next to them but apply to the
    whole block, so an editor who joined lines with Shift+Enter sees one click
@@ -119,126 +84,6 @@ const FormatNote = styled.p`
   font-size: 1.2rem;
   line-height: 1.4;
 `;
-
-/* Text-glyph buttons for actions without a fitting @strapi/icons icon. */
-const GlyphButton = styled.button<{ $active?: boolean }>`
-  border: none;
-  background: ${({ theme, $active }) => ($active ? theme.colors.primary100 : 'transparent')};
-  color: ${({ theme, $active }) => ($active ? theme.colors.primary600 : theme.colors.neutral600)};
-  border-radius: ${({ theme }) => theme.borderRadius};
-  min-width: 3.2rem;
-  height: 3.2rem;
-  font-size: 1.2rem;
-  font-weight: 600;
-  cursor: pointer;
-  &:hover { background: ${({ theme }) => theme.colors.neutral100}; }
-  &:disabled { color: ${({ theme }) => theme.colors.neutral300}; cursor: not-allowed; }
-`;
-
-function ToolbarButton({
-  label,
-  active,
-  disabled,
-  onClick,
-  children,
-}: {
-  label: string;
-  active?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <IconButton
-      label={label}
-      disabled={disabled}
-      onClick={onClick}
-      variant={active ? 'secondary' : 'ghost'}
-      size="S"
-    >
-      {children}
-    </IconButton>
-  );
-}
-
-// When the cursor sits inside a word with nothing selected, ProseMirror has no
-// range to attach the link mark to, so setLink is a no-op and the word never
-// becomes a (visible) link — the reported bug. Expand a collapsed selection to
-// the surrounding word so the link applies to the whole word.
-function selectWordIfCollapsed(editor: Editor): void {
-  const { state } = editor;
-  const { from, empty } = state.selection;
-  if (!empty) return;
-  const $pos = state.doc.resolve(from);
-  const text = $pos.parent.textContent;
-  const base = $pos.start();
-  let start = from - base;
-  let end = start;
-  while (start > 0 && !/\s/.test(text[start - 1])) start--;
-  while (end < text.length && !/\s/.test(text[end])) end++;
-  if (end > start) {
-    editor.commands.setTextSelection({ from: base + start, to: base + end });
-  }
-}
-
-function LinkControl({ editor, isActive }: { editor: Editor; isActive: boolean }) {
-  const [open, setOpen] = React.useState(false);
-  const [url, setUrl] = React.useState('');
-
-  const apply = () => {
-    const trimmed = url.trim();
-    // Expand a bare cursor to its word, then apply to the full link range so the
-    // whole word turns into a styled link and the toolbar reflects it (the
-    // selection stays on the range, so isActive('link') reads true afterwards).
-    selectWordIfCollapsed(editor);
-    if (trimmed) {
-      editor.chain().focus().extendMarkRange('link').setLink({ href: trimmed }).run();
-    } else {
-      editor.chain().focus().extendMarkRange('link').unsetLink().run();
-    }
-    setOpen(false);
-  };
-
-  return (
-    <Popover.Root
-      open={open}
-      onOpenChange={(next: boolean) => {
-        setOpen(next);
-        if (next) setUrl(editor.getAttributes('link').href ?? '');
-      }}
-    >
-      <Popover.Trigger>
-        <IconButton
-          label="Link"
-          size="S"
-          variant={isActive ? 'secondary' : 'ghost'}
-        >
-          <LinkIcon />
-        </IconButton>
-      </Popover.Trigger>
-      <Popover.Content sideOffset={4}>
-        <Flex padding={3} gap={2} width="30rem">
-          <TextInput
-            aria-label="Link URL"
-            placeholder="https://…  (empty removes the link)"
-            size="S"
-            value={url}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUrl(e.target.value)}
-            onKeyDown={(e: React.KeyboardEvent) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                apply();
-              }
-            }}
-          />
-          <GlyphButton type="button" onClick={apply} aria-label="Apply link">
-            OK
-          </GlyphButton>
-        </Flex>
-      </Popover.Content>
-    </Popover.Root>
-  );
-}
 
 interface RichTextEditorProps {
   name: string;

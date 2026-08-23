@@ -1,4 +1,4 @@
-import EntryLinkCell from '../components/EntryLinkCell';
+import EntryLinkCell from '../components/entry-link-cell';
 import { isLinkableCellType } from './entry-link';
 
 /**

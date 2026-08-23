@@ -50,10 +50,10 @@ are now plain regex-validated `string` attributes typed by hand.)
 |------|---------|
 | [`src/admin/app.tsx`](../src/admin/app.tsx) | Admin entry point: field-type registrations, admin config/translations, and panel wiring |
 | [`src/admin/features/taxonomy-panel/`](../src/admin/features/taxonomy-panel/) | The Taxonomies panel implementation (config, relation sections, affiliate toggle) |
-| [`src/admin/components/RichTextEditor.tsx`](../src/admin/components/RichTextEditor.tsx) | TipTap WYSIWYG registered for `richtext` |
-| [`src/admin/components/DateTimeInput.tsx`](../src/admin/components/DateTimeInput.tsx) | `datetime` picker with 5-minute steps |
-| [`src/admin/components/BooleanConfirmInput.tsx`](../src/admin/components/BooleanConfirmInput.tsx) | `boolean` toggle behind a confirmation dialog |
-| [`src/index.ts`](../src/index.ts) | Server lifecycle wiring; the boot-time view config lives in [`src/bootstrap/`](../src/bootstrap/) — [`content-manager-layouts.ts`](../src/bootstrap/content-manager-layouts.ts) is what hides the panel-owned relations |
+| [`src/admin/features/rich-text/`](../src/admin/features/rich-text/) | TipTap WYSIWYG registered for `richtext` (extensions, toolbar, link control, field integration) |
+| [`src/admin/components/date-time-input.tsx`](../src/admin/components/date-time-input.tsx) | `datetime` picker with 5-minute steps |
+| [`src/admin/components/boolean-confirm-input.tsx`](../src/admin/components/boolean-confirm-input.tsx) | `boolean` toggle behind a confirmation dialog |
+| [`src/index.ts`](../src/index.ts) | Server lifecycle wiring; the boot-time view config lives in [`src/bootstrap/`](../src/bootstrap/) — [`content-manager-visibility.ts`](../src/bootstrap/content-manager-visibility.ts) is what hides the panel-owned relations |
 | [`src/constants/homepage-sections.ts`](../src/constants/homepage-sections.ts), [`src/constants/deal-of-the-day-sections.ts`](../src/constants/deal-of-the-day-sections.ts), [`src/constants/homepage-images.ts`](../src/constants/homepage-images.ts), [`src/constants/offer-taxonomy.ts`](../src/constants/offer-taxonomy.ts) | Section labels, image size rules, and the offer taxonomy field list shared by the admin bundle and the server |
 
 The field replacements are maintained product behavior, not release-specific
@@ -334,14 +334,14 @@ Its contract:
 
 Lifecycle wiring stays in [`src/index.ts`](../src/index.ts); the routines it
 awaits live in [`src/bootstrap/`](../src/bootstrap/)
-(`content-manager-layouts.ts`, `field-hints.ts`, `permissions.ts`,
+(the `content-manager-*` view-config modules, `field-hints.ts`, `permissions.ts`,
 `upload.ts`, `relation-search.ts`, `db-reconciliation.ts`).
 
 ### Hiding the panel-owned relations
 
 The panels would be redundant if the default widgets still rendered. On boot,
 `hideRelationsFromContentManager`
-([`src/bootstrap/content-manager-layouts.ts`](../src/bootstrap/content-manager-layouts.ts))
+([`src/bootstrap/content-manager-visibility.ts`](../src/bootstrap/content-manager-visibility.ts))
 rewrites the content-manager's stored layout configuration for each entry in
 its `HIDE_FROM_EDIT` map — the four taxonomies on deal and coupon (spread from
 the shared `OFFER_TAXONOMY_FIELDS` constant the panel config also types

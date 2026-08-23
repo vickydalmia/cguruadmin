@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  isValidCanonicalUrl,
-  validateChangedFields,
-} from './changed-field-validation';
+import { isValidCanonicalUrl } from './changed-field-rules';
+import { validateChangedFields } from './changed-field-validation';
 
 function harness(stored: unknown = null) {
   const findOne = vi.fn().mockResolvedValue(stored);

@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import createSearchService, {
+import createSearchService from "./search";
+import {
   configureSearchRuntime,
   EXPECTED_SEARCH_INDEXES,
   initializeSearchRuntime,
-} from "./search";
+} from "./search-runtime";
 import {
   AMAZON_AFFILIATE_DISCLOSURE_FIELD,
   AMAZON_AFFILIATE_DISCLOSURE_HTML,

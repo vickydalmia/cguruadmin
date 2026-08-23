@@ -1,6 +1,6 @@
 /**
  * Query-shape helpers behind the Published / Scheduled / Expired tabs on the
- * Coupon and Product Deal list views (src/admin/components/OfferStatusTabs.tsx).
+ * Coupon and Product Deal list views (src/admin/components/offer-status-tabs.tsx).
  *
  * The tabs are a shortcut for a filter the editor could build by hand, NOT a
  * parallel mechanism. Strapi's own filter UI reads and writes

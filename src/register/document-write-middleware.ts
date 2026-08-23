@@ -22,15 +22,17 @@ import type {
 } from '../isr-outbox/types';
 import {
   computeScope,
-  FESTIVE_OFFER_ENTITY_UIDS,
   isRedirectNoteOnlyChange,
-  preDeleteScope,
-  type FestiveOfferSnapshot,
 } from '../isr-outbox/scopes';
+import { preDeleteScope } from '../isr-outbox/offer-relation-scopes';
+import {
+  FESTIVE_OFFER_ENTITY_UIDS,
+  type FestiveOfferSnapshot,
+} from '../isr-outbox/festive-offer-scopes';
 // Every write validator now runs through this one pipeline, which reports all
 // of their problems in a single error instead of the first one it hits.
 import { runWriteValidation } from '../utils/write-validation/run';
-import { removeInactiveCuratedOfferRelations } from '../utils/curated-offer-relations';
+import { removeInactiveCuratedOfferRelations } from '../utils/curated-offer-cleanup';
 import {
   changesEntityOfferMembership,
   touchEntityPageUpdatedAt,

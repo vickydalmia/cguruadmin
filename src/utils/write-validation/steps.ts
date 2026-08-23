@@ -18,7 +18,7 @@ import {
   normaliseCouponTypeFields,
   validateCouponTypeFields,
 } from '../coupon-type-consistency';
-import { ensureTransparentDealImageForWrite } from '../deal-image-upload';
+import { ensureTransparentDealImageForWrite } from '../deal-image-write-validation';
 import { validateDealOfTheDaySectionLimits } from '../deal-of-the-day-validation';
 import { validateEntityFieldsForWrite } from '../entity-field-validation';
 import {

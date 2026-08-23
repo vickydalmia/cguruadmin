@@ -100,7 +100,7 @@ export function registerEntityCouponLayoutRoutes(strapi: Core.Strapi): void {
 }
 
 // Edit-lock endpoints for the Content Manager edit view (RecordLockPanel
-// in src/admin/components/RecordLockPanel.tsx). Admin router for the same
+// in src/admin/features/record-lock/record-lock-panel.tsx). Admin router for the same
 // reason as the entity-deal-page settings routes above: src/api/*/routes
 // cannot authenticate an admin session.
 export function registerRecordLockRoutes(strapi: Core.Strapi): void {

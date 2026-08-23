@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isValidCanonicalUrl } from '../../utils/changed-field-validation';
+import { isValidCanonicalUrl } from '../../utils/changed-field-rules';
 
 describe('shared SEO canonicalUrl validation', () => {
   it.each([

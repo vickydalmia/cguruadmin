@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   changedFieldHints,
   changedFieldSeoHints,
-  SEO_COMPONENT_UID,
-} from './changed-field-validation';
-import { TEXT_FIELD_RULES, textFieldHints } from './text-field-validation';
+} from './changed-field-hints';
+import { SEO_COMPONENT_UID } from './changed-field-rules';
+import { textFieldHints } from './text-field-hints';
+import { TEXT_FIELD_RULES } from './text-field-rules';
 // src/bootstrap/field-hints.ts is the merge chokepoint: it derives the
 // editor-facing hints from the two rule tables above (plus a hand-declared
 // mirror table for validators that live elsewhere) and pins them into the

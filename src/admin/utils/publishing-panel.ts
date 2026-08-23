@@ -1,6 +1,6 @@
 /**
  * Pure logic behind the Publishing side panel
- * (src/admin/components/PublishingPanel.tsx).
+ * (src/admin/components/publishing-panel.tsx).
  *
  * The panel presents an offer's lifecycle as two INDEPENDENT questions —
  * when does it start, and when does it end — rather than one three-way status

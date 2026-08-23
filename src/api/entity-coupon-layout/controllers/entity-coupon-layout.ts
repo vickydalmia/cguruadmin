@@ -1,8 +1,6 @@
 import type { Core } from '@strapi/strapi';
-import {
-  CouponLayoutError,
-  ENTITY_COUPON_LAYOUT_ACTION,
-} from '../services/entity-coupon-layout';
+import { ENTITY_COUPON_LAYOUT_ACTION } from '../services/entity-coupon-layout';
+import { CouponLayoutError } from '../services/entity-coupon-layout-parse';
 import { readIsrOutboxConfig } from '../../../isr-outbox/config';
 
 function can(ability: any, action: string, subject?: string): boolean {

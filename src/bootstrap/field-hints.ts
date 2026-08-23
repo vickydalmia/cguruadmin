@@ -4,13 +4,13 @@ import { CULTURE_GALLERY_MEDIA_FOLDER_NAME } from '../constants/media-folders';
 import {
   changedFieldHints,
   changedFieldSeoHints,
-} from '../utils/changed-field-validation';
+} from '../utils/changed-field-hints';
 import { WORD_LIMITS, BENEFIT_TEXT_FIELDS } from '../utils/offer-field-validation';
 import {
   benefitFieldHint,
   offerAmountFieldHint,
 } from '../utils/offer-word-limits';
-import { textFieldHints } from '../utils/text-field-validation';
+import { textFieldHints } from '../utils/text-field-hints';
 import { AFFILIATE_OFFER_TOGGLE_FIELD } from '../constants/affiliate-offer';
 
 // Field help text pinned into the Content Manager on every boot. Homepage

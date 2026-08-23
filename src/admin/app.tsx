@@ -6,18 +6,18 @@ import * as React from 'react';
 import { Earth } from '@strapi/icons';
 
 import { CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME } from '../constants/checkout-merchant';
-import RichTextEditor from './components/RichTextEditor';
-import DateTimeInput from './components/DateTimeInput';
-import BooleanConfirmInput from './components/BooleanConfirmInput';
-import PublicOfferLinkAction from './components/PublicOfferLinkAction';
-import BumpToTopAction from './components/BumpToTopAction';
-import OfferStatusTabs from './components/OfferStatusTabs';
+import RichTextEditor from './features/rich-text/rich-text-editor';
+import DateTimeInput from './components/date-time-input';
+import BooleanConfirmInput from './components/boolean-confirm-input';
+import PublicOfferLinkAction from './components/public-offer-link-action';
+import BumpToTopAction from './components/bump-to-top-action';
+import OfferStatusTabs from './components/offer-status-tabs';
 import CsvExportButton from './features/csv-export/components/csv-export-button';
-import PublishingPanel from './components/PublishingPanel';
-import OfferBenefitsPanel from './components/OfferBenefitsPanel';
-import RecordLockPanel from './components/RecordLockPanel';
-import UniqueCodeImportPanel from './components/UniqueCodeImportPanel';
-import ValidationProblemsPanel from './components/ValidationProblemsPanel';
+import PublishingPanel from './components/publishing-panel';
+import OfferBenefitsPanel from './components/offer-benefits-panel';
+import RecordLockPanel from './features/record-lock/record-lock-panel';
+import UniqueCodeImportPanel from './components/unique-code-import-panel';
+import ValidationProblemsPanel from './components/validation-problems-panel';
 import { installEnterKeyGuard, installTitleRewrite } from './utils/dom-behaviors';
 import {
   INJECT_COLUMN_IN_TABLE,

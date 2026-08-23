@@ -1,59 +1,59 @@
 import type { Core } from '@strapi/strapi';
 import type { ScopeRequest } from './types';
 import { mergeScope } from './payload';
-import {
-  toRouteSlug,
-  type IdentityKind,
-} from '../utils/route-normalization';
+import { toRouteSlug } from '../utils/route-normalization';
 import { entityDealPageSlug } from '../api/entity-deal-page/services/entity-deal-route';
-import {
-  CHECKOUT_MERCHANT_FIELD,
-  formatCheckoutMerchant,
-} from '../constants/checkout-merchant';
 import { DOCUMENT_WRITE_ACTIONS } from '../constants/document-write';
+import {
+  ABOUT_PAGE_SLUG,
+  ABOUT_PAGE_UID,
+  AFFILIATE_DISCLOSURE_PAGE_SLUG,
+  AFFILIATE_DISCLOSURE_PAGE_UID,
+  CAREER_PAGE_SLUG,
+  CAREER_PAGE_UID,
+  CHROME_UIDS,
+  CONTACT_PAGE_SLUG,
+  CONTACT_PAGE_UID,
+  CULTURE_PAGE_SLUG,
+  CULTURE_PAGE_UID,
+  DEAL_OF_THE_DAY_SLUG,
+  DOTD_PAGE_UID,
+  ERROR_DOCUMENT_SLUGS,
+  ERROR_PAGE_UID,
+  FAQ_PAGE_SLUG,
+  FAQ_PAGE_UID,
+  INDEPENDENCE_DAY_SALE_PAGE_UID,
+  INDEPENDENCE_DAY_SALE_SLUG,
+  JOB_UID,
+  PARTNER_WITH_US_PAGE_SLUG,
+  PARTNER_WITH_US_PAGE_UID,
+  PRIVACY_POLICY_PAGE_SLUG,
+  PRIVACY_POLICY_PAGE_UID,
+  TERMS_PAGE_SLUG,
+  TERMS_PAGE_UID,
+  TESTIMONIALS_PAGE_SLUG,
+  TESTIMONIALS_PAGE_UID,
+  withOfferLandingSlugs,
+} from './scope-static-pages';
+import {
+  ENTITY_UIDS,
+  OFFER_UIDS,
+  offerRelationScope,
+  publicSlug,
+} from './offer-relation-scopes';
+import {
+  festiveMerchantScope,
+  festiveOfferChanged,
+  touchesFestiveOffer,
+  type FestiveOfferSnapshot,
+} from './festive-offer-scopes';
 
 // Maps a Strapi document change to every rendered page that consumes it.
+// Static-page mapping lives in ./scope-static-pages, offer relation scopes
+// (and preDeleteScope) in ./offer-relation-scopes, festive-offer scopes in
+// ./festive-offer-scopes; this file keeps the computeScope coordinator and
+// the redirect note-only suppression.
 
-const CHROME_UIDS = new Set(['api::menu.menu', 'api::footer.footer', 'api::global.global']);
-const OFFER_UIDS = new Set(['api::coupon.coupon', 'api::deal.deal']);
-
-// The deal-of-the-day category page renders curated Deal sections (its
-// single type may reference deals NOT tagged with the category), so every
-// Deal change rebuilds it — the same stance as `homepage: true` on offer
-// changes. One constant slug, deduped by the queue; coupons never render
-// there and do not carry it.
-const DEAL_OF_THE_DAY_SLUG = 'deal-of-the-day';
-const DOTD_PAGE_UID = 'api::deal-of-the-day-page.deal-of-the-day-page';
-const INDEPENDENCE_DAY_SALE_SLUG = 'independence-day-sale-coupons';
-const INDEPENDENCE_DAY_SALE_PAGE_UID =
-  'api::independence-day-sale-page.independence-day-sale-page';
-// The About page is a standalone editorial route with no entity relations, so
-// an edit rebuilds exactly one page. Its country cards read from the Footer
-// single type, which is in CHROME_UIDS and already triggers a full rebuild.
-const ABOUT_PAGE_UID = 'api::about-page.about-page';
-const ABOUT_PAGE_SLUG = 'about-us';
-const CAREER_PAGE_UID = 'api::career-page.career-page';
-const JOB_UID = 'api::job.job';
-const CAREER_PAGE_SLUG = 'careers';
-const CONTACT_PAGE_UID = 'api::contact-page.contact-page';
-const CONTACT_PAGE_SLUG = 'contact-us';
-const FAQ_PAGE_UID = 'api::faq-page.faq-page';
-const FAQ_PAGE_SLUG = 'faqs';
-const TESTIMONIALS_PAGE_UID = 'api::testimonials-page.testimonials-page';
-const TESTIMONIALS_PAGE_SLUG = 'testimonials';
-const PARTNER_WITH_US_PAGE_UID =
-  'api::partner-with-us-page.partner-with-us-page';
-const PARTNER_WITH_US_PAGE_SLUG = 'partner-with-us';
-const PRIVACY_POLICY_PAGE_UID = 'api::privacy-policy-page.privacy-policy-page';
-const PRIVACY_POLICY_PAGE_SLUG = 'privacy-policy';
-const TERMS_PAGE_UID =
-  'api::terms-and-conditions-page.terms-and-conditions-page';
-const TERMS_PAGE_SLUG = 'terms-and-conditions';
-const AFFILIATE_DISCLOSURE_PAGE_UID =
-  'api::affiliate-disclosure-page.affiliate-disclosure-page';
-const AFFILIATE_DISCLOSURE_PAGE_SLUG = 'affiliate-disclosure';
-const CULTURE_PAGE_UID = 'api::culture-page.culture-page';
-const CULTURE_PAGE_SLUG = 'culture';
 // A redirect is evaluated by cguru-ui/src/middleware.ts on EVERY request,
 // before routing — it is URL resolution itself, not page content. Nothing
 // narrower than `full` is correct here: the affected URL set is not derivable
@@ -66,181 +66,6 @@ const CULTURE_PAGE_SLUG = 'culture';
 // revalidationScopes), and note-only edits skip the sweep entirely via
 // isRedirectNoteOnlyChange below.
 const REDIRECT_UID = 'api::redirect.redirect';
-const ERROR_PAGE_UID = 'api::error-page.error-page';
-const ERROR_DOCUMENT_SLUGS = [
-  'error-pages/400',
-  'error-pages/403',
-  'error-pages/404',
-  'error-pages/405',
-  'error-pages/414',
-  'error-pages/416',
-  'error-pages/500',
-  'error-pages/501',
-  'error-pages/502',
-  'error-pages/503',
-  'error-pages/504',
-  'error-pages/template',
-] as const;
-
-function withOfferLandingSlugs(uid: string, slugs: string[]): string[] {
-  return [
-    ...new Set([
-      ...slugs,
-      INDEPENDENCE_DAY_SALE_SLUG,
-      ...(uid === 'api::deal.deal' ? [DEAL_OF_THE_DAY_SLUG] : []),
-    ]),
-  ];
-}
-const ENTITY_UIDS: Record<string, IdentityKind> = {
-  'api::store.store': 'store',
-  'api::brand.brand': 'brand',
-  'api::category.category': 'category',
-  'api::bank.bank': 'bank',
-};
-
-// Public URLs are flat: strip an optional type prefix from source slugs
-// (mirror of cguru-ui/src/lib/entity-links.ts#normalizeTypedSlug).
-function publicSlug(
-  value: string | null | undefined,
-  kind: IdentityKind,
-): string | null {
-  return toRouteSlug(value, kind) || null;
-}
-
-const RELATION_KINDS: Array<[field: string, kind: IdentityKind]> = [
-  ['stores', 'store'],
-  ['brands', 'brand'],
-  ['categories', 'category'],
-  ['banks', 'bank'],
-];
-
-const ENTITY_TYPES: Array<[uid: string, kind: IdentityKind]> = [
-  ['api::store.store', 'store'],
-  ['api::brand.brand', 'brand'],
-  ['api::category.category', 'category'],
-  ['api::bank.bank', 'bank'],
-];
-
-type OfferRelationScope = {
-  slugs: string[];
-  optionalSlugs: string[];
-};
-
-export async function offerRelationScope(
-  strapi: Core.Strapi,
-  uid: 'api::coupon.coupon' | 'api::deal.deal',
-  documentId: string,
-): Promise<OfferRelationScope | null> {
-  const doc: any = await strapi.documents(uid).findOne({
-    documentId,
-    populate: {
-      stores: { fields: ['name', 'slug'] },
-      brands: { fields: ['name', 'slug'] },
-      categories: { fields: ['name', 'slug'] },
-      banks: { fields: ['name', 'slug'] },
-    } as any,
-  });
-  if (!doc) return null;
-
-  const numericId = Number(doc.id);
-  if (!Number.isSafeInteger(numericId) || numericId <= 0) return null;
-  const detailKind = uid === 'api::coupon.coupon' ? 'coupon' : 'deal';
-  const slugs = new Set<string>([`${detailKind}/${numericId}`]);
-  const entitySlugs = new Set<string>();
-  const entityDealSlugs = new Set<string>();
-  for (const [field, kind] of RELATION_KINDS) {
-    for (const related of doc[field] ?? []) {
-      const slug = publicSlug(related?.slug, kind);
-      if (slug) entitySlugs.add(slug);
-      const dealSlug = entityDealPageSlug(related?.name);
-      if (uid === 'api::deal.deal' && dealSlug) entityDealSlugs.add(dealSlug);
-    }
-  }
-  // Query every entity-owned offer relation as well as the offer-owned
-  // relation arrays above. `coupons`/`deals` are mappedBy relations on the
-  // entities, while topPickCoupons/orderedCoupons are separate one-way
-  // curated relations.
-  // Reading both directions makes the rendered dependency explicit and
-  // protects updates/deletes regardless of which side Strapi used to mutate
-  // the join.
-  const entityPages = await Promise.all(
-    ENTITY_TYPES.map(async ([entityUid, kind]) => {
-      const offerFilter =
-        uid === 'api::coupon.coupon'
-          ? {
-              $or: [
-                { coupons: { documentId: { $eq: documentId } } },
-                { topPickCoupons: { documentId: { $eq: documentId } } },
-                { orderedCoupons: { documentId: { $eq: documentId } } },
-              ],
-            }
-          : { deals: { documentId: { $eq: documentId } } };
-      const entities: any[] = await strapi.documents(entityUid as any).findMany({
-        filters: offerFilter as any,
-        fields: ['name', 'slug'] as any,
-      });
-      return entities
-        .map((entity) => ({
-          slug: publicSlug(entity?.slug, kind),
-          dealSlug: entityDealPageSlug(entity?.name),
-        }))
-        .filter((entity) => Boolean(entity.slug));
-    }),
-  );
-  for (const entity of entityPages.flat()) {
-    if (entity.slug) entitySlugs.add(entity.slug);
-    if (uid === 'api::deal.deal' && entity.dealSlug) {
-      entityDealSlugs.add(entity.dealSlug);
-    }
-  }
-  for (const slug of entitySlugs) slugs.add(slug);
-
-  return {
-    slugs: [...slugs],
-    optionalSlugs: [...entityDealSlugs],
-  };
-}
-
-/**
- * Pre-fetch (BEFORE next()) for offer changes — for deletes the doc is gone
- * afterwards and its relations are unknowable. Updates need the old relations
- * too, so uncertainty must fail safe with a global invalidation.
- */
-export async function preDeleteScope(
-  strapi: Core.Strapi,
-  uid: string,
-  documentId: string | undefined,
-  action: string,
-): Promise<ScopeRequest | null> {
-  if (!OFFER_UIDS.has(uid) || !documentId) return null;
-  const fallback = (): ScopeRequest => ({
-    full: true,
-    refreshScopes: ['routes'],
-  });
-  try {
-    const relationScope = await offerRelationScope(
-      strapi,
-      uid as any,
-      documentId,
-    );
-    return relationScope
-      ? {
-          slugs: withOfferLandingSlugs(uid, relationScope.slugs),
-          ...(relationScope.optionalSlugs.length > 0
-            ? { optionalSlugs: relationScope.optionalSlugs }
-            : {}),
-          homepage: true,
-          sitemap: true,
-          refreshScopes: ['routes'],
-        }
-      : fallback();
-  } catch (err: any) {
-    strapi.log.warn(
-      `[rebuild] pre-change relation read failed for ${uid} ${documentId} (${action}): ${err?.message ?? err}`
-    );
-    return fallback();
-  }
-}
 
 /**
  * True when an entity update touches ONLY the hidden entityDealPageSeo
@@ -256,213 +81,6 @@ export function isEntityDealPageSeoOnlyChange(data: unknown): boolean {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
   const keys = Object.keys(data);
   return keys.length === 1 && keys[0] === 'entityDealPageSeo';
-}
-
-/** Only Store and Brand carry these; category/bank writes never match. */
-const FESTIVE_OFFER_KEYS = [
-  'isFestiveOffer',
-  'festiveOfferTitle',
-  'festiveOfferDescription',
-] as const;
-
-/**
- * True when a Store/Brand update touches the festive offer keys at all. This
- * is only the cheap first gate — the decisions that matter are
- * `festiveOfferChanged` (did the rendered campaign actually change?) and
- * `festiveMerchantScope` (which pages does it repaint?).
- */
-export function touchesFestiveOffer(data: unknown): boolean {
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
-  return FESTIVE_OFFER_KEYS.some((key) =>
-    Object.prototype.hasOwnProperty.call(data, key),
-  );
-}
-
-/** Entity types carrying the festive fields — the only ones worth a pre-read. */
-export const FESTIVE_OFFER_ENTITY_UIDS = new Set([
-  'api::store.store',
-  'api::brand.brand',
-]);
-
-/** The three festive fields as read from the row BEFORE the write. */
-export type FestiveOfferSnapshot = {
-  isFestiveOffer?: unknown;
-  festiveOfferTitle?: unknown;
-  festiveOfferDescription?: unknown;
-};
-
-const festiveTrimmed = (value: unknown): string | null => {
-  if (typeof value !== 'string') return null;
-  const next = value.trim();
-  return next.length > 0 ? next : null;
-};
-
-/**
- * What the row renders onto offer cards: the `title × description` pair when
- * the campaign is live AND complete, otherwise nothing. Mirrors
- * `loadFestiveMerchants` in utils/festive-offer-response.ts — the walker drops
- * rows with a blank half, so a write that only changes a blank half changes
- * nothing on any page.
- */
-function festiveRendering(row: FestiveOfferSnapshot): string | null {
-  if (row.isFestiveOffer !== true) return null;
-  const title = festiveTrimmed(row.festiveOfferTitle);
-  const description = festiveTrimmed(row.festiveOfferDescription);
-  if (!title || !description) return null;
-  return `${title}\u0000${description}`;
-}
-
-/**
- * True when the write actually CHANGES what festive rendering the merchant
- * contributes to offer cards. Key presence alone is NOT a change signal: the
- * content-manager edit form submits the full document, so every Store/Brand
- * save carries `isFestiveOffer` — treating that as festive activity would turn
- * a logo fix into a full-site rebuild. Escalation therefore requires the
- * effective before/after renderings to differ.
- *
- * `before` is captured by the documents middleware BEFORE the write (the same
- * pattern as `entityIdentityBefore` in
- * src/register/document-write-middleware.ts). When it could not be
- * read, fail toward invalidation: a spurious full rebuild costs minutes, a
- * missed one leaves a campaign stale everywhere.
- */
-export function festiveOfferChanged(
-  data: unknown,
-  before: FestiveOfferSnapshot | null | undefined,
-): boolean {
-  if (!touchesFestiveOffer(data)) return false;
-  if (!before || typeof before !== 'object') return true;
-
-  const payload = data as Record<string, unknown>;
-  const after: FestiveOfferSnapshot = { ...before };
-  for (const key of FESTIVE_OFFER_KEYS) {
-    if (Object.prototype.hasOwnProperty.call(payload, key)) {
-      after[key] = payload[key];
-    }
-  }
-  return festiveRendering(before) !== festiveRendering(after);
-}
-
-/**
- * Offers-per-merchant bound for the festive scan. Beyond it the slug list
- * would crowd `maxPaths` (ISR_REVALIDATE_MAX_PATHS, default 5000) — where the
- * payload layer degrades to a full invalidation anyway — so the scan stops
- * early and returns `full` without paying for the fan-out.
- */
-const FESTIVE_OFFER_SCAN_LIMIT = 1_000;
-
-const OFFER_UID_LIST = ['api::coupon.coupon', 'api::deal.deal'] as const;
-
-/**
- * The exact page set a festive change repaints: every offer whose
- * `checkoutMerchant` names this Store/Brand — its detail page, the entity
- * pages listing it (both relation directions, mirroring offerRelationScope),
- * the deal landing page when Deals are involved, and the homepage. The
- * `checkoutMerchant` column is a plain indexed string, so membership is one
- * batched query per offer type plus one reverse lookup per entity type — six
- * queries total, and festive toggles are a handful of events per season.
- *
- * A merchant nobody checks out with returns an EMPTY scope: its campaign
- * renders on no card, so only the merchant's own narrow entity scope applies.
- * Failures are the caller's to catch; they must fail toward `full`.
- */
-async function festiveMerchantScope(
-  strapi: Core.Strapi,
-  uid: string,
-  documentId: string,
-): Promise<ScopeRequest> {
-  const merchant = formatCheckoutMerchant({
-    kind: uid === 'api::store.store' ? 'store' : 'brand',
-    documentId,
-  });
-
-  const slugs = new Set<string>();
-  const optionalSlugs = new Set<string>();
-  const couponIds: string[] = [];
-  const dealIds: string[] = [];
-
-  for (const offerUid of OFFER_UID_LIST) {
-    const offers: any[] = await strapi.documents(offerUid as any).findMany({
-      filters: { [CHECKOUT_MERCHANT_FIELD]: merchant } as any,
-      fields: ['documentId'] as any,
-      populate: {
-        stores: { fields: ['name', 'slug'] },
-        brands: { fields: ['name', 'slug'] },
-        categories: { fields: ['name', 'slug'] },
-        banks: { fields: ['name', 'slug'] },
-      } as any,
-      limit: FESTIVE_OFFER_SCAN_LIMIT + 1,
-    });
-    if (offers.length > FESTIVE_OFFER_SCAN_LIMIT) {
-      return { full: true, refreshScopes: ['routes'] };
-    }
-
-    const isDeal = offerUid === 'api::deal.deal';
-    for (const offer of offers) {
-      const numericId = Number(offer?.id);
-      if (Number.isSafeInteger(numericId) && numericId > 0) {
-        slugs.add(`${isDeal ? 'deal' : 'coupon'}/${numericId}`);
-      }
-      if (typeof offer?.documentId === 'string') {
-        (isDeal ? dealIds : couponIds).push(offer.documentId);
-      }
-      for (const [field, kind] of RELATION_KINDS) {
-        for (const related of offer?.[field] ?? []) {
-          const slug = publicSlug(related?.slug, kind);
-          if (slug) slugs.add(slug);
-          const dealSlug = entityDealPageSlug(related?.name);
-          if (isDeal && dealSlug) optionalSlugs.add(dealSlug);
-        }
-      }
-    }
-  }
-
-  if (couponIds.length === 0 && dealIds.length === 0) return {};
-
-  // Reverse direction, batched over all matched offers: curated
-  // topPickCoupons/orderedCoupons and the entity-owned mapped relations, the
-  // same both-directions stance offerRelationScope takes per offer.
-  const entityPages = await Promise.all(
-    ENTITY_TYPES.map(async ([entityUid, kind]) => {
-      const membership: unknown[] = [];
-      if (couponIds.length > 0) {
-        membership.push(
-          { coupons: { documentId: { $in: couponIds } } },
-          { topPickCoupons: { documentId: { $in: couponIds } } },
-          { orderedCoupons: { documentId: { $in: couponIds } } },
-        );
-      }
-      if (dealIds.length > 0) {
-        membership.push({ deals: { documentId: { $in: dealIds } } });
-      }
-      const entities: any[] = await strapi.documents(entityUid as any).findMany({
-        filters: { $or: membership } as any,
-        fields: ['name', 'slug'] as any,
-        limit: FESTIVE_OFFER_SCAN_LIMIT,
-      });
-      return entities.map((entity) => ({
-        slug: publicSlug(entity?.slug, kind),
-        dealSlug: entityDealPageSlug(entity?.name),
-      }));
-    }),
-  );
-  for (const entity of entityPages.flat()) {
-    if (entity.slug) slugs.add(entity.slug);
-    if (dealIds.length > 0 && entity.dealSlug) {
-      optionalSlugs.add(entity.dealSlug);
-    }
-  }
-  if (dealIds.length > 0) slugs.add(DEAL_OF_THE_DAY_SLUG);
-  if (couponIds.length > 0 || dealIds.length > 0) {
-    slugs.add(INDEPENDENCE_DAY_SALE_SLUG);
-  }
-
-  return {
-    slugs: [...slugs],
-    ...(optionalSlugs.size > 0 ? { optionalSlugs: [...optionalSlugs] } : {}),
-    // Festive offers render inside homepage sections; one extra page.
-    homepage: true,
-  };
 }
 
 /** Scope for a change, computed AFTER the write succeeded. */

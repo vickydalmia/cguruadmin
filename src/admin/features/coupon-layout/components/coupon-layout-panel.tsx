@@ -15,7 +15,7 @@ import { CouponLayoutDialog } from './coupon-layout-dialog';
 /**
  * Collapsed summary in the edit-view sidebar.
  *
- * The counts come from the same `useRelationSelection` state the dialog edits,
+ * The counts come from the same `useEntityCouponLayout` state the dialog edits,
  * loaded here rather than inside the dialog. Deriving them from the Content
  * Manager form value instead does NOT work: the form carries only pending
  * connect/disconnect edits, not the persisted relation, so the summary read

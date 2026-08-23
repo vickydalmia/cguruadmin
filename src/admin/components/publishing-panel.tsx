@@ -11,7 +11,7 @@ import {
 } from '@strapi/design-system';
 import * as React from 'react';
 
-import DateTimeInput from './DateTimeInput';
+import DateTimeInput from './date-time-input';
 import { computeContentStatus } from '../../utils/content-status';
 import { isOfferModel } from '../utils/offer-status-filter';
 import {
@@ -31,7 +31,7 @@ import {
  * the main form.
  *
  * The four lifecycle fields are hidden from the main edit layout (see
- * HIDE_FROM_EDIT_FORM_ONLY in src/bootstrap/content-manager-layouts.ts) and
+ * HIDE_FROM_EDIT_FORM_ONLY in src/bootstrap/content-manager-visibility.ts) and
  * edited only here, the same way
  * RelationMultiSelectPanel owns the taxonomy relations. Writes go through the
  * shared form state, so nothing persists until the editor hits Save — no

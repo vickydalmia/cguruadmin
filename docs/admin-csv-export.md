@@ -45,7 +45,7 @@ may still be working, and the modal says so.
 | Path | Role |
 |---|---|
 | `src/constants/csv-export.ts` | targets, page sizes, route prefix, page shape (shared by server + admin) |
-| `src/api/csv-export/services/csv-export.ts` | columns / populate / flatten / CSV encoding / `exportPage` |
+| `src/api/csv-export/services/csv-export.ts` | the service coordinator: `exportPage` + `targets` (columns/populate in `csv-export-columns.ts`, flatten/CSV encoding in `csv-export-format.ts`, merchant/audit lookups in `csv-export-loaders.ts`) |
 | `src/api/csv-export/controllers/csv-export.ts` | param validation, `page` handler |
 | `src/register/admin-routes.ts` → `registerCsvExportRoutes` | admin-router route + policies |
 | `src/admin/features/csv-export/api.ts` | the page loop, progress maths, file assembly (React-free, tested) |

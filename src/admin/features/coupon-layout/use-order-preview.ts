@@ -14,8 +14,8 @@ export type { OrderPreviewSource } from './order-preview-response';
  * Read the resulting order from the SAME endpoint the storefront consumes.
  *
  * The admin deliberately does not re-derive the ordering rules — the head/
- * remainder merge lives in listEntityOffers (src/api/coupon/controllers/
- * custom.ts) and would drift if it were reimplemented here. Only the
+ * remainder merge lives in listEntityOffers (src/api/coupon/services/
+ * offer-entity-listings.ts) and would drift if it were reimplemented here. Only the
  * contract's one-line merge rule is applied on top, so unsaved edits still
  * preview. See buildPreviewRows.
  *

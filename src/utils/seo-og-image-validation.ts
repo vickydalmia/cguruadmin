@@ -1,5 +1,5 @@
 import type { Core } from '@strapi/strapi';
-import { ENTITY_UIDS, SEO_UIDS } from './changed-field-validation';
+import { ENTITY_UIDS, SEO_UIDS } from './changed-field-rules';
 
 /**
  * Recommended share-card image size. 1200×630 (~1.91:1) is what Facebook and

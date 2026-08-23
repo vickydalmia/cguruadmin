@@ -4,7 +4,7 @@ import uniqueCouponController, {
   MAX_CODES_PER_REQUEST,
   normalizeActivationId,
 } from './unique-coupon';
-import { DEFAULT_CHUNK_SIZE } from '../../../../../admin/utils/parse-codes';
+import { DEFAULT_CHUNK_SIZE } from '../../../../../admin/features/unique-code/chunk-codes';
 
 function createHarness() {
   const importCodes = vi.fn(async (_poolDocumentId: string, codes: string[]) => ({

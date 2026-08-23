@@ -9,7 +9,7 @@ import {
   HOMEPAGE_UID,
 } from './constants/homepage-sections';
 import { hasTrustedIpsConfigured } from './middlewares/rate-limit';
-import { initializeSearchRuntime } from './api/search/services/search';
+import { initializeSearchRuntime } from './api/search/services/search-runtime';
 import { startIsrOutbox, stopIsrOutbox } from './isr-outbox/runtime';
 import { installDocumentWriteMiddleware } from './register/document-write-middleware';
 // Lives in src/register/, NOT src/middlewares/: Strapi auto-loads every file
@@ -17,23 +17,27 @@ import { installDocumentWriteMiddleware } from './register/document-write-middle
 // this module has none — it would register 'global::record-lock-document' as
 // an undefined factory that throws the moment anything references it.
 import { installRecordLockDocumentMiddleware } from './register/record-lock-document';
-import {
-  getCuratedOfferRelations,
-  registerCuratedOfferRelationQueryFilter,
-} from './utils/curated-offer-relations';
+import { getCuratedOfferRelations } from './utils/curated-offer-relations';
+import { registerCuratedOfferRelationQueryFilter } from './utils/curated-offer-live-filter';
 import { ENTITY_COUPON_LAYOUT_ACTION_ATTRIBUTES } from './api/entity-coupon-layout/services/entity-coupon-layout';
 import { CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME } from './constants/checkout-merchant';
 import {
-  ensureComponentEntryTitles,
-  ensureFullWidthEditFields,
-  ensureNavigationIconPlacement,
-  ensureOfferListStatusColumn,
-  ensureSectionLabels,
-  ensureSingleTypeEntryTitles,
-  ensureSortableListColumns,
   hideFieldsFromComponentManager,
   hideRelationsFromContentManager,
-} from './bootstrap/content-manager-layouts';
+} from './bootstrap/content-manager-visibility';
+import {
+  ensureComponentEntryTitles,
+  ensureSingleTypeEntryTitles,
+} from './bootstrap/content-manager-entry-titles';
+import { ensureSectionLabels } from './bootstrap/content-manager-section-labels';
+import {
+  ensureFullWidthEditFields,
+  ensureNavigationIconPlacement,
+} from './bootstrap/content-manager-edit-widths';
+import {
+  ensureOfferListStatusColumn,
+  ensureSortableListColumns,
+} from './bootstrap/content-manager-list-columns';
 import {
   ensureComponentFieldDescriptions,
   ensureFieldDescriptions,

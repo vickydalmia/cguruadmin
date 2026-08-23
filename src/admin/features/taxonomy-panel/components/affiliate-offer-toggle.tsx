@@ -1,13 +1,14 @@
 import { Box } from '@strapi/design-system';
 
 import { AFFILIATE_OFFER_TOGGLE_FIELD } from '../../../../constants/affiliate-offer';
-import BooleanConfirmInput from '../../../components/BooleanConfirmInput';
+import BooleanConfirmInput from '../../../components/boolean-confirm-input';
 import { type SelectedRelationState } from '../config';
 
 /**
  * The `isForAffiliateBrand` toggle, rendered at the top of the Taxonomies
  * panel next to the pickers it gates (the field is hidden from the main edit
- * form via OFFER_PANEL_ONLY_FIELDS in src/bootstrap/content-manager-layouts.ts).
+ * form via OFFER_PANEL_ONLY_FIELDS in
+ * src/bootstrap/content-manager-visibility.ts).
  * Reuses BooleanConfirmInput
  * so it keeps the same confirm-on-flip behaviour as every other boolean.
  *

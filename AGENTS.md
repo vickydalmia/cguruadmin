@@ -29,6 +29,56 @@ of implementation.
 **When you may edit without a fresh ask:** the user asked for an
 implementation in the first place and you are still delivering it. That is it.
 
+## Feature and module organization
+
+New work must be organized by runtime responsibility from the start. Do not
+grow another all-purpose controller, service, hook, or component and leave the
+split for a later cleanup.
+
+### Placement and naming
+
+- Put admin code used by one feature under
+  `src/admin/features/<feature-name>/`. Keep feature-only components, hooks,
+  request logic, state, types, and pure helpers beside that feature.
+- Keep `src/admin/components/` and `src/admin/utils/` for code with real shared
+  use. Promote feature code only when a second feature actually needs it; do
+  not create speculative shared abstractions.
+- Keep Strapi entry files thin. Controllers and service factories should expose
+  the public action/method surface and orchestrate collaborators; move cohesive
+  configuration, parsing, queries/loaders, transformations, validation,
+  persistence, protocol/error handling, and runtime state into directly named
+  sibling modules.
+- Use **kebab-case** for new source file and folder names. Component symbols
+  remain PascalCase, hooks remain `useCamelCase`, and constants remain
+  `SCREAMING_SNAKE_CASE`.
+- Do not rename or normalize anything under `database/migrations/`. Migration
+  filenames are immutable history and follow the migration tool's convention.
+- Import the concrete file directly. Do not add barrel `index.ts` files,
+  compatibility re-export shims, or forwarding modules just to preserve an
+  obsolete internal path.
+
+### Keep files cohesive and reviewable
+
+- One file should own one clear responsibility. A file that mixes orchestration
+  with substantial data access, transformation, UI presentation, state
+  management, or error/protocol handling is already a candidate for extraction.
+- Aim to keep new production files below roughly **300 lines**. At **400 lines**,
+  stop and explicitly review whether the file contains separable
+  responsibilities before adding more. These are review triggers, not quotas:
+  keep cohesive code together, and never manufacture tiny pass-through files
+  merely to satisfy a number.
+- Keep page components, panels, controllers, and service entry points easy to
+  scan. Their main execution path should read as composition; detailed branch,
+  query, mapping, and rendering logic should live in named collaborators.
+- Split by behavior boundary, not by arbitrary chunks. Preserve call order,
+  arguments, defaults, mutation/reference semantics, async sequencing, error
+  scope, transaction scope, and side-effect timing when extracting existing
+  production logic.
+- Keep tests with the behavior they cover and move/update them with an
+  extraction. A structural refactor is not complete until every meaningful old
+  behavior maps to a new location and the full test, typecheck, diff-check, and
+  production-build gates pass.
+
 ## ⚠️ Patched dependencies — RE-CHECK ON EVERY STRAPI UPGRADE
 
 This repo carries `patch-package` patches against `node_modules`. They are applied

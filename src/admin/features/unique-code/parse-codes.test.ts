@@ -2,19 +2,22 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_CHUNK_SIZE,
   MAX_IMPORT_REQUEST_BYTES,
+  chunkCodes,
+  importRequestByteLength,
+} from './chunk-codes';
+import { reduceImportCompletion, summariseImport } from './import-completion';
+import {
   MAX_CODES_PER_UPLOAD,
   MAX_CODE_LENGTH,
-  chunkCodes,
   extractCode,
-  importRequestByteLength,
   parseCodesFile,
-  reduceImportCompletion,
+  uploadBlocker,
+} from './parse-codes-file';
+import {
   SAMPLE_CODES_CSV,
   SAMPLE_CODES_EXPECTED,
   SAMPLE_CODES_FILE_NAME,
-  summariseImport,
-  uploadBlocker,
-} from './parse-codes';
+} from './sample-codes';
 
 describe('extractCode', () => {
   it('returns a plain line untouched', () => {

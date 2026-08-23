@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { EXPECTED_SEARCH_INDEXES } from "./search";
+import { EXPECTED_SEARCH_INDEXES } from "./search-runtime";
 
 const oldMigration = require("../../../../database/migrations/2026.07.12T01.00.00.add-public-search-indexes.js");
 const reconcileMigration = require("../../../../database/migrations/2026.07.19T00.00.00.add-search-rank-indexes.js");

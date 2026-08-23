@@ -1,7 +1,7 @@
 import { useRBAC } from '@strapi/strapi/admin';
 import type { PanelComponent } from '@strapi/content-manager/strapi-admin';
 
-import UniqueCodeImport from './UniqueCodeImport';
+import UniqueCodeImport from '../features/unique-code/unique-code-import';
 
 // Bulk code import. The server-side importer already existed and was fully
 // implemented — this panel is the only thing that was missing, so editors had

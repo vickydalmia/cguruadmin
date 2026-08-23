@@ -30,7 +30,7 @@ const CANCELLATION_UID =
  * else's lock), so several missed beats (backgrounded-tab timer throttling,
  * flaky wifi) still keep the lock. Retune alongside HEARTBEAT_MS /
  * BLOCKED_RETRY_MS in
- * src/admin/components/RecordLockPanel.tsx. */
+ * src/admin/features/record-lock/record-lock-panel.tsx. */
 export const LOCK_TTL_MS = 90_000;
 
 export type AdminUserLike = {
