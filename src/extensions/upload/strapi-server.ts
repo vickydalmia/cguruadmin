@@ -3,7 +3,12 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import sharp, { type FormatEnum, type Metadata } from 'sharp';
-import { IMAGE_BREAKPOINTS, IMAGE_OPTIMIZATION as OPT } from '../../constants/image';
+import {
+  CULTURE_GALLERY_IMAGE_OPTIMIZATION,
+  IMAGE_BREAKPOINTS,
+  IMAGE_OPTIMIZATION as OPT,
+} from '../../constants/image';
+import { CULTURE_GALLERY_MEDIA_FOLDER_NAME } from '../../constants/media-folders';
 import { slugify } from '../../constants/slugify';
 import { calculateImageBackgroundColour } from '../../utils/image-background-colour';
 import {
@@ -35,10 +40,9 @@ const splitFolderHash = (hash: string): { folder: string; base: string } | null 
 };
 
 // Replaces the upload plugin's image-manipulation `optimize` so every upload
-// is capped to OPT.maxDimension, EXIF-oriented + stripped, and jpeg/png are
-// converted to WebP. Because `optimize` runs before responsive formats are
-// generated (and format temp files carry no extension), all thumbnail/
-// small/medium/large variants automatically inherit the converted output.
+// is capped, EXIF-oriented + stripped, and jpeg/png are converted to WebP.
+// The default profile is unchanged; only media explicitly placed in the
+// Culture Gallery folder gets the larger, higher-quality photo profile.
 // NOTE: this ordering is undocumented @strapi/upload internal behavior —
 // re-verify uploads still produce WebP variants after upgrading Strapi.
 const isSvg = (file: any): boolean =>
@@ -48,6 +52,18 @@ const isSvg = (file: any): boolean =>
 
 export default (plugin: any) => {
   const base = plugin.services['image-manipulation'];
+  const baseUploadFactory = plugin.services.upload;
+
+  const isCultureGalleryUpload = async (file: any): Promise<boolean> => {
+    const folderId = typeof file.folder === 'object' ? file.folder?.id : file.folder;
+    if (!folderId) return false;
+
+    const folder = await strapi.db.query('plugin::upload.folder').findOne({
+      where: { id: folderId },
+      select: ['name'],
+    });
+    return folder?.name === CULTURE_GALLERY_MEDIA_FOLDER_NAME;
+  };
 
   // Extend upload.file itself so the calculated value is persisted and
   // exposed wherever media is populated. The upload controllers only permit
@@ -168,24 +184,43 @@ export default (plugin: any) => {
       file.tmpWorkingDirectory ?? os.tmpdir(),
       `optimized-${file.hash}`
     );
+    const cultureGalleryUpload = await isCultureGalleryUpload(file);
+    const profile = cultureGalleryUpload
+      ? CULTURE_GALLERY_IMAGE_OPTIMIZATION
+      : OPT;
 
     const needsResize =
-      (meta.width ?? 0) > OPT.maxDimension || (meta.height ?? 0) > OPT.maxDimension;
+      (meta.width ?? 0) > profile.maxDimension ||
+      (meta.height ?? 0) > profile.maxDimension;
 
-    const info = await sharp(file.filepath)
+    const transformer = sharp(file.filepath)
       .rotate()
       .resize({
-        width: OPT.maxDimension,
-        height: OPT.maxDimension,
+        width: profile.maxDimension,
+        height: profile.maxDimension,
         fit: 'inside',
         withoutEnlargement: true,
-      })
-      .toFormat(outFormat, { quality: OPT.quality })
-      .toFile(outPath);
+      });
+    const info = outFormat === 'webp' && cultureGalleryUpload
+      ? await transformer
+          .webp({
+            quality: profile.quality,
+            effort: CULTURE_GALLERY_IMAGE_OPTIMIZATION.webp.effort,
+            smartSubsample:
+              CULTURE_GALLERY_IMAGE_OPTIMIZATION.webp.smartSubsample,
+          })
+          .toFile(outPath)
+      : await transformer
+          .toFormat(outFormat, { quality: profile.quality })
+          .toFile(outPath);
 
     // Same-format re-encode that got bigger without needing a resize:
     // keep the original bytes (parity with stock optimize behavior).
     if (!toWebp && !needsResize && meta.size && info.size > meta.size) {
+      if (cultureGalleryUpload) {
+        file.__sourceFilepath = file.filepath;
+        file.__imageOptimizationProfile = 'culture-gallery';
+      }
       return attachDealImageMetadata(file, file.filepath);
     }
 
@@ -201,6 +236,9 @@ export default (plugin: any) => {
     // generateResponsiveFormats below; never persisted (non-schema props are
     // dropped by the db layer, like tmpWorkingDirectory).
     newFile.__sourceFilepath = file.filepath;
+    if (cultureGalleryUpload) {
+      newFile.__imageOptimizationProfile = 'culture-gallery';
+    }
 
     // Rewrite the hash to the folder scheme (slug-rand8/slug) — unless this
     // is a replace(), which pins the existing hash (keep old key = old URL).
@@ -252,6 +290,68 @@ export default (plugin: any) => {
     return relocateVariant('thumbnail', thumbnail, file.hash ?? '');
   };
 
+  // Stock Strapi resizes the already-encoded WebP master without an explicit
+  // output profile. Sharp therefore applies its default WebP quality again,
+  // creating a second lossy generation. For the opt-in Culture Gallery photo
+  // profile, build responsive WebPs directly from the temporary upload so
+  // every rung is encoded once. Other folders retain stock byte behaviour.
+  const generateWebpResponsiveFormats = async (file: any, sourcePath: string) => {
+    const breakpoints: Record<string, number> = strapi.config.get(
+      'plugin::upload.breakpoints',
+      { ...IMAGE_BREAKPOINTS }
+    );
+    const formats: Array<{ key: string; file: any }> = [];
+
+    for (const [key, breakpoint] of Object.entries(breakpoints)) {
+      if (breakpoint >= (file.width ?? 0) && breakpoint >= (file.height ?? 0)) {
+        continue;
+      }
+
+      // Match Strapi's temporary path contract. relocateVariant moves the
+      // persisted hash into the master's folder after this file is created.
+      const temporaryHash = `${key}_${file.hash}`;
+      const outPath = path.join(
+        file.tmpWorkingDirectory ?? os.tmpdir(),
+        temporaryHash
+      );
+      fs.mkdirSync(path.dirname(outPath), { recursive: true });
+      const info = await sharp(sourcePath)
+        .rotate()
+        .resize({
+          width: breakpoint,
+          height: breakpoint,
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
+        .webp({
+          quality: CULTURE_GALLERY_IMAGE_OPTIMIZATION.quality,
+          effort: CULTURE_GALLERY_IMAGE_OPTIMIZATION.webp.effort,
+          smartSubsample:
+            CULTURE_GALLERY_IMAGE_OPTIMIZATION.webp.smartSubsample,
+        })
+        .toFile(outPath);
+
+      formats.push({
+        key,
+        file: {
+          name: `${key}_${file.name}`,
+          hash: temporaryHash,
+          ext: '.webp',
+          mime: 'image/webp',
+          filepath: outPath,
+          path: file.path || null,
+          getStream: () => fs.createReadStream(outPath),
+          width: info.width,
+          height: info.height,
+          size: bytesToKbytes(info.size),
+          sizeInBytes: info.size,
+        },
+      });
+    }
+
+    return formats;
+  };
+
   // Append AVIF twin variants (original_avif + small/medium/large_avif) for
   // WebP masters. Entries returned here flow through uploadImage's upload +
   // formats persistence untouched, and remove()/replace() iterate all formats
@@ -267,9 +367,17 @@ export default (plugin: any) => {
     // file.getStream() when filepath is gone; our encoder reads from a path.
     const sourceFilepath: string | undefined = file.__sourceFilepath;
     const masterFilepath: string | undefined = file.filepath;
+    const cultureGalleryUpload =
+      file.__imageOptimizationProfile === 'culture-gallery';
     delete file.__sourceFilepath;
+    delete file.__imageOptimizationProfile;
 
-    const rawFormats = (await base.generateResponsiveFormats(file)) ?? [];
+    const readableSource = [sourceFilepath, masterFilepath].find(
+      (candidate): candidate is string => Boolean(candidate) && fs.existsSync(candidate as string)
+    );
+    const rawFormats = cultureGalleryUpload && file.mime === 'image/webp' && readableSource
+      ? await generateWebpResponsiveFormats(file, readableSource)
+      : ((await base.generateResponsiveFormats(file)) ?? []);
     // Move each variant's size prefix inside the image folder (no-op for
     // flat hashes, e.g. gif pass-throughs or pre-folder legacy replaces).
     const baseFormats = rawFormats.map((entry: any) =>
@@ -328,10 +436,13 @@ export default (plugin: any) => {
             file.tmpWorkingDirectory ?? os.tmpdir(),
             `avif-${filePrefix}${(parts?.base ?? file.hash) || 'img'}`
           );
+          const avifProfile = cultureGalleryUpload
+            ? CULTURE_GALLERY_IMAGE_OPTIMIZATION.avif
+            : OPT.avif;
           const info = await sharp(srcPath)
             .rotate()
             .resize({ width: w, height: h, fit: 'inside', withoutEnlargement: true })
-            .avif({ quality: OPT.avif.quality, effort: OPT.avif.effort })
+            .avif({ quality: avifProfile.quality, effort: avifProfile.effort })
             .toFile(outPath);
 
           return {
@@ -411,6 +522,61 @@ export default (plugin: any) => {
     generateResponsiveFormats,
     isResizableImage,
   };
+
+  // Strapi's normal Media Library replace request does not include fileInfo.folder.
+  // enhanceAndValidateFile therefore optimizes the incoming bytes before it knows
+  // which folder the existing asset belongs to. Preserve that folder in the
+  // replacement payload so Culture Gallery replacements receive the same photo
+  // profile as fresh uploads. Explicit caller choices (including null/root) win.
+  const withReplacementFolderPreservation = (baseUpload: any) => {
+    if (!baseUpload?.replace || !baseUpload?.findOne) return baseUpload;
+
+    return {
+      ...baseUpload,
+      async replace(id: string | number, payload: any, options?: any) {
+        const fileInfo = payload?.data?.fileInfo;
+        if (fileInfo?.folder !== undefined) {
+          return baseUpload.replace(id, payload, options);
+        }
+
+        const existing = await baseUpload.findOne(id, { folder: true });
+        const folderId = typeof existing?.folder === 'object'
+          ? existing.folder?.id
+          : existing?.folder;
+        if (folderId == null) {
+          return baseUpload.replace(id, payload, options);
+        }
+
+        return baseUpload.replace(
+          id,
+          {
+            ...payload,
+            data: {
+              ...(payload?.data ?? {}),
+              fileInfo: {
+                ...(fileInfo ?? {}),
+                folder: folderId,
+              },
+            },
+          },
+          options,
+        );
+      },
+    };
+  };
+
+  // Unlike image-manipulation, Strapi registers the upload service as a
+  // factory. Wrap the resolved service rather than looking for methods on the
+  // factory itself. The object branch keeps the extension resilient to a
+  // future Strapi registration-shape change.
+  if (typeof baseUploadFactory === 'function') {
+    plugin.services.upload = (context: any) =>
+      withReplacementFolderPreservation(baseUploadFactory(context));
+  } else {
+    plugin.services.upload = withReplacementFolderPreservation(
+      baseUploadFactory,
+    );
+  }
   extendDealImageUploadPlugin(plugin);
   return plugin;
 };

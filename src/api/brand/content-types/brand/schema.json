@@ -61,6 +61,10 @@
       "type": "boolean",
       "default": false
     },
+    "isAffiliateStore": {
+      "type": "boolean",
+      "default": false
+    },
     "showTrendingDeals": {
       "type": "boolean",
       "default": true

@@ -9,6 +9,7 @@ import {
   dealRef,
   isActionableProductDeal,
   isLiveOffer,
+  latestActionableCatalog,
   PUBLISHED_OFFER_FILTER,
   sanitizeOutput,
   storeRef,
@@ -241,16 +242,23 @@ async function fillDerivedSections(
 ) {
   const now = new Date();
 
-  // All Deals has the same two exclusive modes as the tabs. The aggregate
-  // returns the selected Deals plus an explicit mode; the frontend already
-  // owns the full-catalog request and uses it only in catalog mode.
-  if (page?.allDeals) {
+  // All Deals mirrors the Independence Day policy: selected Deals are
+  // authoritative and retain editor order; a genuinely empty relation gets
+  // the latest actionable Deals sitewide ordered by Published date.
+  if (sectionActive(page?.allDeals)) {
     page.allDeals.source = curatedSelections.allDeals ? 'curated' : 'catalog';
     page.allDeals.deals = curatedSelections.allDeals
       ? (page.allDeals.deals ?? []).filter((deal: any) =>
           isActionableProductDeal(deal, now),
         )
-      : [];
+      : await latestActionableCatalog(strapi, ctx, {
+          uid: 'api::deal.deal',
+          fields: dealRef.fields,
+          populate: dealRef.populate,
+          limit: SECTION_CAPS.allDeals,
+          now,
+          accept: isActionableProductDeal,
+        });
   }
 
   if (sectionActive(page?.topDeals)) {

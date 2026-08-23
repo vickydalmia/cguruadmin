@@ -117,7 +117,17 @@
     "checkoutMerchant": {
       "type": "customField",
       "customField": "global::checkout-merchant",
-      "maxLength": 64
+      "maxLength": 64,
+      "conditions": {
+        "visible": {
+          "!=": [
+            {
+              "var": "isForAffiliateBrand"
+            },
+            true
+          ]
+        }
+      }
     },
     "expiresAt": {
       "type": "datetime"
@@ -138,6 +148,10 @@
         "expired"
       ]
     },
+    "isForAffiliateBrand": {
+      "type": "boolean",
+      "default": false
+    },
     "workedCount": {
       "type": "integer",
       "default": 0,
@@ -157,7 +171,17 @@
     "logoStore": {
       "type": "relation",
       "relation": "manyToOne",
-      "target": "api::store.store"
+      "target": "api::store.store",
+      "conditions": {
+        "visible": {
+          "!=": [
+            {
+              "var": "isForAffiliateBrand"
+            },
+            true
+          ]
+        }
+      }
     },
     "banks": {
       "type": "relation",

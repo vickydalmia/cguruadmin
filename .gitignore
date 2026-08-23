@@ -147,6 +147,7 @@ migration/.checkpoints/
 migration/node_modules/
 migration/dist/
 migration/*.log
+migration/usa/
 # This is an audited DML script, not a database dump.
 # !migration/sql/2026-07-30-update-wordpress-taxonomy-slugs.sql
 .astro/

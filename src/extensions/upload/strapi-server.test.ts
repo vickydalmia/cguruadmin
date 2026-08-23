@@ -3,7 +3,12 @@ import os from 'os';
 import path from 'path';
 import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { IMAGE_BREAKPOINTS } from '../../constants/image';
+import {
+  CULTURE_GALLERY_IMAGE_OPTIMIZATION,
+  IMAGE_BREAKPOINTS,
+  IMAGE_OPTIMIZATION,
+} from '../../constants/image';
+import { CULTURE_GALLERY_MEDIA_FOLDER_NAME } from '../../constants/media-folders';
 // Safe as a static import: the extension only touches the `strapi` global
 // inside its service functions, never at module load.
 import applyExtension from './strapi-server';
@@ -12,6 +17,17 @@ import applyExtension from './strapi-server';
 const logged: { level: string; message: string }[] = [];
 (globalThis as any).strapi = {
   config: { get: (_key: string, fallback: unknown) => fallback },
+  plugin: () => ({
+    service: () => ({
+      getSettings: async () => ({ sizeOptimization: true }),
+    }),
+  }),
+  db: {
+    query: () => ({
+      findOne: async ({ where }: any) =>
+        where.id === 42 ? { name: CULTURE_GALLERY_MEDIA_FOLDER_NAME } : null,
+    }),
+  },
   log: {
     warn: (message: string) => logged.push({ level: 'warn', message }),
     error: (message: string) => logged.push({ level: 'error', message }),
@@ -39,14 +55,17 @@ beforeAll(async () => {
   sourcePath = path.join(tmpDir, 'source-input');
   fs.writeFileSync(sourcePath, png);
   masterPath = path.join(tmpDir, 'optimized-slug');
-  await sharp(png).webp({ quality: 80 }).toFile(masterPath);
+  await sharp(png).webp({ quality: IMAGE_OPTIMIZATION.quality }).toFile(masterPath);
 });
 
 afterAll(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-function buildService(baseOverrides: Record<string, any> = {}) {
+function buildService(
+  baseOverrides: Record<string, any> = {},
+  uploadOverrides: Record<string, any> = {},
+) {
   const base = {
     isImage: vi.fn(async () => true),
     optimize: vi.fn(),
@@ -55,8 +74,14 @@ function buildService(baseOverrides: Record<string, any> = {}) {
     isResizableImage: vi.fn(async () => true),
     ...baseOverrides,
   };
+  const uploadBase = {
+    findOne: vi.fn(async () => ({ id: 100, folder: { id: 42 } })),
+    replace: vi.fn(async (_id: string | number, payload: any) => payload),
+    ...uploadOverrides,
+  };
+  const uploadFactory = vi.fn(() => uploadBase);
   const plugin: any = {
-    services: { 'image-manipulation': base },
+    services: { 'image-manipulation': base, upload: uploadFactory },
     contentTypes: {
       file: {
         schema: {
@@ -66,10 +91,18 @@ function buildService(baseOverrides: Record<string, any> = {}) {
     },
   };
   applyExtension(plugin);
-  return { service: plugin.services['image-manipulation'], base, plugin };
+  const uploadService = plugin.services.upload({ strapi: (globalThis as any).strapi });
+  return {
+    service: plugin.services['image-manipulation'],
+    base,
+    uploadBase,
+    uploadFactory,
+    uploadService,
+    plugin,
+  };
 }
 
-function webpMaster() {
+function webpMaster(cultureGallery = true) {
   return {
     name: 'slug.webp',
     hash: 'slug-a1b2c3d4/slug',
@@ -77,6 +110,9 @@ function webpMaster() {
     mime: 'image/webp',
     filepath: masterPath,
     __sourceFilepath: sourcePath,
+    ...(cultureGallery
+      ? { __imageOptimizationProfile: 'culture-gallery' }
+      : {}),
     tmpWorkingDirectory: tmpDir,
     width: 1600,
     height: 1200,
@@ -85,21 +121,51 @@ function webpMaster() {
 }
 
 describe('AVIF twin generation', () => {
-  it('generates a twin for the original and every applicable breakpoint', async () => {
+  it('generates the complete WebP ladder and a size-efficient AVIF ladder', async () => {
     const { service } = buildService();
     const formats = await service.generateResponsiveFormats(webpMaster());
     const keys = formats.map((entry: any) => entry.key).sort();
 
     expect(keys).toContain('original_avif');
     for (const breakpoint of Object.keys(IMAGE_BREAKPOINTS)) {
-      expect(keys).toContain(`${breakpoint}_avif`);
+      expect(keys).toContain(breakpoint);
     }
-    for (const entry of formats) {
+    expect(
+      keys.some(
+        (key: string) => key !== 'original_avif' && key.endsWith('_avif'),
+      ),
+    ).toBe(true);
+    for (const entry of formats.filter((entry: any) => entry.key.endsWith('_avif'))) {
       expect(entry.file.mime).toBe('image/avif');
       expect(entry.file.ext).toBe('.avif');
       expect(entry.file.sizeInBytes).toBeGreaterThan(0);
       expect(fs.existsSync(entry.file.filepath)).toBe(true);
     }
+  });
+
+  it('encodes responsive WebPs once from the original upload', async () => {
+    const { service, base } = buildService();
+    const formats = await service.generateResponsiveFormats(webpMaster());
+    const webpFormats = formats.filter((entry: any) => !entry.key.endsWith('_avif'));
+
+    expect(base.generateResponsiveFormats).not.toHaveBeenCalled();
+    expect(webpFormats.map((entry: any) => entry.key).sort()).toEqual(
+      Object.keys(IMAGE_BREAKPOINTS).sort(),
+    );
+    for (const entry of webpFormats) {
+      expect(entry.file.mime).toBe('image/webp');
+      expect(entry.file.ext).toBe('.webp');
+      expect(entry.file.sizeInBytes).toBeGreaterThan(0);
+      expect(fs.existsSync(entry.file.filepath)).toBe(true);
+    }
+  });
+
+  it('keeps the existing responsive encoder for media outside the Culture Gallery folder', async () => {
+    const { service, base } = buildService();
+
+    await service.generateResponsiveFormats(webpMaster(false));
+
+    expect(base.generateResponsiveFormats).toHaveBeenCalledTimes(1);
   });
 
   it('still generates twins when the concurrent master upload deletes filepath', async () => {
@@ -114,7 +180,7 @@ describe('AVIF twin generation', () => {
       }),
     });
 
-    const formats = await service.generateResponsiveFormats(webpMaster());
+    const formats = await service.generateResponsiveFormats(webpMaster(false));
     const keys = formats.map((entry: any) => entry.key);
 
     expect(keys).toContain('original_avif');
@@ -198,5 +264,146 @@ describe('background colour extraction', () => {
 
     await expect(service.isImage(file)).resolves.toBe(false);
     expect(file.backgroundColour).toBeNull();
+  });
+});
+
+describe('high-quality WebP master', () => {
+  it('caps large photographs at the high-density editorial limit', async () => {
+    const largePath = path.join(tmpDir, 'large-photograph.jpg');
+    await sharp({
+      create: {
+        width: 3200,
+        height: 2400,
+        channels: 3,
+        background: { r: 92, g: 135, b: 170 },
+      },
+    })
+      .jpeg({ quality: 96 })
+      .toFile(largePath);
+    const { service } = buildService();
+    const optimized = await service.optimize({
+      name: 'culture-team.jpg',
+      hash: 'culture_team_abc123',
+      ext: '.jpg',
+      mime: 'image/jpeg',
+      filepath: largePath,
+      tmpWorkingDirectory: tmpDir,
+      folder: 42,
+    });
+
+    expect(optimized.ext).toBe('.webp');
+    expect(optimized.mime).toBe('image/webp');
+    expect(optimized.width).toBe(
+      CULTURE_GALLERY_IMAGE_OPTIMIZATION.maxDimension,
+    );
+    expect(optimized.height).toBe(1920);
+    expect(optimized.__sourceFilepath).toBe(largePath);
+    expect(optimized.__imageOptimizationProfile).toBe('culture-gallery');
+  });
+
+  it('keeps the lighter default profile outside the Culture Gallery folder', async () => {
+    const largePath = path.join(tmpDir, 'standard-large-photograph.jpg');
+    await sharp({
+      create: {
+        width: 3200,
+        height: 2400,
+        channels: 3,
+        background: { r: 92, g: 135, b: 170 },
+      },
+    })
+      .jpeg({ quality: 96 })
+      .toFile(largePath);
+    const { service } = buildService();
+    const optimized = await service.optimize({
+      name: 'other-page.jpg',
+      hash: 'other_page_abc123',
+      ext: '.jpg',
+      mime: 'image/jpeg',
+      filepath: largePath,
+      tmpWorkingDirectory: tmpDir,
+    });
+
+    expect(optimized.width).toBe(IMAGE_OPTIMIZATION.maxDimension);
+    expect(optimized.height).toBe(1440);
+    expect(optimized.__imageOptimizationProfile).toBeUndefined();
+  });
+});
+
+describe('replacement folder preservation', () => {
+  it('carries the existing Culture Gallery folder into replacement optimization', async () => {
+    const { uploadService, uploadBase, uploadFactory } = buildService();
+    const payload = {
+      data: { fileInfo: { name: 'replacement.jpg' } },
+      file: { originalFilename: 'replacement.jpg' },
+    };
+
+    await uploadService.replace('100', payload, { user: { id: 5 } });
+
+    expect(uploadFactory).toHaveBeenCalledTimes(1);
+    expect(uploadBase.findOne).toHaveBeenCalledWith('100', { folder: true });
+    expect(uploadBase.replace).toHaveBeenCalledWith(
+      '100',
+      {
+        data: {
+          fileInfo: {
+            name: 'replacement.jpg',
+            folder: 42,
+          },
+        },
+        file: payload.file,
+      },
+      { user: { id: 5 } },
+    );
+    expect(payload.data.fileInfo).not.toHaveProperty('folder');
+  });
+
+  it('preserves an explicitly supplied replacement folder', async () => {
+    const { uploadService, uploadBase } = buildService();
+    const payload = {
+      data: { fileInfo: { folder: 7 } },
+      file: { originalFilename: 'replacement.jpg' },
+    };
+
+    await uploadService.replace('100', payload);
+
+    expect(uploadBase.findOne).not.toHaveBeenCalled();
+    expect(uploadBase.replace).toHaveBeenCalledWith('100', payload, undefined);
+  });
+
+  it('delegates unchanged when the existing asset has no folder', async () => {
+    const { uploadService, uploadBase } = buildService({}, {
+      findOne: vi.fn(async () => ({ id: 100, folder: null })),
+    });
+    const payload = {
+      data: { fileInfo: {} },
+      file: { originalFilename: 'replacement.jpg' },
+    };
+
+    await uploadService.replace('100', payload);
+
+    expect(uploadBase.replace).toHaveBeenCalledWith('100', payload, undefined);
+  });
+
+  it('preserves the original missing-asset error', async () => {
+    const notFound = new Error('asset not found');
+    const { uploadService, uploadBase } = buildService({}, {
+      findOne: vi.fn(async () => null),
+      replace: vi.fn(async () => {
+        throw notFound;
+      }),
+    });
+    const payload = {
+      data: { fileInfo: {} },
+      file: { originalFilename: 'replacement.jpg' },
+    };
+
+    await expect(
+      uploadService.replace('missing', payload),
+    ).rejects.toBe(notFound);
+    expect(uploadBase.replace).toHaveBeenCalledWith(
+      'missing',
+      payload,
+      undefined,
+    );
   });
 });

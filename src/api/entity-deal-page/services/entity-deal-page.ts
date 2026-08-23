@@ -112,6 +112,8 @@ const DEAL_FIELDS = [
   // Read by the festive-offer walker, which strips it from the response before
   // it reaches the UI (see src/utils/festive-offer-response.ts).
   'checkoutMerchant',
+  // Affiliate-brand offers render the BRAND logo in their merchant chip.
+  'isForAffiliateBrand',
   'expiresAt',
   'contentStatus',
   'scheduledAt',

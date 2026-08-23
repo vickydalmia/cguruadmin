@@ -459,15 +459,30 @@ describe('deal-of-the-day aggregate population', () => {
     expect(harness.findManyDeals).not.toHaveBeenCalled();
   });
 
-  it('marks an empty All Deals relation for catalog fallback', async () => {
-    const harness = createHarness({
-      allDeals: { enabled: true, deals: [] },
-    });
+  it('fills an empty All Deals relation with the latest 50 actionable Deals', async () => {
+    const catalog = Array.from({ length: 60 }, (_, index) =>
+      actionableDeal(index, index < 10 ? { dealImage: null } : {}),
+    );
+    const harness = createHarness(
+      { allDeals: { enabled: true, deals: [] } },
+      catalog,
+    );
 
     const response = await harness.controller.dealOfTheDayFull(harness.ctx as any);
 
-    expect(response.data.allDeals).toMatchObject({ source: 'catalog', deals: [] });
-    expect(harness.findManyDeals).not.toHaveBeenCalled();
+    expect(response.data.allDeals.source).toBe('catalog');
+    expect(response.data.allDeals.deals).toHaveLength(50);
+    expect(response.data.allDeals.deals[0].documentId).toBe('deal-10');
+    expect(response.data.allDeals.deals.at(-1)?.documentId).toBe('deal-59');
+    expect(harness.findManyDeals).toHaveBeenCalledTimes(1);
+    expect(harness.findManyDeals).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filters: { contentStatus: { $eq: 'published' } },
+        sort: ['publishedOn:desc', 'publishedAt:desc'],
+        start: 0,
+        limit: 100,
+      }),
+    );
   });
 
   it('keeps All Deals curated when every selected Deal becomes unusable', async () => {

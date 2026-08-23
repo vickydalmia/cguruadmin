@@ -1,5 +1,11 @@
 import type { Core } from '@strapi/strapi';
 
+import {
+  normaliseAffiliateOfferFields,
+  validateAffiliateBrandFlip,
+  validateAffiliateOfferForWrite,
+} from '../affiliate-offer-consistency';
+import { isAffiliateOfferUid } from '../../constants/affiliate-offer';
 import { validateChangedFields } from '../changed-field-validation';
 import { validateCheckoutMerchantForWrite } from '../checkout-merchant-validation';
 import { isCheckoutMerchantOfferUid } from '../../constants/checkout-merchant';
@@ -147,6 +153,16 @@ export const MUTATOR_STEPS: readonly ValidationStep[] = [
     applies: isFestiveOfferUid,
     run: ({ data }) => normaliseFestiveOfferFields(data),
   },
+  {
+    // Inverse direction of the festive pair: `logoStore`/`checkoutMerchant`
+    // are visible-when-OFF, so turning the affiliate toggle ON hides them,
+    // OMITS them from the payload, and would leave the stored values live.
+    // Clear them explicitly. No-ops when the toggle is absent, so partial
+    // writes (cron, imports) never wipe a Logo Store as a side effect.
+    name: 'normaliseAffiliateOfferFields',
+    applies: isAffiliateOfferUid,
+    run: ({ data }) => normaliseAffiliateOfferFields(data),
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -238,6 +254,25 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
             documentId,
           )
         : undefined,
+  },
+  {
+    // Affiliate-brand offers: toggle ON means zero Stores, only affiliate
+    // Brands, and no payload-explicit logoStore/checkoutMerchant. CM-gated
+    // inside, same as the one-Store rule above.
+    name: 'validateAffiliateOfferForWrite',
+    applies: isAffiliateOfferUid,
+    run: ({ strapi, uid, action, data, documentId }) =>
+      isAffiliateOfferUid(uid)
+        ? validateAffiliateOfferForWrite(strapi, uid, action, data, documentId)
+        : undefined,
+  },
+  {
+    // The other half of the affiliate invariant: a Brand cannot drop its
+    // "Affiliate Store" flag while affiliate offers still reference it.
+    name: 'validateAffiliateBrandFlip',
+    applies: (uid) => uid === 'api::brand.brand',
+    run: ({ strapi, uid, action, data, documentId }) =>
+      validateAffiliateBrandFlip(strapi, uid, action, data, documentId),
   },
   {
     // checkoutMerchant is a custom STRING field, not a relation, so nothing at

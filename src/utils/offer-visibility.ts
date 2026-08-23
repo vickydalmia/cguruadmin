@@ -45,6 +45,8 @@ export const DEAL_FIELDS = [
   // Read by the festive-offer walker, which strips it from the response before
   // it reaches the UI (see src/utils/festive-offer-response.ts).
   'checkoutMerchant',
+  // Affiliate-brand offers render the BRAND logo in their merchant chip.
+  'isForAffiliateBrand',
   'expiresAt',
   'contentStatus',
   'publishedOn',
@@ -108,6 +110,63 @@ export async function sanitizeOutput(
 ): Promise<any> {
   const schema = strapi.contentType(uid as any) as any;
   return await strapi.contentAPI.sanitize.output(data, schema, { auth: ctx.state.auth });
+}
+
+const CATALOG_QUERY_BATCH_SIZE = 100;
+
+// Collect a fixed number of valid newest-first records even when the first
+// query batch contains expired or otherwise unusable entries. Independence
+// Day and Deal of the Day share this driver so their "selected, otherwise
+// latest" sections cannot drift apart.
+export async function latestActionableCatalog(
+  strapi: Core.Strapi,
+  ctx: any,
+  {
+    uid,
+    fields,
+    populate,
+    limit,
+    now,
+    accept,
+  }: {
+    uid: 'api::coupon.coupon' | 'api::deal.deal';
+    fields: readonly string[];
+    populate: Record<string, unknown>;
+    limit: number;
+    now: Date;
+    accept: (item: any, now: Date) => boolean;
+  },
+): Promise<any[]> {
+  const accepted: any[] = [];
+  const seen = new Set<string>();
+  let start = 0;
+
+  while (accepted.length < limit) {
+    const rows = await strapi.documents(uid).findMany({
+      filters: PUBLISHED_OFFER_FILTER,
+      fields: fields as any,
+      populate: populate as any,
+      sort: NEWEST_FIRST as any,
+      start,
+      limit: CATALOG_QUERY_BATCH_SIZE,
+    } as any);
+    const batch = Array.isArray(rows) ? rows : [];
+    if (batch.length === 0) break;
+
+    const sanitized = await sanitizeOutput(strapi, ctx, uid, batch);
+    for (const item of Array.isArray(sanitized) ? sanitized : []) {
+      const documentId = item?.documentId;
+      if (!documentId || seen.has(documentId) || !accept(item, now)) continue;
+      accepted.push(item);
+      seen.add(documentId);
+      if (accepted.length >= limit) break;
+    }
+
+    if (batch.length < CATALOG_QUERY_BATCH_SIZE) break;
+    start += batch.length;
+  }
+
+  return accepted;
 }
 
 // Shared backfill driver: keep valid curated deals in editor order, then fill

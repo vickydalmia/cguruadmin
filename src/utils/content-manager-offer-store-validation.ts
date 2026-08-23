@@ -25,8 +25,9 @@ const hasOwn = (value: object, key: PropertyKey): boolean =>
 // The document service also accepts shorthand relation values — a bare
 // id/documentId, a single relation object, or null (clear all). Normalize
 // them to the array form resultingRelations understands so a valid scripted
-// CM write is not miscounted as zero Stores.
-const normalizeRelationShorthand = (value: unknown): unknown => {
+// CM write is not miscounted as zero Stores. Also used by
+// affiliate-offer-consistency.ts for the same reason.
+export const normalizeRelationShorthand = (value: unknown): unknown => {
   if (value === null) return [];
   if (typeof value === 'string' || typeof value === 'number') return [value];
   if (

@@ -124,6 +124,8 @@ describe('index.ts merged hint map', () => {
       ['api::coupon.coupon', 'uniqueCouponPool'],
       ['api::redirect.redirect', 'from'],
       ['api::redirect.redirect', 'to'],
+      // affiliate-offer-consistency.ts mirror
+      ['api::brand.brand', 'isAffiliateStore'],
       ...['store', 'brand', 'category', 'bank'].flatMap(
         (name): Array<[string, string]> => [
           [`api::${name}.${name}`, 'name'],

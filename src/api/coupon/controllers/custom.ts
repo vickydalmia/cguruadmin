@@ -113,6 +113,8 @@ const COUPON_PUBLIC_FIELDS = [
   // Read by the festive-offer walker, which strips it from the response before
   // it reaches the UI (see src/utils/festive-offer-response.ts).
   'checkoutMerchant',
+  // Drives the per-offer store-style card on entity pages (no listing logo).
+  'isForAffiliateBrand',
   'expiresAt',
   'contentStatus',
   'scheduledAt',
@@ -138,6 +140,8 @@ const DEAL_PUBLIC_FIELDS = [
   // Read by the festive-offer walker, which strips it from the response before
   // it reaches the UI (see src/utils/festive-offer-response.ts).
   'checkoutMerchant',
+  // Drives the per-offer store-style card on entity pages (no listing logo).
+  'isForAffiliateBrand',
   'expiresAt',
   'contentStatus',
   'scheduledAt',

@@ -225,6 +225,39 @@ or choose any Store radio to reduce the relation immediately to that Store. The
 next Content Manager save is rejected until exactly one remains, even if the
 editor changed only an unrelated field.
 
+### The Affiliate brand offer toggle
+
+Coupon and Deal carry an `isForAffiliateBrand` boolean whose only edit control
+is `AffiliateOfferToggle`, rendered at the top of the Taxonomies panel (the
+field is hidden from the main form via `OFFER_PANEL_ONLY_FIELDS`, but stays a
+list column). It reuses `BooleanConfirmInput`, so flipping it asks for
+confirmation like every other boolean.
+
+- **Enable gate.** Turning OFF is always allowed. Turning ON requires zero
+  Stores AND zero Brands currently selected — computed from the live selection
+  each `RelationSection` reports upward via its `onSelectedState` prop
+  (persisted relations + pending form diff). While an existing entry's
+  relations are still loading, the gate counts as blocked.
+- **While ON.** The Stores section gets `selectionDisabled` (radios and
+  unchecked boxes disabled, select handlers no-op — removal stays enabled so a
+  legacy-violating row can be cleaned); the Brands section gets
+  `extraCandidateFilters` appending `filters[isAffiliateStore][$eq]=true`, so
+  only Brands flagged "Affiliate Store" are listed (multi-select unchanged).
+  `logoStore` and `checkoutMerchant` disappear from the main form via native
+  schema `conditions.visible` (`!= true`, NULL-safe for legacy rows).
+- **Clearing is server-side.** The admin omits conditionally-hidden fields from
+  the PUT body, so `normaliseAffiliateOfferFields`
+  (`src/utils/affiliate-offer-consistency.ts`, Group A mutator) nulls
+  `logoStore`/`checkoutMerchant` whenever a payload carries the toggle as
+  `true`. It no-ops when the toggle is absent, so cron/import partial writes
+  never clear anything as a side effect.
+- **Validation.** `validateAffiliateOfferForWrite` (Group B, CM-gated like the
+  one-Store rule) enforces: toggle ON ⇒ zero resulting Stores, every resulting
+  Brand flagged `isAffiliateStore`, and no payload-explicit
+  `logoStore`/`checkoutMerchant`. `validateAffiliateBrandFlip` (Group B, all
+  write origins) blocks un-flagging a Brand while affiliate offers still
+  reference it.
+
 ---
 
 ## 4. The Top Pick Coupons panel
@@ -328,6 +361,12 @@ editor to the Store section. Loading the stored relation even when `stores` is
 absent is intentional: it makes legacy cleanup mandatory on the record's next
 admin save without modifying untouched data.
 
+`validateAffiliateOfferForWrite` sits directly after it in the same pipeline
+and follows the identical pattern (CM gate, stored-relation re-read, shorthand
+resolution) for the affiliate invariant, and `normaliseAffiliateOfferFields` /
+`validateAffiliateBrandFlip` complete the trio — see "The Affiliate brand offer
+toggle" in §3 and `src/utils/affiliate-offer-consistency.ts`.
+
 ### The rest of bootstrap
 
 The search/index integrity checks plus layout hiding are part of the awaited
@@ -413,6 +452,21 @@ computes durable ISR invalidation scopes. `destroy` stops the outbox dispatcher.
     picker offers 5-minute steps, and a boolean asks for confirmation. A new
     store's slug is a plain text field that starts empty and offers no
     Regenerate button.
+13. **Affiliate toggle gate.** On a new coupon the toggle sits first in the
+    Taxonomies panel and is enabled. Select a Store or Brand — it disables with
+    the "untick first" hint; remove the selection (unsaved) — it re-enables
+    live. On an entry with saved Stores/Brands it stays disabled until they are
+    removed.
+14. **Affiliate mode.** Turn the toggle ON (confirm dialog): Stores radios
+    disable with a hint, the Brands list refetches showing only Brands flagged
+    "Affiliate Store", and `Logo Store` + `Checkout merchant` vanish from the
+    main form. Save, reload: the toggle persists and both hidden fields are
+    empty in the database. Turn it OFF: everything returns, both fields empty.
+15. **Affiliate enforcement.** A CM-route write with the toggle ON and a Store
+    is rejected at `stores`; with a non-affiliate Brand at `brands` (named in
+    the message). Un-flagging a Brand still referenced by affiliate offers is
+    rejected at `isAffiliateStore` with the offer count. A legacy offer with a
+    NULL toggle shows both fields (the `!=` condition) and behaves as before.
 
 ---
 

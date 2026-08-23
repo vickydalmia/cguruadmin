@@ -77,6 +77,9 @@ describe('Deal of the Day section limits', () => {
         genZDrops: {
           deals: Array.from({ length: 6 }, (_, id) => ({ id: id + 20 })),
         },
+        allDeals: {
+          deals: Array.from({ length: 50 }, (_, id) => ({ id: id + 30 })),
+        },
       })
     ).resolves.toBeUndefined();
   });
@@ -90,12 +93,16 @@ describe('Deal of the Day section limits', () => {
         genZDrops: {
           deals: Array.from({ length: 7 }, (_, id) => ({ id: id + 20 })),
         },
+        allDeals: {
+          deals: Array.from({ length: 51 }, (_, id) => ({ id: id + 30 })),
+        },
       });
       throw new Error('expected validation to fail');
     } catch (error: any) {
       expect(error.details.errors.map((item: any) => item.path)).toEqual([
         ['topPicks', 'deals'],
         ['genZDrops', 'deals'],
+        ['allDeals', 'deals'],
       ]);
     }
   });
