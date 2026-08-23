@@ -68,6 +68,7 @@ import {
   type ImportSummary,
   type ParsedCodes,
 } from '../utils/parse-codes';
+import { downloadBlob } from '../utils/download-blob';
 
 const UPLOAD_PATH = '/unique-coupon/upload';
 const STATS_PATH = '/unique-coupon/stats';
@@ -134,14 +135,7 @@ function downloadSampleCsv() {
   const blob = new Blob([`\ufeff${SAMPLE_CODES_CSV}`], {
     type: 'text/csv;charset=utf-8',
   });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = SAMPLE_CODES_FILE_NAME;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+  downloadBlob(SAMPLE_CODES_FILE_NAME, blob);
 }
 
 type Progress = { done: number; total: number };
