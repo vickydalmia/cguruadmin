@@ -12,7 +12,11 @@ import { hasTrustedIpsConfigured } from './middlewares/rate-limit';
 import { initializeSearchRuntime } from './api/search/services/search';
 import { startIsrOutbox, stopIsrOutbox } from './isr-outbox/runtime';
 import { installIsrDocumentMiddleware } from './isr-outbox/document-middleware';
-import { installRecordLockDocumentMiddleware } from './middlewares/record-lock-document';
+// Lives in src/register/, NOT src/middlewares/: Strapi auto-loads every file
+// in src/middlewares as a global HTTP middleware via its default export, and
+// this module has none — it would register 'global::record-lock-document' as
+// an undefined factory that throws the moment anything references it.
+import { installRecordLockDocumentMiddleware } from './register/record-lock-document';
 import {
   getCuratedOfferRelations,
   registerCuratedOfferRelationQueryFilter,

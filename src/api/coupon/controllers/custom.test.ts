@@ -1,11 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { validate } from '@strapi/utils';
 
+import couponSchema from '../content-types/coupon/schema.json';
+import dealSchema from '../../deal/content-types/deal/schema.json';
+import { AMAZON_AFFILIATE_DISCLOSURE_FIELD } from '../../../utils/amazon-affiliate-disclosure';
 import createCouponController from './custom';
 
 const REDEEM_TEST_SECRET = 'redeem-test-secret';
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 function createHarness() {
@@ -76,6 +81,67 @@ function createHarness() {
     sanitizeQuery,
   };
 }
+
+const RUNTIME_SCALAR_ATTRIBUTES = {
+  createdAt: { type: 'datetime' },
+  updatedAt: { type: 'datetime' },
+  publishedAt: { type: 'datetime' },
+};
+
+const queryValidators = validate.createAPIValidators({
+  getModel: () => undefined,
+});
+
+function runtimeSchema(schema: { attributes: Record<string, any> }) {
+  return {
+    ...schema,
+    attributes: {
+      ...Object.fromEntries(
+        Object.entries(schema.attributes).map(([name, attribute]) => [
+          name,
+          attribute?.type === 'customField'
+            ? { ...attribute, type: 'string' }
+            : attribute,
+        ]),
+      ),
+      ...RUNTIME_SCALAR_ATTRIBUTES,
+    },
+  };
+}
+
+async function expectSchemaValidFields(
+  fields: readonly string[],
+  schema: { attributes: Record<string, unknown> },
+) {
+  vi.stubGlobal('strapi', {
+    config: { get: () => [] },
+  });
+  await expect(
+    queryValidators.fields([...fields], runtimeSchema(schema)),
+  ).resolves.toBeUndefined();
+}
+
+describe('public offer field projections', () => {
+  it('never selects the Deal-only Amazon disclosure flag from Coupons', async () => {
+    const harness = createHarness();
+
+    await harness.controller.getAllOffers(harness.ctx as any);
+
+    const fields = harness.couponFindMany.mock.calls[0]?.[0]?.fields as string[];
+    expect(fields).not.toContain(AMAZON_AFFILIATE_DISCLOSURE_FIELD);
+    await expectSchemaValidFields(fields, couponSchema);
+  });
+
+  it('selects the Amazon disclosure flag from Product Deals', async () => {
+    const harness = createHarness();
+
+    await harness.controller.getAllDeals(harness.ctx as any);
+
+    const fields = harness.dealFindMany.mock.calls[0]?.[0]?.fields as string[];
+    expect(fields).toContain(AMAZON_AFFILIATE_DISCLOSURE_FIELD);
+    await expectSchemaValidFields(fields, dealSchema);
+  });
+});
 
 describe('ISR offer route inventory', () => {
   it('returns every currently visible Coupon and Deal singular route', async () => {

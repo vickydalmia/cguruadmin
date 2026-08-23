@@ -93,7 +93,10 @@ export const describeErrorLocation = (
 // "newlyAdded.items[].cardImage" rule paths, keyed without indices so an error
 // path like newlyAdded.items.1.cardImage can look up its size requirement.
 const IMAGE_RULE_BY_PATH = new Map(
-  HOMEPAGE_IMAGE_RULES.map((rule) => [rule.path.replace('[]', ''), rule])
+  // Strip EVERY '[]' (string replace would only strip the first): the lookup
+  // key below drops all numeric segments, so a rule path with two repeatable
+  // levels would otherwise never match.
+  HOMEPAGE_IMAGE_RULES.map((rule) => [rule.path.replace(/\[\]/g, ''), rule])
 );
 
 export const imageHintFor = (path: Array<string | number>): string | null => {

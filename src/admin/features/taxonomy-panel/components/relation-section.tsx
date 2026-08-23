@@ -177,6 +177,16 @@ export function RelationSection({
           all.splice(0, all.length, ...merged);
           const pageCount = body?.pagination?.pageCount ?? 1;
           if (page >= pageCount || results.length === 0) break;
+          if (page === 50) {
+            // Hard cap reached with pages still remaining: the persisted
+            // baseline would be silently incomplete, and edits computed
+            // against it could drop relations without a disconnect. Fail
+            // into the retryable error state instead of proceeding.
+            throw new Error(
+              `${config.field} has ${pageCount} pages of persisted relations — ` +
+                'refusing to edit against a truncated baseline',
+            );
+          }
         }
         if (cancelled) return;
         persistedDocumentIdsRef.current = new Set(
@@ -362,6 +372,14 @@ export function RelationSection({
   };
 
   const toggle = (c: Candidate) => {
+    // The persisted baseline must be loaded before any diff is computed.
+    // Without this, ticking an already-persisted relation (rendered
+    // unchecked while the baseline still loads) and unticking it again
+    // would skip its disconnect command — the save would silently keep a
+    // relation the panel showed as removed. Mirrors the guard in
+    // applySingleRelationChange; for new entries the baseline is an empty
+    // set and this never blocks.
+    if (!selectedRelationsReady || !persistedDocumentIdsRef.current) return;
     const exists = selectedList.some((s) => s.documentId === c.documentId);
     if (!exists && selectionDisabled) return;
     if (
@@ -692,8 +710,12 @@ export function RelationSection({
                   <Checkbox
                     checked={selectedDocIds.has(c.documentId)}
                     disabled={
-                      !selectedDocIds.has(c.documentId) &&
-                      (atSelectionLimit || selectionDisabled)
+                      // Same not-ready gate as the Radio list: until the
+                      // persisted baseline loads, any toggle would diff
+                      // against an empty selection.
+                      !selectedRelationsReady ||
+                      (!selectedDocIds.has(c.documentId) &&
+                        (atSelectionLimit || selectionDisabled))
                     }
                     onCheckedChange={() => toggle(c)}
                   >

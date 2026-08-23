@@ -116,9 +116,6 @@ const COUPON_PUBLIC_FIELDS = [
   'checkoutMerchant',
   // Drives the per-offer store-style card on entity pages (no listing logo).
   'isForAffiliateBrand',
-  // Consumed and removed by arrayizeOfferText after it derives the final
-  // Amazon Creator Connections condition.
-  AMAZON_AFFILIATE_DISCLOSURE_FIELD,
   'expiresAt',
   'contentStatus',
   'scheduledAt',
@@ -146,6 +143,9 @@ const DEAL_PUBLIC_FIELDS = [
   'checkoutMerchant',
   // Drives the per-offer store-style card on entity pages (no listing logo).
   'isForAffiliateBrand',
+  // Consumed and removed by arrayizeOfferText after it derives the final
+  // Amazon Creator Connections condition.
+  AMAZON_AFFILIATE_DISCLOSURE_FIELD,
   'expiresAt',
   'contentStatus',
   'scheduledAt',

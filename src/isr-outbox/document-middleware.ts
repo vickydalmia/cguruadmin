@@ -255,6 +255,7 @@ export function installIsrDocumentMiddleware(strapi: Core.Strapi): void {
             [
               'api::homepage.homepage',
               'api::deal-of-the-day-page.deal-of-the-day-page',
+              'api::independence-day-sale-page.independence-day-sale-page',
             ].includes(context.uid) &&
             ['create', 'update', 'publish'].includes(context.action)
           ) {

@@ -92,6 +92,11 @@ describe("search index migrations", () => {
       "utf8",
     );
     const bootstrap = source.slice(source.indexOf("async bootstrap"));
+    // Presence FIRST: indexOf returns -1 when the call is missing, and
+    // -1 < any found index — without this guard the ordering assertion
+    // below passes vacuously if the reconciliation runner is deleted.
+    expect(bootstrap).toContain("runDatabaseReconciliations(strapi)");
+    expect(bootstrap).toContain("initializeSearchRuntime(strapi)");
     expect(
       bootstrap.indexOf("runDatabaseReconciliations(strapi)"),
     ).toBeLessThan(bootstrap.indexOf("initializeSearchRuntime(strapi)"));

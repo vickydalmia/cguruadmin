@@ -205,6 +205,8 @@ const COMPONENT_ENTRY_TITLES: Record<string, string> = {
   'deal-day.telegram-deals': 'heading',
   'deal-day.telegram-deal-item': 'titleOverride',
   'deal-day.section-heading': 'heading',
+  'festival.coupon-category-tab': 'labelOverride',
+  'festival.coupon-store-tab': 'labelOverride',
   'shared.cta': 'label',
   'shared.telegram-cta': 'heading',
   'shared.newsletter': 'heading',

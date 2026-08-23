@@ -20,6 +20,8 @@ const OVERRIDE_FILLS: Array<{
   { componentUid: 'home.bank-offer-item', overrideField: 'subtitle', relationField: 'bank', relationLabel: 'shortDescription' },
   { componentUid: 'deal-day.store-tab', overrideField: 'labelOverride', relationField: 'store', relationLabel: 'name' },
   { componentUid: 'deal-day.telegram-deal-item', overrideField: 'titleOverride', relationField: 'deal', relationLabel: 'title' },
+  { componentUid: 'festival.coupon-category-tab', overrideField: 'labelOverride', relationField: 'category', relationLabel: 'name' },
+  { componentUid: 'festival.coupon-store-tab', overrideField: 'labelOverride', relationField: 'store', relationLabel: 'name' },
 ];
 
 export async function fillHomepageOverrides(strapi: Core.Strapi): Promise<void> {
