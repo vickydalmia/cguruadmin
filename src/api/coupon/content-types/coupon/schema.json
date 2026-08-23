@@ -126,7 +126,7 @@
     },
     "isForAffiliateBrand": {
       "type": "boolean",
-      "default": false
+      "default": true
     },
     "workedCount": {
       "type": "integer",

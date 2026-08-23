@@ -6,6 +6,8 @@ import {
   validateAffiliateOfferForWrite,
 } from './affiliate-offer-consistency';
 import type { AffiliateOfferUid } from '../constants/affiliate-offer';
+import couponSchema from '../api/coupon/content-types/coupon/schema.json';
+import dealSchema from '../api/deal/content-types/deal/schema.json';
 
 const STORE_ONE = { id: 1, documentId: 'store-1' };
 const AFFILIATE_BRAND = {
@@ -61,6 +63,18 @@ const errorPaths = (error: unknown) =>
   (error as { details?: { errors?: { path?: string[] }[] } }).details?.errors?.map(
     (entry) => entry.path,
   );
+
+describe('affiliate offer schema defaults', () => {
+  it.each([
+    ['coupon', couponSchema],
+    ['deal', dealSchema],
+  ])('starts each new %s as an affiliate-brand offer', (_name, schema) => {
+    expect(schema.attributes.isForAffiliateBrand).toEqual({
+      type: 'boolean',
+      default: true,
+    });
+  });
+});
 
 describe('normaliseAffiliateOfferFields', () => {
   it('leaves a payload without the toggle byte-identical', () => {

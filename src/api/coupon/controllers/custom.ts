@@ -4,6 +4,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { publishedOnlyFilters } from '../../../utils/content-status';
 import { arrayizeOfferText } from '../../../utils/offer-text';
 import { attachFestiveOffers } from '../../../utils/festive-offer-response';
+import { AMAZON_AFFILIATE_DISCLOSURE_FIELD } from '../../../utils/amazon-affiliate-disclosure';
 
 const MAX_PAGE_SIZE = 100;
 const clampPageSize = (raw: unknown, fallback: number) =>
@@ -115,6 +116,9 @@ const COUPON_PUBLIC_FIELDS = [
   'checkoutMerchant',
   // Drives the per-offer store-style card on entity pages (no listing logo).
   'isForAffiliateBrand',
+  // Consumed and removed by arrayizeOfferText after it derives the final
+  // Amazon Creator Connections condition.
+  AMAZON_AFFILIATE_DISCLOSURE_FIELD,
   'expiresAt',
   'contentStatus',
   'scheduledAt',

@@ -207,6 +207,14 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
       'Discount from the pricing fields — anything written here appears ' +
       'after them under "Any Other Condition".',
   },
+  {
+    uid: 'api::deal.deal',
+    field: 'enableAmazonAffiliateDisclosure',
+    hint:
+      'When enabled for a Deal assigned to the Amazon Store or Brand, appends ' +
+      'the Amazon Creator Connections disclosure as the final item under ' +
+      '"Any Other Condition". Existing written conditions stay unchanged.',
+  },
   // Mirrors coupon-type-consistency.ts: code and uniqueCouponPool are mutually
   // exclusive, keyed off couponType.
   {
@@ -416,6 +424,7 @@ const CONTENT_TYPE_FIELD_LABELS: Record<string, Record<string, string>> = {
     logoStore: 'Logo Store (image only)',
     checkoutMerchant: 'Checkout merchant (Store or Brand)',
     isForAffiliateBrand: 'Affiliate brand offer',
+    enableAmazonAffiliateDisclosure: 'Amazon affiliate disclosure',
   },
   'api::menu.menu': {
     notification: 'Notification',

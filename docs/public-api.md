@@ -375,6 +375,12 @@ aggregate: Product Deals carry `couponType` and a `uniqueCouponPool` relation
 too. Coupon and related-Coupon objects do not expose Coupon-owned media; their
 populated entity relations provide logos/icons for presentation.
 
+For a Product Deal assigned to the Amazon Store or Brand, enabling
+`enableAmazonAffiliateDisclosure` appends the Amazon Creator Connections
+disclosure after all editor-authored `content`. Public responses expose the
+result as the final “Any Other Condition” item and do not expose the internal
+boolean itself.
+
 The public URL uses the compact database `id`; redemption continues to use the
 Coupon's Strapi `documentId` internally.
 

@@ -3,6 +3,10 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Core } from "@strapi/strapi";
 import { normaliseImageBackgroundColour } from "../../../constants/image-background";
 import { publishedOnlyFilters } from "../../../utils/content-status";
+import {
+  AMAZON_AFFILIATE_DISCLOSURE_FIELD,
+  withAmazonAffiliateDisclosure,
+} from "../../../utils/amazon-affiliate-disclosure";
 import { buildDealComputedContent } from "../../../utils/deal-computed-content";
 import { formatDealDiscount } from "../../../utils/deal-discount";
 import {
@@ -170,6 +174,7 @@ const DEAL_FIELDS = [
   "expiresAt",
   // Affiliate-brand offers resolve the BRAND logo/owner in mapOffer.
   "isForAffiliateBrand",
+  AMAZON_AFFILIATE_DISCLOSURE_FIELD,
   // Feeds the search card's Show Details + redeem-modal bullets, matching
   // every other Deal surface (computed price block + written content).
   "content",
@@ -544,6 +549,8 @@ function mapOffer(document: any, type: "coupon" | "deal") {
   const name = cleanText(document?.title, 300);
   if (!name) return null;
   const documentId = cleanText(document?.documentId, 160);
+  const dealContent =
+    type === "deal" ? withAmazonAffiliateDisclosure(document ?? {}) : null;
 
   const owner = offerOwner(document, type);
   const ownerName = cleanText(owner?.name, 160);
@@ -612,8 +619,8 @@ function mapOffer(document: any, type: "coupon" | "deal") {
           // exactly like other Deal cards. Content is CMS richtext already
           // sanitised at write time (sanitizeRichtextData).
           content:
-            typeof document?.content === "string" && document.content.trim()
-              ? document.content
+            typeof dealContent === "string" && dealContent.trim()
+              ? dealContent
               : null,
           computedContent: buildDealComputedContent(document ?? {}),
         }

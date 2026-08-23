@@ -150,6 +150,10 @@
     },
     "isForAffiliateBrand": {
       "type": "boolean",
+      "default": true
+    },
+    "enableAmazonAffiliateDisclosure": {
+      "type": "boolean",
       "default": false
     },
     "workedCount": {

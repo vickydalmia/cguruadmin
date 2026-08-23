@@ -122,6 +122,7 @@ describe('index.ts merged hint map', () => {
       ['api::deal.deal', 'discountPrefix'],
       ['api::coupon.coupon', 'code'],
       ['api::coupon.coupon', 'uniqueCouponPool'],
+      ['api::deal.deal', 'enableAmazonAffiliateDisclosure'],
       ['api::redirect.redirect', 'from'],
       ['api::redirect.redirect', 'to'],
       // affiliate-offer-consistency.ts mirror

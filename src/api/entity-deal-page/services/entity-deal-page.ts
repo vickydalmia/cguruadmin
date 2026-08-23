@@ -1,6 +1,7 @@
 import type { Core } from '@strapi/strapi';
 import { errors } from '@strapi/utils';
 import { arrayizeOfferText } from '../../../utils/offer-text';
+import { AMAZON_AFFILIATE_DISCLOSURE_FIELD } from '../../../utils/amazon-affiliate-disclosure';
 import { attachFestiveOffers } from '../../../utils/festive-offer-response';
 import {
   CANONICAL_PATH_RULE,
@@ -114,6 +115,9 @@ const DEAL_FIELDS = [
   'checkoutMerchant',
   // Affiliate-brand offers render the BRAND logo in their merchant chip.
   'isForAffiliateBrand',
+  // Consumed and removed by arrayizeOfferText after it derives the final
+  // Amazon Creator Connections condition.
+  AMAZON_AFFILIATE_DISCLOSURE_FIELD,
   'expiresAt',
   'contentStatus',
   'scheduledAt',

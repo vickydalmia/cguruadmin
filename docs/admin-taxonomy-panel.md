@@ -215,11 +215,14 @@ The schemas and document API deliberately keep `stores` as `manyToMany`. Public
 responses therefore still return a Store array, migrations and integrations may
 still write arrays, and no existing relation is rewritten in bulk. The stricter
 rule belongs only to Coupon and Deal editing through Content Manager: the
-resulting selection must contain exactly one Store.
+resulting selection must contain exactly one Store while Affiliate brand offer
+is OFF, and no Stores while it is ON.
 
-New entries begin with a visible “Select exactly one Store” notice. Once one is
-selected, its remove button is disabled; choosing another Store performs an
-atomic replacement. Brand, Category, and Bank behavior is unchanged.
+New entries begin in affiliate mode with Store selection disabled. Turning the
+toggle OFF reveals the “Select exactly one Store” notice. Once one is selected,
+its remove button is disabled; choosing another Store performs an atomic
+replacement. Brand, Category, and Bank behavior is unchanged outside the
+affiliate-only Brand filter described below.
 
 A legacy entry with several Stores displays every current Store plus a cleanup
 warning. Merely opening it does not write a form change and never silently
@@ -234,7 +237,8 @@ Coupon and Deal carry an `isForAffiliateBrand` boolean whose only edit control
 is `AffiliateOfferToggle`, rendered at the top of the Taxonomies panel (the
 field is hidden from the main form via `OFFER_PANEL_ONLY_FIELDS`, but stays a
 list column). It reuses `BooleanConfirmInput`, so flipping it asks for
-confirmation like every other boolean.
+confirmation like every other boolean. New Coupons and Deals start with the
+toggle ON; changing the schema default does not rewrite existing entries.
 
 - **Enable gate.** Turning OFF is always allowed. Turning ON requires zero
   Stores AND zero Brands currently selected — computed from the live selection
@@ -455,16 +459,16 @@ computes durable ISR invalidation scopes. `destroy` stops the outbox dispatcher.
     picker offers 5-minute steps, and a boolean asks for confirmation. A new
     store's slug is a plain text field that starts empty and offers no
     Regenerate button.
-13. **Affiliate toggle gate.** On a new coupon the toggle sits first in the
-    Taxonomies panel and is enabled. Select a Store or Brand — it disables with
-    the "untick first" hint; remove the selection (unsaved) — it re-enables
-    live. On an entry with saved Stores/Brands it stays disabled until they are
-    removed.
-14. **Affiliate mode.** Turn the toggle ON (confirm dialog): Stores radios
-    disable with a hint, the Brands list refetches showing only Brands flagged
-    "Affiliate Store", and `Logo Store` + `Checkout merchant` vanish from the
-    main form. Save, reload: the toggle persists and both hidden fields are
-    empty in the database. Turn it OFF: everything returns, both fields empty.
+13. **Affiliate toggle default and gate.** On a new Coupon and a new Product
+    Deal the toggle sits first in the Taxonomies panel and starts ON. Turn it
+    OFF, then select a Store or Brand — it disables with the "untick first"
+    hint; remove the selection (unsaved) — it re-enables live. On an existing
+    OFF entry with saved Stores/Brands it stays disabled until they are removed.
+14. **Affiliate mode.** With the toggle ON, Store radios are disabled with a
+    hint, the Brands list shows only Brands flagged "Affiliate Store", and
+    `Logo Store` + `Checkout merchant` are absent from the main form. Save,
+    reload: the toggle persists and both hidden fields are empty in the
+    database. Turn it OFF: everything returns, both fields empty.
 15. **Affiliate enforcement.** A CM-route write with the toggle ON and a Store
     is rejected at `stores`; with a non-affiliate Brand at `brands` (named in
     the message). Un-flagging a Brand still referenced by affiliate offers is
