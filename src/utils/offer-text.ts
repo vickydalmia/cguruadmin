@@ -89,8 +89,12 @@ export function arrayizeOfferText<T>(node: T): T {
       if (computed) record.computedContent = computed;
     }
     if (AMAZON_AFFILIATE_DISCLOSURE_FIELD in record) {
-      const content = withAmazonAffiliateDisclosure(record);
-      if (content !== undefined) record.content = content;
+      if ('content' in record) {
+        const content = withAmazonAffiliateDisclosure(record);
+        if (content !== undefined) record.content = content;
+      }
+      // Compact Deal projections intentionally omit rich text, but the
+      // internal flag must never leak from any public response.
       delete record[AMAZON_AFFILIATE_DISCLOSURE_FIELD];
     }
   }

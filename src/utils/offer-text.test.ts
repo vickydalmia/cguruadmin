@@ -140,6 +140,19 @@ describe('arrayizeOfferText', () => {
     );
     expect(deal).not.toHaveProperty('enableAmazonAffiliateDisclosure');
   });
+
+  it('keeps compact Deal projections content-free and strips the internal flag', () => {
+    const deal: any = {
+      salePrice: 499,
+      enableAmazonAffiliateDisclosure: true,
+      stores: [{ name: 'Amazon India', slug: 'amazon-coupons' }],
+    };
+
+    arrayizeOfferText(deal);
+
+    expect(deal).not.toHaveProperty('content');
+    expect(deal).not.toHaveProperty('enableAmazonAffiliateDisclosure');
+  });
 });
 
 describe('formatBenefitText', () => {
