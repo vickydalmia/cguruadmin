@@ -53,6 +53,7 @@ import {
 } from './bootstrap/upload';
 import { runDatabaseReconciliations } from './bootstrap/db-reconciliation';
 import {
+  registerCsvExportRoutes,
   registerEntityCouponLayoutRoutes,
   registerEntityDealPageRoutes,
   registerRecordLockRoutes,
@@ -113,6 +114,7 @@ export default {
 
     registerEntityCouponLayoutRoutes(strapi);
     registerRecordLockRoutes(strapi);
+    registerCsvExportRoutes(strapi);
 
     // Document-service middlewares. Registration order = execution order:
     // the record-lock guard must run before the write-validation/ISR

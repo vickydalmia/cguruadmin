@@ -12,6 +12,7 @@ import BooleanConfirmInput from './components/BooleanConfirmInput';
 import PublicOfferLinkAction from './components/PublicOfferLinkAction';
 import BumpToTopAction from './components/BumpToTopAction';
 import OfferStatusTabs from './components/OfferStatusTabs';
+import CsvExportButton from './features/csv-export/components/csv-export-button';
 import PublishingPanel from './components/PublishingPanel';
 import OfferBenefitsPanel from './components/OfferBenefitsPanel';
 import RecordLockPanel from './components/RecordLockPanel';
@@ -159,6 +160,12 @@ export default {
     contentManager.injectComponent('listView', 'actions', {
       name: 'offer-status-tabs',
       Component: OfferStatusTabs,
+    });
+    // Super-Admin-only "Export CSV" on the six main collection lists. Same
+    // zone; the component hides itself on every other model and role.
+    contentManager.injectComponent('listView', 'actions', {
+      name: 'csv-export',
+      Component: CsvExportButton,
     });
     // Panel order = the order editors read them. Strapi's own "Entry" panel
     // (Save, Publish) is always first; Publishing sits directly under it

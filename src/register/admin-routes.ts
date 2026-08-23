@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { CSV_EXPORT_ROUTE_PREFIX } from '../constants/csv-export';
 
 // Entity Deal-page settings endpoints, mounted on the ADMIN router rather
 // than under src/api/entity-deal-page/routes.
@@ -118,6 +119,28 @@ export function registerRecordLockRoutes(strapi: Core.Strapi): void {
         path: '/release',
         handler: 'api::record-lock.record-lock.release',
         config: { policies: ['admin::isAuthenticatedAdmin'] },
+      },
+    ],
+  } as any);
+}
+
+// Full-collection CSV export for the Content Manager list views (the
+// "Export CSV" button in src/admin/features/csv-export). Admin router for
+// the same reason as above. Super Admin only — the download holds every
+// field of every entry — and `global::super-admin-only` is what enforces it;
+// the admin button merely hides itself for other roles.
+export function registerCsvExportRoutes(strapi: Core.Strapi): void {
+  strapi.server.routes({
+    type: 'admin',
+    prefix: CSV_EXPORT_ROUTE_PREFIX,
+    routes: [
+      {
+        method: 'GET',
+        path: '/:uid',
+        handler: 'api::csv-export.csv-export.page',
+        config: {
+          policies: ['admin::isAuthenticatedAdmin', 'global::super-admin-only'],
+        },
       },
     ],
   } as any);
