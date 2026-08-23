@@ -8,7 +8,7 @@ import {
   TOP_PICK_MAX,
   type CouponLayoutConfig,
 } from '../config';
-import { useDeferredMount } from '../use-deferred-mount';
+import { useDeferredMount } from '../../../utils/use-deferred-mount';
 import { useEntityCouponLayout } from '../use-entity-coupon-layout';
 import { CouponLayoutDialog } from './coupon-layout-dialog';
 

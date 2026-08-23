@@ -131,11 +131,18 @@ describe("post-schema content contract reconciliation", () => {
   });
 
   it("runs before search initialization in Strapi bootstrap", () => {
+    // The require blocks live in bootstrap/db-reconciliation.ts; index.ts
+    // bootstrap must invoke that runner before search initialization.
+    const reconciliations = readFileSync(
+      resolve(__dirname, "../bootstrap/db-reconciliation.ts"),
+      "utf8",
+    );
+    expect(reconciliations).toContain("reconcileContentContractAfterSchemaSync(");
     const source = readFileSync(resolve(__dirname, "../index.ts"), "utf8");
     const bootstrap = source.slice(source.indexOf("async bootstrap"));
-    expect(bootstrap).toContain("reconcileContentContractAfterSchemaSync(");
+    expect(bootstrap).toContain("runDatabaseReconciliations(strapi)");
     expect(
-      bootstrap.indexOf("reconcileContentContractAfterSchemaSync("),
+      bootstrap.indexOf("runDatabaseReconciliations(strapi)"),
     ).toBeLessThan(bootstrap.indexOf("initializeSearchRuntime(strapi)"));
   });
 });

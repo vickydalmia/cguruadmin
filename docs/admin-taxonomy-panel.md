@@ -8,9 +8,11 @@ them.
 > **What this doc is for.** It explains *why* these customizations exist and what
 > contract each one holds, so you can change them without re-deriving the intent.
 > It is deliberately not a transcription: the maintained references are
-> [`src/admin/app.tsx`](../src/admin/app.tsx) (everything client-side) and
-> [`src/index.ts`](../src/index.ts) (everything server-side). When this doc and
-> the code disagree, the code wins.
+> [`src/admin/app.tsx`](../src/admin/app.tsx) plus
+> [`src/admin/features/taxonomy-panel/`](../src/admin/features/taxonomy-panel/)
+> (client-side) and [`src/index.ts`](../src/index.ts) plus
+> [`src/bootstrap/`](../src/bootstrap/) (server-side). When this doc and the
+> code disagree, the code wins.
 
 ---
 
@@ -46,11 +48,12 @@ are now plain regex-validated `string` attributes typed by hand.)
 
 | File | Purpose |
 |------|---------|
-| [`src/admin/app.tsx`](../src/admin/app.tsx) | The whole admin customization: field-type registrations, admin config/translations, and all three side panels |
+| [`src/admin/app.tsx`](../src/admin/app.tsx) | Admin entry point: field-type registrations, admin config/translations, and panel wiring |
+| [`src/admin/features/taxonomy-panel/`](../src/admin/features/taxonomy-panel/) | The Taxonomies panel implementation (config, relation sections, affiliate toggle) |
 | [`src/admin/components/RichTextEditor.tsx`](../src/admin/components/RichTextEditor.tsx) | TipTap WYSIWYG registered for `richtext` |
 | [`src/admin/components/DateTimeInput.tsx`](../src/admin/components/DateTimeInput.tsx) | `datetime` picker with 5-minute steps |
 | [`src/admin/components/BooleanConfirmInput.tsx`](../src/admin/components/BooleanConfirmInput.tsx) | `boolean` toggle behind a confirmation dialog |
-| [`src/index.ts`](../src/index.ts) | Server bootstrap: hides the panel-owned relations from the content-manager layout, plus the rest of the boot-time view config |
+| [`src/index.ts`](../src/index.ts) | Server lifecycle wiring; the boot-time view config lives in [`src/bootstrap/`](../src/bootstrap/) — [`content-manager-layouts.ts`](../src/bootstrap/content-manager-layouts.ts) is what hides the panel-owned relations |
 | [`src/constants/homepage-sections.ts`](../src/constants/homepage-sections.ts), [`src/constants/deal-of-the-day-sections.ts`](../src/constants/deal-of-the-day-sections.ts), [`src/constants/homepage-images.ts`](../src/constants/homepage-images.ts) | Section labels and image size rules shared by the admin bundle and the server |
 
 The field replacements are maintained product behavior, not release-specific

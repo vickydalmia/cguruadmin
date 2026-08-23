@@ -63,11 +63,18 @@ describe('site selection compatibility reconciliation', () => {
   });
 
   it('runs after schema sync and before search starts serving', () => {
+    // The require blocks live in bootstrap/db-reconciliation.ts; index.ts
+    // bootstrap must invoke that runner before search initialization.
+    const reconciliations = readFileSync(
+      resolve(__dirname, '../bootstrap/db-reconciliation.ts'),
+      'utf8',
+    );
+    expect(reconciliations).toContain('reconcileSiteSelectionsAfterSchemaSync(');
     const source = readFileSync(resolve(__dirname, '../index.ts'), 'utf8');
     const bootstrap = source.slice(source.indexOf('async bootstrap'));
-    expect(bootstrap).toContain('reconcileSiteSelectionsAfterSchemaSync(');
+    expect(bootstrap).toContain('runDatabaseReconciliations(strapi)');
     expect(
-      bootstrap.indexOf('reconcileSiteSelectionsAfterSchemaSync('),
+      bootstrap.indexOf('runDatabaseReconciliations(strapi)'),
     ).toBeLessThan(bootstrap.indexOf('initializeSearchRuntime(strapi)'));
   });
 

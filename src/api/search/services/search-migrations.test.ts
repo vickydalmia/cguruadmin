@@ -76,20 +76,24 @@ describe("search index migrations", () => {
   });
 
   it("runs post-schema reconciliation before search diagnostics in bootstrap", () => {
+    // The require blocks live in bootstrap/db-reconciliation.ts; index.ts
+    // bootstrap must invoke that runner before search initialization.
+    const reconciliations = readFileSync(
+      resolve(__dirname, "../../../bootstrap/db-reconciliation.ts"),
+      "utf8",
+    );
+    expect(reconciliations).toContain("(strapi as any).dirs.app.root");
+    expect(reconciliations).not.toContain(
+      "require('../database/search-index-migration')",
+    );
+    expect(reconciliations).toContain("reconcileSearchIndexesAfterSchemaSync(");
     const source = readFileSync(
       resolve(__dirname, "../../../index.ts"),
       "utf8",
     );
     const bootstrap = source.slice(source.indexOf("async bootstrap"));
-    expect(bootstrap).toContain("(strapi as any).dirs.app.root");
-    expect(source).not.toContain(
-      "require('../database/search-index-migration')",
-    );
     expect(
-      bootstrap.indexOf("reconcileSearchIndexesAfterSchemaSync("),
-    ).toBeGreaterThan(-1);
-    expect(
-      bootstrap.indexOf("reconcileSearchIndexesAfterSchemaSync("),
+      bootstrap.indexOf("runDatabaseReconciliations(strapi)"),
     ).toBeLessThan(bootstrap.indexOf("initializeSearchRuntime(strapi)"));
   });
 
