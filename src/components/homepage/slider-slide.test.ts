@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COMPONENT_FIELD_DESCRIPTIONS } from '../../index';
+import { COMPONENT_FIELD_DESCRIPTIONS } from '../../bootstrap/field-hints';
 import sliderSlideSchema from './slider-slide.json';
 
 describe('homepage slider link schema', () => {

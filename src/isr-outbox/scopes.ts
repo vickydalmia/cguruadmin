@@ -10,6 +10,7 @@ import {
   CHECKOUT_MERCHANT_FIELD,
   formatCheckoutMerchant,
 } from '../constants/checkout-merchant';
+import { DOCUMENT_WRITE_ACTIONS } from '../constants/document-write';
 
 // Maps a Strapi document change to every rendered page that consumes it.
 
@@ -96,15 +97,6 @@ const ENTITY_UIDS: Record<string, IdentityKind> = {
   'api::category.category': 'category',
   'api::bank.bank': 'bank',
 };
-const RELEVANT_ACTIONS = new Set([
-  'create',
-  'clone',
-  'update',
-  'delete',
-  'publish',
-  'unpublish',
-  'discardDraft',
-]);
 
 // Public URLs are flat: strip an optional type prefix from source slugs
 // (mirror of cguru-ui/src/lib/entity-links.ts#normalizeTypedSlug).
@@ -329,7 +321,8 @@ function festiveRendering(row: FestiveOfferSnapshot): string | null {
  * effective before/after renderings to differ.
  *
  * `before` is captured by the documents middleware BEFORE the write (the same
- * pattern as `entityIdentityBefore` in src/index.ts). When it could not be
+ * pattern as `entityIdentityBefore` in
+ * src/register/document-write-middleware.ts). When it could not be
  * read, fail toward invalidation: a spurious full rebuild costs minutes, a
  * missed one leaves a campaign stale everywhere.
  */
@@ -480,11 +473,12 @@ export async function computeScope(
   documentId: string | undefined,
   data?: unknown,
   // Festive fields read from the row BEFORE the write (Store/Brand updates
-  // only — see the capture in src/index.ts). Undefined means "not captured";
-  // festiveOfferChanged() then fails toward invalidation.
+  // only — see the capture in src/register/document-write-middleware.ts).
+  // Undefined means "not captured"; festiveOfferChanged() then fails toward
+  // invalidation.
   festiveOfferBefore?: FestiveOfferSnapshot | null,
 ): Promise<ScopeRequest | null> {
-  if (!RELEVANT_ACTIONS.has(action)) return null;
+  if (!DOCUMENT_WRITE_ACTIONS.has(action)) return null;
 
   if (uid === 'api::homepage.homepage') {
     return { homepage: true, sitemap: true };

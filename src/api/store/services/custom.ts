@@ -4,8 +4,8 @@ import type { EntityPageType } from './entity-page';
 import { buildEntityPopularSearches } from './entity-popular-searches';
 
 // Raw Knex ON PURPOSE: rating votes must NOT go through strapi.documents —
-// the global documents middleware in src/index.ts enqueues static rebuilds on
-// every documents-API write, and anonymous votes must never trigger a rebuild.
+// the global documents middleware (src/register/document-write-middleware.ts)
+// enqueues static rebuilds on every documents-API write, and anonymous votes must never trigger a rebuild.
 
 const RELATED_STORE_LIMIT = 6;
 const MAX_RELATED_STORE_LIMIT = 12;

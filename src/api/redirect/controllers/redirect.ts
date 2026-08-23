@@ -1,6 +1,7 @@
 import { factories } from '@strapi/strapi';
 
-// The core `find` action is granted to the public role (src/index.ts bootstrap)
+// The core `find` action is granted to the public role
+// (src/bootstrap/permissions.ts, run from bootstrap)
 // so the ISR frontend can page in the active redirect table. That grant makes
 // every query parameter on this route attacker-controlled: a stock core
 // controller would honour `?filters[active][$eq]=false` (enumerating planned /

@@ -13,7 +13,6 @@ import {
 
 import {
   mergeDescendingRelationPage,
-  orderedRelationCommands,
   removalNeedsDisconnect,
 } from '../../../utils/ordered-relation';
 import {
@@ -23,7 +22,11 @@ import {
   toRelationCommand,
   type RelationCandidate as Candidate,
 } from '../../../utils/single-relation';
-import { PAGE_SIZE, type RelationConfig } from '../config';
+import {
+  PAGE_SIZE,
+  type RelationConfig,
+  type SelectedRelationState,
+} from '../config';
 import { SelectedRelationRow } from './selected-relation-row';
 
 export function RelationSection({
@@ -50,10 +53,7 @@ export function RelationSection({
   selectionDisabledHint?: string;
   /** Extra query params for the candidate fetch, e.g. an affiliate filter. */
   extraCandidateFilters?: Readonly<Record<string, string>>;
-  onSelectedState?: (
-    field: string,
-    state: { count: number; ready: boolean },
-  ) => void;
+  onSelectedState?: (field: string, state: SelectedRelationState) => void;
 }) {
   const { get } = useFetchClient();
 
@@ -265,41 +265,25 @@ export function RelationSection({
   }, [
     debouncedSearch,
     config.target,
-    config.scopeRelationField,
     documentId,
     stableExtraFilters,
   ]);
 
   React.useEffect(() => {
-    if (!deferred || (config.scopeRelationField && !documentId)) return;
+    if (!deferred) return;
     let cancelled = false;
     const run = async () => {
       setLoading(true);
       try {
-        const mainField = config.mainField ?? 'name';
+        // Every taxonomy target labels its rows with `name` — sort and search
+        // by it directly.
         const params = new URLSearchParams({
           page: String(page),
           pageSize: String(PAGE_SIZE),
-          sort: `${mainField}:ASC`,
+          sort: 'name:ASC',
         });
         if (debouncedSearch) {
-          params.set(`filters[${mainField}][$containsi]`, debouncedSearch);
-        }
-        if (config.scopeRelationField && documentId) {
-          params.set(
-            `filters[${config.scopeRelationField}][documentId][$eq]`,
-            documentId,
-          );
-          // An offer can pass its exact expiresAt up to five minutes before
-          // the scheduler changes contentStatus. Match the public visibility
-          // rule so that already-dead Coupons never appear in entity Top Pick
-          // dropdowns during that window.
-          params.set('filters[contentStatus][$eq]', 'published');
-          params.set('filters[$or][0][expiresAt][$null]', 'true');
-          params.set(
-            'filters[$or][1][expiresAt][$gt]',
-            new Date().toISOString(),
-          );
+          params.set('filters[name][$containsi]', debouncedSearch);
         }
         if (stableExtraFilters) {
           for (const [key, value] of Object.entries(stableExtraFilters)) {
@@ -336,8 +320,6 @@ export function RelationSection({
     debouncedSearch,
     config.target,
     config.field,
-    config.mainField,
-    config.scopeRelationField,
     documentId,
     stableExtraFilters,
     get,
@@ -411,13 +393,9 @@ export function RelationSection({
       );
 
       onChangeForm(config.field, {
-        // Rebuild every anchor from the final selection. After a prior reorder,
-        // a surviving command may still point `before` the removed Coupon.
-        connect: config.reorderable
-          ? orderedRelationCommands(next)
-          : currentConnect.filter(
-              (relation) => getRelationDocumentId(relation) !== c.documentId
-            ),
+        connect: currentConnect.filter(
+          (relation) => getRelationDocumentId(relation) !== c.documentId
+        ),
         disconnect: needsDisconnect
           ? [
               ...currentDisconnect.filter(
@@ -436,21 +414,16 @@ export function RelationSection({
     );
 
     onChangeForm(config.field, {
-      // Canceling a disconnect changes the final ordered selection too. The
-      // shortened list's positional commands cannot be reused because they may
-      // place the restored Coupon before the wrong anchor.
-      connect: config.reorderable
-        ? orderedRelationCommands(next)
-        : wasPendingDisconnect
-          ? currentConnect.filter(
+      connect: wasPendingDisconnect
+        ? currentConnect.filter(
+            (relation) => getRelationDocumentId(relation) !== c.documentId
+          )
+        : [
+            ...currentConnect.filter(
               (relation) => getRelationDocumentId(relation) !== c.documentId
-            )
-          : [
-              ...currentConnect.filter(
-                (relation) => getRelationDocumentId(relation) !== c.documentId
-              ),
-              toRelationCommand(c, { isTemporary: true }),
-            ],
+            ),
+            toRelationCommand(c, { isTemporary: true }),
+          ],
       disconnect: currentDisconnect.filter(
         (relation) => getRelationDocumentId(relation) !== c.documentId
       ),
@@ -465,57 +438,11 @@ export function RelationSection({
     toggle(candidate);
   };
 
-  const moveSelection = (fromIndex: number, toIndex: number) => {
-    if (
-      !config.reorderable ||
-      fromIndex === toIndex ||
-      fromIndex < 0 ||
-      toIndex < 0 ||
-      fromIndex >= selectedList.length ||
-      toIndex >= selectedList.length
-    ) {
-      return;
-    }
-
-    const next = [...selectedList];
-    const [moved] = next.splice(fromIndex, 1);
-    if (!moved) return;
-    next.splice(toIndex, 0, moved);
-    const currentValue = isRelationFormValue(formValue) ? formValue : {};
-
-    setSelectedList(next);
-    onChangeForm(config.field, {
-      connect: orderedRelationCommands(next),
-      disconnect: currentValue.disconnect ?? [],
-    });
-  };
-
-  const dropSelection = (
-    draggedDocumentId: string,
-    targetDocumentId: string,
-  ) => {
-    moveSelection(
-      selectedList.findIndex((item) => item.documentId === draggedDocumentId),
-      selectedList.findIndex((item) => item.documentId === targetDocumentId),
-    );
-  };
-
   const sentinelRef = React.useRef<HTMLDivElement>(null);
   const hasMore = page < pageCount;
-  const requiresSavedEntity = Boolean(
-    config.scopeRelationField && !documentId,
-  );
   const atSelectionLimit =
     config.maxSelections != null &&
     selectedList.length >= config.maxSelections;
-  const scopeEntityLabel = config.scopeRelationField
-    ? {
-        stores: 'Store',
-        brands: 'Brand',
-        categories: 'Category',
-        banks: 'Bank',
-      }[config.scopeRelationField]
-    : null;
   const hasLegacySingleChoiceSelection =
     isSingleChoice && selectedList.length > 1;
 
@@ -576,8 +503,9 @@ export function RelationSection({
           marginBottom={2}
         >
           <Typography variant="pi" textColor="warning600">
-            This legacy entry has {selectedList.length} Stores. Choose one
-            Store below, or remove Stores until one remains, before saving.
+            This legacy entry has {selectedList.length} selections. Choose one{' '}
+            {config.singularLabel} below, or remove selections until one remains,
+            before saving.
           </Typography>
         </Box>
       ) : null}
@@ -588,16 +516,7 @@ export function RelationSection({
       selectedList.length === 0 ? (
         <Box paddingBottom={2} width="100%">
           <Typography variant="pi" textColor="danger600">
-            Select exactly one Store before saving.
-          </Typography>
-        </Box>
-      ) : null}
-
-      {scopeEntityLabel && documentId ? (
-        <Box paddingBottom={3} width="100%">
-          <Typography variant="pi" textColor="neutral600">
-            Only live Coupons related to this {scopeEntityLabel} are listed.{' '}
-            {config.description}
+            Select exactly one {config.singularLabel} before saving.
           </Typography>
         </Box>
       ) : null}
@@ -622,20 +541,15 @@ export function RelationSection({
               block preserves `overflowWrap`, and centring the row lines the
               remove button up with a single-line label.
             */}
-            {selectedList.map((candidate, index) => (
+            {selectedList.map((candidate) => (
               <SelectedRelationRow
                 key={candidate.documentId}
                 candidate={candidate}
-                index={index}
-                count={selectedList.length}
-                reorderable={Boolean(config.reorderable)}
                 removeDisabled={
                   isSingleChoice &&
                   (!selectedRelationsReady ||
                     selectedList.length <= (config.minSelections ?? 0))
                 }
-                onDrop={dropSelection}
-                onMove={moveSelection}
                 onRemove={removeSelection}
               />
             ))}
@@ -643,106 +557,95 @@ export function RelationSection({
         </Box>
       ) : null}
 
-      {requiresSavedEntity ? (
-        <Box paddingTop={1} paddingBottom={1} width="100%">
-          <Typography variant="pi" textColor="neutral600">
-            Save this entry first. Its related Coupons will then be available
-            here.
-          </Typography>
-        </Box>
-      ) : (
-        <>
-          <Box paddingBottom={2} width="100%">
-            <TextInput
-              aria-label={`Search ${config.label}`}
-              placeholder={`Search ${config.label.toLowerCase()}...`}
-              value={search}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setSearch(e.target.value)
+      <Box paddingBottom={2} width="100%">
+        <TextInput
+          aria-label={`Search ${config.label}`}
+          placeholder={`Search ${config.label.toLowerCase()}...`}
+          value={search}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+            setSearch(e.target.value)
+          }
+          size="S"
+        />
+      </Box>
+
+      <Box
+        hasRadius
+        background="neutral0"
+        borderColor="neutral200"
+        padding={2}
+        width="100%"
+        style={{ maxHeight: 220, overflowY: 'auto', boxSizing: 'border-box' }}
+      >
+        {isSingleChoice ? (
+          <Radio.Group
+            name={`${config.field}-single-selection`}
+            value={
+              selectedList.length === 1
+                ? selectedList[0]?.documentId
+                : undefined
+            }
+            onValueChange={(documentId: string) => {
+              const candidate = candidates.find(
+                (item) => item.documentId === documentId,
+              );
+              if (candidate) {
+                applySingleRelationChange({
+                  type: 'select',
+                  candidate,
+                });
               }
-              size="S"
-            />
-          </Box>
-
-          <Box
-            hasRadius
-            background="neutral0"
-            borderColor="neutral200"
-            padding={2}
-            width="100%"
-            style={{ maxHeight: 220, overflowY: 'auto', boxSizing: 'border-box' }}
+            }}
           >
-            {isSingleChoice ? (
-              <Radio.Group
-                name={`${config.field}-single-selection`}
-                value={
-                  selectedList.length === 1
-                    ? selectedList[0]?.documentId
-                    : undefined
+            <Flex direction="column" alignItems="stretch" gap={1}>
+              {candidates.map((candidate) => (
+                <Radio.Item
+                  key={candidate.documentId}
+                  value={candidate.documentId}
+                  disabled={!selectedRelationsReady || selectionDisabled}
+                >
+                  {candidate.name}
+                </Radio.Item>
+              ))}
+            </Flex>
+          </Radio.Group>
+        ) : (
+          candidates.map((c) => (
+            <Box key={c.documentId} paddingBottom={1}>
+              <Checkbox
+                checked={selectedDocIds.has(c.documentId)}
+                disabled={
+                  // Same not-ready gate as the Radio list: until the
+                  // persisted baseline loads, any toggle would diff
+                  // against an empty selection.
+                  !selectedRelationsReady ||
+                  (!selectedDocIds.has(c.documentId) &&
+                    (atSelectionLimit || selectionDisabled))
                 }
-                onValueChange={(documentId: string) => {
-                  const candidate = candidates.find(
-                    (item) => item.documentId === documentId,
-                  );
-                  if (candidate) {
-                    applySingleRelationChange({
-                      type: 'select',
-                      candidate,
-                    });
-                  }
-                }}
+                onCheckedChange={() => toggle(c)}
               >
-                <Flex direction="column" alignItems="stretch" gap={1}>
-                  {candidates.map((candidate) => (
-                    <Radio.Item
-                      key={candidate.documentId}
-                      value={candidate.documentId}
-                      disabled={!selectedRelationsReady || selectionDisabled}
-                    >
-                      {candidate.name}
-                    </Radio.Item>
-                  ))}
-                </Flex>
-              </Radio.Group>
-            ) : (
-              candidates.map((c) => (
-                <Box key={c.documentId} paddingBottom={1}>
-                  <Checkbox
-                    checked={selectedDocIds.has(c.documentId)}
-                    disabled={
-                      // Same not-ready gate as the Radio list: until the
-                      // persisted baseline loads, any toggle would diff
-                      // against an empty selection.
-                      !selectedRelationsReady ||
-                      (!selectedDocIds.has(c.documentId) &&
-                        (atSelectionLimit || selectionDisabled))
-                    }
-                    onCheckedChange={() => toggle(c)}
-                  >
-                    {c.name}
-                  </Checkbox>
-                </Box>
-              ))
-            )}
+                {c.name}
+              </Checkbox>
+            </Box>
+          ))
+        )}
 
-            {initialLoaded && candidates.length === 0 ? (
-              <Typography variant="pi" textColor="neutral500">
-                {debouncedSearch
-                  ? 'No matches.'
-                  : `No ${config.label.toLowerCase()} available.`}
-              </Typography>
-            ) : null}
+        {initialLoaded && candidates.length === 0 ? (
+          <Typography variant="pi" textColor="neutral500">
+            {debouncedSearch
+              ? 'No matches.'
+              : `No ${config.label.toLowerCase()} available.`}
+          </Typography>
+        ) : null}
 
-            {loading ? (
-              <Flex justifyContent="center" padding={2}>
-                <Loader small>Loading</Loader>
-              </Flex>
-            ) : null}
+        {loading ? (
+          <Flex justifyContent="center" padding={2}>
+            <Loader small>Loading</Loader>
+          </Flex>
+        ) : null}
 
-            <div ref={sentinelRef} style={{ height: 1 }} />
-          </Box>
-        </>
-      )}
+        <div ref={sentinelRef} style={{ height: 1 }} />
+      </Box>
     </Box>
   );
 }

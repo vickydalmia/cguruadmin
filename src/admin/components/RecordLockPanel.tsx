@@ -20,7 +20,7 @@ import {
 /**
  * "Edit lock" side panel — single-editor guard for every Content Manager edit
  * view. On mount it claims the lock for this entry (POST /record-lock/acquire,
- * admin router — see src/index.ts) and re-claims it every HEARTBEAT_MS so the
+ * admin router — see src/register/admin-routes.ts) and re-claims it every HEARTBEAT_MS so the
  * server-side 90 s TTL never lapses while the tab is open.
  *
  * When another admin already holds the lock the view is hard-blocked, three
@@ -32,7 +32,8 @@ import {
  *   2. the edit form is greyed out and made `inert` (unclickable, untypable,
  *      unfocusable) until this exact tab owns the lock;
  *   3. the server rejects the save anyway (document middleware in
- *      src/index.ts) — the DOM layers are UX, the middleware is the guarantee.
+ *      src/register/record-lock-document.ts) — the DOM layers are UX, the
+ *      middleware is the guarantee.
  * The same heartbeat keeps retrying while blocked — the moment the holder
  * leaves (or their lock expires) the modal closes and the form re-enables
  * automatically.

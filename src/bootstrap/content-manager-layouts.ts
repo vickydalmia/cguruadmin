@@ -8,10 +8,15 @@ import {
   type EditLayout,
 } from '../utils/content-manager-layout';
 import { type SectionLabel } from '../constants/homepage-sections';
+import { AFFILIATE_OFFER_TOGGLE_FIELD } from '../constants/affiliate-offer';
+import { OFFER_TAXONOMY_FIELDS } from '../constants/offer-taxonomy';
 
 const HIDE_FROM_EDIT: Record<string, string[]> = {
-  'api::deal.deal': ['stores', 'brands', 'categories', 'banks'],
-  'api::coupon.coupon': ['stores', 'brands', 'categories', 'banks'],
+  // Hidden here BECAUSE the Taxonomies panel owns them — the panel builds its
+  // sections from the same OFFER_TAXONOMY_FIELDS constant
+  // (src/admin/features/taxonomy-panel/config.ts), keeping the pair in sync.
+  'api::deal.deal': [...OFFER_TAXONOMY_FIELDS],
+  'api::coupon.coupon': [...OFFER_TAXONOMY_FIELDS],
   // Offer membership is maintained from Coupon/Deal records. Entity editors
   // use the dedicated Top Pick and Ordered Coupon panels; Deals remain fully
   // automatic, so none of these raw relation inputs belongs in the edit form.
@@ -68,7 +73,7 @@ const OFFER_PANEL_ONLY_FIELDS = [
   'cashbackText',
   'bankOfferText',
   'prepaidText',
-  'isForAffiliateBrand',
+  AFFILIATE_OFFER_TOGGLE_FIELD,
 ];
 const HIDE_FROM_EDIT_FORM_ONLY: Record<string, string[]> = {
   'api::coupon.coupon': OFFER_PANEL_ONLY_FIELDS,

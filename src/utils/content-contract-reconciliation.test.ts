@@ -130,20 +130,14 @@ describe("post-schema content contract reconciliation", () => {
     expect(rows.categories[0].icon_alt).toBe("Travel");
   });
 
-  it("runs before search initialization in Strapi bootstrap", () => {
-    // The require blocks live in bootstrap/db-reconciliation.ts; index.ts
-    // bootstrap must invoke that runner before search initialization.
+  it("is invoked by the bootstrap reconciliation runner", () => {
+    // Runner-before-search ordering is asserted once, in
+    // src/bootstrap/db-reconciliation.test.ts.
     const reconciliations = readFileSync(
       resolve(__dirname, "../bootstrap/db-reconciliation.ts"),
       "utf8",
     );
     expect(reconciliations).toContain("reconcileContentContractAfterSchemaSync(");
-    const source = readFileSync(resolve(__dirname, "../index.ts"), "utf8");
-    const bootstrap = source.slice(source.indexOf("async bootstrap"));
-    expect(bootstrap).toContain("runDatabaseReconciliations(strapi)");
-    expect(
-      bootstrap.indexOf("runDatabaseReconciliations(strapi)"),
-    ).toBeLessThan(bootstrap.indexOf("initializeSearchRuntime(strapi)"));
   });
 });
 

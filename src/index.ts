@@ -11,7 +11,7 @@ import {
 import { hasTrustedIpsConfigured } from './middlewares/rate-limit';
 import { initializeSearchRuntime } from './api/search/services/search';
 import { startIsrOutbox, stopIsrOutbox } from './isr-outbox/runtime';
-import { installIsrDocumentMiddleware } from './isr-outbox/document-middleware';
+import { installDocumentWriteMiddleware } from './register/document-write-middleware';
 // Lives in src/register/, NOT src/middlewares/: Strapi auto-loads every file
 // in src/middlewares as a global HTTP middleware via its default export, and
 // this module has none — it would register 'global::record-lock-document' as
@@ -58,12 +58,6 @@ import {
   registerEntityDealPageRoutes,
   registerRecordLockRoutes,
 } from './register/admin-routes';
-
-// Re-exported for hint-coverage.test.ts, which imports these from '../index'.
-export {
-  COMPONENT_FIELD_DESCRIPTIONS,
-  CONTENT_TYPE_FIELD_HINTS,
-} from './bootstrap/field-hints';
 
 export default {
   async register({ strapi }: { strapi: Core.Strapi }) {
@@ -117,10 +111,11 @@ export default {
     registerCsvExportRoutes(strapi);
 
     // Document-service middlewares. Registration order = execution order:
-    // the record-lock guard must run before the write-validation/ISR
-    // middleware, matching the order the two blocks had inline here.
+    // the record-lock guard must run before the document-write pipeline
+    // (validation + integrity side-effects + ISR outbox), matching the order
+    // the two blocks had inline here.
     installRecordLockDocumentMiddleware(strapi);
-    installIsrDocumentMiddleware(strapi);
+    installDocumentWriteMiddleware(strapi);
   },
 
   async bootstrap({ strapi }: { strapi: Core.Strapi }) {

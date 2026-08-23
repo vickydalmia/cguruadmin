@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { humanizeField, pendingRequiredFields } from './pending-required';
+import { pendingRequiredFields } from './pending-required';
 
 const storeSchema = {
   attributes: {
@@ -40,13 +40,7 @@ const completeStore = {
 const paths = (values: Record<string, unknown>) =>
   pendingRequiredFields(storeSchema, components, values).map((p) => p.path);
 
-describe('humanizeField', () => {
-  it('turns camelCase attribute names into sentence case', () => {
-    expect(humanizeField('websiteUrl')).toBe('Website url');
-    expect(humanizeField('metaTitle')).toBe('Meta title');
-    expect(humanizeField('name')).toBe('Name');
-  });
-});
+// humanizeField's casing contracts are pinned in humanize-field.test.ts.
 
 describe('pendingRequiredFields', () => {
   it('reports nothing for a complete record', () => {

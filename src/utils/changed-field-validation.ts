@@ -11,7 +11,7 @@ type Rule = {
   /**
    * Editor-facing description shown UNDER the field in the admin edit form,
    * before anything is typed (wired into the content-manager metadatas by
-   * src/index.ts). Short and imperative; states the constraint, not the error.
+   * src/bootstrap/field-hints.ts). Short and imperative; states the constraint, not the error.
    * Required on every rule so a new rule cannot ship without teaching the
    * editor its limit — hint-coverage.test.ts enforces it at runtime too.
    */
@@ -268,8 +268,8 @@ export type ComponentFieldHint = {
 /**
  * Editor-facing hints for every TOP-LEVEL rule in this file, derived straight
  * from the rule table so the shown limit can never drift from the enforced
- * one. Consumed by src/index.ts, which pins each hint into the content-manager
- * edit view as the field's grey description.
+ * one. Consumed by src/bootstrap/field-hints.ts, which pins each hint into
+ * the content-manager edit view as the field's grey description.
  */
 export function changedFieldHints(): FieldHint[] {
   return TOP_LEVEL_RULES.map((rule) => ({

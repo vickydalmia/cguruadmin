@@ -17,7 +17,8 @@ const ADMIN_SESSION_STRATEGY = 'admin';
  * user whose numeric id happened to match a Super Admin's would pass.
  *
  * So assert the strategy explicitly and fail closed. Routes are registered in
- * src/index.ts via `strapi.server.routes({ type: 'admin', ... })`; moving them
+ * src/register/admin-routes.ts via `strapi.server.routes({ type: 'admin', ... })`;
+ * moving them
  * back under a per-API routes directory would silently make them content-API
  * again.
  *

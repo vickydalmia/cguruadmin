@@ -32,7 +32,8 @@ import { toCandidate, type CouponCandidate } from './coupon-layout';
  * own connect/disconnect payload echoing back, and replaying that would be
  * ambiguous (the command array is deliberately reversed, and carries apiData
  * rather than Coupon fields). Nothing else writes these two relations: their
- * raw inputs are hidden from the edit form by HIDE_FROM_EDIT in src/index.ts.
+ * raw inputs are hidden from the edit form by HIDE_FROM_EDIT in
+ * src/bootstrap/content-manager-layouts.ts.
  */
 
 type RelationFormValue = { connect?: any[]; disconnect?: any[] };

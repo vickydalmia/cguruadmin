@@ -1,9 +1,11 @@
 // ---------------------------------------------------------------------------
-// Validation-problems panel (homepage and Deal of the Day). Client-side checks
-// and the server-side image validator put their errors into the same nested
-// form-errors state ({ section: { items: [{ field: 'msg' }] } }); this panel
-// flattens that into a human list with the numbered section names, so editors
-// see exactly WHERE the save failed instead of hunting through every section.
+// Form-error flattening for ValidationProblemsPanel (which runs on EVERY
+// content type). Client-side checks and the server-side validators put their
+// errors into the same nested form-errors state
+// ({ section: { items: [{ field: 'msg' }] } }); these helpers flatten that
+// into a human list — with the numbered homepage/DOTD section names where
+// those apply — so editors see exactly WHERE the save failed instead of
+// hunting through every section.
 // ---------------------------------------------------------------------------
 import {
   HOMEPAGE_SECTION_LABELS,
@@ -14,6 +16,7 @@ import {
   DOTD_UID,
 } from '../../constants/deal-of-the-day-sections';
 import { HOMEPAGE_IMAGE_RULES } from '../../constants/homepage-images';
+import { humanizeFieldLower } from './humanize-field';
 
 const SECTION_LABEL_BY_MODEL: Record<string, Record<string, string>> = {
   [HOMEPAGE_UID]: Object.fromEntries(
@@ -66,10 +69,6 @@ export const flattenFormErrors = (
   return [];
 };
 
-// 'cardImage' -> 'card image'
-const humanizeFieldName = (segment: string): string =>
-  segment.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
-
 // ['newlyAdded','items',1,'cardImage'] -> "7 · Fresh Drops … › items #2 › card image"
 export const describeErrorLocation = (
   path: Array<string | number>,
@@ -83,8 +82,8 @@ export const describeErrorLocation = (
     }
     parts.push(
       index === 0
-        ? SECTION_LABEL_BY_MODEL[model]?.[segment] ?? humanizeFieldName(segment)
-        : humanizeFieldName(segment)
+        ? SECTION_LABEL_BY_MODEL[model]?.[segment] ?? humanizeFieldLower(segment)
+        : humanizeFieldLower(segment)
     );
   });
   return parts.join(' › ');

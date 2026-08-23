@@ -275,7 +275,8 @@ export function textFieldHint(rule: TextFieldRule): string {
 /**
  * Editor-facing hints for every rule in this file, derived from the rule table
  * so the shown behaviour can never drift from the enforced one. Consumed by
- * src/index.ts, which pins each hint into the content-manager edit view as the
+ * src/bootstrap/field-hints.ts, which pins each hint into the content-manager
+ * edit view as the
  * field's grey description (component fields via the component config).
  * hint-coverage.test.ts fails when a rule produces an empty hint.
  */

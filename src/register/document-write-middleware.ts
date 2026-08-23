@@ -5,28 +5,28 @@ import {
   mergeScope,
   offerEntityTypeFromUid,
   outboxPayloadSummary,
-} from './payload';
-import { logIsrOutbox } from './log';
-import { wakeIsrOutbox } from './runtime';
-import { runContentTransaction } from './transaction';
+} from '../isr-outbox/payload';
+import { logIsrOutbox } from '../isr-outbox/log';
+import { wakeIsrOutbox } from '../isr-outbox/runtime';
+import { runContentTransaction } from '../isr-outbox/transaction';
 import {
   entityPublicIdentityChanged,
   isPopularSearchEntityUid,
-} from './popular-search-invalidation';
+} from '../isr-outbox/popular-search-invalidation';
 import {
   purgeEntityPopularSearchCatalog,
 } from '../api/store/services/entity-popular-searches';
 import type {
   OfferInvalidation,
   ScopeRequest,
-} from './types';
+} from '../isr-outbox/types';
 import {
   computeScope,
   FESTIVE_OFFER_ENTITY_UIDS,
   isRedirectNoteOnlyChange,
   preDeleteScope,
   type FestiveOfferSnapshot,
-} from './scopes';
+} from '../isr-outbox/scopes';
 // Every write validator now runs through this one pipeline, which reports all
 // of their problems in a single error instead of the first one it hits.
 import { runWriteValidation } from '../utils/write-validation/run';
@@ -38,22 +38,16 @@ import {
 import { CHECKOUT_MERCHANT_FIELD } from '../constants/checkout-merchant';
 import { clearDeletedCheckoutMerchant } from '../utils/checkout-merchant-validation';
 import { fillHomepageOverrides } from '../utils/homepage-override-fill';
+import { DOCUMENT_WRITE_ACTIONS } from '../constants/document-write';
 
-const DOCUMENT_WRITE_ACTIONS = new Set([
-  'create',
-  'clone',
-  'update',
-  'delete',
-  'publish',
-  'unpublish',
-  'discardDraft',
-]);
-
-// The write-validation + ISR-outbox document-service middleware: normalises
-// and validates every editor-facing write, wraps it in the content
-// transaction that enqueues the durable outbox event, and purges the
-// process-local caches only after commit.
-export function installIsrDocumentMiddleware(strapi: Core.Strapi): void {
+// The document-write pipeline: the one document-service middleware every
+// editor-facing write flows through. In order: pre-write validation
+// (write-validation steps), pre-state capture for scope/identity diffs,
+// the content transaction (the write itself + the in-transaction data
+// integrity side-effects + the durable ISR outbox insert), and post-commit
+// process-local cache purges. ISR scope/payload/dispatch logic stays in
+// src/isr-outbox/; this module owns the orchestration.
+export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
   strapi.documents.use(async (context: any, next: any) => {
     if (!DOCUMENT_WRITE_ACTIONS.has(context.action)) return next();
 
@@ -363,19 +357,9 @@ export function installIsrDocumentMiddleware(strapi: Core.Strapi): void {
 
           const offerInvalidations: OfferInvalidation[] = [];
           const entityType = offerEntityTypeFromUid(context.uid);
-          if (
-            entityType &&
-            documentId &&
-            [
-              'create',
-              'clone',
-              'update',
-              'publish',
-              'unpublish',
-              'discardDraft',
-              'delete',
-            ].includes(context.action)
-          ) {
+          // No action check here: the middleware's entry gate already
+          // restricted context.action to DOCUMENT_WRITE_ACTIONS.
+          if (entityType && documentId) {
             offerInvalidations.push({ entityType, documentId });
           }
 

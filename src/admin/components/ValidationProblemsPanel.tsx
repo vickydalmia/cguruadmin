@@ -76,7 +76,7 @@ function ValidationProblemsList({
 // flattenFormErrors walks arbitrary nested error state, and
 // pendingRequiredFields reads the content-manager's own schema attributes. The
 // two model-keyed lookups it does consult (SECTION_LABEL_BY_MODEL,
-// IMAGE_RULE_BY_PATH) already fall through to humanizeFieldName, so an unlisted
+// IMAGE_RULE_BY_PATH) already fall through to humanizeFieldLower, so an unlisted
 // model gets sensible generic labels rather than nothing.
 const ValidationProblemsPanel: PanelComponent = ({ model }) => {
   const formErrors = useForm('ValidationProblemsPanel', (state) => state.errors);

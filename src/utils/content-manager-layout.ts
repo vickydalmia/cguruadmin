@@ -1,5 +1,5 @@
 // Pure helpers for the content-manager view configuration pinned in
-// src/index.ts. The shapes here mirror what
+// src/bootstrap/content-manager-layouts.ts. The shapes here mirror what
 // `plugin('content-manager').service('content-types')` stores in the DB
 // config store: `layouts.edit` is rows of `{ name, size }` cells, `layouts.list`
 // is an array of attribute names.

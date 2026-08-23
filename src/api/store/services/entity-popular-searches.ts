@@ -343,7 +343,7 @@ export async function buildEntityPopularSearches(
 
 // NOTE: the write-path leaderboard surface (readPopularSearchFallbackLeaderboards,
 // popularSearchLeaderboardsChanged) was removed together with the
-// document-middleware change detection: keeping the global top-10 perfectly
+// document-write-middleware change detection: keeping the global top-10 perfectly
 // fresh in cached HTML cost two full catalogue scans per offer write. The rail
 // still renders from the cached catalog above; sparse pages' borrowed global
 // list self-heals via the nightly unconditional {all:true} consistency event.

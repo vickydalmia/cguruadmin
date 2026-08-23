@@ -11,12 +11,13 @@ import {
   offerAmountFieldHint,
 } from '../utils/offer-word-limits';
 import { textFieldHints } from '../utils/text-field-validation';
+import { AFFILIATE_OFFER_TOGGLE_FIELD } from '../constants/affiliate-offer';
 
 // Field help text pinned into the Content Manager on every boot. Homepage
 // image guidance is derived from HOMEPAGE_IMAGE_RULES so the enforced size and
 // instruction cannot drift; other business-input guidance is declared here.
 // Uses the same DB config store + config-as-code approach as entry titles.
-// Exported for hint-coverage.test.ts only (via the src/index.ts re-export).
+// Exported for hint-coverage.test.ts only.
 export const COMPONENT_FIELD_DESCRIPTIONS: Record<string, Record<string, string>> = {};
 for (const rule of HOMEPAGE_IMAGE_RULES) {
   (COMPONENT_FIELD_DESCRIPTIONS[rule.componentUid] ??= {})[rule.field] =
@@ -362,7 +363,7 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
 // Merge the three hint sources. When several validators constrain the same
 // field the sentences are concatenated (required-ness first, then format
 // limits, then the mirrored notes), so the editor sees one combined hint.
-// Exported for hint-coverage.test.ts only (via the src/index.ts re-export).
+// Exported for hint-coverage.test.ts only.
 export const CONTENT_TYPE_FIELD_HINTS: Record<string, Record<string, string>> = {};
 {
   const componentHints: Record<string, Record<string, string>> = {};
@@ -417,13 +418,13 @@ const CONTENT_TYPE_FIELD_LABELS: Record<string, Record<string, string>> = {
     publishedOn: 'Published date',
     logoStore: 'Logo Store (image only)',
     checkoutMerchant: 'Checkout merchant (Store or Brand)',
-    isForAffiliateBrand: 'Affiliate brand offer',
+    [AFFILIATE_OFFER_TOGGLE_FIELD]: 'Affiliate brand offer',
   },
   'api::deal.deal': {
     publishedOn: 'Published date',
     logoStore: 'Logo Store (image only)',
     checkoutMerchant: 'Checkout merchant (Store or Brand)',
-    isForAffiliateBrand: 'Affiliate brand offer',
+    [AFFILIATE_OFFER_TOGGLE_FIELD]: 'Affiliate brand offer',
     enableAmazonAffiliateDisclosure: 'Amazon affiliate disclosure',
   },
   'api::menu.menu': {

@@ -75,9 +75,10 @@ describe("search index migrations", () => {
     ).toEqual([...EXPECTED_SEARCH_INDEXES]);
   });
 
-  it("runs post-schema reconciliation before search diagnostics in bootstrap", () => {
-    // The require blocks live in bootstrap/db-reconciliation.ts; index.ts
-    // bootstrap must invoke that runner before search initialization.
+  it("is invoked by the bootstrap reconciliation runner", () => {
+    // Runner-before-search ordering is asserted once, in
+    // src/bootstrap/db-reconciliation.test.ts. This test only pins the
+    // search-specific facts about db-reconciliation.ts itself.
     const reconciliations = readFileSync(
       resolve(__dirname, "../../../bootstrap/db-reconciliation.ts"),
       "utf8",
@@ -87,19 +88,6 @@ describe("search index migrations", () => {
       "require('../database/search-index-migration')",
     );
     expect(reconciliations).toContain("reconcileSearchIndexesAfterSchemaSync(");
-    const source = readFileSync(
-      resolve(__dirname, "../../../index.ts"),
-      "utf8",
-    );
-    const bootstrap = source.slice(source.indexOf("async bootstrap"));
-    // Presence FIRST: indexOf returns -1 when the call is missing, and
-    // -1 < any found index — without this guard the ordering assertion
-    // below passes vacuously if the reconciliation runner is deleted.
-    expect(bootstrap).toContain("runDatabaseReconciliations(strapi)");
-    expect(bootstrap).toContain("initializeSearchRuntime(strapi)");
-    expect(
-      bootstrap.indexOf("runDatabaseReconciliations(strapi)"),
-    ).toBeLessThan(bootstrap.indexOf("initializeSearchRuntime(strapi)"));
   });
 
   it("skips both migrations completely outside Postgres", async () => {

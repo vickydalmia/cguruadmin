@@ -1,5 +1,6 @@
 // Only the two anonymous read routes live here. The Super-Admin settings
-// endpoints are registered as ADMIN-type routes in src/index.ts: everything
+// endpoints are registered as ADMIN-type routes by
+// src/register/admin-routes.ts: everything
 // under src/api/*/routes is forced to `type: 'content-api'` by Strapi's
 // registerAPIRoutes, and the content API only serves the api-token and
 // users-permissions strategies — an admin-panel session can never authenticate
