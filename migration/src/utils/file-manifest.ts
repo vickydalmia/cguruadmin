@@ -197,7 +197,7 @@ export async function clearFileManifest(): Promise<void> {
 }
 
 export const FILES_ROW_SELECT = `
-  SELECT name, alternative_text, caption, width, height, formats, ext, mime,
+  SELECT id, document_id, name, alternative_text, caption, width, height, formats, ext, mime,
          size, hash, url, provider, provider_metadata, background_colour,
          background_removal_source_hash, background_removal_version,
          background_removed_at

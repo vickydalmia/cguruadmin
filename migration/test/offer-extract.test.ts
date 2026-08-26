@@ -154,6 +154,59 @@ test("cashback fields: dollar bank and prepaid offers retain USD", () => {
   );
 });
 
+test("cashback fields: USA dollar cashback is captured in either word order", () => {
+  const usa = { currencyCode: "USD" };
+  assert.deepEqual(
+    extractCashbackFields("Earn $25 Cashback today", null, usa),
+    { cashbackText: "$25", bankOfferText: null, prepaidText: null },
+  );
+  assert.deepEqual(
+    extractCashbackFields("Member reward: Cashback of $10", null, usa),
+    { cashbackText: "$10", bankOfferText: null, prepaidText: null },
+  );
+  assert.deepEqual(
+    extractCashbackFields("Member reward", "Receive Cashback USD 15", usa),
+    { cashbackText: "$15", bankOfferText: null, prepaidText: null },
+  );
+  assert.deepEqual(
+    extractCashbackFields("USD 15 CAshback", null, usa),
+    { cashbackText: "$15", bankOfferText: null, prepaidText: null },
+  );
+  assert.deepEqual(
+    extractCashbackFields("usd 15 cashback", null, usa),
+    { cashbackText: "$15", bankOfferText: null, prepaidText: null },
+  );
+});
+
+test("cashback fields: punctuation between Cashback and a dollar amount is accepted", () => {
+  assert.deepEqual(
+    extractCashbackFields("Cashback: $10", null, { currencyCode: "USD" }),
+    { cashbackText: "$10", bankOfferText: null, prepaidText: null },
+  );
+  assert.deepEqual(
+    extractCashbackFields("Cashback - USD 15", null, {
+      currencyCode: "USD",
+    }),
+    { cashbackText: "$15", bankOfferText: null, prepaidText: null },
+  );
+});
+
+test("cashback fields: explicit INR cashback remains INR in every profile", () => {
+  assert.deepEqual(
+    extractCashbackFields("Get Rs.100 Cashback", null, {
+      currencyCode: "USD",
+    }),
+    { cashbackText: "₹100", bankOfferText: null, prepaidText: null },
+  );
+});
+
+test("offerText: currency cashback does not become the main discount badge", () => {
+  assert.equal(
+    extractOfferText("Earn $25 Cashback today", null, { currencyCode: "USD" }),
+    null,
+  );
+});
+
 test("cashback fields: both null when none present", () => {
   assert.deepEqual(extractCashbackFields("Snitch Fans Sale – Extra 18% Off"), {
     cashbackText: null,

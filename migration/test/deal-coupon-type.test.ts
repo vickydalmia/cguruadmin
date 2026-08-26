@@ -10,6 +10,10 @@ const couponsSource = readFileSync(
   new URL("../src/phases/07-coupons.ts", import.meta.url),
   "utf8",
 );
+const couponBatchSource = readFileSync(
+  new URL("../src/utils/coupon-batch.ts", import.meta.url),
+  "utf8",
+);
 
 // deals.coupon_type is required + load-bearing (a NULL type renders the Deal
 // as a no-code offer) but schema sync never applies schema.json defaults at
@@ -32,9 +36,10 @@ test("deal coupon_type is fill-only on conflict; coupon stays authoritative", ()
   // Coupons: WordPress IS the source of truth for uniqueness and phase 07
   // reconciles the pool link in the same phase — authoritative overwrite is
   // correct there. This asymmetry is deliberate; do not "unify" it.
-  assert.match(couponsSource, /"coupon_type" = EXCLUDED\."coupon_type"/);
+  assert.match(couponBatchSource, /"coupon_type" = EXCLUDED\."coupon_type"/);
   assert.doesNotMatch(
-    couponsSource,
+    couponBatchSource,
     /COALESCE\("coupons"\."coupon_type"/,
   );
+  assert.match(couponsSource, /buildCouponUpsertBatchQuery/);
 });

@@ -88,6 +88,15 @@ PG_CONNECTION_STRING=postgres://strapi:strapi@127.0.0.1:5432/strapi
 # Remote DBs use TLS by default; set a CA path to also verify the chain.
 PG_CA_CERT_PATH=
 PG_SSL_REJECT_UNAUTHORIZED=true
+PG_POOL_MAX=10               # Shared pool; clamped to 4..50
+# Phase 03 workers; clamped to 1..8 and the shared pool budget.
+TAXONOMY_CONCURRENCY=8
+# Phase 07 source/content preparation workers; clamped to 1..8.
+COUPON_CONCURRENCY=8
+# Rows per PostgreSQL Coupon transaction; clamped to 1..500.
+COUPON_BATCH_SIZE=250
+# Concurrent Coupon batch transactions; clamped to 1..4.
+COUPON_BATCH_CONCURRENCY=4
 
 # AWS S3 (leave S3_BUCKET empty to use local file records)
 S3_BUCKET=
@@ -119,12 +128,13 @@ list and log is profile-scoped. Do not point two country profiles at the same
 underscores and must end in `_`; an unsafe prefix fails before MySQL executes
 a query.
 
-The India profile automatically adopts the legacy `.checkpoints/` directory
-when it is the only location containing real JSON state. It never merges two
-state roots: if both legacy and `.state/india` contain checkpoints or maps, the
-run fails and asks the operator to reconcile them. A target Site Configuration
-whose country disagrees with the active profile is also refused before data is
-mutated.
+The India profile keeps using the legacy `.checkpoints/` directory when it is
+the only location containing real JSON state. Resolving configuration never
+renames or deletes a directory. Move `.checkpoints` to `.state/india` manually
+only while no migration command is running. If both locations contain
+checkpoints or maps, the run fails and asks the operator to reconcile them. A
+target Site Configuration whose country disagrees with the active profile is
+also refused before data is mutated.
 
 For USA, copy values from `.env.migration.usa.example` only after explicitly
 setting the USA `PG_CONNECTION_STRING`, WordPress host/database/uploads and S3
@@ -270,8 +280,11 @@ Validates the profile name and JSON, ISO country/locale/currency/timezone,
 WordPress table prefix, both database connections, required prefixed tables,
 optional pool/code/Yoast tables, exclusions, expected source inventory and the
 target Site Configuration country. These checks happen before target mutation.
-It then verifies Strapi infrastructure and prints the source summary. Never
-checkpointed — always runs.
+It then verifies Strapi infrastructure, creates and validates every unique
+index used by entity, media and Coupon/Deal relation `ON CONFLICT` clauses, and
+prints the source summary. A drifted Logo Store or taxonomy link table therefore
+fails here instead of halfway through a batch. Never checkpointed — always
+runs.
 
 ### Phase 01 — Media Inventory
 
@@ -281,9 +294,40 @@ Queries all WordPress image attachments. Builds an in-memory catalog with file p
 
 Uploads inventoried images to S3 with configurable concurrency. Deduplicates by SHA-256 hash. Before upload, supported raster images (jpeg/png/webp/avif/tiff) are optimized: EXIF orientation baked in, downscaled to fit 1920×1920, jpeg/png converted to webp, and webp/avif/tiff re-compressed at quality 80. Strapi-style responsive variants (`thumbnail`/`xsmall`/`small`/`medium`/`large`) are generated and uploaded alongside the original, and recorded in the `files.formats` JSON column. For webp originals, AVIF "twin" variants (`original_avif`/`xsmall_avif`/`small_avif`/`medium_avif`/`large_avif`, quality 50, effort 4) are also encoded — from the pre-optimization source bytes for best quality — and merged into `formats`; a twin that comes out no smaller than its webp counterpart is dropped. All breakpoint/quality knobs live in [`src/constants/image.ts`](../src/constants/image.ts), the single source of truth shared with admin uploads. gif/svg/other formats pass through untouched (`formats` stays NULL). Creates corresponding records in the Strapi `files` table with CloudFront URLs, dimensions, and provider metadata. See [Media / S3 Pipeline](#media--s3-pipeline) for details.
 
+The complete existing `files` rows are preloaded once, not queried once per
+logo. Concurrent references to the same path or the same source-byte hash share
+one promise, so they cannot transform or upload the same image twice.
+
 ### Phase 03 — Taxonomies
 
 Migrates WordPress category terms into **four** Strapi collections — `stores`, `brands`, `categories`, `banks` — based on the ACF `choose_type` termmeta field (defaults to "Store"). Also migrates FAQ items and SEO components for each entity, and links logo/icon media. Images embedded in term descriptions are rewritten through the content-media pipeline (see below).
+
+Before starting the workers, the phase validates manifest entries against the
+objects that still exist in S3 and restores all reusable missing Strapi `files`
+rows with a few bulk inserts. It does **not** download, transform, or upload
+those images again. Slugs are claimed serially first, then taxonomy rows run
+with bounded concurrency (`TAXONOMY_CONCURRENCY`, default/max `8`, also clamped
+to `PG_POOL_MAX - 2`). All database
+writes for one taxonomy are committed in one transaction; media resolution is
+completed before that transaction opens. Empty FAQ and description-media
+reconciliation is skipped only when a one-time target snapshot proves there is
+nothing stale to remove, so reruns still converge correctly. Progress is logged
+after every 10 completed rows and at completion. If one term fails, the phase
+waits for every already-started worker to settle before reporting the combined
+failure, so no background transaction survives the phase boundary.
+
+Bulk restore intentionally makes manifest media available to later phases as
+well as taxonomies. After every migration phase succeeds, Phase 16 identifies
+unused rows specifically by the deterministic `manifest-file:<hash>` document
+identity. It excludes those rows from the S3 reference set and prunes them only
+after the normal dry-run and 40% mass-deletion fuse pass. Unlinked media created
+by Strapi or an editor is never selected by this ownership boundary.
+
+On a fresh target, a large manifest can legitimately leave more than 40% of
+its restored objects unreferenced, so the Phase 16 fuse may stop cleanup. Do
+not immediately add `--force-orphan-cleanup`: first verify the active profile,
+Postgres target, bucket/root path, linked-media counts and the reported sample.
+Use the force flag only when that reviewed deletion set is expected.
 
 ### Phase 05 — Unique Coupon Pools
 
@@ -320,11 +364,39 @@ removed, so deletion, withdrawal, and Coupon → Product Deal changes converge.
 For each coupon:
 
 - Strips WordPress shortcodes from content
+- Extracts locale-aware offer and benefit amounts. USA currency cashback such
+  as `USD 15 Cashback`, `usd 15 cashback`, `$15 Cashback`, or `Cashback: $15`
+  is stored as the bare `$15` value; the public API adds the `Cashback` suffix
+  when rendering.
 - Resolves `coupon_type` ("static" or "unique") from ACF meta
 - Wires taxonomy relationships (store, brand, category, bank) from WordPress `wp_term_relationships`
 - Links the unique coupon pool and SEO component; Coupon records do not own a
   featured image
 - Rewrites content-embedded images (see **Content-embedded images** below)
+
+Phase 07 preloads whether existing Coupons have content-media or unique-pool
+links. Source/content preparation runs with bounded concurrency
+(`COUPON_CONCURRENCY`, default/max `8`) before PostgreSQL writes. Prepared rows
+are grouped into batches (`COUPON_BATCH_SIZE`, default `250`, max `500`) and up
+to four batches write concurrently (`COUPON_BATCH_CONCURRENCY`, default/max
+`4`). `PG_POOL_MAX` defaults to `10`; preparation plus batch concurrency is
+automatically reduced when necessary so two connections remain available.
+This keeps the importer plus two live five-connection Strapi pools at 20,
+below the current managed-Postgres limit of 22. Raise the migration pool only
+when Strapi is stopped or the database has independently verified headroom.
+Each batch atomically bulk-upserts Coupon rows, migration ownership,
+taxonomy/Logo Store links, content media and pool links. Empty content-media or
+pool cleanup is skipped only when the target snapshot proves no stale row
+exists. A data or constraint error recursively splits only its affected batch,
+so one corrupt source record can be reported without discarding valid records;
+connection and SQL errors still abort the phase. Progress and throughput are
+logged after every completed batch. This preserves idempotency while reducing
+the normal remote path to a handful of round trips per 250 Coupons.
+
+For Coupons-only profiles, Phase 08 and the Deal-reconciliation portion of
+Phase 12 are valid no-ops. Phase 12 still runs the Coupon recommendation
+backfill. Its empty-target continuity guard fails only when importable source
+Deals exist but the target `deals` table is unexpectedly empty.
 
 #### Content-embedded images
 

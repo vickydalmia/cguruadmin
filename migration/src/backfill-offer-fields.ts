@@ -4,7 +4,7 @@
  *
  *   - `badge`           ← 'Recommended' where the legacy `is_popular` is true
  *   - Coupon `offer_text` ← extracted from title (falling back to content)
- *   - `cashback_text`   ← extracted amount, e.g. "15%"
+ *   - `cashback_text`   ← extracted amount, e.g. "15%" / "$10"
  *   - `bank_offer_text` ← extracted amount, e.g. "12%" / "₹2000"
  *   - `prepaid_text`    ← extracted amount, e.g. "5%" / "₹100"
  *
@@ -123,16 +123,21 @@ async function backfillTexts(table: string, apply: boolean, reextract: boolean):
     prepaid_text: string | null;
   };
   const pending: Pending[] = [];
+  const extractionOptions = { currencyCode: config.source.currencyCode };
   for (const row of rows) {
     let offer_text: string | null = null;
     let cashback_text: string | null = null;
     let bank_offer_text: string | null = null;
     let prepaid_text: string | null = null;
     if (includeOfferText && row.offer_text == null) {
-      offer_text = extractOfferText(row.title, row.content);
+      offer_text = extractOfferText(row.title, row.content, extractionOptions);
     }
     if (row.cashback_text == null || row.bank_offer_text == null || row.prepaid_text == null) {
-      const extracted = extractCashbackFields(row.title, row.content);
+      const extracted = extractCashbackFields(
+        row.title,
+        row.content,
+        extractionOptions,
+      );
       if (row.cashback_text == null) cashback_text = extracted.cashbackText;
       if (row.bank_offer_text == null) bank_offer_text = extracted.bankOfferText;
       if (row.prepaid_text == null) prepaid_text = extracted.prepaidText;

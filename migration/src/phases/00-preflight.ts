@@ -4,6 +4,10 @@ import { pgQuery, getPgPool } from "../db/pg-client.js";
 import { logger } from "../utils/logger.js";
 import fs from "node:fs";
 import { config } from "../config.js";
+import {
+  OFFER_RELATION_UNIQUE_INDEXES,
+  relationUniqueIndexSql,
+} from "../utils/relation-indexes.js";
 
 const require = createRequire(import.meta.url);
 // Single source of truth for the background-removal dedup index: the Strapi
@@ -234,6 +238,7 @@ export async function runPreflight(): Promise<void> {
     "files_related_mph",
     "components_shared_seos",
     "components_shared_faq_items",
+    ...OFFER_RELATION_UNIQUE_INDEXES.map((spec) => spec.table),
   ];
   const pgTables = await pgQuery<{ table_name: string }>(
     `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`
@@ -291,6 +296,43 @@ export async function runPreflight(): Promise<void> {
   await pgQuery(
     `CREATE UNIQUE INDEX IF NOT EXISTS "files_related_mph_uq" ON "files_related_mph" ("file_id", "related_id", "related_type", "field")`
   );
+  // Batch relation upserts name their conflict columns explicitly. Strapi
+  // normally creates these pair indexes, but preflight owns the guarantee so
+  // a drifted/mixed-version target fails before Phase 07/08 starts writing.
+  for (const spec of OFFER_RELATION_UNIQUE_INDEXES) {
+    await pgQuery(relationUniqueIndexSql(spec));
+    const [verification] = await pgQuery<{ valid: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1
+           FROM pg_index index_meta
+           JOIN pg_class table_meta ON table_meta.oid = index_meta.indrelid
+           JOIN pg_namespace namespace_meta
+             ON namespace_meta.oid = table_meta.relnamespace
+          WHERE namespace_meta.nspname = current_schema()
+            AND table_meta.relname = $1
+            AND index_meta.indisunique
+            AND index_meta.indisvalid
+            AND index_meta.indpred IS NULL
+            AND index_meta.indexprs IS NULL
+            AND (
+              SELECT array_agg(attribute_meta.attname::text ORDER BY attribute_meta.attname::text)
+                FROM unnest(index_meta.indkey) WITH ORDINALITY
+                  AS index_key(attnum, position)
+                JOIN pg_attribute attribute_meta
+                  ON attribute_meta.attrelid = table_meta.oid
+                 AND attribute_meta.attnum = index_key.attnum
+               WHERE index_key.position <= index_meta.indnkeyatts
+            ) = $2::text[]
+       ) AS valid`,
+      [spec.table, [...spec.columns].sort()],
+    );
+    if (!verification?.valid) {
+      throw new Error(
+        `Required unique relation index missing on ${spec.table} ` +
+          `(${spec.columns.join(", ")})`,
+      );
+    }
+  }
   // Background-removal dedup guard (lost on fresh DBs — see the require above)
   await pgQuery(bgRemovalIndexSql);
   logger.info("  ✓ Unique indexes ensured");

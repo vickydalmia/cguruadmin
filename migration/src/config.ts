@@ -2,6 +2,10 @@ import dotenv from "dotenv";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
+import {
+  allocateCouponConcurrency,
+  allocateWorkerConcurrency,
+} from "./utils/concurrency-budget.js";
 import { migrationProfile, migrationStateDir, profileFile } from "./utils/profile-state.js";
 import { validateWpTablePrefix } from "./utils/wp-table.js";
 
@@ -18,6 +22,29 @@ function required(key: string): string {
 function optional(key: string, fallback: string = ""): string {
   return process.env[key] || fallback;
 }
+
+function boundedInteger(
+  key: string,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const parsed = parseInt(optional(key, String(fallback)), 10);
+  const value = Number.isFinite(parsed) ? parsed : fallback;
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+// Keep the default safe while both production Strapi processes are connected
+// to the same managed database (2 x DATABASE_POOL_MAX=5 on the current stack).
+// Operators running with Strapi stopped or against a larger backend may raise
+// this explicitly for a one-off import.
+const pgPoolMax = boundedInteger("PG_POOL_MAX", 10, 4, 50);
+const couponConcurrency = allocateCouponConcurrency({
+  poolMax: pgPoolMax,
+  requestedPreparation: boundedInteger("COUPON_CONCURRENCY", 8, 1, 8),
+  requestedBatches: boundedInteger("COUPON_BATCH_CONCURRENCY", 4, 1, 4),
+  reserve: 2,
+});
 
 export const config = {
   profile: migrationProfile(),
@@ -68,6 +95,7 @@ export const config = {
     connectionString: required("PG_CONNECTION_STRING"),
     caCertPath: optional("PG_CA_CERT_PATH").replace(/^~/, os.homedir()),
     rejectUnauthorized: optional("PG_SSL_REJECT_UNAUTHORIZED", "true") === "true",
+    poolMax: pgPoolMax,
   },
   s3: {
     bucket: optional("S3_BUCKET"),
@@ -97,5 +125,25 @@ export const config = {
   ),
   batchSize: parseInt(optional("BATCH_SIZE", "5000")),
   mediaConcurrency: parseInt(optional("MEDIA_CONCURRENCY", "10")),
+  // Keep taxonomy writes below the shared pool budget and clamp
+  // hostile/mistyped values instead of flooding remote PostgreSQL.
+  taxonomyConcurrency: allocateWorkerConcurrency({
+    poolMax: pgPoolMax,
+    requested: boundedInteger("TAXONOMY_CONCURRENCY", 8, 1, 8),
+    reserve: 2,
+    maximum: 8,
+  }),
+  // Preparation may acquire PostgreSQL through media/taxonomy resolution.
+  // Budget it together with pinned batch transactions, retaining two pool
+  // connections for preflight/progress work.
+  couponConcurrency: couponConcurrency.preparation,
+  // Multi-row Coupon writes amortize remote DB latency. Four concurrent
+  // batches leave pool headroom; 500 keeps the 21-column upsert far below PG's
+  // 65,535 bind-parameter limit.
+  couponBatchSize: Math.max(
+    1,
+    Math.min(500, parseInt(optional("COUPON_BATCH_SIZE", "250"), 10) || 250),
+  ),
+  couponBatchConcurrency: couponConcurrency.batches,
   logLevel: optional("LOG_LEVEL", "info"),
 };

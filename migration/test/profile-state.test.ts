@@ -5,7 +5,11 @@ import path from "node:path";
 import test from "node:test";
 
 import { excludedStoresFile } from "../src/utils/import-exclusions.js";
-import { migrationProfile, migrationStateDir } from "../src/utils/profile-state.js";
+import {
+  migrationProfile,
+  migrationStateDir,
+  statePathIncludesProfile,
+} from "../src/utils/profile-state.js";
 
 function withTempRoot(run: (root: string) => void): void {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cguru-profile-state-"));
@@ -33,7 +37,7 @@ test("profile state defaults and USA state never share a directory", () => {
   });
 });
 
-test("India adopts the complete legacy state directory in one move", () => {
+test("India uses legacy state without mutating either directory", () => {
   withTempRoot((root) => {
     const legacy = path.join(root, ".checkpoints");
     fs.mkdirSync(legacy, { recursive: true });
@@ -45,10 +49,11 @@ test("India adopts the complete legacy state directory in one move", () => {
       { rootDir: root },
     );
 
-    assert.equal(stateDir, path.join(root, ".state", "india"));
-    assert.equal(fs.existsSync(legacy), false);
-    assert.equal(fs.existsSync(path.join(stateDir, "03-stores.json")), true);
-    assert.equal(fs.existsSync(path.join(stateDir, "storeIdMap.json")), true);
+    assert.equal(stateDir, legacy);
+    assert.equal(fs.existsSync(legacy), true);
+    assert.equal(fs.existsSync(path.join(legacy, "03-stores.json")), true);
+    assert.equal(fs.existsSync(path.join(legacy, "storeIdMap.json")), true);
+    assert.equal(fs.existsSync(path.join(root, ".state", "india")), false);
   });
 });
 
@@ -99,6 +104,13 @@ test("unsafe profile names fail closed", () => {
   assert.throws(() =>
     migrationProfile({ MIGRATION_PROFILE: "../india" } as NodeJS.ProcessEnv),
   );
+});
+
+test("state pin validation requires a complete profile path segment", () => {
+  assert.equal(statePathIncludesProfile(".state/india", "india"), true);
+  assert.equal(statePathIncludesProfile("/srv/india/.state", "india"), true);
+  assert.equal(statePathIncludesProfile(".state/india-usa", "india"), false);
+  assert.equal(statePathIncludesProfile(".state/usa", "india"), false);
 });
 
 test("USA exclusions resolve only inside the USA profile", () => {

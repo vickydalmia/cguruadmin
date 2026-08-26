@@ -315,7 +315,7 @@ The design has several independent safety layers:
 | Existing India links/cookies | The `.couponzguru.com` registrable-domain behavior preserves apex/www classification and cleans legacy Meta cookies. |
 | India and new-country image parity | `PUBLIC_SITE_URL` is runtime-only and the authenticated admin config endpoint supplies it to Coupon/Deal link actions, so one country-neutral image serves every deployment while rich-text classification still uses the correct domain. |
 | Footer country links | A shared registry preserves the existing sibling sites and automatically excludes India itself. |
-| Existing migration progress | The India profile adopts the old `.checkpoints` directory atomically, or safely keeps using it when a non-state log directory blocks the rename. |
+| Existing migration progress | The India profile safely keeps using the old `.checkpoints` directory without moving it during configuration import; operators can rename it explicitly while migration commands are stopped. |
 | Cross-country migration mistakes | Profile, state, target-country, table-prefix, configuration-file, Store-count, and Deal-count checks fail before target mutation. Attachment drift warns and is reconciled through the Phase 01 missing-file report. |
 
 The compatibility defaults are deliberately permissive for India. Feature
@@ -372,8 +372,10 @@ The expected USA source checks are:
 | Homepage hero banners | 5 |
 | Featured Stores | 8 |
 
-The profile imports Coupons only. Product Deal phases safely no-op when the
-source contains none.
+The profile imports Coupons only. Product Deal phases, including the Phase 12
+taxonomy reconciliation, safely no-op when the source contains none. Phase 12
+continues with its Coupon recommendation backfill; an empty Deal target is only
+treated as stale migration state when importable source Deals actually exist.
 
 ## 11. Migration profiles and safety
 
@@ -420,7 +422,9 @@ when the source does not contain them.
 
 Existing publication, scheduling, and expiry rules remain unchanged. The
 extractor additionally understands country-appropriate phrases such as Free
-Shipping, Buy One Get One, Starting At, Under, and dollar-value discounts.
+Shipping, Buy One Get One, Starting At, Under, dollar-value discounts, and
+case-insensitive dollar cashback such as `USD 15 Cashback`, `$15 cashback`, or
+`Cashback: $15`.
 
 - `SPECIAL OFFER` is the reported final text fallback, not the first choice.
 - Offers without a valid affiliate destination are quarantined.

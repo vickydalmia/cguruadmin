@@ -5,6 +5,7 @@ import {
   couponLogoStoreCandidates,
   normalizeWpMediaPath,
 } from "../src/utils/offer-logo-store.js";
+import { buildOfferTaxonomyRelationQuery } from "../src/utils/offer-relations.js";
 
 const couponsSource = readFileSync(
   new URL("../src/phases/07-coupons.ts", import.meta.url),
@@ -14,11 +15,6 @@ const dealsSource = readFileSync(
   new URL("../src/phases/08-deals.ts", import.meta.url),
   "utf8",
 );
-const offerRelationsSource = readFileSync(
-  new URL("../src/utils/offer-relations.ts", import.meta.url),
-  "utf8",
-);
-
 test("normalizes WordPress media URLs by upload path", () => {
   assert.equal(
     normalizeWpMediaPath("http://couponzguru.com/wp-content/uploads/Logo%20One.JPG?x=1"),
@@ -55,18 +51,26 @@ test("a related Store wins only as a duplicate-logo tie breaker", () => {
 });
 
 test("Coupon and Deal migrations link Logo Store only without Store membership", () => {
-  for (const source of [couponsSource, dealsSource]) {
-    assert.match(
-      source,
-      /replaceOfferTaxonomyRelations\([\s\S]{0,500}logoStoreOnlyWithoutStore: true/,
-    );
-  }
+  assert.match(
+    couponsSource,
+    /resolveOfferTaxonomyRelations\([\s\S]{0,500}logoStoreOnlyWithoutStore: true/,
+  );
+  assert.match(
+    dealsSource,
+    /replaceOfferTaxonomyRelations\([\s\S]{0,500}logoStoreOnlyWithoutStore: true/,
+  );
 });
 
 test("Logo Store inserts match Strapi many-to-one link-table columns", () => {
+  const query = buildOfferTaxonomyRelationQuery("coupons", 7, {
+    idsByTable: { stores: [], brands: [], categories: [], banks: [] },
+    logoStoreId: 42,
+  });
   assert.match(
-    offerRelationsSource,
-    /INSERT INTO "\$\{logoTarget\.table\}" \(\s*"\$\{logoTarget\.ownerColumn\}", "store_id"\s*\) VALUES \(\$1, \$2\)/,
+    query.sql,
+    /INSERT INTO "coupons_logo_store_lnk" \(\s*"coupon_id", "store_id"/,
   );
-  assert.doesNotMatch(offerRelationsSource, /logoTarget\.orderColumn/);
+  const logoInsert = query.sql.slice(query.sql.indexOf("upserted_logo_store"));
+  assert.doesNotMatch(logoInsert, /coupon_ord|store_ord/);
+  assert.deepEqual(query.params.at(-1), [42]);
 });

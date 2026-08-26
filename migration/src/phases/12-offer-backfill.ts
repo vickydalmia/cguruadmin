@@ -13,6 +13,7 @@ import {
   allowsPartialDeals,
   type PhaseOutcome,
 } from "../utils/phase-outcome.js";
+import { hasStaleEmptyDealTarget } from "../utils/target-continuity.js";
 
 /**
  * Phase 12 — Fold the WordPress ACF `deal_store` postmeta (a store term ID,
@@ -33,19 +34,6 @@ import {
 export async function runOfferBackfill(): Promise<void | PhaseOutcome> {
   logger.info("=== Phase 12: Offer Backfill (ACF deal_store → stores taxonomy) ===");
   const allowPartial = allowsPartialDeals();
-
-  // Guard against stale ID maps: if the Strapi tables are empty, the persisted
-  // maps belong to a different database (e.g. after switching
-  // PG_CONNECTION_STRING) and every row-id lookup would fail with FK errors.
-  const [{ count: dealCount }] = await pgQuery<{ count: string }>(
-    "SELECT COUNT(*)::text AS count FROM deals"
-  );
-  if (Number(dealCount) === 0) {
-    throw new Error(
-      "Strapi `deals` table is empty but checkpoints/ID maps exist from a previous run " +
-        "against a different database. Run a full clean migration instead: npm run migrate -- --clean"
-    );
-  }
 
   // Include every migrated Deal, including one whose deal_store was removed;
   // otherwise an old ACF owner could never be deleted during a re-import.
@@ -103,7 +91,22 @@ export async function runOfferBackfill(): Promise<void | PhaseOutcome> {
   if (importableRows.length !== rows.length) {
     logger.info(
       `Skipping ${rows.length - importableRows.length} excluded deal post(s) ` +
-        `(articles/retired stores) — never imported, nothing to reconcile`,
+      `(articles/retired stores) — never imported, nothing to reconcile`,
+    );
+  }
+
+  // Guard against stale ID maps only when this source actually has Deals to
+  // reconcile. A Coupons-only profile such as USA legitimately has an empty
+  // source inventory and target `deals` table; no Deal mapping is read in that
+  // case, and the Coupon recommendation backfill below must still run.
+  const [{ count: dealCount }] = await pgQuery<{ count: string }>(
+    "SELECT COUNT(*)::text AS count FROM deals",
+  );
+  if (hasStaleEmptyDealTarget(importableRows.length, Number(dealCount))) {
+    throw new Error(
+      "Strapi `deals` table is empty even though importable WordPress Deals exist; " +
+        "check that Phase 08 ran against this target database. If the migration state " +
+        "belongs to another database, run a full clean migration: yarn migrate --clean",
     );
   }
 
