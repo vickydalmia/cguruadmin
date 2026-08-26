@@ -1,6 +1,8 @@
 import { wpQuery } from "../db/wp-client.js";
 import { pgQuery } from "../db/pg-client.js";
 import pLimit from "p-limit";
+import fs from "node:fs";
+import path from "node:path";
 import {
   setPostMapping,
   getUserMapping,
@@ -36,6 +38,8 @@ import {
 } from "../utils/import-exclusions.js";
 import { getWpOfferExpiryRaw } from "../utils/wp-offer-expiry.js";
 import { registerMigratedEntity } from "../utils/migration-registry.js";
+import { isValidAffiliateDestination } from "../utils/offer-quality.js";
+import { config } from "../config.js";
 import {
   allowsPartialDeals,
   type PhaseOutcome,
@@ -47,6 +51,33 @@ import {
 const { parseLegacyDealDiscount } = await import(
   "../../../src/utils/deal-discount.js"
 );
+
+type DealReviewStatus =
+  | "pending"
+  | "imported"
+  | "excluded"
+  | "quarantined"
+  | "failed";
+
+type DealReviewRow = {
+  wpId: number;
+  title: string;
+  status: DealReviewStatus;
+  notes: string[];
+};
+
+function writeDealReview(rows: Iterable<DealReviewRow>): void {
+  fs.mkdirSync(config.stateDir, { recursive: true });
+  const values = [...rows].sort((a, b) => a.wpId - b.wpId);
+  fs.writeFileSync(
+    path.join(config.stateDir, "deal-review.json"),
+    JSON.stringify(
+      { profile: config.profile, total: values.length, rows: values },
+      null,
+      2,
+    ),
+  );
+}
 
 export async function runDeals(): Promise<void | PhaseOutcome> {
   logger.info("=== Phase 8: Deals Migration ===");
@@ -84,6 +115,12 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
 
   const sourcePostIds = sourcePosts.map((post) => post.ID);
   const metaByPost = await getMetaBulk(sourcePostIds);
+  const review = new Map<number, DealReviewRow>(
+    sourcePosts.map((post) => [
+      post.ID,
+      { wpId: post.ID, title: post.post_title, status: "pending", notes: [] },
+    ]),
+  );
   const migrationNow = new Date();
   const lifecyclePosts = sourcePosts.filter((post) => {
     const expiresAt = parseExpiryDate(
@@ -95,6 +132,13 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
       now: migrationNow,
     });
   });
+  const lifecyclePostIdSet = new Set(lifecyclePosts.map((post) => post.ID));
+  for (const post of sourcePosts) {
+    if (lifecyclePostIdSet.has(post.ID)) continue;
+    const row = review.get(post.ID)!;
+    row.status = "excluded";
+    row.notes.push("excluded by the shared offer lifecycle policy");
+  }
 
   // Posts filed under an excluded term (Articles tree, retired stores)
   // are not deals to import. Excluding them BEFORE expectedDocumentIds means the inventory
@@ -122,7 +166,27 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
     );
   }
   const excludedPostIds = new Set(excludedPosts.map((post) => post.ID));
-  const posts = lifecyclePosts.filter((post) => !excludedPostIds.has(post.ID));
+  for (const post of excludedPosts) {
+    const row = review.get(post.ID)!;
+    row.status = "excluded";
+    row.notes.push("excluded by the profile taxonomy/store policy");
+  }
+  const includedPosts = lifecyclePosts.filter((post) => !excludedPostIds.has(post.ID));
+  const quarantinedPosts = includedPosts.filter(
+    (post) => !isValidAffiliateDestination(clean(metaByPost.get(post.ID)?.link)),
+  );
+  const quarantinedIds = new Set(quarantinedPosts.map((post) => post.ID));
+  for (const post of quarantinedPosts) {
+    const row = review.get(post.ID)!;
+    row.status = "quarantined";
+    row.notes.push("missing or invalid affiliate destination");
+  }
+  const posts = includedPosts.filter((post) => !quarantinedIds.has(post.ID));
+  if (quarantinedPosts.length > 0) {
+    logger.warn(
+      `Quarantined ${quarantinedPosts.length} Deal(s) without a valid affiliate destination`,
+    );
+  }
 
   const expectedDocumentIds = new Set(
     posts.map((post) => generateDocumentId(`deal:${post.ID}`)),
@@ -132,9 +196,13 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
   logger.info(
     `Found ${posts.length} importable deal posts ` +
       `(${sourcePosts.length - lifecyclePosts.length} non-importable post(s) ` +
-      `dropped, ${excludedPosts.length} excluded post(s))`,
+      `dropped, ${excludedPosts.length} excluded post(s), ` +
+      `${quarantinedPosts.length} quarantined post(s))`,
   );
-  if (posts.length === 0) return;
+  if (posts.length === 0) {
+    writeDealReview(review.values());
+    return;
+  }
 
   // Saved migration maps can outlive a dev database reset. Never trust a
   // mapped Strapi admin ID until it is confirmed in the active target DB;
@@ -172,7 +240,11 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
         const title = clean(post.post_title) || post.post_title;
         // Best-effort cashback/bank/prepaid texts parsed from the title
         // (falling back to content); editors can correct these in the admin.
-        const { cashbackText, bankOfferText, prepaidText } = extractCashbackFields(title, content);
+        const { cashbackText, bankOfferText, prepaidText } = extractCashbackFields(
+          title,
+          content,
+          { currencyCode: config.source.currencyCode },
+        );
         const affiliateLink = clean(meta.link);
         const createdAt =
           normalizeWpDate(post.post_date_gmt) ||
@@ -325,8 +397,9 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
         const entityId =
           result[0]?.id ?? (await getEntityIdByDocumentId("deals", documentId));
         if (!entityId) {
-          logger.warn(`Could not resolve entity id for deal ${post.ID} (${post.post_title})`);
-          return;
+          throw new Error(
+            `Could not resolve entity id for deal ${post.ID} (${post.post_title})`,
+          );
         }
         setPostMapping(post.ID, {
           id: entityId,
@@ -369,11 +442,15 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
         );
 
         inserted++;
+        review.get(post.ID)!.status = "imported";
         if (inserted % 200 === 0) {
           logger.info(`  Processed ${inserted}/${posts.length} deals`);
         }
       } catch (err: any) {
         failed++;
+        const row = review.get(post.ID)!;
+        row.status = "failed";
+        row.notes.push(String(err?.message ?? err));
         logger.error(
           `Failed to insert deal ${post.ID} (${post.post_title}): ${err.message}`
         );
@@ -392,6 +469,7 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
   );
 
   await Promise.all(tasks);
+  writeDealReview(review.values());
   logger.info(`Deals migration complete: ${inserted} inserted, ${failed} failed`);
   logger.info(
     `Deal image progress complete: ${dealImagesFinished}/${posts.length} checked, ` +

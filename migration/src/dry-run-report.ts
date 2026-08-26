@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { config } from "./config.js";
 import { wpQuery, closeWp } from "./db/wp-client.js";
 import { logger } from "./utils/logger.js";
 import { shouldImportMigrationOffer } from "./utils/content-status.js";
@@ -18,18 +19,9 @@ import {
 
 const TYPE_LABELS = ["Store", "Brand", "Category", "Bank"] as const;
 
-const REPORT_CSV = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../dry-run-report.csv",
-);
-const EXCLUDED_CSV = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../dry-run-excluded.csv",
-);
-const SUMMARY_CSV = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../dry-run-summary.csv",
-);
+const REPORT_CSV = path.resolve(config.stateDir, "dry-run-report.csv");
+const EXCLUDED_CSV = path.resolve(config.stateDir, "dry-run-excluded.csv");
+const SUMMARY_CSV = path.resolve(config.stateDir, "dry-run-summary.csv");
 
 interface TermTally {
   /** Every fetched post carrying this term. */

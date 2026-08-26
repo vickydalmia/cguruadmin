@@ -20,6 +20,16 @@
       "required": true,
       "regex": "^[a-z0-9]+([-.][a-z0-9]+)*$"
     },
+    "pageTemplate": {
+      "type": "enumeration",
+      "enum": [
+        "default",
+        "dealTemplate",
+        "independenceDayTemplate"
+      ],
+      "default": "default",
+      "required": true
+    },
     "description": {
       "type": "richtext",
       "searchable": false

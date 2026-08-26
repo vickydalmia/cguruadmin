@@ -9,9 +9,33 @@
 
 import sanitizeHtmlLib from "sanitize-html";
 
-// Kept byte-in-sync with src/utils/sanitize-richtext.ts (parity pinned by its
-// test suite): external http(s) links get rel="nofollow" added automatically.
-const INTERNAL_HOST_PATTERN = /(^|\.)couponzguru\.com$/iu;
+function configuredInternalHosts(): string[] {
+  const values = [
+    process.env.SOURCE_INTERNAL_HOSTS,
+    process.env.TARGET_INTERNAL_HOSTS,
+  ]
+    .flatMap((value) => value?.split(",") ?? [])
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .flatMap((value) => {
+      try {
+        return [new URL(value.includes("://") ? value : `https://${value}`).hostname.toLowerCase()];
+      } catch {
+        return [];
+      }
+    });
+  // No fallback host: the rel rewrite is persisted into imported content, so
+  // an unconfigured run must treat every absolute link as external rather than
+  // grant first-party status to whichever brand happened to be in the code.
+  return [...new Set(values)];
+}
+
+function isInternalHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return configuredInternalHosts().some(
+    (host) => normalized === host || normalized.endsWith(`.${host}`),
+  );
+}
 
 function isExternalHttpHref(href: string | undefined): boolean {
   if (!href) return false;
@@ -23,7 +47,7 @@ function isExternalHttpHref(href: string | undefined): boolean {
     return false;
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-  return !INTERNAL_HOST_PATTERN.test(url.hostname);
+  return !isInternalHost(url.hostname);
 }
 
 /** Trim whitespace from a string value. Returns null if the result is empty. */

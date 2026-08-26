@@ -36,3 +36,15 @@ test("defaulted booleans are fill-only on conflict (editor toggles win)", () => 
   assert.doesNotMatch(source, /"show_trending_deals" = EXCLUDED/);
   assert.doesNotMatch(source, /"is_cj_enabled" = EXCLUDED/);
 });
+
+test("taxonomy import seeds entity page templates without overwriting editor choices", () => {
+  assert.match(source, /"page_template",/);
+  assert.match(source, /sourceSlug === "deal-of-the-day"/);
+  assert.match(source, /\? "dealTemplate"/);
+  assert.match(source, /"independenceDayTemplate"/);
+  assert.match(
+    source,
+    /"page_template" = COALESCE\("\$\{table\}"\."page_template", EXCLUDED\."page_template"\)/,
+  );
+  assert.doesNotMatch(source, /"page_template" = EXCLUDED/);
+});

@@ -103,6 +103,7 @@ export interface CashbackFields {
 export function extractCashbackFields(
   title: string | null | undefined,
   content?: string | null | undefined,
+  options: OfferExtractionOptions = {},
 ): CashbackFields {
   let cashbackText: string | null = null;
   let bankOfferText: string | null = null;
@@ -120,7 +121,12 @@ export function extractCashbackFields(
         bankOfferText = `${pct[1]}%`;
       } else {
         const rupee = text.match(BANK_RUPEE_ONE);
-        if (rupee) bankOfferText = `₹${digits(rupee[1])}`;
+        if (rupee) {
+          const symbolMatch = text.match(BANK_RUPEE_ONE);
+          bankOfferText = symbolMatch
+            ? money(symbolMatch[0].match(new RegExp(CUR, "i"))?.[0] ?? defaultCurrencySymbol(options), rupee[1])
+            : `${defaultCurrencySymbol(options)}${digits(rupee[1])}`;
+        }
       }
     }
     if (!prepaidText) {
@@ -129,7 +135,12 @@ export function extractCashbackFields(
         prepaidText = `${pct[1]}%`;
       } else {
         const rupee = text.match(PREPAID_RUPEE_ONE);
-        if (rupee) prepaidText = `₹${digits(rupee[1])}`;
+        if (rupee) {
+          const symbolMatch = text.match(PREPAID_RUPEE_ONE);
+          prepaidText = symbolMatch
+            ? money(symbolMatch[0].match(new RegExp(CUR, "i"))?.[0] ?? defaultCurrencySymbol(options), rupee[1])
+            : `${defaultCurrencySymbol(options)}${digits(rupee[1])}`;
+        }
       }
     }
   }
@@ -156,8 +167,27 @@ function stripCashbackSpans(text: string): string {
 export type OfferParts = [string, string, string];
 
 /** First-match-wins badge patterns, highest priority first. */
-function matchOffer(text: string): OfferParts | null {
+export type OfferExtractionOptions = {
+  currencyCode?: string;
+};
+
+function defaultCurrencySymbol(options: OfferExtractionOptions): "$" | "₹" {
+  return options.currencyCode?.trim().toUpperCase() === "USD" ? "$" : "₹";
+}
+
+function matchOffer(text: string, options: OfferExtractionOptions): OfferParts | null {
   let m: RegExpMatchArray | null;
+
+  if (/\bfree\s+shipping\b/iu.test(text)) return ["FREE", "SHIPPING", ""];
+  if (/\b(?:buy\s+one\s+get\s+one|buy\s*1\s+get\s*1|bogo)\b/iu.test(text)) {
+    return ["BOGO", "", ""];
+  }
+  if ((m = text.match(new RegExp(String.raw`\bstarting\s+(?:at|from)\s+(${CUR})\s*([\d,]+)`, "i")))) {
+    return ["STARTING", money(m[1], m[2]), ""];
+  }
+  if ((m = text.match(new RegExp(String.raw`\bunder\s+(${CUR})\s*([\d,]+)`, "i")))) {
+    return ["UNDER", money(m[1], m[2]), ""];
+  }
 
   // Qualifier (UPTO/FLAT/EXTRA/MIN) immediately before a percentage. For a
   // range ("Min 30% To 80%", "Flat 40-60%") this captures the first number.
@@ -189,7 +219,7 @@ function matchOffer(text: string): OfferParts | null {
   // this India-first catalog ("Flat 250 Off" -> "FLAT ₹250 OFF"). Requiring a
   // qualifier + "off" (and the scale guard) keeps stray numbers out.
   if ((m = text.match(new RegExp(String.raw`\b(${QUAL})\s+([\d,]+)${NOT_SCALED}\s*(?:instant\s+)?off\b`, "i"))))
-    return [normQualifier(m[1]), `₹${digits(m[2])}`, "OFF"];
+    return [normQualifier(m[1]), `${defaultCurrencySymbol(options)}${digits(m[2])}`, "OFF"];
 
   return null;
 }
@@ -204,11 +234,12 @@ function matchOffer(text: string): OfferParts | null {
 export function extractOfferText(
   title: string | null | undefined,
   content?: string | null | undefined,
+  options: OfferExtractionOptions = {},
 ): string | null {
   for (const raw of [title, content]) {
     const text = stripCashbackSpans(toPlain(raw));
     if (!text) continue;
-    const parts = matchOffer(text);
+    const parts = matchOffer(text, options);
     if (parts) return parts.filter(Boolean).join(" ");
   }
   return null;

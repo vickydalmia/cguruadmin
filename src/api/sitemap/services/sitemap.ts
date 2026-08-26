@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { cachedSiteConfiguration } from '../../site-configuration/services/cached-configuration';
 
 // Sitemap entity feed.
 //
@@ -43,10 +44,28 @@ const ENTITY_CONFIGS: readonly EntityConfig[] = [
 const ENTITY_BATCH_SIZE = 1_000;
 
 // The two offer collections that can contribute to an entity page's content.
+// Which of them count is feature-gated per deployment: a disabled feature's
+// offers never render (EntityLinkPolicy empties the sources in
+// build-unified-entity-page-view.ts), so counting them here would keep pages
+// in the sitemap that emit noindex. A feature-skipped source is an
+// authoritative zero, NOT an incomplete aggregate.
 const OFFER_SOURCES = [
   { table: 'coupons', link: (config: EntityConfig) => `coupons_${config.table}_lnk`, ownerColumn: 'coupon_id' },
   { table: 'deals', link: (config: EntityConfig) => `deals_${config.table}_lnk`, ownerColumn: 'deal_id' },
 ] as const;
+
+type OfferSource = (typeof OFFER_SOURCES)[number];
+
+async function enabledOfferSources(
+  strapi: Core.Strapi,
+): Promise<readonly OfferSource[]> {
+  const configuration = await cachedSiteConfiguration(strapi);
+  return OFFER_SOURCES.filter((source) =>
+    source.table === 'coupons'
+      ? configuration.couponsEnabled !== false
+      : configuration.productDealsEnabled !== false,
+  );
+}
 
 export type SitemapEntityRow = {
   kind: EntityKind;
@@ -60,9 +79,11 @@ export type SitemapEntityRow = {
    * Live (published, unexpired) coupons + deals rendered on this entity page.
    * Feeds the frontend thin-content guard: a zero-offer page is near-empty
    * boilerplate, so the sitemap drops it and the page emits noindex until
-   * offers return. 0 means "confirmed empty" and is only published when every
-   * source query ran (OfferAggregateResult.complete); OMITTED when any count
-   * failed, so the frontend fails open and keeps the URL.
+   * offers return. Feature-disabled sources (couponsEnabled /
+   * productDealsEnabled false) contribute zero because the page renders none
+   * of their offers. 0 means "confirmed empty" and is only published when
+   * every ENABLED source query ran (OfferAggregateResult.complete); OMITTED
+   * when any count failed, so the frontend fails open and keeps the URL.
    */
   liveOfferCount?: number;
 };
@@ -145,6 +166,7 @@ type OfferAggregateResult = {
 async function fetchOfferAggregates(
   strapi: Core.Strapi,
   config: EntityConfig,
+  sources: readonly OfferSource[],
 ): Promise<OfferAggregateResult> {
   const connection = (strapi.db as any)?.connection;
   const result = new Map<number, OfferAggregate>();
@@ -155,7 +177,7 @@ async function fetchOfferAggregates(
   const cutoff = new Date().toISOString();
   let complete = true;
 
-  for (const source of OFFER_SOURCES) {
+  for (const source of sources) {
     const linkTable = source.link(config);
 
     let rows: any[] = [];
@@ -242,11 +264,12 @@ async function fetchOfferAggregates(
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   async listSitemapEntities(): Promise<SitemapEntityRow[]> {
+    const sources = await enabledOfferSources(strapi);
     const perKind = await Promise.all(
       ENTITY_CONFIGS.map(async (config) => {
         const [entities, { aggregates, complete }] = await Promise.all([
           fetchEntities(strapi, config),
-          fetchOfferAggregates(strapi, config),
+          fetchOfferAggregates(strapi, config, sources),
         ]);
 
         return entities.map((entity) => {

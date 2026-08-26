@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { migrationProfile, migrationRoot, profileFile } from "./profile-state.js";
 
 // Terms excluded from the WordPress import, for two independent reasons:
 //
@@ -107,14 +108,23 @@ export function parseExcludedStoreNames(csv: string): Set<string> {
   return names;
 }
 
-const EXCLUDED_STORES_CSV = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../excluded-stores.csv",
-);
+export function excludedStoresFile(environment: NodeJS.ProcessEnv = process.env): string {
+  const explicit = environment.MIGRATION_EXCLUSIONS_FILE?.trim();
+  if (explicit) return path.resolve(migrationRoot(), explicit);
+  const isolated = profileFile("excluded-stores.csv", environment);
+  if (fs.existsSync(isolated) || migrationProfile(environment) !== "india") {
+    return isolated;
+  }
+  return path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../excluded-stores.csv",
+  );
+}
 
 export function loadExcludedStoreNames(): Set<string> {
-  if (!fs.existsSync(EXCLUDED_STORES_CSV)) return new Set();
-  return parseExcludedStoreNames(fs.readFileSync(EXCLUDED_STORES_CSV, "utf8"));
+  const file = excludedStoresFile();
+  if (!fs.existsSync(file)) return new Set();
+  return parseExcludedStoreNames(fs.readFileSync(file, "utf8"));
 }
 
 export interface ImportExclusions {

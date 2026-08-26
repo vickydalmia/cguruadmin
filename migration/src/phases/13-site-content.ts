@@ -1,10 +1,13 @@
 import { unserialize } from "php-serialize";
+import fs from "node:fs";
+import { config } from "../config.js";
 import { wpQuery } from "../db/wp-client.js";
 import { pgQuery, pgTransaction } from "../db/pg-client.js";
 import {
   limitHomepageBankOffers,
   MAX_HOMEPAGE_BANK_OFFERS,
 } from "../utils/homepage-bank-offers.js";
+import { FOOTER_COUNTRY_ASSETS } from "../utils/footer-media-assets.js";
 import { HOMEPAGE_SEED_LIMITS } from "../utils/homepage-limits.js";
 import { ensureTermMapping } from "../utils/id-maps.js";
 import { resolveMediaRef } from "../utils/media-resolver.js";
@@ -17,6 +20,7 @@ import { clean } from "../utils/sanitize.js";
 import { logger } from "../utils/logger.js";
 import { HEADER_SEARCH_SUGGESTIONS } from "../utils/site-selection-defaults.js";
 import { migrationRegistryRows } from "../utils/migration-registry.js";
+import { isAcfTrue } from "../utils/acf.js";
 
 /**
  * Phase 13 — Site Content
@@ -158,13 +162,10 @@ const SOCIAL_PLATFORMS: ReadonlyArray<string> = [
   "youtube",
 ];
 
-const FOOTER_COUNTRIES: ReadonlyArray<{ code: string; name: string; url: string }> = [
-  { code: "us", name: "USA", url: "https://www.couponzguruusa.com/" },
-  { code: "sg", name: "Singapore", url: "https://www.couponzguru.sg/" },
-  { code: "ph", name: "Philippines", url: "https://www.couponzguru.ph/" },
-  { code: "ae", name: "UAE", url: "https://www.couponzguru.ae/" },
-  { code: "my", name: "Malaysia", url: "https://www.couponzguru.my/" },
-];
+// Shared country registry filtered for this deployment; phases 13b/13c use
+// the same list so every footer links to all other known country sites.
+const FOOTER_COUNTRIES: ReadonlyArray<{ code: string; name: string; url: string }> =
+  FOOTER_COUNTRY_ASSETS;
 
 const PARTNER_CARD = {
   title: "Partner With Us",
@@ -197,6 +198,30 @@ const MENU_EXTRA_ITEMS: ReadonlyArray<{
   { label: "Today's Deals", url: "/todays-deals/" },
   { label: "End of the Months Sale", url: "/sale/end-of-month/", featured: true },
 ];
+
+const homepageSourceReview: {
+  ignoredLegacyStoreGrids: string[];
+  heroBannersResolved?: number;
+  featuredStoresResolved?: number;
+} = { ignoredLegacyStoreGrids: [] };
+
+async function reportIgnoredLegacyStoreGrids(): Promise<void> {
+  if (config.profile !== "usa") return;
+  const options = await fetchOptionsLike("options_%store%");
+  const roots = [...options.entries()]
+    .filter(([name, value]) =>
+      name !== "options_featured_stores" &&
+      /^\d+$/u.test(value.trim()) &&
+      Number(value) === 8 &&
+      [...options.keys()].some((candidate) => candidate.startsWith(`${name}_0`)),
+    )
+    .map(([name]) => name);
+  homepageSourceReview.ignoredLegacyStoreGrids = roots;
+  logger.info(
+    `USA homepage: intentionally ignoring ${roots.length} legacy eight-Store grid(s)` +
+      (roots.length ? ` (${roots.join(", ")})` : ""),
+  );
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // Schema detection helpers (information_schema)
@@ -422,6 +447,9 @@ export async function runSiteContent(): Promise<void> {
 
   const summary: string[] = [];
 
+  await pgTransaction(() => seedSiteConfiguration(summary));
+  await reportIgnoredLegacyStoreGrids();
+
   // Seed source for independently editable homepage, navigation, and search
   // store selections.
   const curatedStores = await getCuratedStores();
@@ -436,8 +464,98 @@ export async function runSiteContent(): Promise<void> {
   await pgTransaction(() => seedMenu(summary, curatedStores, exploreCategories));
   await pgTransaction(() => seedFooter(summary));
 
+  fs.mkdirSync(config.stateDir, { recursive: true });
+  fs.writeFileSync(
+    `${config.stateDir}/homepage-source-review.json`,
+    JSON.stringify({ profile: config.profile, ...homepageSourceReview }, null, 2),
+  );
+
   logger.info("Site content summary:");
   for (const line of summary) logger.info(`  ${line}`);
+}
+
+const SITE_CONFIGURATION_FIELDS = [
+  "siteName", "countryName", "countryCode", "locale", "timezone",
+  "currencyCode", "onboardingComplete", "storesEnabled", "couponsEnabled",
+  "brandsEnabled", "categoriesEnabled", "banksEnabled", "productDealsEnabled",
+  "aboutEnabled", "careersEnabled", "contactEnabled", "faqsEnabled",
+  "testimonialsEnabled", "partnerWithUsEnabled", "cultureEnabled",
+  "privacyPolicyEnabled", "termsAndConditionsEnabled",
+  "affiliateDisclosureEnabled", "dealOfTheDayEnabled",
+  "independenceDaySaleEnabled",
+] as const;
+
+function snakeCase(value: string): string {
+  return value.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+}
+
+async function seedSiteConfiguration(summary: string[]): Promise<void> {
+  if (!hasTable("site_configurations")) {
+    throw new Error(
+      "site_configurations table is missing. Apply the Site Configuration Strapi schema before Phase 13.",
+    );
+  }
+  if (!fs.existsSync(config.siteConfigurationFile)) {
+    throw new Error(
+      `Site configuration profile is missing: ${config.siteConfigurationFile}`,
+    );
+  }
+  const profile = JSON.parse(
+    fs.readFileSync(config.siteConfigurationFile, "utf8"),
+  ) as Record<string, unknown>;
+  const values: Record<string, unknown> = {
+    ...profile,
+    countryCode: config.source.countryCode.toUpperCase(),
+    locale: config.source.locale,
+    currencyCode: config.source.currencyCode.toUpperCase(),
+    timezone: config.source.timezone,
+  };
+  const columns = await getColumns("site_configurations");
+  const row: Record<string, unknown> = {};
+  for (const field of SITE_CONFIGURATION_FIELDS) {
+    const column = snakeCase(field);
+    if (columns.includes(column)) row[column] = values[field];
+  }
+  const now = new Date().toISOString();
+  const existing = await pgQuery<{ id: number; country_code: string | null }>(
+    `SELECT id, country_code FROM "site_configurations" ORDER BY id ASC LIMIT 1 FOR UPDATE`,
+  );
+  // Destination guard: silently flipping an existing site's country means the
+  // operator pointed this run at the WRONG database (e.g. a usa overlay merged
+  // into the india env without repointing PG_CONNECTION_STRING). Refuse
+  // instead of repurposing a live country's data.
+  const existingCountry = existing[0]?.country_code?.trim().toUpperCase();
+  const targetCountry = String(values.countryCode ?? "").toUpperCase();
+  if (
+    existingCountry &&
+    targetCountry &&
+    existingCountry !== targetCountry &&
+    process.env.MIGRATION_ALLOW_COUNTRY_SWITCH !== "true"
+  ) {
+    throw new Error(
+      `Target database is configured for country "${existingCountry}" but this run imports "${targetCountry}". ` +
+        "This usually means the destination connection still points at another country's database. " +
+        "Fix the destination env vars, or set MIGRATION_ALLOW_COUNTRY_SWITCH=true to deliberately repurpose this database.",
+    );
+  }
+  if (existing[0]) {
+    const names = Object.keys(row);
+    await pgQuery(
+      `UPDATE "site_configurations" SET ${names
+        .map((column, index) => `"${column}" = $${index + 1}`)
+        .join(", ")}, "updated_at" = $${names.length + 1} WHERE id = $${names.length + 2}`,
+      [...names.map((column) => row[column]), now, existing[0].id],
+    );
+    summary.push(`site configuration: updated (${config.profile})`);
+    return;
+  }
+  await insertRow("site_configurations", {
+    document_id: generateDocumentId(`site-configuration:${config.profile}`),
+    ...row,
+    created_at: now,
+    updated_at: now,
+  });
+  summary.push(`site configuration: seeded (${config.profile})`);
 }
 
 type ComponentLink = {
@@ -875,12 +993,13 @@ async function seedGlobal(summary: string[]): Promise<void> {
     return;
   }
 
-  const opts = await fetchOptionsIn([
-    "options_header_code",
-    "options_footer_code",
-  ]);
+  const opts = config.importWpTrackingScripts
+    ? await fetchOptionsIn(["options_header_code", "options_footer_code"])
+    : new Map<string, string>();
   logger.info(
-    `global: found ${opts.size}/2 WP option keys (${Array.from(opts.keys()).join(", ") || "none"})`
+    config.importWpTrackingScripts
+      ? `global: found ${opts.size}/2 WP tracking option keys (${Array.from(opts.keys()).join(", ") || "none"})`
+      : "global: WordPress header/footer scripts intentionally not imported"
   );
 
   const now = new Date().toISOString();
@@ -993,6 +1112,45 @@ async function wordpressCouponImageRefs(
   return refs;
 }
 
+type HomepageCouponSelection = "recommended" | "exclusive" | "newly-added";
+
+async function wordpressHomepageCouponMeta(
+  postIds: readonly number[],
+): Promise<Map<number, { popular: boolean; offerType: string }>> {
+  const result = new Map<number, { popular: boolean; offerType: string }>();
+  const batchSize = 500;
+  for (let start = 0; start < postIds.length; start += batchSize) {
+    const batch = postIds.slice(start, start + batchSize);
+    if (batch.length === 0) continue;
+    const placeholders = batch.map(() => "?").join(",");
+    const rows = await wpQuery<{ post_id: number; meta_key: string; meta_value: string }>(
+      `SELECT post_id, meta_key, meta_value FROM wp_postmeta
+       WHERE post_id IN (${placeholders})
+         AND meta_key IN ('popular_coupon', 'offer_type')`,
+      [...batch],
+    );
+    for (const row of rows) {
+      const current = result.get(row.post_id) ?? { popular: false, offerType: "" };
+      if (row.meta_key === "popular_coupon") current.popular = isAcfTrue(row.meta_value);
+      if (row.meta_key === "offer_type") current.offerType = row.meta_value.trim().toLowerCase();
+      result.set(row.post_id, current);
+    }
+  }
+  return result;
+}
+
+function matchesHomepageSelection(
+  value: { popular: boolean; offerType: string } | undefined,
+  selection: HomepageCouponSelection,
+): boolean {
+  const offerType = value?.offerType ?? "";
+  if (selection === "recommended") {
+    return value?.popular === true || /recommended|popular/u.test(offerType);
+  }
+  if (selection === "exclusive") return /exclusive/u.test(offerType);
+  return /new(?:ly)?[ _-]*(?:added)?|latest/u.test(offerType);
+}
+
 /** Newest published migrated Coupons with legacy WordPress art. The art is
  *  resolved directly into the required homepage component field; it is never
  *  attached to the Coupon record. extraJoin/extraWhere refine the pool. */
@@ -1000,7 +1158,8 @@ async function newestCouponsWithPresentationImage(
   limit: number,
   extraJoin = "",
   extraWhere = "",
-  params: unknown[] = []
+  params: unknown[] = [],
+  selection?: HomepageCouponSelection,
 ): Promise<CouponWithPresentationImage[]> {
   const rows = await pgQuery<{ id: number; document_id: string }>(
     `SELECT c.id, c.document_id
@@ -1026,9 +1185,15 @@ async function newestCouponsWithPresentationImage(
     return postId ? [postId] : [];
   });
   const refs = await wordpressCouponImageRefs(postIds);
+  const homepageMeta = selection
+    ? await wordpressHomepageCouponMeta(postIds)
+    : new Map<number, { popular: boolean; offerType: string }>();
   const resolved: CouponWithPresentationImage[] = [];
   for (const row of rows) {
     const postId = postIdByDocumentId.get(row.document_id);
+    if (selection && (!postId || !matchesHomepageSelection(homepageMeta.get(postId), selection))) {
+      continue;
+    }
     const ref = postId ? refs.get(postId) : undefined;
     if (!ref) continue;
     const imageFileId = await resolveMediaRef(ref);
@@ -1110,6 +1275,10 @@ async function gatherHomepageData(
   if (hasTable("coupons")) {
     topOfferCoupons = await newestCouponsWithPresentationImage(
       HOMEPAGE_SEED_LIMITS.topOffers,
+      "",
+      "",
+      [],
+      config.profile === "usa" ? "recommended" : undefined,
     );
   } else {
     logger.warn("coupons table not found — topOffers section will be empty");
@@ -1154,6 +1323,22 @@ async function gatherHomepageData(
   let exclusiveCoupons: CouponWithPresentationImage[] = [];
   let newlyAddedCoupons: CouponWithPresentationImage[] = [];
   if (hasTable("coupons")) {
+    if (config.profile === "usa") {
+      exclusiveCoupons = await newestCouponsWithPresentationImage(
+        HOMEPAGE_SEED_LIMITS.cgExclusive,
+        "",
+        "",
+        [],
+        "exclusive",
+      );
+      newlyAddedCoupons = await newestCouponsWithPresentationImage(
+        HOMEPAGE_SEED_LIMITS.newlyAdded,
+        "",
+        "",
+        [],
+        "newly-added",
+      );
+    } else {
     const couponsCategoriesLnkForExclusive = await detectLnk(
       "coupons",
       "categories",
@@ -1179,6 +1364,7 @@ async function gatherHomepageData(
     newlyAddedCoupons = await newestCouponsWithPresentationImage(
       HOMEPAGE_SEED_LIMITS.newlyAdded,
     );
+    }
   } else {
     logger.warn(
       "coupons table not found — cgExclusive/newlyAdded sections will be skipped"
@@ -1660,6 +1846,7 @@ async function buildHomepageTree(
 
   // ── howItWorks (exact frontend copy) ──
   if (
+    config.profile === "india" &&
     missingTables(
       "components_home_how_it_works",
       "components_home_steps",
@@ -1710,6 +1897,7 @@ async function buildHomepageTree(
 
   // ── faq (exact frontend copy) ──
   if (
+    config.profile === "india" &&
     missingTables(
       "components_home_faq_blocks",
       "components_shared_faq_items",
@@ -1863,6 +2051,15 @@ async function parseSliderBanners(): Promise<Banner[]> {
       alt: clean(alt ?? null),
     });
   }
+  if (
+    config.source.expectedHeroBanners > 0 &&
+    banners.length !== config.source.expectedHeroBanners
+  ) {
+    throw new Error(
+      `Hero banner exception: expected ${config.source.expectedHeroBanners}, resolved ${banners.length}`,
+    );
+  }
+  homepageSourceReview.heroBannersResolved = banners.length;
   return banners;
 }
 
@@ -1876,6 +2073,7 @@ async function getCuratedStores(): Promise<StoreRow[]> {
 
   const opts = await fetchOptionsLike("options_featured_stores%");
   const termIds: number[] = [];
+  const authoredUrls: string[] = [];
 
   const direct = opts.get("options_featured_stores");
   if (direct && !/^\d+$/.test(direct.trim())) {
@@ -1899,6 +2097,7 @@ async function getCuratedStores(): Promise<StoreRow[]> {
           termIds.push(ids[0]);
           break;
         }
+        if (/^https?:\/\//iu.test(value.trim())) authoredUrls.push(value.trim());
       }
     }
   }
@@ -1919,6 +2118,45 @@ async function getCuratedStores(): Promise<StoreRow[]> {
     );
     if (row[0]) stores.push(row[0]);
   }
+
+  for (const authoredUrl of authoredUrls) {
+    let pathname: string;
+    try {
+      pathname = new URL(authoredUrl).pathname;
+    } catch {
+      logger.warn(`featured store URL is invalid: ${authoredUrl}`);
+      continue;
+    }
+    const leaf = decodeURIComponent(pathname).split("/").filter(Boolean).at(-1)?.toLowerCase();
+    if (!leaf) continue;
+    const candidates = [
+      leaf,
+      leaf.replace(/-(?:coupon-codes?|coupons?|promo-codes?|offers?)$/u, ""),
+    ];
+    const row = await pgQuery<{ id: number; name: string }>(
+      `SELECT id, name FROM "stores" WHERE lower(slug) = ANY($1::text[]) ORDER BY id LIMIT 1`,
+      [[...new Set(candidates)]],
+    );
+    if (!row[0]) {
+      logger.warn(`featured store URL did not resolve to a migrated Store: ${authoredUrl}`);
+      continue;
+    }
+    if (!seen.has(row[0].id)) {
+      seen.add(row[0].id);
+      stores.push(row[0]);
+    }
+  }
+
+  if (
+    config.source.expectedFeaturedStores > 0 &&
+    stores.length !== config.source.expectedFeaturedStores
+  ) {
+    throw new Error(
+      `Featured Store exception: expected ${config.source.expectedFeaturedStores}, resolved ${stores.length}`,
+    );
+  }
+
+  homepageSourceReview.featuredStoresResolved = stores.length;
 
   if (stores.length > 0) {
     logger.info(`curated stores: ${stores.length} from options_featured_stores`);
@@ -2203,8 +2441,9 @@ async function seedMenu(
 
   // ── extraItems ──
   let extraCount = 0;
-  for (let i = 0; i < MENU_EXTRA_ITEMS.length; i++) {
-    const item = MENU_EXTRA_ITEMS[i];
+  const menuExtraItems = config.profile === "india" ? MENU_EXTRA_ITEMS : [];
+  for (let i = 0; i < menuExtraItems.length; i++) {
+    const item = menuExtraItems[i];
     const linkId = await insertRow("components_nav_links", {
       label: item.label,
       url: item.url,
@@ -2263,8 +2502,16 @@ async function seedFooter(summary: string[]): Promise<void> {
   // ── sections ──
   let sectionCount = 0;
   let storeLinksResolved = 0;
-  for (let i = 0; i < FOOTER_SECTIONS.length; i++) {
-    const section = FOOTER_SECTIONS[i];
+  const footerSections = config.profile === "india"
+    ? FOOTER_SECTIONS
+    : FOOTER_SECTIONS.map((section) => ({
+        ...section,
+        links: section.links.filter(
+          (link) => link.href === "/stores/" || link.href === "/sitemap.xml",
+        ),
+      })).filter((section) => section.links.length > 0);
+  for (let i = 0; i < footerSections.length; i++) {
+    const section = footerSections[i];
     const sectionId = await insertRow("components_footer_link_sections", {
       title: section.title,
     });

@@ -17,18 +17,18 @@ guarantees they hold.
 
 ### What it does
 
-The migration ingests a large WordPress 5.x site (coupons and deals plus
+The migration ingests a profiled WordPress 5.x site (coupons and deals plus
 supporting taxonomies, media, SEO, and unique coupon codes) and writes the
-equivalent Strapi v5 content into PostgreSQL, with media in S3 (or a local
-filesystem fallback).
+equivalent Strapi v5 content into one country's PostgreSQL database, with media
+in S3 (or a local filesystem fallback). The profile also seeds that
+deployment's Site Configuration.
 
 **Sources**
 
-- **MySQL** — WordPress core tables (`wp_posts`, `wp_postmeta`, `wp_terms`,
-  `wp_term_taxonomy`, `wp_term_relationships`, `wp_termmeta`, `wp_users`,
-  `wp_usermeta`), plus optional `wp_uc_coupons` / `wp_uc_codes` (Unique Coupons
-  plugin) and `wp_yoast_indexable` / `wp_yoast_primary_term` when Yoast is
-  installed.
+- **MySQL** — WordPress core tables selected through the validated
+  `WP_TABLE_PREFIX` (for example `wp_posts` or
+  `wp_dda10ab629_posts`), plus optional prefixed Unique Coupons and Yoast
+  tables when those plugins are installed.
 - **Filesystem** — `wp-content/uploads/` on disk, for the actual image bytes.
 
 **Targets**
@@ -42,7 +42,7 @@ filesystem fallback).
 
 ```
 config ─► connections ─► phase loop ─► checkpoints ─► verification
-           (MySQL + PG)   (00 → 15)     (per phase)     (non-fatal)
+           (MySQL + PG)   (00 → 16)     (per phase)     (non-fatal)
                              │
                              ├── Media inventoried (01)
                              ├── Media uploads happen on demand (02)
@@ -53,7 +53,7 @@ config ─► connections ─► phase loop ─► checkpoints ─► verificati
                              ├── Verify (10)
                              ├── Copy used local media (11)
                              ├── Offer + site-content backfills (12, 13, 13a)
-                             └── Media optimize + formats backfill (14, 15)
+                             └── Media optimize, formats + safe cleanup (14–16)
 ```
 
 ### Resumable by design
@@ -62,8 +62,9 @@ Three mechanisms cooperate:
 
 - **Deterministic `document_id`** derived from WordPress primary keys, so every
   insert can use an `ON CONFLICT ("document_id")` clause and be safely repeated.
-- **Per-phase checkpoint files** under `migration/.checkpoints/`, which cause
-  completed phases to be skipped on a rerun.
+- **Per-phase checkpoint files** under the active profile state directory
+  (normally `migration/.state/<profile>/`), which cause completed phases to be
+  skipped on a rerun.
 - **Persisted id maps**, which let a later phase run standalone without redoing
   its prerequisites.
 
@@ -80,6 +81,8 @@ Three mechanisms cooperate:
 | [`src/config.ts`](../migration/src/config.ts) | `.env.migration` → typed config; nothing else |
 | [`src/db/wp-client.ts`](../migration/src/db/wp-client.ts) | MySQL pool + optional SSH tunnel |
 | [`src/db/pg-client.ts`](../migration/src/db/pg-client.ts) | Postgres pool + optional CA-cert SSL |
+| [`src/utils/profile-state.ts`](../migration/src/utils/profile-state.ts) | Validated profile names, isolated state paths, profile files and legacy India state adoption |
+| [`src/utils/wp-table.ts`](../migration/src/utils/wp-table.ts) | Validates the WordPress prefix and rewrites table identifiers before a query executes |
 
 **Utilities** — [`src/utils/`](../migration/src/utils)
 
@@ -164,7 +167,7 @@ Order is a dependency chain, not a preference:
 - **01 before 03–08** so inventoried attachments are resolvable.
 - **03–06 before 07–08** so taxonomies and pools are in the id maps.
 - **06a before 07–08** so author ids are available for `created_by_id`.
-- **12–15 last**, because they operate on already-migrated rows rather than
+- **12–16 last**, because they operate on already-migrated rows rather than
   reading fresh WordPress data.
 
 Two phases are worth calling out. **Phase 02 is special**: its entry point only
@@ -244,12 +247,23 @@ tunnel and its local server.
 ### Config
 
 [`src/config.ts`](../migration/src/config.ts) reads `.env.migration` and exposes
-a single typed `config` object grouped into `ssh`, `wp`, `pg`, `s3`, plus
-`wpUploadsDir`, `batchSize`, `mediaConcurrency`, and `logLevel`. Only
-`WP_DB_NAME` and `PG_CONNECTION_STRING` are required; everything else has a
-default or may be omitted. `~` is expanded in both the SSH key path and the
-Postgres CA cert path. `wpUploadsDir` resolves relative to the `migration/`
-package directory, not the working directory.
+a single typed `config` object grouped into the active profile, source/target
+identity, `ssh`, `wp`, `pg`, `s3`, plus `wpUploadsDir`, `batchSize`,
+`mediaConcurrency`, and `logLevel`. Only `WP_DB_NAME` and
+`PG_CONNECTION_STRING` are required at module load; Phase 00 validates the
+profile file and all country-specific invariants before mutation. `~` is
+expanded in both the SSH key path and the Postgres CA cert path.
+`wpUploadsDir` resolves relative to the `migration/` package directory, not the
+working directory.
+
+`MIGRATION_PROFILE` defaults to `india`. It selects `.state/<profile>`,
+`profiles/<profile>/site-configuration.json`, and the profile exclusion file
+unless those paths are explicitly supplied. Checkpoints, ID maps, manifests,
+logs and reports follow the same state root. The India profile can atomically
+adopt the pre-profile `.checkpoints/` directory so an in-flight production
+migration does not restart from zero. If both old and new locations contain
+real JSON state, configuration fails closed and requires an operator to
+reconcile them.
 
 `migration/README.md` is the catalogue of what each variable does. Two are worth
 knowing here: `SSH_HOST_FINGERPRINT` pins the tunnel's expected server host key
@@ -290,7 +304,8 @@ first query fires, not at process start.
 
 ### `id-maps.ts` — the spine
 
-Six maps, each persisted as its own JSON file under `migration/.checkpoints/`:
+Six maps, each persisted as its own JSON file under the active profile state
+directory (`migration/.state/<profile>/` by default):
 
 | Map | Key → value |
 |---|---|
@@ -398,7 +413,8 @@ The other exports:
 ### Logging and checkpoints
 
 [`logger.ts`](../migration/src/utils/logger.ts) is Winston with three transports:
-a colorized console, `migration.log`, and an errors-only `migration-errors.log`.
+a colorized console and profile-scoped `migration.log` and
+`migration-errors.log` files.
 [`checkpoint.ts`](../migration/src/utils/checkpoint.ts) exposes
 "is this phase complete", "mark it complete", and "clear the markers" — where
 clearing deliberately spares the `*Map.json` id-map files, which `--clean`
@@ -413,14 +429,21 @@ Each phase's own file is the authoritative description of its SQL;
 
 ### 00 — Preflight
 
-Read-only safety checks; throws if anything is wrong, and always runs. Probes
-both databases, asserts the required WordPress tables exist (logging presence of
-the optional plugin and Yoast tables), asserts the required Strapi tables exist,
-and then **creates the unique indexes the rest of the migration depends on**: one
-on `document_id` per entity table, a partial one on `files.hash`, and a composite
-one on `files_related_mph`. Without those, `ON CONFLICT` clauses would error
-rather than resolve. It finishes by logging discovered link/component tables and
-a summary of WordPress row counts.
+Safety checks always run. Before target mutation they validate the profile name
+and JSON, country/locale/currency/timezone agreement, WordPress prefix, required
+prefixed source tables, optional plugin tables, profile exclusions, hard Store
+and Deal counts, the target database, and any existing target Site
+Configuration country. A country mismatch is refused instead of importing into
+the wrong deployment. Attachment-count drift is a warning because a live source
+can add media after the paired database/files snapshot; Phase 01 reports any
+actual files missing from the configured uploads tree.
+
+It then asserts the required Strapi tables exist and **creates the unique
+indexes the rest of the migration depends on**: one on `document_id` per entity
+table, a partial one on `files.hash`, and a composite one on
+`files_related_mph`. Without those, `ON CONFLICT` clauses would error rather
+than resolve. It finishes by logging discovered link/component tables and a
+summary of WordPress row counts.
 
 ### 01 — Media inventory
 
@@ -557,6 +580,11 @@ Shared behavior:
   [`offer-extract.ts`](../migration/src/utils/offer-extract.ts) derives these
   best-effort defaults from title/content. Product Deal promotion copy comes
   only from its WordPress `deal_discount` value mapped to `discount`.
+- **Locale-aware quality** recognizes phrases such as Free Shipping, Buy One
+  Get One, Starting At, Under and dollar-value discounts. `SPECIAL OFFER` is a
+  reported last fallback. Invalid affiliate destinations are quarantined, and
+  URL/image values found in Coupon code fields are normalized to no-code and
+  reported rather than imported as literal codes.
 - **`badge`** is set to `Recommended` when the WordPress popular-coupon meta is
   set. (There is no `is_popular` column; that mapping moved to the badge.)
 - **Author** resolves through the user id map, or stays null when the author was
@@ -615,9 +643,15 @@ unused files — and copies each from its recorded source path into Strapi's
 `public/uploads`, skipping targets that already exist and counting sources that
 have vanished as failures.
 
-### 12–15 — Backfills
+### 12–16 — Backfills and cleanup
 
 These run against already-migrated rows rather than fresh WordPress data.
+Phase 13 additionally creates or updates the active profile's Site
+Configuration. The USA
+profile imports five hero banners, resolves eight featured Store URLs to Store
+slugs, ignores the four intentionally retired legacy grids, and disables
+homepage sections whose required catalog source is unavailable. WordPress
+header/footer tracking scripts remain excluded unless explicitly approved.
 
 - **12 — Offer backfill.** Rebuilds each Deal's four taxonomy link sets from
   current WordPress data. The ACF `deal_store` term is ordered first in
@@ -853,7 +887,13 @@ diff, then re-run with `--apply --yes-i-mean-<host-or-bucket>`, where the target
 is the exact host or bucket printed in the log line. The mismatch is the point:
 it is what stops a script aimed at local from running against production.
 
-**Partial progress after a crash** — just re-run the migration; checkpoints pick
-up where it stopped. Only if you suspect corrupted state should you reach for
-`--clean`, and only after reading its contract in §2 — it destroys the seeded
-homepage, menu, and footer along with everything else.
+**Partial progress after a crash** — just re-run the migration; the active
+profile's checkpoints pick up where it stopped. Confirm the log names the
+expected profile and `.state/<profile>` path first. Only if you suspect
+corrupted state should you reach for `--clean`, and only after reading its
+contract in §2 — it destroys the seeded homepage, menu, footer and global
+content along with migrated catalog rows. The target Site Configuration row is
+preserved as a country guard and Phase 13 updates it from the active profile.
+
+For the owner/operator explanation and India compatibility checklist, see
+[Country Setup and Multi-Country Sites](./country-setup.md).

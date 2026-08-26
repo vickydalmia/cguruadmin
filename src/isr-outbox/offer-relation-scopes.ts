@@ -9,7 +9,7 @@ import {
 } from '../utils/route-normalization';
 import { entityDealPageSlug } from '../api/entity-deal-page/services/entity-deal-route';
 import { DOCUMENT_WRITE_ACTIONS } from '../constants/document-write';
-import { withOfferLandingSlugs } from './scope-static-pages';
+import { withOfferTemplateOwnerSlugs } from '../api/site-configuration/services/entity-template-owners';
 
 export const OFFER_UIDS = new Set(['api::coupon.coupon', 'api::deal.deal']);
 
@@ -147,7 +147,11 @@ export async function preDeleteScope(
     );
     return relationScope
       ? {
-          slugs: withOfferLandingSlugs(uid, relationScope.slugs),
+          slugs: await withOfferTemplateOwnerSlugs(
+            strapi,
+            uid,
+            relationScope.slugs,
+          ),
           ...(relationScope.optionalSlugs.length > 0
             ? { optionalSlugs: relationScope.optionalSlugs }
             : {}),

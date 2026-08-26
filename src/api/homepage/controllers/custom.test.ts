@@ -2,6 +2,19 @@ import { describe, expect, it, vi } from 'vitest';
 
 import createHomepageController from './custom';
 
+const ALL_FEATURES_LIVE = Object.fromEntries(
+  [
+    'stores', 'coupons', 'brands', 'categories', 'banks', 'productDeals',
+    'about', 'careers', 'contact', 'faqs', 'testimonials', 'partnerWithUs',
+    'culture', 'privacyPolicy', 'termsAndConditions', 'affiliateDisclosure',
+    'dealOfTheDay', 'independenceDaySale',
+  ].map((key) => [key, { enabled: true, ready: true, live: true }]),
+);
+
+const siteSettingsService = () => ({
+  publicSettings: vi.fn(async () => ({ countryCode: 'IN', features: ALL_FEATURES_LIVE })),
+});
+
 function createHarness(homepage: any, fallbackDeals: any[] = []) {
   const findFirst = vi.fn().mockResolvedValue(homepage);
   const findManyDeals = vi.fn().mockResolvedValue(fallbackDeals);
@@ -12,8 +25,10 @@ function createHarness(homepage: any, fallbackDeals: any[] = []) {
     return { count };
   });
   const sanitizeOutput = vi.fn(async (data: any) => data);
+  const { publicSettings } = siteSettingsService();
   const strapi = {
     documents,
+    service: vi.fn(() => ({ publicSettings })),
     contentType: vi.fn(() => ({})),
     contentAPI: {
       sanitize: {
@@ -33,6 +48,7 @@ function createHarness(homepage: any, fallbackDeals: any[] = []) {
     findFirst,
     findManyDeals,
     sanitizeOutput,
+    publicSettings,
   };
 }
 
@@ -352,6 +368,7 @@ describe('site chrome aggregate population', () => {
     const controller = createHomepageController({
       strapi: {
         documents,
+        service: vi.fn(siteSettingsService),
         contentType: vi.fn(() => ({})),
         contentAPI: { sanitize: { output: sanitizeOutput } },
       } as any,
@@ -620,6 +637,29 @@ describe('public route metadata aggregate', () => {
     ]);
     const documents = vi.fn((uid: string) => {
       if (uid === 'api::job.job') return { findMany: findManyJobs };
+      if (
+        [
+          'api::store.store',
+          'api::brand.brand',
+          'api::category.category',
+          'api::bank.bank',
+        ].includes(uid)
+      ) {
+        return {
+          findMany: vi.fn(async ({ filters }: any) =>
+            uid === 'api::category.category' &&
+            filters?.pageTemplate === 'dealTemplate'
+              ? [
+                  {
+                    documentId: 'daily-specials',
+                    slug: 'daily-specials',
+                    updatedAt: '2026-07-28T10:00:00.000Z',
+                  },
+                ]
+              : [],
+          ),
+        };
+      }
       const findFirst =
         findFirstByUid.get(uid) ??
         vi.fn().mockResolvedValue(rows[uid] ?? null);
@@ -627,7 +667,7 @@ describe('public route metadata aggregate', () => {
       return { findFirst };
     });
     const controller = createHomepageController({
-      strapi: { documents } as any,
+      strapi: { documents, service: vi.fn(siteSettingsService) } as any,
     });
     const ctx = { send: vi.fn((payload: any) => payload) };
 
@@ -675,12 +715,13 @@ describe('public route metadata aggregate', () => {
         noIndex: true,
       },
       {
-        path: '/deal-of-the-day/',
+        path: '/careers/seo-editor/',
+        updatedAt: '2026-07-21T10:00:00.000Z',
         noIndex: true,
       },
       {
-        path: '/careers/seo-editor/',
-        updatedAt: '2026-07-21T10:00:00.000Z',
+        path: '/daily-specials/',
+        updatedAt: '2026-07-28T10:00:00.000Z',
         noIndex: true,
       },
     ]);

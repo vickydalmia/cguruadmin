@@ -63,9 +63,17 @@ describe("upload plugin breakpoints gating", () => {
     const upload = uploadConfig({
       NODE_ENV: "production",
       S3_UPLOAD_ENABLED: "true",
+      // Required alongside S3 uploads: it is stamped into every stored file URL.
+      S3_BASE_URL: "https://media.example.com",
     });
     expect(upload.breakpoints).toEqual({ ...IMAGE_BREAKPOINTS });
     expect(upload.provider).toBe("aws-s3");
+  });
+
+  it("refuses S3 uploads without a media base URL", () => {
+    expect(() =>
+      uploadConfig({ NODE_ENV: "production", S3_UPLOAD_ENABLED: "true" })
+    ).toThrow("S3_BASE_URL is required");
   });
 
   it("sets the shared breakpoints when S3 uploads are disabled", () => {

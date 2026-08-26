@@ -50,6 +50,12 @@ import { validateRedirect } from '../redirect-validation';
 import { warnUndersizedSeoOgImage } from '../seo-og-image-validation';
 import { sanitizeRichtextData } from '../sanitize-richtext';
 import { normaliseTextFields, validateTextFieldsForWrite } from '../text-field-validation';
+import { SITE_CONFIGURATION_UID } from '../../api/site-configuration/services/country-registry';
+import { validateSiteConfigurationForWrite } from '../../api/site-configuration/services/site-configuration';
+import {
+  isEntityTemplateUid,
+  validateUniqueEntityPageTemplate,
+} from '../entity-page-template-validation';
 
 import { DOTD_UID } from '../../constants/deal-of-the-day-sections';
 import { HOMEPAGE_UID } from '../../constants/homepage-sections';
@@ -178,6 +184,13 @@ export const MUTATOR_STEPS: readonly ValidationStep[] = [
  * having run, which they always do.
  */
 export const COLLECTED_STEPS: readonly ValidationStep[] = [
+  {
+    name: 'validateSiteConfigurationForWrite',
+    actions: CREATE_UPDATE,
+    applies: (uid) => uid === SITE_CONFIGURATION_UID,
+    run: ({ strapi, data, documentId }) =>
+      validateSiteConfigurationForWrite(strapi, data, documentId),
+  },
   {
     name: 'validateCouponTypeFields',
     applies: isCouponUid,
@@ -353,7 +366,7 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
 // ---------------------------------------------------------------------------
 
 /**
- * Slug and redirect invariants are validated with plain reads and committed by
+ * Slug, template-owner and redirect invariants are validated with plain reads and committed by
  * an INDEPENDENT write, so two concurrent saves can both pass on the same
  * snapshot and both commit. The middleware serializes them under one advisory
  * lock per domain (see write-serialization.ts).
@@ -372,6 +385,15 @@ export const LOCKED_STEPS: readonly ValidationStep[] = [
     name: 'validateIdentity',
     run: ({ strapi, uid, action, data, documentId, strict }) =>
       validateIdentity(strapi, uid, action, data, documentId, strict),
+  },
+  {
+    // Singleton campaign templates can have exactly one entity owner. This
+    // read-then-write check shares the entity identity lock so concurrent
+    // creates/updates/clones cannot both claim the same template.
+    name: 'validateUniqueEntityPageTemplate',
+    applies: isEntityTemplateUid,
+    run: ({ strapi, uid, action, data, documentId }) =>
+      validateUniqueEntityPageTemplate(strapi, data, documentId, action, uid),
   },
   {
     // Redirects are evaluated by the storefront middleware on EVERY request,

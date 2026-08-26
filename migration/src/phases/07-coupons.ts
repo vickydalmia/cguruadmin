@@ -1,6 +1,8 @@
 import { wpQuery } from "../db/wp-client.js";
 import { pgQuery, pgTransaction } from "../db/pg-client.js";
 import pLimit from "p-limit";
+import fs from "node:fs";
+import path from "node:path";
 import {
   setPostMapping,
   getPoolMappingByName,
@@ -25,6 +27,11 @@ import {
   parseExpiryDate,
 } from "../utils/wp-dates.js";
 import { logger } from "../utils/logger.js";
+import { config } from "../config.js";
+import {
+  corruptedNoCodeReason,
+  isValidAffiliateDestination,
+} from "../utils/offer-quality.js";
 import { isAcfTrue } from "../utils/acf.js";
 import { reconcileMigratedOfferInventory } from "../utils/offer-inventory.js";
 import {
@@ -55,6 +62,29 @@ interface PostMeta {
   [key: string]: string;
 }
 
+type ReviewStatus =
+  | "pending"
+  | "imported"
+  | "excluded"
+  | "quarantined"
+  | "failed";
+
+type CouponReviewRow = {
+  wpId: number;
+  title: string;
+  status: ReviewStatus;
+  notes: string[];
+};
+
+function writeCouponReview(rows: Iterable<CouponReviewRow>): void {
+  fs.mkdirSync(config.stateDir, { recursive: true });
+  const values = [...rows].sort((a, b) => a.wpId - b.wpId);
+  fs.writeFileSync(
+    path.join(config.stateDir, "coupon-review.json"),
+    JSON.stringify({ profile: config.profile, total: values.length, rows: values }, null, 2),
+  );
+}
+
 export async function runCoupons(): Promise<void> {
   logger.info("=== Phase 7: Coupons Migration ===");
 
@@ -79,6 +109,12 @@ export async function runCoupons(): Promise<void> {
 
   const sourcePostIds = sourcePosts.map((post) => post.ID);
   const allMeta = await getPostMetaBulk(sourcePostIds);
+  const review = new Map<number, CouponReviewRow>(
+    sourcePosts.map((post) => [
+      post.ID,
+      { wpId: post.ID, title: post.post_title, status: "pending", notes: [] },
+    ]),
+  );
   const migrationNow = new Date();
   const lifecyclePosts = sourcePosts.filter((post) => {
     const expiresAt = parseExpiryDate(
@@ -90,6 +126,13 @@ export async function runCoupons(): Promise<void> {
       now: migrationNow,
     });
   });
+  const lifecyclePostIds = new Set(lifecyclePosts.map((post) => post.ID));
+  for (const post of sourcePosts) {
+    if (lifecyclePostIds.has(post.ID)) continue;
+    const row = review.get(post.ID)!;
+    row.status = "excluded";
+    row.notes.push("excluded by the shared offer lifecycle policy");
+  }
 
   // Posts filed under an excluded term (Articles tree, retired stores)
   // are not coupons to import. Excluding them BEFORE expectedDocumentIds means the inventory
@@ -113,7 +156,23 @@ export async function runCoupons(): Promise<void> {
     );
   }
   const excludedPostIds = new Set(excludedPosts.map((post) => post.ID));
-  const posts = lifecyclePosts.filter((post) => !excludedPostIds.has(post.ID));
+  for (const post of excludedPosts) review.get(post.ID)!.status = "excluded";
+  const includedPosts = lifecyclePosts.filter((post) => !excludedPostIds.has(post.ID));
+  const quarantinedPosts = includedPosts.filter(
+    (post) => !isValidAffiliateDestination(clean(allMeta.get(post.ID)?.link)),
+  );
+  const quarantinedIds = new Set(quarantinedPosts.map((post) => post.ID));
+  for (const post of quarantinedPosts) {
+    const row = review.get(post.ID)!;
+    row.status = "quarantined";
+    row.notes.push("missing or invalid affiliate destination");
+  }
+  if (quarantinedPosts.length > 0) {
+    logger.warn(
+      `Quarantined ${quarantinedPosts.length} Coupon(s) without a valid affiliate destination`,
+    );
+  }
+  const posts = includedPosts.filter((post) => !quarantinedIds.has(post.ID));
 
   const expectedDocumentIds = new Set(
     posts.map((post) => generateDocumentId(`coupon:${post.ID}`)),
@@ -123,9 +182,13 @@ export async function runCoupons(): Promise<void> {
   logger.info(
     `Found ${posts.length} importable coupon posts ` +
       `(${sourcePosts.length - lifecyclePosts.length} non-importable post(s) ` +
-      `dropped, ${excludedPosts.length} excluded post(s))`,
+      `dropped, ${excludedPosts.length} excluded post(s), ` +
+      `${quarantinedPosts.length} quarantined post(s))`,
   );
-  if (posts.length === 0) return;
+  if (posts.length === 0) {
+    writeCouponReview(review.values());
+    return;
+  }
 
   // Coupon `image` was a standalone URL in WordPress. It duplicates a Store
   // logo in most records, so map that path to the image-only logoStore
@@ -163,9 +226,22 @@ export async function runCoupons(): Promise<void> {
         const title = clean(post.post_title) || post.post_title;
         // Best-effort badge + cashback/bank/prepaid texts parsed from the title
         // (falling back to content); editors can correct these in the admin.
-        const offerText = extractOfferText(title, content);
-        const { cashbackText, bankOfferText, prepaidText } = extractCashbackFields(title, content);
+        const extractedOfferText = extractOfferText(title, content, {
+          currencyCode: config.source.currencyCode,
+        });
+        const offerText = extractedOfferText ?? "SPECIAL OFFER";
+        if (!extractedOfferText) {
+          review.get(post.ID)!.notes.push("offerText used final SPECIAL OFFER fallback");
+        }
+        const { cashbackText, bankOfferText, prepaidText } = extractCashbackFields(
+          title,
+          content,
+          { currencyCode: config.source.currencyCode },
+        );
         const affiliateLink = clean(meta.link);
+        const corruptedCode = corruptedNoCodeReason(meta.code);
+        const normalizedCode = corruptedCode ? null : cleanCode(meta.code);
+        if (corruptedCode) review.get(post.ID)!.notes.push(corruptedCode);
         const missingRequired = [
           !title.trim() ? "title" : null,
           !offerText?.trim() ? "offerText" : null,
@@ -259,7 +335,7 @@ export async function runCoupons(): Promise<void> {
             bankOfferText,
             prepaidText,
             content,
-            cleanCode(meta.code),
+            normalizedCode,
             isUnique ? "unique" : "static",
             isAcfTrue(meta.popular_coupon) ? "Recommended" : null,
             affiliateLink,
@@ -279,8 +355,9 @@ export async function runCoupons(): Promise<void> {
         const entityId =
           result[0]?.id ?? (await getEntityIdByDocumentId("coupons", documentId));
         if (!entityId) {
-          logger.warn(`Could not resolve entity id for coupon ${post.ID} (${post.post_title})`);
-          return;
+          throw new Error(
+            `Could not resolve entity id for coupon ${post.ID} (${post.post_title})`,
+          );
         }
         setPostMapping(post.ID, {
           id: entityId,
@@ -346,11 +423,15 @@ export async function runCoupons(): Promise<void> {
         }
 
         inserted++;
+        review.get(post.ID)!.status = "imported";
         if (inserted % 200 === 0) {
           logger.info(`  Processed ${inserted}/${posts.length} coupons`);
         }
       } catch (err: any) {
         failed++;
+        const row = review.get(post.ID)!;
+        row.status = "failed";
+        row.notes.push(String(err?.message ?? err));
         logger.error(
           `Failed to insert coupon ${post.ID} (${post.post_title}): ${err.message}`
         );
@@ -359,6 +440,7 @@ export async function runCoupons(): Promise<void> {
   );
 
   await Promise.all(tasks);
+  writeCouponReview(review.values());
   logger.info(`Coupons migration complete: ${inserted} inserted, ${failed} failed`);
   if (failed > 0) {
     throw new Error(

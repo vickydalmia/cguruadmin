@@ -75,6 +75,20 @@ If an old and a new Strapi instance share PostgreSQL, enable
 `CRON_ENABLED=true` on exactly one instance. Prefer an in-place replacement
 instead of running two production schedulers.
 
+### Multi-country/Country Setup release note
+
+The Site Configuration table and entity `page_template` columns are additive.
+For India, the migration defaults existing entities to `default` and backfills
+the two legacy campaign owners. Older application images ignore these columns,
+so rollback does not require dropping them.
+
+Deploying the CMS contract before the matching UI remains the preferred order.
+The reverse overlap is nevertheless tolerated: the new UI falls back to
+India-compatible settings if an old CMS lacks `/api/site-settings`, and retries
+route projections without `pageTemplate`. This protection keeps the site up;
+it does not remove the requirement to verify Country Setup before completing
+the release. See [Country Setup and Multi-Country Sites](./country-setup.md).
+
 ## 1. Publish an immutable image
 
 Run the CMS checks before creating the GitHub Release:
@@ -90,7 +104,8 @@ docker build -t couponzguru-cms:verify .
 Create a GitHub Release and wait for its GHCR workflow to finish. Record the
 immutable `v*` or `sha-*` tag. Never deploy `latest`.
 
-`STRAPI_ADMIN_PUBLIC_SITE_URL` is compiled into the Strapi admin bundle. If the
+`STRAPI_ADMIN_PUBLIC_SITE_URL` is compiled into the Strapi admin bundle and
+stored as the runtime image default. If the
 admin Coupon/Deal public-link actions are required, the value must be supplied
 while the release image runs `yarn build`. Adding it only to the running
 container does not rebuild the admin bundle.
@@ -254,6 +269,8 @@ UPLOAD_CSP_SOURCES=https://media.couponzguru.com,https://<BUCKET>.s3.ap-south-1.
 CORS_ORIGINS=
 
 # Build-time admin value; runtime assignment alone does not rebuild the UI.
+# Builds admin public-link actions and supplies the runtime base from which
+# rich-text sanitization derives the registrable first-party domain.
 STRAPI_ADMIN_PUBLIC_SITE_URL=https://www.couponzguru.com
 
 # Persistent-ISR transactional outbox
@@ -362,7 +379,7 @@ normal deployments.
 | `FAL_BACKGROUND_REMOVAL_MAX_ATTEMPTS` | Optional | Attempts for transient provider failures. Defaults to `3`; credit/auth errors are not retried. |
 | `UPLOAD_CSP_SOURCES` | Required for external media | Comma-separated media origins added to the Strapi admin `img-src` and `media-src` policy. |
 | `CORS_ORIGINS` | Optional | Browser origins permitted to call Strapi directly. Keep empty when all public browser requests use Fastify. |
-| `STRAPI_ADMIN_PUBLIC_SITE_URL` | Optional build-time | Public site origin compiled into Coupon/Deal admin link actions. Runtime-only changes do not rebuild the admin bundle. |
+| `STRAPI_ADMIN_PUBLIC_SITE_URL` | Build-time; inherited by the runtime image | Public site origin compiled into Coupon/Deal admin link actions and used at runtime to derive the registrable first-party domain for rich-text links. An explicit runtime value may override the image default, but runtime-only changes do not rebuild the admin bundle. There is no separate `INTERNAL_HOSTS` list. |
 
 #### Persistent-ISR outbox
 
@@ -502,6 +519,10 @@ There must be no startup error involving:
 - cron task registration;
 - the ISR outbox configuration.
 
+Also confirm the startup migration added `page_template` to Store, Brand,
+Category and Bank without removing existing fields, and that the hidden Site
+Configuration single type is available through the Country Setup service.
+
 Before the frontend gateway starts, outbox delivery failures are expected and
 remain retryable. Strapi itself must remain healthy.
 
@@ -560,6 +581,19 @@ Verify:
 - route-inventory APIs used by Astro;
 - search status and indexes;
 - scheduled Coupon/Deal state processing.
+- `GET /api/site-settings` identity, localization and feature readiness;
+- the expected `dealTemplate` and `independenceDayTemplate` owner paths;
+- disabled features are absent from public route metadata, search and sitemap
+  sources, while the India deployment reports every intended feature live.
+
+For India, stop the rollout if an intended feature is not simultaneously
+`enabled`, `ready` and `live`, or if either campaign path differs from the
+existing public URL. Do not bypass readiness with a direct database edit.
+
+```bash
+curl -fsS http://127.0.0.1:1337/api/site-settings | jq
+curl -fsS http://127.0.0.1:1337/api/public-route-metadata | jq '.data | length'
+```
 
 With `ISR_ADMIN_SECRET` exported from the secret manager:
 

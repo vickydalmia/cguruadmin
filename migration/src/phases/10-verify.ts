@@ -14,6 +14,7 @@ import {
   resolveImportExclusions,
 } from "../utils/import-exclusions.js";
 import { getAllPoolMappings } from "../utils/id-maps.js";
+import { isValidAffiliateDestination } from "../utils/offer-quality.js";
 import {
   TAXONOMY_DESCRIPTION_TARGETS,
   auditTaxonomyDescriptionCoverage,
@@ -71,7 +72,8 @@ async function countImportableWpOffers(
            '_action_manager_date',
            '_expiration-date',
            '_expiration-date-status',
-           'expiration-date'
+           'expiration-date',
+           'link'
          )`,
       ids,
     );
@@ -96,7 +98,6 @@ async function countImportableWpOffers(
   // Mirror phases 07/08: posts filed under an excluded term (Articles tree,
   // retired stores) are never imported, so they must not count as expected.
   const { termIds: excludedTermIds } = await getImportExclusions();
-  if (excludedTermIds.size === 0) return lifecycleImportable.length;
 
   const articlePostIds = new Set<number>();
   for (let start = 0; start < lifecycleImportable.length; start += batchSize) {
@@ -116,8 +117,11 @@ async function countImportableWpOffers(
       if (excludedTermIds.has(row.term_id)) articlePostIds.add(row.object_id);
     }
   }
-  return lifecycleImportable.filter((post) => !articlePostIds.has(post.ID))
-    .length;
+  return lifecycleImportable.filter(
+    (post) =>
+      !articlePostIds.has(post.ID) &&
+      isValidAffiliateDestination(metaByPost.get(post.ID)?.link),
+  ).length;
 }
 
 export async function runVerification(): Promise<void> {

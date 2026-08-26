@@ -1,12 +1,11 @@
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
 import { getPgPool } from "../db/pg-client.js";
 import { generateDocumentId } from "./strapi-insert.js";
 import { logger } from "./logger.js";
+import { config } from "../config.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MAPS_DIR = path.resolve(__dirname, "../../.checkpoints");
+const MAPS_DIR = config.stateDir;
 
 export interface StrapiEntityRef {
   id: number;

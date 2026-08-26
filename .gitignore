@@ -142,7 +142,10 @@ build
 # Migration
 ############################
 
-migration/.env.migration
+# Every profile's filled env file (.env.migration, .env.migration.usa, …).
+# Templates stay tracked.
+migration/.env.migration*
+!migration/.env.migration*.example
 migration/.checkpoints/
 migration/node_modules/
 migration/dist/

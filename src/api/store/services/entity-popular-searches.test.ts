@@ -104,7 +104,7 @@ describe('entity Popular Searches aggregate', () => {
     expect(new Set(brands?.map((item) => item.documentId)).size).toBe(5);
   });
 
-  it('filters the dedicated Deal of the Day category from related and fallback results', async () => {
+  it('keeps campaign-template categories as ordinary entity results', async () => {
     const source = relation('store-source', 'Source', 'source');
     const special = relation(
       'category-dotd',
@@ -126,6 +126,7 @@ describe('entity Popular Searches aggregate', () => {
     );
     const result = await buildEntityPopularSearches(strapi, 'store', 'source');
     expect(result?.find((group) => group.kind === 'category')?.items).toEqual([
+      special,
       regular,
     ]);
   });

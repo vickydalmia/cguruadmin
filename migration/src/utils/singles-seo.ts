@@ -23,6 +23,7 @@ interface SingleTarget {
   slugCandidates: string[];
   /** Display name used for %%title%% when the WP page is missing. */
   fallbackName: string;
+  featureColumn: string;
 }
 
 const SINGLE_TARGETS: SingleTarget[] = [
@@ -31,31 +32,43 @@ const SINGLE_TARGETS: SingleTarget[] = [
     strapiUid: "api::deal-of-the-day-page.deal-of-the-day-page",
     slugCandidates: ["deal-of-the-day", "deals-of-the-day", "dotd"],
     fallbackName: "Deal of the Day",
+    featureColumn: "deal_of_the_day_enabled",
   },
   {
     table: "about_pages",
     strapiUid: "api::about-page.about-page",
     slugCandidates: ["about", "about-us"],
     fallbackName: "About Us",
+    featureColumn: "about_enabled",
   },
   {
     table: "career_pages",
     strapiUid: "api::career-page.career-page",
     slugCandidates: ["careers", "career", "jobs"],
     fallbackName: "Careers",
+    featureColumn: "careers_enabled",
   },
   {
     table: "contact_pages",
     strapiUid: "api::contact-page.contact-page",
     slugCandidates: ["contact", "contact-us"],
     fallbackName: "Contact Us",
+    featureColumn: "contact_enabled",
   },
   {
     table: "faq_pages",
     strapiUid: "api::faq-page.faq-page",
     slugCandidates: ["faq", "faqs"],
     fallbackName: "FAQ",
+    featureColumn: "faqs_enabled",
   },
+  { table: "testimonials_pages", strapiUid: "api::testimonials-page.testimonials-page", slugCandidates: ["testimonials"], fallbackName: "Testimonials", featureColumn: "testimonials_enabled" },
+  { table: "partner_with_us_pages", strapiUid: "api::partner-with-us-page.partner-with-us-page", slugCandidates: ["partner-with-us"], fallbackName: "Partner With Us", featureColumn: "partner_with_us_enabled" },
+  { table: "culture_pages", strapiUid: "api::culture-page.culture-page", slugCandidates: ["culture", "life-at-couponzguru"], fallbackName: "Culture", featureColumn: "culture_enabled" },
+  { table: "privacy_policy_pages", strapiUid: "api::privacy-policy-page.privacy-policy-page", slugCandidates: ["privacy-policy"], fallbackName: "Privacy Policy", featureColumn: "privacy_policy_enabled" },
+  { table: "terms_and_conditions_pages", strapiUid: "api::terms-and-conditions-page.terms-and-conditions-page", slugCandidates: ["terms-and-conditions", "terms-of-use"], fallbackName: "Terms and Conditions", featureColumn: "terms_and_conditions_enabled" },
+  { table: "affiliate_disclosure_pages", strapiUid: "api::affiliate-disclosure-page.affiliate-disclosure-page", slugCandidates: ["affiliate-disclosure"], fallbackName: "Affiliate Disclosure", featureColumn: "affiliate_disclosure_enabled" },
+  { table: "independence_day_sale_pages", strapiUid: "api::independence-day-sale-page.independence-day-sale-page", slugCandidates: ["independence-day-sale", "independence-day-sale-coupons"], fallbackName: "Independence Day Sale", featureColumn: "independence_day_sale_enabled" },
 ];
 
 export interface SinglesSeoSummary {
@@ -145,7 +158,13 @@ export async function syncSinglesSeo(apply: boolean): Promise<SinglesSeoSummary>
       ? (pages.find((page) => page.ID === frontPageId) ?? null)
       : null;
 
-  const matched = SINGLE_TARGETS.map((target) => ({
+  const [siteConfiguration] = await pgQuery<Record<string, unknown>>(
+    `SELECT * FROM "site_configurations" ORDER BY id LIMIT 1`,
+  ).catch(() => []);
+  const enabledTargets = SINGLE_TARGETS.filter(
+    (target) => !siteConfiguration || siteConfiguration[target.featureColumn] === true,
+  );
+  const matched = enabledTargets.map((target) => ({
     target,
     page:
       target.slugCandidates

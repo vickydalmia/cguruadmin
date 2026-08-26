@@ -1,5 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Core } from '@strapi/strapi';
+
+import { INDIA_DEFAULT_CONFIGURATION } from '../../site-configuration/services/country-registry';
+
+const mocks = vi.hoisted(() => ({
+  cachedSiteConfiguration: vi.fn(),
+}));
+
+vi.mock('../../site-configuration/services/cached-configuration', () => ({
+  cachedSiteConfiguration: mocks.cachedSiteConfiguration,
+}));
+
 import sitemapService from './sitemap';
 
 // One store entity per test run; the aggregate stubs decide what its offer
@@ -63,6 +74,11 @@ async function storeRow(sources: Record<string, SourceBehavior>) {
 }
 
 describe('listSitemapEntities liveOfferCount', () => {
+  beforeEach(() => {
+    mocks.cachedSiteConfiguration.mockReset();
+    mocks.cachedSiteConfiguration.mockResolvedValue(INDIA_DEFAULT_CONFIGURATION);
+  });
+
   it('publishes the summed count when both source queries run', async () => {
     const row = await storeRow({
       coupons_stores_lnk: {
@@ -107,6 +123,53 @@ describe('listSitemapEntities liveOfferCount', () => {
     const row = rows.find((entry) => entry.documentId === 'doc-7');
     expect(row).toBeDefined();
     expect('liveOfferCount' in row!).toBe(false);
+  });
+
+  it('never queries a feature-disabled source and publishes the rest as authoritative', async () => {
+    // Feature-disabled offers do not render (EntityLinkPolicy empties the
+    // sources), so they must not keep a page in the sitemap — and skipping
+    // them is an authoritative zero, not an incomplete aggregate.
+    mocks.cachedSiteConfiguration.mockResolvedValue({
+      ...INDIA_DEFAULT_CONFIGURATION,
+      couponsEnabled: false,
+    });
+    const calls: Record<string, ChainCall[]> = {};
+    const rows = await sitemapService({
+      strapi: fakeStrapi(
+        {
+          coupons_stores_lnk: {
+            rows: [{ entity_id: 7, last_modified: '2026-07-25T00:00:00.000Z', live_count: 3 }],
+          },
+          deals_stores_lnk: {
+            rows: [{ entity_id: 7, last_modified: '2026-07-20T00:00:00.000Z', live_count: 2 }],
+          },
+        },
+        calls,
+      ),
+    }).listSitemapEntities();
+
+    const row = rows.find((entry) => entry.documentId === 'doc-7');
+    expect(calls.coupons_stores_lnk).toBeUndefined();
+    expect(row!.liveOfferCount).toBe(2);
+    expect(row!.offersUpdatedAt).toBe('2026-07-20T00:00:00.000Z');
+  });
+
+  it('publishes a confirmed 0 when every offer feature is disabled', async () => {
+    mocks.cachedSiteConfiguration.mockResolvedValue({
+      ...INDIA_DEFAULT_CONFIGURATION,
+      couponsEnabled: false,
+      productDealsEnabled: false,
+    });
+    const row = await storeRow({
+      coupons_stores_lnk: {
+        rows: [{ entity_id: 7, last_modified: '2026-07-25T00:00:00.000Z', live_count: 3 }],
+      },
+      deals_stores_lnk: {
+        rows: [{ entity_id: 7, last_modified: '2026-07-20T00:00:00.000Z', live_count: 2 }],
+      },
+    });
+    expect(row.liveOfferCount).toBe(0);
+    expect(row.offersUpdatedAt).toBeUndefined();
   });
 
   it('applies deal card eligibility to the deals source only', async () => {

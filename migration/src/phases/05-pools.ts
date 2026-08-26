@@ -20,6 +20,18 @@ export async function runPools(): Promise<void> {
     return;
   }
 
+  const [codesTable] = await wpQuery<{ c: number }>(`
+    SELECT COUNT(*) AS c
+    FROM information_schema.tables
+    WHERE table_schema = DATABASE() AND table_name = 'wp_uc_codes'
+  `);
+  const codeCounts = codesTable?.c
+    ? `(SELECT COUNT(*) FROM wp_uc_codes c WHERE c.coupon_id = uc.id)`
+    : "0";
+  const usedCodeCounts = codesTable?.c
+    ? `(SELECT COUNT(*) FROM wp_uc_codes c WHERE c.coupon_id = uc.id AND c.is_used = 1)`
+    : "0";
+
   const pools = await wpQuery<{
     id: number;
     name: string;
@@ -29,8 +41,8 @@ export async function runPools(): Promise<void> {
     SELECT
       uc.id,
       uc.name,
-      (SELECT COUNT(*) FROM wp_uc_codes c WHERE c.coupon_id = uc.id) AS total_codes,
-      (SELECT COUNT(*) FROM wp_uc_codes c WHERE c.coupon_id = uc.id AND c.is_used = 1) AS used_codes
+      ${codeCounts} AS total_codes,
+      ${usedCodeCounts} AS used_codes
     FROM wp_uc_coupons uc
     ORDER BY uc.id
   `);

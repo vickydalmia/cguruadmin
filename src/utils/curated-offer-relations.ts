@@ -108,12 +108,35 @@ export const ENTITY_KIND_BY_UID: Readonly<Record<string, IdentityKind>> = {
 
 export function curatedSourcePath(sourceUid: string, row: any): string | null {
   if (sourceUid.startsWith('home.')) return '/';
-  if (sourceUid.startsWith('deal-day.')) return '/deal-of-the-day/';
-  if (sourceUid.startsWith('festival.')) return '/independence-day-sale-coupons/';
   if (sourceUid.startsWith('header.')) return '/';
 
   const kind = ENTITY_KIND_BY_UID[sourceUid];
   if (!kind) return null;
   const slug = toRouteSlug(row?.slug, kind);
   return slug ? `/${slug}/` : null;
+}
+
+export async function curatedSourcePaths(
+  strapi: Core.Strapi,
+  sourceUid: string,
+  row: any,
+): Promise<string[]> {
+  if (sourceUid.startsWith('deal-day.')) {
+    const { entityTemplateOwnerSlugs } = await import(
+      '../api/site-configuration/services/entity-template-owners'
+    );
+    return (await entityTemplateOwnerSlugs(strapi, 'dealTemplate')).map(
+      (slug) => `/${slug}/`,
+    );
+  }
+  if (sourceUid.startsWith('festival.')) {
+    const { entityTemplateOwnerSlugs } = await import(
+      '../api/site-configuration/services/entity-template-owners'
+    );
+    return (
+      await entityTemplateOwnerSlugs(strapi, 'independenceDayTemplate')
+    ).map((slug) => `/${slug}/`);
+  }
+  const path = curatedSourcePath(sourceUid, row);
+  return path ? [path] : [];
 }

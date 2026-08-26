@@ -8,6 +8,7 @@ import { readFileSync, existsSync } from "fs";
 import net from "net";
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
+import { rewriteWpTableNames, wpTableName } from "../utils/wp-table.js";
 
 let pool: mysql.Pool | null = null;
 let sshClient: SSHClientType | null = null;
@@ -158,7 +159,7 @@ export async function wpQuery<T = any>(
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const p = await getWpPool();
-      const [rows] = await p.execute(sql, params);
+      const [rows] = await p.execute(rewriteWpTableNames(sql, config.wp.tablePrefix), params);
       return rows as T[];
     } catch (error: any) {
       const code = String(error?.code ?? "");
@@ -185,6 +186,10 @@ export async function wpQuery<T = any>(
     }
   }
   throw new Error("WordPress query retry loop exhausted");
+}
+
+export function wpTable(suffix: string): string {
+  return wpTableName(config.wp.tablePrefix, suffix);
 }
 
 export async function closeWp(): Promise<void> {

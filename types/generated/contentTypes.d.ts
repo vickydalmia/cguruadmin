@@ -605,6 +605,11 @@ export interface ApiBankBank extends Struct.CollectionTypeSchema {
       'manyToMany',
       'api::coupon.coupon'
     >;
+    pageTemplate: Schema.Attribute.Enumeration<
+      ['default', 'dealTemplate', 'independenceDayTemplate']
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'default'>;
     publishedAt: Schema.Attribute.DateTime;
     ratingAverage: Schema.Attribute.Decimal &
       Schema.Attribute.SetMinMax<
@@ -685,6 +690,11 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
       'manyToMany',
       'api::coupon.coupon'
     >;
+    pageTemplate: Schema.Attribute.Enumeration<
+      ['default', 'dealTemplate', 'independenceDayTemplate']
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'default'>;
     publishedAt: Schema.Attribute.DateTime;
     ratingAverage: Schema.Attribute.Decimal &
       Schema.Attribute.SetMinMax<
@@ -815,6 +825,11 @@ export interface ApiCategoryCategory extends Struct.CollectionTypeSchema {
       'manyToMany',
       'api::coupon.coupon'
     >;
+    pageTemplate: Schema.Attribute.Enumeration<
+      ['default', 'dealTemplate', 'independenceDayTemplate']
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'default'>;
     publishedAt: Schema.Attribute.DateTime;
     ratingAverage: Schema.Attribute.Decimal &
       Schema.Attribute.SetMinMax<
@@ -1071,7 +1086,7 @@ export interface ApiDealOfTheDayPageDealOfTheDayPage
   extends Struct.SingleTypeSchema {
   collectionName: 'deal_of_the_day_pages';
   info: {
-    description: 'Curated sections for the deal-of-the-day category landing page';
+    description: 'Curated content for entities using the dealTemplate page design';
     displayName: 'Deal of the Day Page';
     pluralName: 'deal-of-the-day-pages';
     singularName: 'deal-of-the-day-page';
@@ -1446,7 +1461,7 @@ export interface ApiIndependenceDaySalePageIndependenceDaySalePage
   extends Struct.SingleTypeSchema {
   collectionName: 'independence_day_sale_pages';
   info: {
-    description: 'Single CMS surface for the Independence Day Coupon and product Deal landing page';
+    description: 'Curated content for entities using the independenceDayTemplate page design';
     displayName: 'Independence Day Sale Page';
     pluralName: 'independence-day-sale-pages';
     singularName: 'independence-day-sale-page';
@@ -1943,6 +1958,129 @@ export interface ApiRedirectRedirect extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiSiteConfigurationSiteConfiguration
+  extends Struct.SingleTypeSchema {
+  collectionName: 'site_configurations';
+  info: {
+    description: 'Country identity, localization, onboarding and fixed feature availability';
+    displayName: 'Site Configuration';
+    pluralName: 'site-configurations';
+    singularName: 'site-configuration';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  pluginOptions: {
+    'content-manager': {
+      visible: false;
+    };
+  };
+  attributes: {
+    aboutEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    affiliateDisclosureEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    banksEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    brandsEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    careersEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    categoriesEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    contactEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    countryCode: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 2;
+        minLength: 2;
+      }> &
+      Schema.Attribute.DefaultTo<'IN'>;
+    countryName: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }> &
+      Schema.Attribute.DefaultTo<'India'>;
+    couponsEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    cultureEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    currencyCode: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 3;
+        minLength: 3;
+      }> &
+      Schema.Attribute.DefaultTo<'INR'>;
+    dealOfTheDayEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    faqsEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    independenceDaySaleEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::site-configuration.site-configuration'
+    > &
+      Schema.Attribute.Private;
+    onboardingComplete: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<false>;
+    partnerWithUsEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    privacyPolicyEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    productDealsEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    publishedAt: Schema.Attribute.DateTime;
+    siteName: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }> &
+      Schema.Attribute.DefaultTo<'CouponzGuru'>;
+    storesEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    termsAndConditionsEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    testimonialsEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    timezone: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }> &
+      Schema.Attribute.DefaultTo<'Asia/Kolkata'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiStoreStore extends Struct.CollectionTypeSchema {
   collectionName: 'stores';
   info: {
@@ -1989,6 +2127,11 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
       'manyToMany',
       'api::coupon.coupon'
     >;
+    pageTemplate: Schema.Attribute.Enumeration<
+      ['default', 'dealTemplate', 'independenceDayTemplate']
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'default'>;
     publishedAt: Schema.Attribute.DateTime;
     ratingAverage: Schema.Attribute.Decimal &
       Schema.Attribute.SetMinMax<
@@ -2792,6 +2935,7 @@ declare module '@strapi/strapi' {
       'api::record-lock-cancellation.record-lock-cancellation': ApiRecordLockCancellationRecordLockCancellation;
       'api::record-lock.record-lock': ApiRecordLockRecordLock;
       'api::redirect.redirect': ApiRedirectRedirect;
+      'api::site-configuration.site-configuration': ApiSiteConfigurationSiteConfiguration;
       'api::store.store': ApiStoreStore;
       'api::terms-and-conditions-page.terms-and-conditions-page': ApiTermsAndConditionsPageTermsAndConditionsPage;
       'api::testimonials-page.testimonials-page': ApiTestimonialsPageTestimonialsPage;

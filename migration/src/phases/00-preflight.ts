@@ -1,7 +1,9 @@
 import { createRequire } from "node:module";
-import { wpQuery, getWpPool } from "../db/wp-client.js";
+import { wpQuery, getWpPool, wpTable } from "../db/wp-client.js";
 import { pgQuery, getPgPool } from "../db/pg-client.js";
 import { logger } from "../utils/logger.js";
+import fs from "node:fs";
+import { config } from "../config.js";
 
 const require = createRequire(import.meta.url);
 // Single source of truth for the background-removal dedup index: the Strapi
@@ -14,8 +16,151 @@ const {
 
 import { getImportExclusions } from "../utils/import-exclusions.js";
 
+const SITE_CONFIGURATION_BOOLEAN_FIELDS = [
+  "onboardingComplete",
+  "storesEnabled",
+  "couponsEnabled",
+  "brandsEnabled",
+  "categoriesEnabled",
+  "banksEnabled",
+  "productDealsEnabled",
+  "aboutEnabled",
+  "careersEnabled",
+  "contactEnabled",
+  "faqsEnabled",
+  "testimonialsEnabled",
+  "partnerWithUsEnabled",
+  "cultureEnabled",
+  "privacyPolicyEnabled",
+  "termsAndConditionsEnabled",
+  "affiliateDisclosureEnabled",
+  "dealOfTheDayEnabled",
+  "independenceDaySaleEnabled",
+] as const;
+
+function validateSiteConfigurationProfile(): void {
+  if (!fs.existsSync(config.siteConfigurationFile)) {
+    throw new Error(`Missing profile site configuration: ${config.siteConfigurationFile}`);
+  }
+
+  let profile: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(
+      fs.readFileSync(config.siteConfigurationFile, "utf8"),
+    );
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("expected a JSON object");
+    }
+    profile = parsed as Record<string, unknown>;
+  } catch (error) {
+    throw new Error(
+      `Invalid profile site configuration ${config.siteConfigurationFile}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
+  for (const field of ["siteName", "countryName"] as const) {
+    if (typeof profile[field] !== "string" || !profile[field].trim()) {
+      throw new Error(`Profile site configuration requires a non-empty ${field}`);
+    }
+  }
+
+  const expectedIdentity = {
+    countryCode: config.source.countryCode.toUpperCase(),
+    locale: config.source.locale,
+    timezone: config.source.timezone,
+    currencyCode: config.source.currencyCode.toUpperCase(),
+  };
+  for (const [field, expected] of Object.entries(expectedIdentity)) {
+    const actual =
+      field === "countryCode" || field === "currencyCode"
+        ? String(profile[field] ?? "").toUpperCase()
+        : profile[field];
+    if (actual !== expected) {
+      throw new Error(
+        `Profile ${field} (${String(profile[field] ?? "missing")}) does not match source configuration (${expected})`,
+      );
+    }
+  }
+
+  for (const field of SITE_CONFIGURATION_BOOLEAN_FIELDS) {
+    if (typeof profile[field] !== "boolean") {
+      throw new Error(`Profile site configuration requires boolean ${field}`);
+    }
+  }
+}
+
+async function validateSourceDataExceptions(): Promise<void> {
+  const exclusions = await getImportExclusions();
+
+  const [attachmentCount] = await wpQuery<{ c: number }>(
+    "SELECT COUNT(*) AS c FROM wp_posts WHERE post_type='attachment'",
+  );
+  if (
+    config.source.expectedAttachments > 0 &&
+    Number(attachmentCount.c) !== config.source.expectedAttachments
+  ) {
+    logger.warn(
+      `Attachment count drift (non-blocking): expected ${config.source.expectedAttachments}, ` +
+        `found ${attachmentCount.c}. Phase 01 will report files missing from the local uploads tree; ` +
+        `reconcile newly added source attachments after this run.`,
+    );
+  }
+
+  const storeTerms = await wpQuery<{ term_id: number; choose_type: string | null }>(`
+    SELECT t.term_id,
+           MAX(CASE WHEN tm.meta_key = 'choose_type' THEN tm.meta_value END) AS choose_type
+    FROM wp_terms t
+    JOIN wp_term_taxonomy tt ON tt.term_id = t.term_id AND tt.taxonomy = 'category'
+    LEFT JOIN wp_termmeta tm ON tm.term_id = t.term_id AND tm.meta_key = 'choose_type'
+    GROUP BY t.term_id
+  `);
+  const nonStoreTypes = new Set(["Brand", "Category", "Bank"]);
+  const importableStoreCount = storeTerms.filter(
+    (term) =>
+      !exclusions.termIds.has(term.term_id) &&
+      !nonStoreTypes.has(term.choose_type?.trim() || "Store"),
+  ).length;
+  if (
+    config.source.expectedStores > 0 &&
+    importableStoreCount !== config.source.expectedStores
+  ) {
+    throw new Error(
+      `Store count exception: expected ${config.source.expectedStores}, found ${importableStoreCount}`,
+    );
+  }
+
+  const [dealCount] = await wpQuery<{ c: number }>(`
+    SELECT COUNT(*) AS c FROM wp_posts p
+    JOIN wp_postmeta pm ON p.ID = pm.post_id AND pm.meta_key = 'is_deal' AND pm.meta_value = 'yes'
+    WHERE p.post_type = 'post' AND p.post_status IN ('publish', 'future')
+  `);
+  if (
+    config.source.expectedDeals >= 0 &&
+    Number(dealCount?.c ?? 0) !== config.source.expectedDeals
+  ) {
+    throw new Error(
+      `Deal count exception: expected ${config.source.expectedDeals}, found ${dealCount?.c ?? 0}`,
+    );
+  }
+}
+
 export async function runPreflight(): Promise<void> {
   logger.info("=== Phase 0: Preflight Checks ===");
+
+  if (!/^[A-Z]{2}$/u.test(config.source.countryCode.toUpperCase())) {
+    throw new Error("SOURCE_COUNTRY_CODE must be a two-letter ISO country code");
+  }
+  Intl.getCanonicalLocales(config.source.locale);
+  if (!Intl.supportedValuesOf("currency").includes(config.source.currencyCode.toUpperCase())) {
+    throw new Error(`Unsupported SOURCE_CURRENCY_CODE: ${config.source.currencyCode}`);
+  }
+  new Intl.DateTimeFormat(config.source.locale, { timeZone: config.source.timezone }).format();
+  validateSiteConfigurationProfile();
+  logger.info(
+    `Profile ${config.profile}: ${config.source.countryCode}/${config.source.locale}/${config.source.currencyCode}, prefix ${config.wp.tablePrefix}, state ${config.stateDir}`,
+  );
 
   // Test WordPress connection
   logger.info("Testing WordPress MySQL connection...");
@@ -28,12 +173,15 @@ export async function runPreflight(): Promise<void> {
 
   // Verify WP tables
   const requiredWpTables = [
-    "wp_posts",
-    "wp_postmeta",
-    "wp_terms",
-    "wp_term_taxonomy",
-    "wp_term_relationships",
-    "wp_termmeta",
+    wpTable("posts"),
+    wpTable("postmeta"),
+    wpTable("terms"),
+    wpTable("term_taxonomy"),
+    wpTable("term_relationships"),
+    wpTable("termmeta"),
+    wpTable("users"),
+    wpTable("usermeta"),
+    wpTable("options"),
   ];
   const wpTables = await wpQuery<{ TABLE_NAME: string }>(
     `SELECT TABLE_NAME FROM information_schema.tables WHERE table_schema = DATABASE()`
@@ -48,7 +196,7 @@ export async function runPreflight(): Promise<void> {
   }
 
   // Check optional WP tables
-  const optionalTables = ["wp_uc_coupons", "wp_uc_codes", "wp_yoast_indexable"];
+  const optionalTables = [wpTable("uc_coupons"), wpTable("uc_codes"), wpTable("yoast_indexable")];
   for (const table of optionalTables) {
     if (wpTableNames.has(table)) {
       logger.info(`  ✓ ${table} (optional)`);
@@ -56,6 +204,12 @@ export async function runPreflight(): Promise<void> {
       logger.warn(`  ✗ ${table} (optional - not found)`);
     }
   }
+
+  // Validate source identity and hard inventory exceptions before opening or
+  // mutating the destination. Attachment totals are advisory because a live
+  // WordPress site can add media after the paired DB/files snapshot; Phase 01
+  // reports whether the actual source files are locally available.
+  await validateSourceDataExceptions();
 
   // Test PostgreSQL connection
   logger.info("Testing Strapi PostgreSQL connection...");
@@ -91,6 +245,31 @@ export async function runPreflight(): Promise<void> {
       throw new Error(`Required Strapi table missing: ${table}. Run Strapi bootstrap first.`);
     }
     logger.info(`  ✓ ${table}`);
+  }
+
+  // Destination↔profile guard, BEFORE anything mutates the target: a DB
+  // already configured for another country means the destination env vars
+  // still point at that country's stack (the classic merged-overlay mistake)
+  // — refuse rather than import into (or later wipe) the wrong database.
+  if (pgTableNames.has("site_configurations")) {
+    const [siteConfigRow] = await pgQuery<{ country_code: string | null }>(
+      `SELECT country_code FROM "site_configurations" ORDER BY id ASC LIMIT 1`,
+    );
+    const existingCountry = siteConfigRow?.country_code?.trim().toUpperCase();
+    const targetCountry = config.source.countryCode.toUpperCase();
+    if (
+      existingCountry &&
+      existingCountry !== targetCountry &&
+      process.env.MIGRATION_ALLOW_COUNTRY_SWITCH !== "true"
+    ) {
+      throw new Error(
+        `Target database is configured for country "${existingCountry}" but profile "${config.profile}" imports "${targetCountry}". ` +
+          "Fix the destination env vars (PG_CONNECTION_STRING, S3 bucket) or set MIGRATION_ALLOW_COUNTRY_SWITCH=true to deliberately repurpose this database.",
+      );
+    }
+    if (existingCountry) {
+      logger.info(`  ✓ target country matches profile (${existingCountry})`);
+    }
   }
 
   // Ensure unique indexes on document_id for idempotent inserts
@@ -160,14 +339,14 @@ export async function runPreflight(): Promise<void> {
   logger.info(`    Deals: ${dealCount[0]?.c || 0}`);
   logger.info(`    Coupons: ${(postCount.c as number) - (dealCount[0]?.c || 0)}`);
 
-  if (wpTableNames.has("wp_uc_coupons")) {
+  if (wpTableNames.has(wpTable("uc_coupons"))) {
     const [poolCount] = await wpQuery<{ c: number }>(
       "SELECT COUNT(*) AS c FROM wp_uc_coupons"
     );
     logger.info(`  Unique coupon pools: ${poolCount.c}`);
   }
 
-  if (wpTableNames.has("wp_uc_codes")) {
+  if (wpTableNames.has(wpTable("uc_codes"))) {
     const [codeCount] = await wpQuery<{ c: number }>(
       "SELECT COUNT(*) AS c FROM wp_uc_codes"
     );
@@ -194,6 +373,22 @@ export async function runPreflight(): Promise<void> {
     "SELECT COUNT(*) AS c FROM wp_posts WHERE post_type='attachment'"
   );
   logger.info(`  Attachments: ${attachmentCount.c}`);
+
+  const storeTerms = await wpQuery<{ term_id: number; choose_type: string | null }>(`
+    SELECT t.term_id,
+           MAX(CASE WHEN tm.meta_key = 'choose_type' THEN tm.meta_value END) AS choose_type
+    FROM wp_terms t
+    JOIN wp_term_taxonomy tt ON tt.term_id = t.term_id AND tt.taxonomy = 'category'
+    LEFT JOIN wp_termmeta tm ON tm.term_id = t.term_id AND tm.meta_key = 'choose_type'
+    GROUP BY t.term_id
+  `);
+  const nonStoreTypes = new Set(["Brand", "Category", "Bank"]);
+  const importableStoreCount = storeTerms.filter(
+    (term) =>
+      !exclusions.termIds.has(term.term_id) &&
+      !nonStoreTypes.has(term.choose_type?.trim() || "Store"),
+  ).length;
+  logger.info(`  Importable stores after exclusions: ${importableStoreCount}`);
 
   // Check for expiresAt data
   const expiryMeta = await wpQuery<{ c: number }>(`

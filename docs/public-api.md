@@ -23,13 +23,17 @@ listener also strips this reserved header before proxying anything to Strapi.
 |---|---|---|---|
 | `GET /api/search` | anonymous | 120 / 60s | 30s |
 | `GET /api/search/status` | **bearer secret** (`global::search-status-auth`) | — | `Cache-Control: private, no-store` |
+| `GET /api/site-settings` | anonymous | 60 / 60s | 60s, keyed by path |
 | `GET /api/directories/:kind` | anonymous | 120 / 60s | 60s, keyed by path |
 | `GET /api/homepage-full` | anonymous | 60 / 60s | 60s |
 | `GET /api/deal-of-the-day-full` | anonymous | 60 / 60s | 60s, keyed by path |
+| `GET /api/independence-day-sale-full` | anonymous | 60 / 60s | 60s, keyed by path |
 | `GET /api/entity-deal-pages/:dealSlug` | anonymous | 60 / 60s | 60s |
 | `GET /api/entity-deal-page-routes` | anonymous | 60 / 60s | 60s |
 | `GET /entity-deal-page/pages` | **Super Admin session** | — | none |
 | `PATCH /entity-deal-page/pages/:kind/:documentId` | **Super Admin session** | — | none |
+| `GET /country-setup/` | **Super Admin session** | — | none |
+| `PUT /country-setup/` | **Super Admin session** | — | none |
 | `GET /api/site-chrome` | anonymous | — | 300s |
 | `GET /api/public-route-metadata` | anonymous | 60 / 60s | 60s, keyed by path |
 | `GET /api/sitemap-entities` | anonymous | 60 / 60s | 60s, keyed by path |
@@ -50,14 +54,39 @@ The `keyByPath` entries ignore the query string entirely, so `?nonce=1`,
 full-catalog scans.
 
 Route definitions: [`src/api/search/routes/search.ts`](../src/api/search/routes/search.ts),
+[`src/api/site-configuration/routes/custom.ts`](../src/api/site-configuration/routes/custom.ts),
 [`src/api/directory/routes/directory.ts`](../src/api/directory/routes/directory.ts),
 [`src/api/homepage/routes/custom.ts`](../src/api/homepage/routes/custom.ts),
 [`src/api/deal-of-the-day-page/routes/custom.ts`](../src/api/deal-of-the-day-page/routes/custom.ts),
+[`src/api/independence-day-sale-page/routes/custom.ts`](../src/api/independence-day-sale-page/routes/custom.ts),
 [`src/api/entity-deal-page/routes/entity-deal-page.ts`](../src/api/entity-deal-page/routes/entity-deal-page.ts),
 [`src/api/coupon/routes/custom.ts`](../src/api/coupon/routes/custom.ts),
 [`src/api/store/routes/custom.ts`](../src/api/store/routes/custom.ts),
 [`src/api/redirect/routes/redirect.ts`](../src/api/redirect/routes/redirect.ts),
 [`src/plugins/unique-coupon/server/src/routes/index.ts`](../src/plugins/unique-coupon/server/src/routes/index.ts).
+
+---
+
+## Site settings and Country Setup
+
+`GET /api/site-settings` returns the deployment's safe site identity,
+localization preview and all 18 feature states. Each feature carries
+`enabled`, `ready` and `live`; an unready state may include an operator-facing
+`reason`, and a live campaign includes its authoritative entity-owner `path`.
+No private service URL, secret, origin allowlist or database value is exposed.
+
+The public response is cached for 60 seconds. Saving Site Configuration clears
+the process cache and emits ISR invalidation that refreshes routes, sitemap,
+site chrome and affected HTML.
+
+`GET /country-setup/` and `PUT /country-setup/` are mounted on Strapi's admin
+router, require an authenticated Super Admin session, and are used by
+**Settings → Country Setup**. The write accepts identity/localization fields
+and boolean feature flags. It rejects invalid ISO/locale/timezone values and
+any feature that is enabled before its required source content is ready.
+
+The complete operator and compatibility contract is in
+[Country Setup and Multi-Country Sites](./country-setup.md).
 
 ---
 
@@ -83,6 +112,12 @@ search parameter`) — this is a closed allowlist, not a filter.
 
 There are exactly **six** result groups: `stores`, `brands`, `categories`,
 `banks`, `coupons`, `deals`.
+
+The response envelope keeps all six keys for cross-version stability, but Site
+Configuration decides which groups may contain records. A disabled feature has
+an empty array, zero total and `hasMore: false`; grouped requests for that type
+also return an empty result. The UI hides the matching tab and browse link, so
+search cannot advertise a URL type removed from this deployment.
 
 > **`insights` is not a search group.** It is not a compatibility alias either:
 > `group=insights` is rejected as an invalid group, and no `insights` key is
@@ -206,14 +241,18 @@ hydrated with media. Only published, unexpired offers are counted.
 
 - `GET /api/homepage-full` — the entire homepage single type with its component
   tree deeply populated, returned as `{ data }`. Dead offers are dropped from
-  curated lists, Top Deals are backfilled, lists are capped to their schema
+  curated lists, feature-disabled sections/destinations are removed, Top Deals
+  are backfilled only from live sources, lists are capped to their schema
   maxima, and offer counts are attached. 404 when the homepage has never been
   seeded.
 - `GET /api/deal-of-the-day-full` — the same treatment for the Deal of the Day
   single type.
+- `GET /api/independence-day-sale-full` — the Independence Day campaign
+  singleton used only when a live entity owns `independenceDayTemplate`.
 - `GET /api/site-chrome` — `{ menu, footer, global }` in one call, each `null`
   if that single type is unseeded. This is the header/footer payload; its 300s
   cache is the longest on the public surface because chrome changes rarely.
+  Links whose owning feature is not live are removed before the response.
 
 ### Generated entity Product Deal pages
 
@@ -258,13 +297,15 @@ Super Admin contract explicitly enables one and every SEO blocker passes.
 ## Route metadata and redirects
 
 - `GET /api/public-route-metadata` — `{ data }`, a flat list of
-  `{ path, updatedAt, noIndex }` entries for the managed single-type pages plus
-  every active job's `/careers/:slug/` route. The ISR gateway consumes it to
+  `{ path, updatedAt, noIndex }` entries for **enabled-and-ready** managed
+  single-type pages plus every active job's `/careers/:slug/` route while
+  Careers is live. Campaign entries use the authoritative entity-template
+  owner path. The ISR gateway consumes it to
   drive sitemap/revalidation and to honour per-route `noIndex`. Rate-limited
   60/60s and cached 60s keyed by path (the query string is ignored).
 - `GET /api/sitemap-entities` — `{ data }`, one row per store / brand /
   category / bank: `{ kind, documentId, id, slug, updatedAt, offersUpdatedAt?,
-  imageUrl? }`. Decoration for the frontend's sharded sitemap, and nothing
+  liveOfferCount?, imageUrl? }`. Decoration for the frontend's sharded sitemap, and nothing
   else — route *membership* still comes from the collections themselves via
   `get-flat-routes.ts`, so a failure here degrades the sitemap's `lastmod`
   precision without dropping any URL.
@@ -273,6 +314,10 @@ Super Admin contract explicitly enables one and every SEO blocker passes.
     grouped join per `coupons_*_lnk` / `deals_*_lnk` table. An entity page's
     content *is* its offers, so the entity row's own `updatedAt` alone
     under-reports badly.
+  - Offer aggregates include only feature-enabled sources. A disabled Coupon
+    or Product Deal source contributes an authoritative zero; a failed enabled
+    source omits `liveOfferCount` so the frontend fails open instead of
+    collapsing sitemap membership on a transient database error.
   - Deliberately **not** an OR-of-EXISTS: that shape inflated planner costs on
     this database badly enough to trip JIT compilation (see
     [search-operations.md](./search-operations.md)).

@@ -372,6 +372,13 @@ async function insertTerm(
   const faqEnabled = term.faq_enabled === "1";
   const ratingAverage = parseDecimal(term.rating_avg);
   const ratingCount = parseInteger(term.rating_count) ?? 0;
+  const sourceSlug = cleanSlug(term.slug) || term.slug;
+  const pageTemplate =
+    sourceSlug === "deal-of-the-day"
+      ? "dealTemplate"
+      : sourceSlug === "independence-day-sale-coupons"
+        ? "independenceDayTemplate"
+        : "default";
 
   // Build column list based on table type
   const isCategory = table === "categories";
@@ -397,6 +404,7 @@ async function insertTerm(
     "document_id",
     "name",
     "slug",
+    "page_template",
     "description",
     "short_description",
     altColumn,
@@ -425,6 +433,7 @@ async function insertTerm(
     documentId,
     entityName,
     slug,
+    pageTemplate,
     descriptionMedia.html,
     clean(term.short_desc),
     clean(term.image_alt) || entityName,
@@ -449,6 +458,7 @@ async function insertTerm(
        ON CONFLICT ("document_id") DO UPDATE SET
          "name" = EXCLUDED."name",
          "slug" = EXCLUDED."slug",
+         "page_template" = COALESCE("${table}"."page_template", EXCLUDED."page_template"),
          "description" = EXCLUDED."description",
          "short_description" = EXCLUDED."short_description",
          "${altColumn}" = EXCLUDED."${altColumn}",

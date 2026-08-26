@@ -11,13 +11,38 @@
  */
 
 import sanitizeHtmlLib from 'sanitize-html';
+import { getDomain } from 'tldts-icann';
 
-// couponzguru.com and every subdomain (www, beta, cms) count as internal;
-// anything else that resolves to an absolute http(s) URL is external and gets
-// rel="nofollow" added automatically — the editor has no per-link rel control
-// (TipTap always emits dofollow), so the sanitizer owns the policy. The
-// transform is a pure function of href, so sanitized output stays idempotent.
-const INTERNAL_HOST_PATTERN = /(^|\.)couponzguru\.com$/iu;
+// First-party link classification derives from the public site URL. The
+// registrable domain keeps apex/www/CMS aliases internal without another
+// deployment flag, while Public Suffix List parsing prevents co.ke/co.uk-style
+// sibling domains from being mistaken for subdomains of the site.
+// Unconfigured means "no domain is first-party", not "assume some site":
+// classification is written to the database as rel="nofollow", so guessing a
+// brand here would either drop link equity on the real site or hand it to
+// another deployment's domain. Over-nofollowing is the safe direction, and
+// relative hrefs are unaffected.
+function configuredInternalDomain(): string | null {
+  const value =
+    process.env.STRAPI_ADMIN_PUBLIC_SITE_URL?.trim() ||
+    process.env.PUBLIC_SITE_URL?.trim();
+  if (!value) return null;
+
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return getDomain(hostname) ?? hostname;
+  } catch {
+    return null;
+  }
+}
+
+function isInternalHost(hostname: string): boolean {
+  const internalDomain = configuredInternalDomain();
+  if (!internalDomain) return false;
+  const normalized = hostname.toLowerCase().replace(/\.$/u, '');
+  const linkedDomain = getDomain(normalized) ?? normalized;
+  return linkedDomain === internalDomain;
+}
 
 function isExternalHttpHref(href: string | undefined): boolean {
   if (!href) return false;
@@ -29,7 +54,7 @@ function isExternalHttpHref(href: string | undefined): boolean {
     return false;
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-  return !INTERNAL_HOST_PATTERN.test(url.hostname);
+  return !isInternalHost(url.hostname);
 }
 
 export function cleanHtml(val: string | null | undefined): string | null {

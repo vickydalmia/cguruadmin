@@ -1,6 +1,5 @@
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
 import {
   PutObjectCommand,
   GetObjectCommand,
@@ -27,8 +26,7 @@ import {
 } from "../utils/format-gaps.js";
 import { getS3Client, hashBuffer } from "./02-media-upload.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CHECKPOINT_DIR = path.resolve(__dirname, "../../.checkpoints");
+const CHECKPOINT_DIR = config.stateDir;
 // `*Map.json` survives clearCheckpoints(), so --clean no longer forces a
 // full rehash of the uploads tree. The old name is read once as a fallback.
 const HASH_MAP_CACHE = path.join(CHECKPOINT_DIR, "mediaHashMap.json");

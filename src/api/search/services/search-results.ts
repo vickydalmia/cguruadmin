@@ -259,7 +259,11 @@ export async function preview(
   strapi: Core.Strapi,
   request: SearchRequest,
   nowIso: string,
+  // Feature-disabled kinds are skipped entirely: their records must not
+  // surface as results linking into routes the storefront now 404s.
+  liveKeys?: ReadonlySet<string>,
 ) {
+  const isLive = (key: string) => liveKeys?.has(key) ?? true;
   const response = emptyResponse(request.query);
   const fallbackCache: FallbackRequestCache = new Map();
   const entityWindow = {
@@ -280,7 +284,7 @@ export async function preview(
     dealCount,
   ] = await Promise.all([
     Promise.all(
-      ENTITIES.map(async (config) => {
+      ENTITIES.filter((config) => isLive(config.key)).map(async (config) => {
         const [items, total] = await Promise.all([
           entityPage(strapi, config, request.query, entityWindow, fallbackCache),
           entityTotal(strapi, config, request.query, fallbackCache),
@@ -288,24 +292,32 @@ export async function preview(
         return [config, items, total] as const;
       }),
     ),
-    offerPage(
-      strapi,
-      "coupon",
-      request.query,
-      offerWindow,
-      fallbackCache,
-      nowIso,
-    ),
-    offerTotal(strapi, "coupon", request.query, fallbackCache, nowIso),
-    offerPage(
-      strapi,
-      "deal",
-      request.query,
-      offerWindow,
-      fallbackCache,
-      nowIso,
-    ),
-    offerTotal(strapi, "deal", request.query, fallbackCache, nowIso),
+    isLive("coupons")
+      ? offerPage(
+          strapi,
+          "coupon",
+          request.query,
+          offerWindow,
+          fallbackCache,
+          nowIso,
+        )
+      : Promise.resolve([]),
+    isLive("coupons")
+      ? offerTotal(strapi, "coupon", request.query, fallbackCache, nowIso)
+      : Promise.resolve(0),
+    isLive("deals")
+      ? offerPage(
+          strapi,
+          "deal",
+          request.query,
+          offerWindow,
+          fallbackCache,
+          nowIso,
+        )
+      : Promise.resolve([]),
+    isLive("deals")
+      ? offerTotal(strapi, "deal", request.query, fallbackCache, nowIso)
+      : Promise.resolve(0),
   ]);
 
   for (const [config, items, total] of entityResults) {
@@ -348,7 +360,9 @@ export async function group(
   strapi: Core.Strapi,
   request: SearchRequest,
   nowIso: string,
+  liveKeys?: ReadonlySet<string>,
 ) {
+  const isLive = (key: string) => liveKeys?.has(key) ?? true;
   const response = emptyResponse(request.query);
   const fallbackCache: FallbackRequestCache = new Map();
   const window = {
@@ -357,10 +371,17 @@ export async function group(
   };
   let total = 0;
 
-  if (request.group === "coupons" || request.group === "deals") {
+  if (
+    (request.group === "coupons" || request.group === "deals") &&
+    isLive(request.group)
+  ) {
     const [couponCount, dealCount] = await Promise.all([
-      offerTotal(strapi, "coupon", request.query, fallbackCache, nowIso),
-      offerTotal(strapi, "deal", request.query, fallbackCache, nowIso),
+      isLive("coupons")
+        ? offerTotal(strapi, "coupon", request.query, fallbackCache, nowIso)
+        : Promise.resolve(0),
+      isLive("deals")
+        ? offerTotal(strapi, "deal", request.query, fallbackCache, nowIso)
+        : Promise.resolve(0),
     ]);
     response.totals.coupons = couponCount;
     response.totals.deals = dealCount;
@@ -389,7 +410,9 @@ export async function group(
       total = dealCount;
     }
   } else {
-    const config = ENTITIES.find((item) => item.key === request.group);
+    const config = ENTITIES.find(
+      (item) => item.key === request.group && isLive(item.key),
+    );
     if (config) {
       const [items, entityCount] = await Promise.all([
         entityPage(strapi, config, request.query, window, fallbackCache),

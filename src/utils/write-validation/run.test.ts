@@ -32,6 +32,7 @@ describe('write-validation step order', () => {
 
   it('runs the collected validators in the documented order', () => {
     expect(names(COLLECTED_STEPS)).toEqual([
+      'validateSiteConfigurationForWrite',
       'validateCouponTypeFields',
       'validateChangedFields',
       'warnUndersizedSeoOgImage',
@@ -55,9 +56,10 @@ describe('write-validation step order', () => {
     ]);
   });
 
-  it('keeps identity, redirect and job slug together under the lock', () => {
+  it('keeps cross-row invariants together under the lock', () => {
     expect(names(LOCKED_STEPS)).toEqual([
       'validateIdentity',
+      'validateUniqueEntityPageTemplate',
       'validateRedirect',
       'validateJobSlug',
     ]);
@@ -90,6 +92,12 @@ describe('stepApplies', () => {
         true,
       );
     }
+  });
+
+  it('checks singleton campaign-template ownership on clone', () => {
+    expect(
+      stepApplies(step('validateUniqueEntityPageTemplate'), 'api::store.store', 'clone'),
+    ).toBe(true);
   });
 
   it('never runs a validator for delete / publish / unpublish / discardDraft', () => {
@@ -326,8 +334,11 @@ describe('runWriteValidation — one save reports every problem', () => {
     // must still surface as the 500 it always was.
     const bug = new TypeError('boom');
     const strapi = fakeStrapi({ human: true });
+    const validator = COLLECTED_STEPS.find(
+      (candidate) => candidate.name === 'validateChangedFields',
+    )!;
     const spy = vi
-      .spyOn(COLLECTED_STEPS[1], 'run')
+      .spyOn(validator, 'run')
       .mockImplementation(() => {
         throw bug;
       });

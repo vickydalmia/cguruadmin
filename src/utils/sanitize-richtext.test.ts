@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanHtml, sanitizeRichtextData, RICHTEXT_FIELDS } from './sanitize-richtext';
 // The migration workspace holds the original allowlist this module copies —
 // both feed HTML rendered raw on the public site, so they must never drift.
 import { cleanHtml as migrationCleanHtml } from '../../migration/src/utils/sanitize';
 
 describe('cleanHtml', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
   it('keeps allowlisted formatting markup', () => {
     const html =
       '<h2>Title</h2><p><strong>bold</strong> and <em>italic</em></p>' +
@@ -25,13 +27,16 @@ describe('cleanHtml', () => {
   });
 
   it('forces rel="noopener noreferrer" on links, adding nofollow when external', () => {
+    // First-party classification comes from the deployment's own URL; there is
+    // no built-in domain, so the test states which deployment it is.
+    vi.stubEnv('STRAPI_ADMIN_PUBLIC_SITE_URL', 'https://www.example.com');
     expect(cleanHtml('<a href="https://a.b" target="_blank">x</a>')).toContain(
       'rel="nofollow noopener noreferrer"'
     );
-    // Internal absolute URLs (any couponzguru.com host) and relative paths
-    // stay followed — the editor cannot set rel, so the sanitizer's policy
-    // must never nofollow the site's own pages.
-    expect(cleanHtml('<a href="https://www.couponzguru.com/nike-coupons/">x</a>')).toContain(
+    // Internal absolute URLs (any host on the deployment's domain) and
+    // relative paths stay followed — the editor cannot set rel, so the
+    // sanitizer's policy must never nofollow the site's own pages.
+    expect(cleanHtml('<a href="https://www.example.com/nike-coupons/">x</a>')).toContain(
       'rel="noopener noreferrer"'
     );
     expect(cleanHtml('<a href="/nike-coupons/">x</a>')).toContain(
@@ -39,9 +44,19 @@ describe('cleanHtml', () => {
     );
     expect(cleanHtml('<a href="/nike-coupons/">x</a>')).not.toContain('nofollow');
     // A lookalike host does not count as internal.
-    expect(cleanHtml('<a href="https://couponzguru.com.evil.example/">x</a>')).toContain(
+    expect(cleanHtml('<a href="https://example.com.evil.example/">x</a>')).toContain(
       'rel="nofollow noopener noreferrer"'
     );
+  });
+
+  it('treats every absolute link as external when no deployment URL is set', () => {
+    // Fail-safe direction: without configuration nothing is first-party, so a
+    // misconfigured stack over-nofollows instead of granting link equity to
+    // some other deployment's domain. Relative paths are unaffected.
+    expect(cleanHtml('<a href="https://www.example.com/x/">x</a>')).toContain(
+      'rel="nofollow noopener noreferrer"'
+    );
+    expect(cleanHtml('<a href="/x/">x</a>')).not.toContain('nofollow');
   });
 
   it('is idempotent on its own output', () => {
@@ -49,6 +64,36 @@ describe('cleanHtml', () => {
       '<p>text <a href="https://a.b" target="_blank">link</a> <sup>1</sup></p><div>d</div>'
     );
     expect(cleanHtml(first)).toBe(first);
+  });
+
+  it('derives first-party hosts from the deployment domain', () => {
+    vi.stubEnv('STRAPI_ADMIN_PUBLIC_SITE_URL', 'https://www.couponzguru.us');
+    // The registrable domain of the configured URL is internal — apex and
+    // every subdomain — so re-saving content never rewrites existing
+    // first-party links to nofollow.
+    expect(cleanHtml('<a href="https://www.couponzguru.us/stores/">x</a>')).not.toContain(
+      'nofollow',
+    );
+    expect(cleanHtml('<a href="https://cms.couponzguru.us/stores/">x</a>')).not.toContain(
+      'nofollow',
+    );
+    expect(cleanHtml('<a href="https://couponzguru.us/stores/">x</a>')).not.toContain(
+      'nofollow',
+    );
+    // Another country's domain is external to this deployment.
+    expect(cleanHtml('<a href="https://www.couponzguru.com/stores/">x</a>')).toContain(
+      'nofollow',
+    );
+  });
+
+  it('does not confuse sibling hosts on a multi-label public suffix', () => {
+    vi.stubEnv('STRAPI_ADMIN_PUBLIC_SITE_URL', 'https://www.couponzguru.co.ke');
+    expect(cleanHtml('<a href="https://cms.couponzguru.co.ke/banner/">x</a>')).not.toContain(
+      'nofollow',
+    );
+    expect(cleanHtml('<a href="https://attacker.co.ke/banner/">x</a>')).toContain(
+      'nofollow',
+    );
   });
 
   it('returns null for empty or fully-stripped input', () => {

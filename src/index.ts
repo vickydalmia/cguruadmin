@@ -19,6 +19,7 @@ import { installDocumentWriteMiddleware } from './register/document-write-middle
 import { installRecordLockDocumentMiddleware } from './register/record-lock-document';
 import { getCuratedOfferRelations } from './utils/curated-offer-relations';
 import { registerCuratedOfferRelationQueryFilter } from './utils/curated-offer-live-filter';
+import { primeOfferContentLocalization } from './utils/offer-content-localization';
 import { ENTITY_COUPON_LAYOUT_ACTION_ATTRIBUTES } from './api/entity-coupon-layout/services/entity-coupon-layout';
 import { CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME } from './constants/checkout-merchant';
 import {
@@ -58,6 +59,7 @@ import {
 import { runDatabaseReconciliations } from './bootstrap/db-reconciliation';
 import {
   registerCsvExportRoutes,
+  registerCountrySetupRoutes,
   registerEntityCouponLayoutRoutes,
   registerEntityDealPageRoutes,
   registerRecordLockRoutes,
@@ -113,6 +115,7 @@ export default {
     registerEntityCouponLayoutRoutes(strapi);
     registerRecordLockRoutes(strapi);
     registerCsvExportRoutes(strapi);
+    registerCountrySetupRoutes(strapi);
 
     // Document-service middlewares. Registration order = execution order:
     // the record-lock guard must run before the document-write pipeline
@@ -124,6 +127,9 @@ export default {
 
   async bootstrap({ strapi }: { strapi: Core.Strapi }) {
     await seedEditorCouponLayoutPermission(strapi);
+    // Offer response walkers are synchronous; load the site localization they
+    // read before the first public request is served.
+    await primeOfferContentLocalization(strapi);
 
     // The renderer fetches every page of a Deal catalogue to regenerate one
     // entity Deal page, so a single render can spend a large share of the

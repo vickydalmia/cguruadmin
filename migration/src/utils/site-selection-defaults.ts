@@ -45,7 +45,7 @@ export function routeSlug(value: string | null | undefined): string | null {
   if (!value) return null;
   let path: string;
   try {
-    path = new URL(value, "https://www.couponzguru.com").pathname;
+    path = new URL(value, "https://path.invalid").pathname;
   } catch {
     return null;
   }

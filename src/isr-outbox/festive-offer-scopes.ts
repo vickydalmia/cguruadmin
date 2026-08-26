@@ -3,10 +3,7 @@
 // modules split out of scopes.ts, which keeps the computeScope coordinator.
 import type { Core } from '@strapi/strapi';
 import type { ScopeRequest } from './types';
-import {
-  DEAL_OF_THE_DAY_SLUG,
-  INDEPENDENCE_DAY_SALE_SLUG,
-} from './scope-static-pages';
+import { entityTemplateOwnerSlugs } from '../api/site-configuration/services/entity-template-owners';
 import { entityDealPageSlug } from '../api/entity-deal-page/services/entity-deal-route';
 import {
   CHECKOUT_MERCHANT_FIELD,
@@ -212,10 +209,15 @@ export async function festiveMerchantScope(
       optionalSlugs.add(entity.dealSlug);
     }
   }
-  if (dealIds.length > 0) slugs.add(DEAL_OF_THE_DAY_SLUG);
-  if (couponIds.length > 0 || dealIds.length > 0) {
-    slugs.add(INDEPENDENCE_DAY_SALE_SLUG);
-  }
+  const templateSlugs = await Promise.all([
+    dealIds.length > 0
+      ? entityTemplateOwnerSlugs(strapi, 'dealTemplate')
+      : Promise.resolve([]),
+    couponIds.length > 0 || dealIds.length > 0
+      ? entityTemplateOwnerSlugs(strapi, 'independenceDayTemplate')
+      : Promise.resolve([]),
+  ]);
+  for (const slug of templateSlugs.flat()) slugs.add(slug);
 
   return {
     slugs: [...slugs],

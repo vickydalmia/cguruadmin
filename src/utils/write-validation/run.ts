@@ -32,7 +32,7 @@ import {
  * B below runs all of them and reports the union, so one Save shows everything.
  *
  * What is deliberately NOT merged, and why:
- *  - Group C (identity / redirect) needs a Postgres advisory lock held across
+ *  - Group C (identity / campaign-template owner / redirect) needs a Postgres advisory lock held across
  *    validate AND commit. Taking that lock for a save group B already condemned
  *    would serialize every other editor behind work that is going to be thrown
  *    away.
@@ -119,7 +119,7 @@ function applicable(
   return steps.filter((step) => stepApplies(step, ctx.uid, ctx.action));
 }
 
-/** Identity and redirect problems are merged with each other, then thrown once. */
+/** Cross-row invariant problems are merged with each other, then thrown once. */
 async function collectLockedSteps(ctx: StepContext): Promise<void> {
   const collector = new ProblemCollector();
   for (const step of applicable(LOCKED_STEPS, ctx)) {
@@ -130,9 +130,9 @@ async function collectLockedSteps(ctx: StepContext): Promise<void> {
 
 /**
  * Which advisory-lock domain this uid's cross-row invariants belong to, or null
- * when it has none. Identity and redirect are the middleware's original
- * selection; job was added with the slug uid→string conversion, whose
- * uniqueness guard is read-then-write like the other two.
+ * when it has none. Entity identity and template ownership share one domain;
+ * redirect and job each keep their existing lock. Every guard is a
+ * read-then-write invariant that must serialize validation through commit.
  */
 function lockDomainFor(uid: string): WriteLockDomain | null {
   if (isIdentityUid(uid)) return 'identity';

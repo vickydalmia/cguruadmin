@@ -5,6 +5,9 @@ database (new environment, go-live, or a full re-do). For reference material —
 what each phase does internally, data mapping, troubleshooting — see
 [README.md](./README.md). For refreshing only the homepage on an already
 migrated database, skip to [Maintenance scripts](#maintenance-scripts).
+Country identity, feature readiness, USA starter behavior and the India
+compatibility contract are explained in
+[Country Setup and Multi-Country Sites](../docs/country-setup.md).
 
 Everything here runs **from your local machine**. The scripts connect directly
 to the target Postgres (`PG_CONNECTION_STRING`) and to the WordPress MySQL
@@ -35,6 +38,7 @@ the server or the Docker container.
 
 ```bash
 cp .env.migration.example .env.migration   # if starting from scratch
+# USA: merge .env.migration.usa.example only after replacing every MUST-SET value
 ```
 
 `PG_CONNECTION_STRING` in `.env.migration` **is the target selector** — every
@@ -46,11 +50,33 @@ Key settings (full list in README § Setup & Configuration):
 
 | Variable | Purpose |
 |---|---|
+| `MIGRATION_PROFILE` | Validated country profile name, such as `india` or `usa` |
+| `MIGRATION_STATE_DIR` | Profile-only checkpoints, maps, manifests, reports and logs; normally `.state/<profile>` |
+| `MIGRATION_SITE_CONFIGURATION_FILE` | Country identity/localization/feature JSON created or updated in Phase 13 |
+| `MIGRATION_EXCLUSIONS_FILE` | Exclusions for this source only; USA must not reuse the India retired-store list |
+| `SOURCE_COUNTRY_CODE` / `SOURCE_LOCALE` / `SOURCE_CURRENCY_CODE` / `SOURCE_TIMEZONE` | Source identity asserted against the profile JSON |
+| `WP_TABLE_PREFIX` | Validated WordPress prefix; USA uses `wp_dda10ab629_` |
 | `PG_CONNECTION_STRING` + `PG_CA_CERT_PATH` | Target Strapi Postgres (TLS verified for remote DBs) |
 | `WP_DB_*` | Source WordPress MySQL |
 | `SSH_HOST` / `SSH_PRIVATE_KEY_PATH` / `SSH_HOST_FINGERPRINT` | Optional tunnel to the WP DB (fingerprint is required when tunneling) |
 | `WP_UPLOADS_DIR` | Local path to `wp-content/uploads/` |
 | `S3_*` | Media destination |
+
+Before continuing, review the effective profile, state path, WordPress prefix,
+source country and target database. Phase 00 refuses a target database already
+configured for another country, but that guard is not permission to leave
+destination values implicit.
+
+An `EXPECTED_ATTACHMENT_COUNT` mismatch is advisory: Phase 00 warns and
+continues because a live WordPress site may add media after the local files
+snapshot. Phase 01 remains authoritative for file availability and reports all
+attachments whose originals are absent from `WP_UPLOADS_DIR`. Store and Deal
+count exceptions remain blocking.
+
+The India profile adopts a pre-profile `.checkpoints/` directory only when it
+is the sole location with JSON state. If both `.checkpoints` and
+`.state/india` contain real state, stop and reconcile them; do not copy or
+merge ID-map files casually.
 
 ## 3. Run the migration
 
@@ -59,7 +85,7 @@ Key settings (full list in README § Setup & Configuration):
 On a **fresh database**, the hash-based media reuse index (the `files` table)
 is empty, so without a manifest every image would be re-optimized and
 re-uploaded even though its immutable objects already sit in S3. The manifest
-(`.checkpoints/fileManifestMap.json`, mirrored to
+(`<MIGRATION_STATE_DIR>/fileManifestMap.json`, mirrored to
 `{S3_ROOT_PATH}/.migration/files-manifest.json`) carries the full row payload
 per content hash, letting the import re-create `files` rows with **zero**
 image processing. Build it once:
@@ -86,7 +112,7 @@ yarn migrate
 
 One command runs every phase in order. Each phase checkpoints on completion,
 so if anything fails you fix the cause and re-run `yarn migrate` — it resumes
-where it stopped. To re-run one phase against existing data, use
+from the active profile's state directory. To re-run one phase against existing data, use
 `yarn migrate:phase <name>`. Media stats at the end show
 `reused` (manifest hits — no processing) vs `uploaded` (full pipeline).
 
@@ -106,10 +132,10 @@ trips a fuse above 40% orphans (`--force-orphan-cleanup` to override). Pass
 
 | # | What | Detail |
 |---|---|---|
-| 1 | Checkpoint files | `.checkpoints/*.json` — every phase becomes eligible again |
+| 1 | Checkpoint files | `<MIGRATION_STATE_DIR>/*.json` checkpoint markers — every phase becomes eligible again |
 | 2 | **All six ID map files** | `termIdMap` / `postIdMap` / `mediaIdMap` / `poolIdMap` / `poolNameMap` / `userIdMap` `.json` are unlinked from disk (`clearAllMaps()`). Relationship data from earlier phases is **not** retained |
 | 3 | Every migrated non-media table | `TRUNCATE … RESTART IDENTITY CASCADE` over the explicit list in [`src/index.ts`](./src/index.ts) — coupons, deals, stores, brands, categories, banks, unique pools/codes, all link tables, all `components_*` tables — **plus** every `*_cmps` / `*_lnk` table auto-discovered from `information_schema` under the owned-prefix allowlist. The `files` table is preserved so its hashes can reuse existing media |
-| 4 | **The four singles** | `homepages`, `menus`, `footers`, `globals` and their component join tables are in that truncate list. A "fresh" run therefore wipes the curated homepage, menu, footer and global settings, and phase 13 reseeds them from WordPress |
+| 4 | **The four content singles** | `homepages`, `menus`, `footers`, `globals` and their component join tables are in that truncate list. A "fresh" run therefore wipes the curated homepage, menu, footer and global settings, and phase 13 reseeds them from WordPress. `site_configurations` is preserved as the target-country guard and Phase 13 updates it from the active profile |
 | 5 | Migration-created admin users | `admin_users` rows owned by `migration_source_entities` (phase 06a's accounts) and their role links. Accounts created by hand in the admin — including the super admin — survive |
 | 6 | Media only with `--delete-media` | Ordinary `--clean` preserves the `files` table and all S3 objects. Reuse verifies each retained AWS master in S3 and regenerates only a missing object. `yarn migrate:fresh --delete-media` also truncates `files`, then `clearS3Bucket()` deletes every object under `S3_ROOT_PATH/` in `S3_BUCKET`. It refuses an empty `S3_ROOT_PATH`, and `--delete-media` is rejected unless paired with `--clean` |
 
@@ -132,7 +158,7 @@ trips a fuse above 40% orphans (`--force-orphan-cleanup` to override). Pass
 | `12a-entity-updated-at` | Re-derive entity `created_at`/`updated_at` from the offers now linked to them |
 | `13-site-content` | Global, **homepage**, menu, footer singles |
 | `13a-homepage-offer-sections` | Backfill for **pre-existing** homepages only — on a fresh run phase 13 already seeds everything and this is a no-op |
-| `13b-footer-media` | Upload optimized footer flags/Google Preferred icon and fill missing footer media/component relations |
+| `13b-footer-media` | Upload optimized flags for every other country in the shared registry, plus any profile-specific Google Preferred icon, and fill missing footer media/component relations |
 | `13c-footer-country-links` | Fill blank footer country destinations while preserving editor-entered URLs |
 | `13d-site-selection-backfill` | Preserve legacy homepage Popular Searches and fill empty search-overlay stores/suggestions without overwriting editor selections |
 | `14-media-optimize` | Image optimization backfill |
@@ -182,9 +208,19 @@ To repair an already-migrated database without a full re-run, use
       counts: topOffers 8, popularStores 1+24, topDeals 10, cgExclusive 8,
       exploreOffers ≤10/tab, newlyAdded 8, offersByBrand 7, bankOffers 12.
 - [ ] `GET <strapi-url>/api/search?q=<known store>` returns grouped results.
+- [ ] `GET <strapi-url>/api/site-settings` reports the expected country,
+      locale, timezone and currency.
+- [ ] Every enabled feature reports `ready: true` and `live: true`; a campaign
+      reports the selected entity-owner `path`.
 - [ ] Admin: log in, open Homepage, **save once** — proves component caps and
       image validation pass on the seeded data.
 - [ ] Spot-check a store page and a Coupon homepage banner URL (CDN base correct).
+
+For USA, the review report must additionally account for 7,162 Stores, 10,360
+attachments, zero Product Deals, five hero banners and eight featured Stores.
+Brands, Categories, Banks, Product Deals, campaigns and unsupplied
+editorial/legal pages must remain disabled. Run the migration a second time
+against the disposable target and confirm those counts do not grow.
 
 ## 5. Restart Strapi (required)
 

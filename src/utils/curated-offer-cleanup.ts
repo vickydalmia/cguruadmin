@@ -4,7 +4,7 @@ import type { Core } from '@strapi/strapi';
 import { isLiveOffer } from './offer-visibility';
 import {
   ENTITY_KIND_BY_UID,
-  curatedSourcePath,
+  curatedSourcePaths,
   getCuratedOfferRelations,
   type CuratedOfferRelation,
   type OfferUid,
@@ -80,9 +80,9 @@ export async function removeInactiveCuratedOfferRelations(
       } as any);
       removedSelections += inactiveIds.length;
 
-      const path = curatedSourcePath(relation.sourceUid, row);
-      if (path) {
-        affectedPaths.add(path);
+      const paths = await curatedSourcePaths(strapi, relation.sourceUid, row);
+      if (paths.length > 0) {
+        for (const path of paths) affectedPaths.add(path);
       } else {
         requiresFullRevalidation = true;
       }

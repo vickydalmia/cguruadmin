@@ -39,3 +39,43 @@ test("preflight requires the migration's SQL rather than duplicating it", () => 
   assert.match(preflightSource, /bgRemovalIndexSql/);
   assert.match(preflightSource, /await pgQuery\(bgRemovalIndexSql\)/);
 });
+
+test("source profile and count exceptions are validated before target mutation", () => {
+  const profileValidation = preflightSource.indexOf(
+    "validateSiteConfigurationProfile();",
+  );
+  const sourceValidation = preflightSource.indexOf(
+    "await validateSourceDataExceptions();",
+  );
+  const firstTargetMutation = preflightSource.indexOf(
+    "CREATE UNIQUE INDEX IF NOT EXISTS",
+  );
+
+  assert.ok(profileValidation >= 0, "profile validation must be called");
+  assert.ok(sourceValidation >= 0, "source count validation must be called");
+  assert.ok(firstTargetMutation >= 0, "target index mutation must remain explicit");
+  assert.ok(profileValidation < sourceValidation);
+  assert.ok(sourceValidation < firstTargetMutation);
+});
+
+test("attachment count drift is advisory while source validation stays before mutation", () => {
+  const attachmentCheck = preflightSource.indexOf("Attachment count drift (non-blocking)");
+  const storeCheck = preflightSource.indexOf("Store count exception");
+  const attachmentBlockEnd = preflightSource.indexOf(
+    "\n  const storeTerms",
+    attachmentCheck,
+  );
+
+  assert.ok(attachmentCheck >= 0, "attachment drift warning must remain explicit");
+  assert.ok(storeCheck > attachmentCheck, "hard Store validation must still follow it");
+  assert.ok(attachmentBlockEnd > attachmentCheck);
+
+  const attachmentBlock = preflightSource.slice(
+    attachmentCheck - 300,
+    attachmentBlockEnd,
+  );
+  assert.match(attachmentBlock, /logger\.warn\(/);
+  assert.doesNotMatch(attachmentBlock, /throw new Error\(/);
+  assert.match(preflightSource, /throw new Error\(\s*`Store count exception:/);
+  assert.match(preflightSource, /throw new Error\(\s*`Deal count exception:/);
+});

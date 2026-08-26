@@ -145,6 +145,15 @@ test("cashback fields: rupee bank offer", () => {
   );
 });
 
+test("cashback fields: dollar bank and prepaid offers retain USD", () => {
+  assert.deepEqual(
+    extractCashbackFields("$20 Bank Off and $5 Prepaid Discount", null, {
+      currencyCode: "USD",
+    }),
+    { cashbackText: null, bankOfferText: "$20", prepaidText: "$5" },
+  );
+});
+
 test("cashback fields: both null when none present", () => {
   assert.deepEqual(extractCashbackFields("Snitch Fans Sale – Extra 18% Off"), {
     cashbackText: null,
@@ -169,6 +178,17 @@ test("offerText: Additional maps to EXTRA; Save is a discount", () => {
 test("offerText: dollar amounts", () => {
   assert.equal(extractOfferText("Upto $20 Off On Flights"), "UPTO $20 OFF");
   assert.equal(extractOfferText("$40 Instant Off On Bookings"), "$40 OFF");
+});
+
+test("offerText: USA commerce phrases and locale-aware bare amounts", () => {
+  assert.equal(extractOfferText("Free Shipping on every order"), "FREE SHIPPING");
+  assert.equal(extractOfferText("Buy One Get One Free"), "BOGO");
+  assert.equal(extractOfferText("Starting At $19 today"), "STARTING $19");
+  assert.equal(extractOfferText("All gifts Under $25"), "UNDER $25");
+  assert.equal(
+    extractOfferText("Flat 25 Off", null, { currencyCode: "USD" }),
+    "FLAT $25 OFF",
+  );
 });
 
 test("offerText: a non-discount % is not a badge", () => {

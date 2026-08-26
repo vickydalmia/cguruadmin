@@ -7,7 +7,15 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
     env('NODE_ENV', 'development') !== 'production'
   );
 
-  const s3BaseUrl = env('S3_BASE_URL', 'https://media.vicky.com');
+  // The media host is stamped into every persisted files.url (and every
+  // srcset inside `formats`), so a wrong value is permanent data, not a
+  // rendering detail. No default: fail the boot instead of guessing a host.
+  const s3BaseUrl = env('S3_BASE_URL', '');
+  if (s3UploadEnabled && !s3BaseUrl.trim()) {
+    throw new Error(
+      'S3_BASE_URL is required when S3_UPLOAD_ENABLED is true: it is written into every uploaded file URL.'
+    );
+  }
   const s3RootPath = env('S3_ROOT_PATH', '');
 
   return {
@@ -99,7 +107,7 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
                 // Media filenames are content-hashed (and preventOverwrite is
                 // on), so a replaced image always gets a NEW URL — immutable
                 // year-long browser/CDN caching is safe and fixes the
-                // "Cache TTL: None" Lighthouse audit on media.couponzguru.com.
+                // "Cache TTL: None" Lighthouse audit on the deployment's media CDN.
                 // Existing objects need a one-time metadata backfill:
                 // migration's `npm run fix:cache-headers` (NOT aws s3 cp,
                 // which re-guesses Content-Type from extensions).

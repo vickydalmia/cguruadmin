@@ -5,7 +5,7 @@
     "singularName": "independence-day-sale-page",
     "pluralName": "independence-day-sale-pages",
     "displayName": "Independence Day Sale Page",
-    "description": "Single CMS surface for the Independence Day Coupon and product Deal landing page"
+    "description": "Curated content for entities using the independenceDayTemplate page design"
   },
   "options": {
     "draftAndPublish": false
