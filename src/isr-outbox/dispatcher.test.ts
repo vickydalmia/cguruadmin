@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  backlogExceeded,
   cleanupDeliveredEvents,
   deliveredRetentionCutoff,
   deliverOutboxEvent,
@@ -24,6 +25,74 @@ it('computes the delivered-event retention cutoff in UTC milliseconds', () => {
   );
 });
 
+it('judges backlog staleness from the oldest undelivered timestamp', () => {
+  const now = Date.parse('2026-07-24T12:00:00.000Z');
+  const threshold = 1_800_000;
+  // No undelivered rows is healthy, as is an unparseable timestamp.
+  expect(backlogExceeded(null, now, threshold)).toBe(false);
+  expect(backlogExceeded('not-a-date', now, threshold)).toBe(false);
+  // Fresh backlog within the threshold is healthy.
+  expect(
+    backlogExceeded('2026-07-24T11:45:00.000Z', now, threshold),
+  ).toBe(false);
+  // Past the threshold — delivery is stuck, not merely backing off.
+  expect(
+    backlogExceeded('2026-07-24T11:29:59.000Z', now, threshold),
+  ).toBe(true);
+  expect(
+    backlogExceeded('2026-07-19T12:00:00.000Z', now, threshold),
+  ).toBe(true);
+});
+
+it('reports a stale undelivered backlog as unhealthy in status', async () => {
+  const dispatcher = new IsrOutboxDispatcher(
+    {
+      log: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
+    } as any,
+    {
+      gatewayUrl: 'http://gateway.test',
+      adminSecret: 'test-secret',
+      pollMs: 2_000,
+      batchSize: 1,
+      requestTimeoutMs: 90_000,
+      leaseMs: 120_000,
+      maxBackoffMs: 300_000,
+      alertAfterAttempts: 5,
+      backlogAlertMs: 1_800_000,
+      retentionDays: 30,
+      maxPaths: 5_000,
+      maxPayloadBytes: 900_000,
+    } as any,
+  );
+  const summary = {
+    counts: { pending: 60, processing: 1, delivered: 11_312 },
+    oldestUndeliveredAt: new Date(Date.now() - 5 * 86_400_000).toISOString(),
+    expiredProcessing: 0,
+  };
+  (dispatcher as any).store = {
+    statusSummary: vi.fn(async () => summary),
+  };
+  (dispatcher as any).lastCycleStartedAt = Date.now();
+  (dispatcher as any).lastCycleCompletedAt = Date.now();
+
+  const stale = await dispatcher.status();
+  expect(stale.ok).toBe(false);
+  expect(stale.outbox.backlogStale).toBe(true);
+  expect(stale.outbox.backlogAgeMs).toBeGreaterThan(4 * 86_400_000);
+  expect(stale.outbox.backlogAlertMs).toBe(1_800_000);
+
+  // Freshly-created backlog and an empty outbox both stay healthy.
+  summary.oldestUndeliveredAt = new Date().toISOString();
+  const fresh = await dispatcher.status();
+  expect(fresh.ok).toBe(true);
+  expect(fresh.outbox.backlogStale).toBe(false);
+
+  (summary as any).oldestUndeliveredAt = null;
+  const empty = await dispatcher.status();
+  expect(empty.ok).toBe(true);
+  expect(empty.outbox.backlogAgeMs).toBe(null);
+});
+
 it('contains a failed dispatcher cycle and exposes it in status', async () => {
   const logged = vi.fn();
   const dispatcher = new IsrOutboxDispatcher(
@@ -43,6 +112,7 @@ it('contains a failed dispatcher cycle and exposes it in status', async () => {
       leaseMs: 120_000,
       maxBackoffMs: 300_000,
       alertAfterAttempts: 5,
+      backlogAlertMs: 1_800_000,
       retentionDays: 30,
       maxPaths: 5_000,
       maxPayloadBytes: 900_000,
@@ -90,6 +160,7 @@ it('uses per-event progress to keep a long active drain healthy', async () => {
       leaseMs: 120_000,
       maxBackoffMs: 300_000,
       alertAfterAttempts: 5,
+      backlogAlertMs: 1_800_000,
       retentionDays: 30,
       maxPaths: 5_000,
       maxPayloadBytes: 900_000,

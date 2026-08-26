@@ -1,16 +1,16 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { getCuratedOfferRelations } from './curated-offer-relations';
+import { removeInactiveCuratedOfferRelations } from './curated-offer-cleanup';
 import {
   curatedOfferTargetForRelationPath,
-  getCuratedOfferRelations,
   isContentManagerRelationPath,
   normalizeRelationSearch,
   registerCuratedOfferRelationQueryFilter,
-  removeDisplayedTopPicksFromOrdered,
-  removeInactiveCuratedOfferRelations,
   runWithCuratedOfferRelationFilter,
-} from './curated-offer-relations';
+} from './curated-offer-live-filter';
+import { removeDisplayedTopPicksFromOrdered } from './curated-offer-top-picks';
 
 /**
  * A `strapi` shaped like the loaded registries, built from the real schema

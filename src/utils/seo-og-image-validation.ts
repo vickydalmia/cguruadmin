@@ -1,5 +1,5 @@
 import type { Core } from '@strapi/strapi';
-import { ENTITY_UIDS, SEO_UIDS } from './changed-field-validation';
+import { ENTITY_UIDS, SEO_UIDS } from './changed-field-rules';
 
 /**
  * Recommended share-card image size. 1200×630 (~1.91:1) is what Facebook and
@@ -9,7 +9,8 @@ import { ENTITY_UIDS, SEO_UIDS } from './changed-field-validation';
  * SOFT check by request: much of the catalogue is migrated from WordPress with
  * arbitrary image sizes, so an undersized image must never block a save. The
  * editor sees the size guidance as the field's permanent description (wired in
- * src/index.ts COMPONENT_FIELD_DESCRIPTIONS), and an undersized assignment is
+ * src/bootstrap/field-hints.ts COMPONENT_FIELD_DESCRIPTIONS), and an
+ * undersized assignment is
  * logged as a warning for ops visibility instead of thrown as a
  * ValidationError.
  */

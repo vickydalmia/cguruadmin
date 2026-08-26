@@ -4,11 +4,13 @@ import createEntityDealPageService, {
   entityDealPagePath,
   entityDealPageSlug,
   parseEntityDealPageSlug,
+} from './entity-deal-page';
+import { resolveEntityDealPageSeo } from './entity-deal-page-seo';
+import {
   parseSettingsSort,
   publicEntityDealPageRoute,
-  resolveEntityDealPageSeo,
   settingsComparator,
-} from './entity-deal-page';
+} from './entity-deal-page-settings';
 
 describe('entity Deal-page URL contract', () => {
   it('derives and parses the generated flat route', () => {

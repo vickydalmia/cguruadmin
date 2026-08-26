@@ -1,6 +1,6 @@
 import type { Core } from '@strapi/strapi';
 
-import { isIdentityUid } from '../identity-validation';
+import { isIdentityUid } from '../identity-uids';
 import { JOB_UID } from '../job-slug-validation';
 import { isHumanWrite } from '../write-origin';
 import {

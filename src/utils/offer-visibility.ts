@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { AMAZON_AFFILIATE_DISCLOSURE_FIELD } from './amazon-affiliate-disclosure';
 
 // Shared visibility/actionability rules, populate refs, and the curated-list
 // backfill driver for the public offer aggregates (/homepage-full,
@@ -47,6 +48,9 @@ export const DEAL_FIELDS = [
   'checkoutMerchant',
   // Affiliate-brand offers render the BRAND logo in their merchant chip.
   'isForAffiliateBrand',
+  // Consumed and removed by arrayizeOfferText after it derives the final
+  // Amazon Creator Connections condition.
+  AMAZON_AFFILIATE_DISCLOSURE_FIELD,
   'expiresAt',
   'contentStatus',
   'publishedOn',

@@ -20,6 +20,8 @@
  * 0 is a real value, never "missing".
  */
 
+import { humanizeField } from './humanize-field';
+
 export type PendingField = {
   /** Form path, e.g. ['websiteUrl'] or ['seo', 'metaTitle']. */
   path: string[];
@@ -34,12 +36,6 @@ type Attribute = {
 };
 
 type Schema = { attributes?: Record<string, Attribute> } | undefined;
-
-/** 'websiteUrl' -> 'Website url'; 'metaTitle' -> 'Meta title'. */
-export function humanizeField(name: string): string {
-  const spaced = name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
-}
 
 function isBlankMediaValue(value: unknown): boolean {
   if (value === undefined || value === null) return true;

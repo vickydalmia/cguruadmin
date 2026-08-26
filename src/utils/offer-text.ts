@@ -15,6 +15,10 @@ import {
   isOfferAmount,
   normalizeOfferAmount,
 } from './offer-word-limits';
+import {
+  AMAZON_AFFILIATE_DISCLOSURE_FIELD,
+  withAmazonAffiliateDisclosure,
+} from './amazon-affiliate-disclosure';
 import { buildDealComputedContent } from './deal-computed-content';
 import { formatDealDiscount } from './deal-discount';
 
@@ -49,10 +53,12 @@ const DEAL_PRICE_KEYS = ['salePrice', 'mrp', 'discount'];
  * strings become arrays of words (so a Coupon card can render each word in its
  * own slot), each benefit text gains its wording suffix, and every Deal
  * node gains `computedContent` — the pre-calculated Deal Price / MRP /
- * Discount template the UI renders ahead of the written content. Handles both
- * flat listings and the deeply-nested homepage payload (coupons/deals live
- * inside components inside sections). Mutates in place and returns the same
- * reference; non-string fields (null/absent) are untouched.
+ * Discount template the UI renders ahead of the written content. An opted-in
+ * Amazon Deal also gains its disclosure as the final written condition, and
+ * the internal opt-in flag is removed. Handles both flat listings and the
+ * deeply-nested homepage payload (coupons/deals live inside components inside
+ * sections). Mutates in place and returns the same reference; non-string
+ * fields (null/absent) are untouched.
  */
 export function arrayizeOfferText<T>(node: T): T {
   if (Array.isArray(node)) {
@@ -81,6 +87,15 @@ export function arrayizeOfferText<T>(node: T): T {
     if (DEAL_PRICE_KEYS.some((key) => key in record)) {
       const computed = buildDealComputedContent(record);
       if (computed) record.computedContent = computed;
+    }
+    if (AMAZON_AFFILIATE_DISCLOSURE_FIELD in record) {
+      if ('content' in record) {
+        const content = withAmazonAffiliateDisclosure(record);
+        if (content !== undefined) record.content = content;
+      }
+      // Compact Deal projections intentionally omit rich text, but the
+      // internal flag must never leak from any public response.
+      delete record[AMAZON_AFFILIATE_DISCLOSURE_FIELD];
     }
   }
   return node;

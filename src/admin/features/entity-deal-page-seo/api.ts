@@ -7,7 +7,7 @@ import type {
 } from './types';
 
 // These endpoints live on the ADMIN router, so they carry no /api prefix — see
-// src/index.ts. useFetchClient attaches the admin session token.
+// src/register/admin-routes.ts. useFetchClient attaches the admin session token.
 const BASE = '/entity-deal-page/pages';
 
 // Must match SETTINGS_SORT_FIELDS in the entity-deal-page service.

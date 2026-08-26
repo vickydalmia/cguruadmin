@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { isRedirectNoteOnlyChange, preDeleteScope } from './scopes';
+import { preDeleteScope } from './offer-relation-scopes';
+import { isRedirectNoteOnlyChange } from './scopes';
 
 function strapiWithFindOne(
   findOne: (args: any) => Promise<any>,
@@ -549,18 +550,18 @@ describe('festiveOfferChanged', () => {
   };
 
   it('is false when the payload never touches the festive keys', async () => {
-    const { festiveOfferChanged } = await import('./scopes');
+    const { festiveOfferChanged } = await import('./festive-offer-scopes');
     expect(festiveOfferChanged({ name: 'Flipkart' }, live)).toBe(false);
     expect(festiveOfferChanged(null, live)).toBe(false);
   });
 
   it('is false when the submitted values match the row', async () => {
-    const { festiveOfferChanged } = await import('./scopes');
+    const { festiveOfferChanged } = await import('./festive-offer-scopes');
     expect(festiveOfferChanged({ ...live }, live)).toBe(false);
   });
 
   it('detects toggling the campaign on and off', async () => {
-    const { festiveOfferChanged } = await import('./scopes');
+    const { festiveOfferChanged } = await import('./festive-offer-scopes');
     expect(
       festiveOfferChanged({ isFestiveOffer: false }, live),
     ).toBe(true);
@@ -573,7 +574,7 @@ describe('festiveOfferChanged', () => {
   });
 
   it('detects a copy edit on a live campaign', async () => {
-    const { festiveOfferChanged } = await import('./scopes');
+    const { festiveOfferChanged } = await import('./festive-offer-scopes');
     expect(
       festiveOfferChanged({ festiveOfferTitle: 'Diwali Dhamaka' }, live),
     ).toBe(true);
@@ -582,7 +583,7 @@ describe('festiveOfferChanged', () => {
   it('ignores edits that never render: copy changes while the toggle is off', async () => {
     // The response walker only ships complete, switched-on campaigns, so a
     // draft title typed before enabling the toggle changes nothing on any page.
-    const { festiveOfferChanged } = await import('./scopes');
+    const { festiveOfferChanged } = await import('./festive-offer-scopes');
     expect(
       festiveOfferChanged(
         { festiveOfferTitle: 'Draft title' },
@@ -592,7 +593,7 @@ describe('festiveOfferChanged', () => {
   });
 
   it('ignores an incomplete campaign in both states', async () => {
-    const { festiveOfferChanged } = await import('./scopes');
+    const { festiveOfferChanged } = await import('./festive-offer-scopes');
     expect(
       festiveOfferChanged(
         { festiveOfferDescription: '' },
@@ -602,7 +603,7 @@ describe('festiveOfferChanged', () => {
   });
 
   it('fails toward invalidation when the before-row could not be read', async () => {
-    const { festiveOfferChanged } = await import('./scopes');
+    const { festiveOfferChanged } = await import('./festive-offer-scopes');
     expect(festiveOfferChanged({ isFestiveOffer: true }, null)).toBe(true);
     expect(festiveOfferChanged({ isFestiveOffer: false }, undefined)).toBe(true);
   });
@@ -610,7 +611,7 @@ describe('festiveOfferChanged', () => {
 
 describe('touchesFestiveOffer', () => {
   it('matches any of the three festive keys', async () => {
-    const { touchesFestiveOffer } = await import('./scopes');
+    const { touchesFestiveOffer } = await import('./festive-offer-scopes');
     expect(touchesFestiveOffer({ isFestiveOffer: true })).toBe(true);
     expect(touchesFestiveOffer({ festiveOfferTitle: 'x' })).toBe(true);
     expect(touchesFestiveOffer({ festiveOfferDescription: null })).toBe(true);
@@ -618,12 +619,12 @@ describe('touchesFestiveOffer', () => {
 
   it('matches a key present but explicitly cleared', async () => {
     // Switching a campaign OFF stales exactly the same pages as switching it on.
-    const { touchesFestiveOffer } = await import('./scopes');
+    const { touchesFestiveOffer } = await import('./festive-offer-scopes');
     expect(touchesFestiveOffer({ isFestiveOffer: false })).toBe(true);
   });
 
   it('ignores unrelated payloads', async () => {
-    const { touchesFestiveOffer } = await import('./scopes');
+    const { touchesFestiveOffer } = await import('./festive-offer-scopes');
     expect(touchesFestiveOffer({ name: 'Flipkart' })).toBe(false);
     expect(touchesFestiveOffer(null)).toBe(false);
     expect(touchesFestiveOffer([{ isFestiveOffer: true }])).toBe(false);

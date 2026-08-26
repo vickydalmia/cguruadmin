@@ -18,9 +18,11 @@ vi.mock('../isr-outbox/runtime', () => ({
   enqueueStandaloneIsrEvent: mocks.enqueueStandaloneIsrEvent,
 }));
 
-vi.mock('./curated-offer-relations', () => ({
+vi.mock('./curated-offer-cleanup', () => ({
   removeInactiveCuratedOfferRelations:
     mocks.removeInactiveCuratedOfferRelations,
+}));
+vi.mock('./curated-offer-top-picks', () => ({
   removeDisplayedTopPicksFromOrdered: mocks.removeDisplayedTopPicksFromOrdered,
 }));
 

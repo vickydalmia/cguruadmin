@@ -1,6 +1,6 @@
 /**
  * Pure helpers for the global `datetime` input override
- * (../components/DateTimeInput.tsx). Row 62.
+ * (../components/date-time-input.tsx). Row 62.
  *
  * WHAT ACTUALLY HAPPENS (traced in
  * node_modules/@strapi/design-system/dist/index.mjs — the TimePicker at the

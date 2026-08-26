@@ -112,6 +112,7 @@ before running it against anything you care about.
 | [docs/search-operations.md](./docs/search-operations.md) | Operator reference for search: execution modes, the 11 expected trigram indexes, `/api/search/status`, and automatic migration/bootstrap reconciliation |
 | [docs/related-stores-api.md](./docs/related-stores-api.md) | The four `/related-stores` endpoints: ranking, category profile, and the high-rated fallback |
 | [docs/admin-taxonomy-panel.md](./docs/admin-taxonomy-panel.md) | How the admin bundle is customized: the Taxonomies panel and the custom field components |
+| [docs/admin-csv-export.md](./docs/admin-csv-export.md) | Super-Admin CSV export of Coupons/Deals/Stores/Brands/Categories/Banks: columns, paging, progress modal |
 | [docs/wordpress-migration.md](./docs/wordpress-migration.md) | Deep walkthrough of the migration pipeline's internals |
 
 Production operations live in the UI repository's

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { EXPECTED_SEARCH_INDEXES } from "./search";
+import { EXPECTED_SEARCH_INDEXES } from "./search-runtime";
 
 const oldMigration = require("../../../../database/migrations/2026.07.12T01.00.00.add-public-search-indexes.js");
 const reconcileMigration = require("../../../../database/migrations/2026.07.19T00.00.00.add-search-rank-indexes.js");
@@ -75,22 +75,19 @@ describe("search index migrations", () => {
     ).toEqual([...EXPECTED_SEARCH_INDEXES]);
   });
 
-  it("runs post-schema reconciliation before search diagnostics in bootstrap", () => {
-    const source = readFileSync(
-      resolve(__dirname, "../../../index.ts"),
+  it("is invoked by the bootstrap reconciliation runner", () => {
+    // Runner-before-search ordering is asserted once, in
+    // src/bootstrap/db-reconciliation.test.ts. This test only pins the
+    // search-specific facts about db-reconciliation.ts itself.
+    const reconciliations = readFileSync(
+      resolve(__dirname, "../../../bootstrap/db-reconciliation.ts"),
       "utf8",
     );
-    const bootstrap = source.slice(source.indexOf("async bootstrap"));
-    expect(bootstrap).toContain("(strapi as any).dirs.app.root");
-    expect(source).not.toContain(
+    expect(reconciliations).toContain("(strapi as any).dirs.app.root");
+    expect(reconciliations).not.toContain(
       "require('../database/search-index-migration')",
     );
-    expect(
-      bootstrap.indexOf("reconcileSearchIndexesAfterSchemaSync("),
-    ).toBeGreaterThan(-1);
-    expect(
-      bootstrap.indexOf("reconcileSearchIndexesAfterSchemaSync("),
-    ).toBeLessThan(bootstrap.indexOf("initializeSearchRuntime(strapi)"));
+    expect(reconciliations).toContain("reconcileSearchIndexesAfterSchemaSync(");
   });
 
   it("skips both migrations completely outside Postgres", async () => {

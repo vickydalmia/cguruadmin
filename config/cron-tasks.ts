@@ -2,10 +2,8 @@ import { join } from 'node:path';
 
 import { computeContentStatus } from '../src/utils/content-status';
 import { enqueueStandaloneIsrEvent } from '../src/isr-outbox/runtime';
-import {
-  removeDisplayedTopPicksFromOrdered,
-  removeInactiveCuratedOfferRelations,
-} from '../src/utils/curated-offer-relations';
+import { removeInactiveCuratedOfferRelations } from '../src/utils/curated-offer-cleanup';
+import { removeDisplayedTopPicksFromOrdered } from '../src/utils/curated-offer-top-picks';
 
 /**
  * Resolve from the application ROOT, not from this module's directory, and not

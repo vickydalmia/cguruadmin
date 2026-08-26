@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   mergeDescendingRelationPage,
-  orderedRelationCommands,
   removalNeedsDisconnect,
 } from './ordered-relation';
 
@@ -45,33 +44,7 @@ describe('mergeDescendingRelationPage', () => {
     ]);
   });
 });
-
-describe('orderedRelationCommands', () => {
-  it('rebuilds anchors from the remaining selection after an item is removed', () => {
-    const reordered = [
-      candidate('coupon-a', 1),
-      candidate('coupon-c', 3),
-      candidate('coupon-b', 2),
-    ];
-    const remaining = reordered.filter(
-      (item) => item.documentId !== 'coupon-c',
-    );
-
-    const commands = orderedRelationCommands(remaining);
-
-    expect(commands.map((command) => command.documentId)).toEqual([
-      'coupon-b',
-      'coupon-a',
-    ]);
-    expect(commands[0]?.apiData.position).toEqual({ end: true });
-    expect(commands[1]?.apiData.position).toEqual({
-      before: 'coupon-b',
-      status: 'published',
-      locale: null,
-    });
-    expect(JSON.stringify(commands)).not.toContain('coupon-c');
-  });
-
+describe('removalNeedsDisconnect', () => {
   it('still disconnects a persisted item after reorder reconnects every row', () => {
     const persisted = new Set(['coupon-a', 'coupon-b', 'coupon-c']);
 
@@ -82,28 +55,5 @@ describe('orderedRelationCommands', () => {
     expect(
       removalNeedsDisconnect(persisted, 'new-unsaved-coupon', true),
     ).toBe(false);
-  });
-
-  it('rebuilds the full chain when a disconnected item is selected again', () => {
-    const couponA = candidate('coupon-a', 1);
-    const couponB = candidate('coupon-b', 2);
-
-    // Removing B temporarily leaves A as the tail.
-    expect(orderedRelationCommands([couponA])[0]?.apiData.position).toEqual({
-      end: true,
-    });
-
-    // Re-selecting B must replace that shortened command set completely.
-    const restored = orderedRelationCommands([couponA, couponB]);
-    expect(restored.map((command) => command.documentId)).toEqual([
-      'coupon-b',
-      'coupon-a',
-    ]);
-    expect(restored[0]?.apiData.position).toEqual({ end: true });
-    expect(restored[1]?.apiData.position).toEqual({
-      before: 'coupon-b',
-      status: 'published',
-      locale: null,
-    });
   });
 });

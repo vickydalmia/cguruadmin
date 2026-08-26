@@ -11,7 +11,8 @@ Public endpoints, cached for 60 seconds:
 - `GET /api/banks/:slug/related-stores`
 
 The four routes share one Store-only implementation in
-`src/api/store/services/custom.ts`. Routes are registered in
+`src/api/store/services/custom.ts` (discovery and ranking live in
+`src/api/store/services/related-stores.ts`). Routes are registered in
 `src/api/store/routes/custom.ts`.
 
 ## Contract

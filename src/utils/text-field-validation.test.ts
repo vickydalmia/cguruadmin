@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
+import { TEXT_FIELD_RULES } from './text-field-rules';
 import {
   isBlankMedia,
   isBlankText,
   normaliseTextFields,
   requiresStoredRead,
-  TEXT_FIELD_RULES,
   validateTextFields,
   validateTextFieldsForWrite,
 } from './text-field-validation';

@@ -972,7 +972,7 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
       > &
       Schema.Attribute.DefaultTo<0>;
     isForAffiliateBrand: Schema.Attribute.Boolean &
-      Schema.Attribute.DefaultTo<false>;
+      Schema.Attribute.DefaultTo<true>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -1167,6 +1167,8 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     discountPrefix: Schema.Attribute.Enumeration<
       ['flat', 'upTo', 'extra', 'min', 'under', 'below']
     >;
+    enableAmazonAffiliateDisclosure: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
     expiresAt: Schema.Attribute.DateTime;
     failedCount: Schema.Attribute.Integer &
       Schema.Attribute.SetMinMax<
@@ -1177,7 +1179,7 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
       > &
       Schema.Attribute.DefaultTo<0>;
     isForAffiliateBrand: Schema.Attribute.Boolean &
-      Schema.Attribute.DefaultTo<false>;
+      Schema.Attribute.DefaultTo<true>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::deal.deal'> &
       Schema.Attribute.Private;

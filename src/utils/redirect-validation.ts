@@ -1,15 +1,23 @@
 import type { Core } from '@strapi/strapi';
 import { errors } from '@strapi/utils';
-import { IDENTITY_UIDS } from './identity-validation';
+import { REDIRECT_RESERVED_ROUTE_LABELS } from './reserved-route-segments';
 import {
-  routeSlugCandidates,
-  toRouteSlug,
-  type IdentityKind,
-} from './route-normalization';
+  foldPathKey,
+  isAssetFromPath,
+  isWireSafeFromPath,
+  normalizeRedirectPath,
+  redirectKey,
+} from './redirect-paths';
+import { classifyTarget, findLiveEntity } from './redirect-targets';
 import {
-  entityDealPageSlug,
-  parseEntityDealPageSlug,
-} from '../api/entity-deal-page/services/entity-deal-route';
+  ACTIVE_REDIRECT_LIMIT,
+  REDIRECT_MAX_HOPS,
+  REDIRECT_UID,
+  findDuplicateFrom,
+  loadActiveEdges,
+  walkChain,
+} from './redirect-graph';
+import { readBoolean, readString } from './row-fields';
 
 /**
  * Write-time safety rules for the editor-managed `redirect` collection.
@@ -62,476 +70,20 @@ import {
  * an unrelated partial update never pays for this and never trips a stale row.
  */
 
-export const REDIRECT_UID = 'api::redirect.redirect';
+// Path parsing/keys live in ./redirect-paths, target classification in
+// ./redirect-targets, and the active-edge graph walk in ./redirect-graph
+// (which also owns REDIRECT_UID and REDIRECT_MAX_HOPS).
 
-/**
- * Must equal MAX_REDIRECT_HOPS in
- * cguru-ui/src/features/routing/api/get-redirects.ts. What an editor can save
- * is then exactly what the resolver can follow to the end — a chain longer
- * than the resolver's budget would silently land the visitor on an
- * intermediate hop instead of the destination the editor authored.
- */
-export const REDIRECT_MAX_HOPS = 5;
-
-// Ceiling on active redirects, enforced at write (guard 2b) AND the bound on
-// the cycle-walk graph load. It must not exceed what the frontend resolver can
-// page in (MAX_REDIRECT_PAGES × 100 = 2000 in get-redirects.ts): a rule beyond
-// that is saved but never executes and can hide a cycle from the walk. Redirect
-// tables are small (tens to low hundreds) in practice; this only matters if one
-// grows pathologically.
-const ACTIVE_REDIRECT_LIMIT = 2000;
-const ENTITY_CANDIDATE_LIMIT = 25;
-const ENTITY_NAME_SCAN_PAGE = 500;
-
-const KIND_BY_UID: Record<string, IdentityKind> = {
-  'api::store.store': 'store',
-  'api::brand.brand': 'brand',
-  'api::category.category': 'category',
-  'api::bank.bank': 'bank',
-};
-
-/**
- * First path segments owned by a real page or internal namespace in
- * cguru-ui/src/pages/. A redirect `from` one of these shadows the route in
- * exactly the same way it shadows an entity — `/search` redirecting somewhere
- * takes site search offline.
- *
- * Duplicated from RESERVED_ROUTE_SEGMENTS in identity-validation.ts, which
- * does not export it. Keep the two lists in step when a page is added or
- * removed; both are derived from the same src/pages/ listing.
- * reserved-route-drift.test.ts parses both source files and fails when the
- * key sets diverge.
- */
-const RESERVED_ROUTE_SEGMENTS = new Map<string, string>([
-  ['404', 'the 404 page'],
-  ['500', 'the 500 page'],
-  ['about-us', 'the About Us page'],
-  ['api', 'the internal API namespace'],
-  ['banks', 'the bank listing page'],
-  ['brands', 'the brand listing page'],
-  ['careers', 'the careers pages'],
-  ['categories', 'the category listing page'],
-  ['contact-us', 'the Contact page'],
-  ['coupon', 'the coupon detail pages'],
-  ['deal', 'the deal detail pages'],
-  ['error-pages', 'the error pages'],
-  ['faqs', 'the FAQ page'],
-  ['redeem-unavailable', 'the redeem fallback page'],
-  ['robots.txt', 'the robots.txt route'],
-  ['search', 'the search page'],
-  ['sitemap', 'the sitemap shard namespace'],
-  ['sitemap_index.xml', 'the sitemap index route'],
-  ['stores', 'the store listing page'],
-]);
+// A redirect `from` a segment owned by a real page in cguru-ui/src/pages/
+// shadows the route in exactly the same way it shadows an entity — `/search`
+// redirecting somewhere takes site search offline. The shared key set (with
+// this validator's editor-facing labels) lives in ./reserved-route-segments;
+// reserved-route-drift.test.ts pins the two consumers' key sets together.
 
 type Problem = { path: string[]; message: string };
 
 export function isRedirectUid(uid: string): boolean {
   return uid === REDIRECT_UID;
-}
-
-function readString(row: unknown, key: string): string | undefined {
-  if (!row || typeof row !== 'object') return undefined;
-  const value = Reflect.get(row, key);
-  return typeof value === 'string' ? value : undefined;
-}
-
-function readBoolean(row: unknown, key: string): boolean | undefined {
-  if (!row || typeof row !== 'object') return undefined;
-  const value = Reflect.get(row, key);
-  return typeof value === 'boolean' ? value : undefined;
-}
-
-/**
- * The canonical comparison form of a request path: trimmed, query/hash
- * removed, duplicate slashes collapsed, leading slash forced, trailing slash
- * dropped. `/Winter-Sale/`, `winter-sale` and `//winter-sale?utm=x` all
- * normalise to `/winter-sale`.
- *
- * Returns '' only for input that is not a string or is blank.
- */
-export function normalizeRedirectPath(value: unknown): string {
-  if (typeof value !== 'string') return '';
-
-  let path = value.trim();
-  if (!path) return '';
-
-  const marker = path.search(/[?#]/);
-  if (marker !== -1) path = path.slice(0, marker);
-
-  path = path.replace(/\/{2,}/g, '/');
-  if (!path.startsWith('/')) path = `/${path}`;
-  if (path.length > 1) path = path.replace(/\/+$/, '');
-
-  return path || '/';
-}
-
-/**
- * Fold an already-normalized path into its matching key. MUST stay
- * byte-equivalent with foldPathKey() in
- * cguru-ui/src/features/routing/api/get-redirects.ts — the validator's cycle
- * and duplicate detection and the resolver's walk have to agree on what counts
- * as "the same URL", or a chain the admin proved acyclic could still loop at
- * read time.
- *
- * The middleware hands the resolver the request path in WIRE form
- * (percent-encoded), while an editor authors `from` in whichever form they
- * pasted — so `/café` and `/caf%C3%A9` must produce one key. Steps, in order
- * (only the order is load-bearing; both sides of every comparison run the
- * same steps):
- *
- *  1. decode percent-escapes of NON-ASCII bytes only (`%C3%A9` → `é`). A
- *     sequence that is not valid UTF-8 (a malformed `%c3` with no
- *     continuation byte) is left exactly as authored instead of throwing.
- *     ASCII escapes are deliberately NOT decoded: `%2F` as a path byte is
- *     data, not a segment separator, and `%20` cannot be authored unescaped —
- *     decoding either would change which paths are "the same".
- *  2. NFC-normalise and lowercase, so composed/decomposed/uppercase `é` fold
- *     to one character.
- *  3. re-encode the non-ASCII characters back to wire form and lowercase the
- *     result, folding hex-digit casing (`%C3%A9` vs `%c3%a9`).
- */
-function foldPathKey(path: string): string {
-  const decoded = path.replace(/(?:%[89a-f][0-9a-f])+/gi, (sequence) => {
-    try {
-      return decodeURIComponent(sequence);
-    } catch {
-      return sequence; // not valid UTF-8 — compare the raw bytes as authored
-    }
-  });
-
-  const folded = decoded.normalize('NFC').toLowerCase();
-
-  try {
-    return folded
-      .replace(/[\u{80}-\u{10ffff}]/gu, (char) => encodeURIComponent(char))
-      .toLowerCase();
-  } catch {
-    return folded; // lone surrogate — unencodable, and unmatchable either way
-  }
-}
-
-/**
- * Matching key. Case-FOLDED, unlike entity slugs.
- *
- * Folding is safe here in a way it is not for entity routes: an entity match
- * decides who serves 200, so folding it would serve the same page at every
- * casing and split PageRank. A redirect only ever produces a 3xx, so folding
- * `from` costs nothing and stops `/Winter-Sale` and `/winter-sale` from being
- * two rows that disagree about where the URL goes. Percent-encoding of
- * non-ASCII characters is folded too (see foldPathKey) so an authored `/café`
- * matches the wire-form request `/caf%C3%A9`.
- */
-export function redirectKey(value: unknown): string {
-  return foldPathKey(normalizeRedirectPath(value));
-}
-
-/**
- * A `from` path whose every character is already wire-safe: the unreserved set
- * A-Za-z0-9-._~/ plus already-percent-encoded %XX bytes. MUST stay in step
- * with the `from` regex in
- * src/api/redirect/content-types/redirect/schema.json.
- *
- * WHY THIS IS TIGHTER THAN "no whitespace" (F5)
- * ---------------------------------------------
- * The frontend matches a request against `from` by its FOLDED wire form, and a
- * browser sends every character outside the unreserved set percent-encoded: an
- * apostrophe as `%27`, a space as `%20`, a parenthesis as `%28`/`%29`, an
- * accented letter as `%C3%A9`. An authored `/men's` therefore never matches the
- * request `/men%27s`, and the redirect silently never fires. Requiring `from`
- * to already be in wire form — unreserved characters or `%XX` escapes only —
- * makes what the editor saves exactly what the request carries. An author who
- * wants the accented URL writes `/caf%C3%A9`, not `/café`; both then match,
- * because the fold decodes and re-encodes the non-ASCII escape. Whitespace,
- * apostrophes, parentheses and commas are all rejected here, matching the
- * `from` regex in the content-type schema.
- */
-const WIRE_SAFE_FROM = /^\/(?:[A-Za-z0-9._~/-]|%[0-9A-Fa-f]{2})*$/;
-
-export function isWireSafeFromPath(path: string): boolean {
-  return WIRE_SAFE_FROM.test(path);
-}
-
-/**
- * A `from` path that is unambiguously a build asset: anything under the
- * hashed-bundle namespace `/_astro/`, or ending in an asset extension. The ISR
- * gateway serves static assets BEFORE the redirect map is consulted, so such a
- * rule saves cleanly but never fires — a silent no-op an editor cannot debug.
- *
- * Deliberately NOT rejected: document-ish extensions (`.html`, `.php`, `.xml`,
- * `.txt`, …). This is a WordPress-migrated site, so legacy `/old-page.html`
- * style redirect sources are legitimate and common — only extensions no page
- * URL ever carries are listed here.
- */
-const ASSET_FROM_PREFIX = '/_astro/';
-const ASSET_FROM_EXTENSION =
-  /\.(?:ico|css|js|mjs|map|png|jpg|jpeg|webp|avif|gif|svg|woff|woff2|ttf|otf|eot)$/i;
-
-export function isAssetFromPath(path: string): boolean {
-  return (
-    path.toLowerCase().startsWith(ASSET_FROM_PREFIX) || ASSET_FROM_EXTENSION.test(path)
-  );
-}
-
-export type RedirectTarget =
-  | { kind: 'internal'; raw: string; path: string; key: string }
-  | { kind: 'external'; raw: string }
-  | { kind: 'invalid'; reason: string };
-
-/**
- * Classify a `to` value. Deliberately strict about what may end up in a
- * Location header:
- *
- *  - `//evil.example` is rejected. Browsers read a leading `//` as
- *    protocol-relative, so it is an off-site redirect that LOOKS like a path —
- *    an open redirect an editor can create by typo.
- *  - Any backslash is rejected. WHATWG URL parsing folds `\` to `/` in
- *    http(s) contexts, so `/\evil.example` resolves to
- *    `https://evil.example/` — the same open redirect, spelled so it slips
- *    past a naive `//` check.
- *  - Anything that is neither an absolute http(s) URL nor a rooted path is
- *    rejected rather than guessed at.
- *  - Control characters are rejected: a raw CR/LF in a Location header is
- *    response splitting.
- */
-export function classifyTarget(value: unknown): RedirectTarget {
-  const raw = typeof value === 'string' ? value.trim() : '';
-  if (!raw) return { kind: 'invalid', reason: 'is empty' };
-
-  // Escaped explicitly: a raw CR/LF reaching a Location header is response
-  // splitting, and a literal control byte in the source is invisible in review.
-  // eslint-disable-next-line no-control-regex
-  if (/[\u0000-\u001f\u007f]/.test(raw)) {
-    return {
-      kind: 'invalid',
-      reason: 'contains a line break or control character, which is not allowed in a redirect target',
-    };
-  }
-
-  // Before the external-URL branch: browsers treat "\" as "/" when resolving
-  // a Location header, so a backslash target is an off-site redirect however
-  // it is spelled ("/\evil.example" resolves to https://evil.example/).
-  if (raw.includes('\\')) {
-    return {
-      kind: 'invalid',
-      reason:
-        `contains a backslash ("${raw}"). Browsers treat "\\" as "/", so this ` +
-        `value would send visitors to a DIFFERENT site, not a page on this one. ` +
-        `Use forward slashes only — "/path" for an internal page, or the full ` +
-        `"https://…" address for an external one`,
-    };
-  }
-
-  if (/^https?:\/\//i.test(raw)) {
-    try {
-      new URL(raw);
-    } catch {
-      return { kind: 'invalid', reason: `is not a valid absolute URL ("${raw}")` };
-    }
-    return { kind: 'external', raw };
-  }
-
-  if (raw.startsWith('//')) {
-    return {
-      kind: 'invalid',
-      reason:
-        `starts with "//" ("${raw}"), which browsers read as a link to ANOTHER ` +
-        `site, not a path on this one. Write "/${raw.replace(/^\/+/, '')}" for an ` +
-        `internal page, or the full "https://…" address for an external one`,
-    };
-  }
-
-  if (!raw.startsWith('/')) {
-    return {
-      kind: 'invalid',
-      reason:
-        `must be either a path on this site starting with "/" (for example ` +
-        `"/nike/") or a full "https://…" address, but it is "${raw}"`,
-    };
-  }
-
-  const path = normalizeRedirectPath(raw);
-  return { kind: 'internal', raw, path, key: foldPathKey(path) };
-}
-
-/**
- * A live store/brand/category/bank whose public page is served at this path.
- *
- * Matching is case-insensitive (`$eqi`, an exact comparison — no LIKE
- * wildcards leak in) and re-confirmed in JS through toRouteSlug(), the same
- * normalisation the frontend uses to turn a stored "stores/amazon" into the
- * route "amazon". A raw string compare would miss that form and let a redirect
- * shadow the page anyway.
- */
-async function findLiveEntity(
-  strapi: Core.Strapi,
-  path: string,
-): Promise<{
-  kind: IdentityKind;
-  name: string;
-  slug: string;
-  entityDealPage?: boolean;
-} | null> {
-  const route = path.replace(/^\/+/, '');
-  if (!route) return null;
-  const routeKey = route.toLowerCase();
-
-  const findRoute = async (candidateRoute: string) => {
-    const candidateKey = candidateRoute.toLowerCase();
-    for (const targetUid of IDENTITY_UIDS) {
-      const kind = KIND_BY_UID[targetUid];
-      if (!kind) continue;
-
-      // The three stored forms that all route to `candidateRoute`.
-      const candidates = routeSlugCandidates(candidateRoute, kind);
-
-      const rows: unknown = await strapi.documents(targetUid).findMany({
-        filters: { $or: candidates.map((candidate) => ({ slug: { $eqi: candidate } })) } as any,
-        fields: ['name', 'slug'],
-        limit: ENTITY_CANDIDATE_LIMIT,
-      });
-
-      for (const row of Array.isArray(rows) ? rows : []) {
-        const slug = readString(row, 'slug');
-        if (toRouteSlug(slug, kind).toLowerCase() !== candidateKey) continue;
-        return {
-          kind,
-          name: readString(row, 'name') ?? '(untitled)',
-          slug: slug ?? candidateRoute,
-        };
-      }
-    }
-    return null;
-  };
-
-  const direct = await findRoute(route);
-  if (direct) return direct;
-
-  if (!parseEntityDealPageSlug(route)) return null;
-  for (const targetUid of IDENTITY_UIDS) {
-    const kind = KIND_BY_UID[targetUid];
-    if (!kind) continue;
-    let start = 0;
-    while (true) {
-      const rows: unknown = await strapi.documents(targetUid).findMany({
-        fields: ['name', 'slug'],
-        sort: [{ id: 'asc' }],
-        start,
-        limit: ENTITY_NAME_SCAN_PAGE,
-      });
-      const list = Array.isArray(rows) ? rows : [];
-      for (const row of list) {
-        const name = readString(row, 'name') ?? '(untitled)';
-        if (entityDealPageSlug(name)?.toLowerCase() !== routeKey) continue;
-        return {
-          kind,
-          name,
-          slug: readString(row, 'slug') ?? route,
-          entityDealPage: true,
-        };
-      }
-      if (list.length < ENTITY_NAME_SCAN_PAGE) break;
-      start += list.length;
-    }
-  }
-  return null;
-}
-
-type Edge = { fromPath: string; toPath: string | null; note: string };
-
-/**
- * The active redirect graph, keyed by folded `from`. The row being edited is
- * excluded so the pending version replaces it rather than racing it.
- *
- * An external target is stored as `toPath: null` — the chain ends there and
- * cannot loop back into this site.
- */
-async function loadActiveEdges(
-  strapi: Core.Strapi,
-  excludeDocumentId: string | undefined,
-): Promise<Map<string, Edge>> {
-  const rows: unknown = await strapi.documents(REDIRECT_UID as any).findMany({
-    filters: { active: true } as any,
-    fields: ['documentId', 'from', 'to'] as any,
-    limit: ACTIVE_REDIRECT_LIMIT,
-  });
-
-  const edges = new Map<string, Edge>();
-
-  for (const row of Array.isArray(rows) ? rows : []) {
-    if (excludeDocumentId && readString(row, 'documentId') === excludeDocumentId) continue;
-
-    const fromPath = normalizeRedirectPath(readString(row, 'from'));
-    if (!fromPath) continue;
-
-    const target = classifyTarget(readString(row, 'to'));
-    // A stored row with an unusable target cannot participate in a loop, and
-    // must not make an unrelated write fail. Skip it.
-    if (target.kind === 'invalid') continue;
-
-    const key = foldPathKey(fromPath);
-    // First writer wins, so the walk is deterministic even if the unique
-    // index was bypassed by a casing difference.
-    if (edges.has(key)) continue;
-
-    edges.set(key, {
-      fromPath,
-      toPath: target.kind === 'internal' ? target.path : null,
-      note: target.kind === 'internal' ? target.path : target.raw,
-    });
-  }
-
-  return edges;
-}
-
-export type ChainProblem = { kind: 'loop' | 'too-long'; path: string[] };
-
-/**
- * Walk the chain starting at `startKey`, bounded twice over: a visited set
- * (catches any loop, however long) and a hop budget (catches a chain that is
- * finite but deeper than the frontend resolver will follow). Returns null when
- * the chain terminates on a real page or an external URL.
- */
-export function walkChain(
-  edges: Map<string, Edge>,
-  startKey: string,
-  maxHops: number = REDIRECT_MAX_HOPS,
-): ChainProblem | null {
-  const start = edges.get(startKey);
-  if (!start) return null;
-
-  const visited = new Set<string>([startKey]);
-  const display = [start.fromPath];
-
-  let current = start.toPath;
-  let hops = 1;
-
-  while (current !== null) {
-    const key = foldPathKey(current);
-    display.push(current);
-
-    if (visited.has(key)) return { kind: 'loop', path: display };
-    visited.add(key);
-
-    if (hops > maxHops) return { kind: 'too-long', path: display };
-
-    const next = edges.get(key);
-    if (!next) return null; // lands on a real page — the chain terminates
-
-    current = next.toPath;
-    hops += 1;
-  }
-
-  return null; // ended on an external URL
-}
-
-/**
- * Another ACTIVE redirect already claiming the same folded `from`.
- * The column is `unique`, but Postgres uniqueness is byte-exact, so
- * `/Winter-Sale` and `/winter-sale` both save and one silently wins.
- */
-function findDuplicateFrom(edges: Map<string, Edge>, fromKey: string): Edge | null {
-  return edges.get(fromKey) ?? null;
 }
 
 /**
@@ -686,7 +238,7 @@ export async function validateRedirect(
     }
     const reserved =
       problems.length === 0
-        ? RESERVED_ROUTE_SEGMENTS.get(
+        ? REDIRECT_RESERVED_ROUTE_LABELS.get(
             fromPath.replace(/^\/+/, '').split('/')[0]?.toLowerCase() ?? '',
           )
         : undefined;

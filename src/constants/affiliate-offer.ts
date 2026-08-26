@@ -10,9 +10,10 @@
  * utils/affiliate-offer-consistency.ts, alongside the write validator that
  * enforces the invariant for Content-Manager writes.
  *
- * NULL semantics: `default: false` sets no DB column default, so legacy rows
- * hold NULL. Every consumer must treat only `=== true` as ON — the schema
- * conditions use `!= true`, the picker filter uses `$eq: true`.
+ * New Coupons and Deals default this toggle to `true`. The schema default does
+ * not add a DB column default, so existing legacy rows can still hold NULL.
+ * Every consumer must therefore treat only `=== true` as ON — the schema
+ * conditions use `!= true`, and the picker filter uses `$eq: true`.
  *
  * Imported by BOTH halves of the app (server pipeline and admin bundle),
  * which is why it lives in src/constants rather than src/utils.

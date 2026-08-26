@@ -62,13 +62,14 @@ describe('site selection compatibility reconciliation', () => {
     expect(uniqueIds([2, 1, 2], [3, -1, 1])).toEqual([2, 1, 3]);
   });
 
-  it('runs after schema sync and before search starts serving', () => {
-    const source = readFileSync(resolve(__dirname, '../index.ts'), 'utf8');
-    const bootstrap = source.slice(source.indexOf('async bootstrap'));
-    expect(bootstrap).toContain('reconcileSiteSelectionsAfterSchemaSync(');
-    expect(
-      bootstrap.indexOf('reconcileSiteSelectionsAfterSchemaSync('),
-    ).toBeLessThan(bootstrap.indexOf('initializeSearchRuntime(strapi)'));
+  it('is invoked by the bootstrap reconciliation runner', () => {
+    // Runner-before-search ordering is asserted once, in
+    // src/bootstrap/db-reconciliation.test.ts.
+    const reconciliations = readFileSync(
+      resolve(__dirname, '../bootstrap/db-reconciliation.ts'),
+      'utf8',
+    );
+    expect(reconciliations).toContain('reconcileSiteSelectionsAfterSchemaSync(');
   });
 
   it('has a guarded one-shot migration that delegates to the reconciler', () => {

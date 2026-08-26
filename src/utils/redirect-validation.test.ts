@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { REDIRECT_MAX_HOPS } from './redirect-graph';
 import {
-  REDIRECT_MAX_HOPS,
-  classifyTarget,
-  isRedirectUid,
   isWireSafeFromPath,
   normalizeRedirectPath,
   redirectKey,
-  validateRedirect,
-} from './redirect-validation';
+} from './redirect-paths';
+import { classifyTarget } from './redirect-targets';
+import { isRedirectUid, validateRedirect } from './redirect-validation';
 
 const UID = 'api::redirect.redirect';
 

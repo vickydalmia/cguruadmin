@@ -1,12 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { slugify } from '../constants/slugify';
-import {
-  IDENTITY_UIDS,
-  toNameKey,
-  toRouteSlug,
-  validateIdentity,
-  type IdentityUid,
-} from './identity-validation';
+import { toNameKey } from './identity-collisions';
+import { IDENTITY_UIDS, type IdentityUid } from './identity-uids';
+import { toRouteSlug, validateIdentity } from './identity-validation';
 
 type Row = {
   documentId: string;

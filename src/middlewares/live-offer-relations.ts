@@ -4,7 +4,7 @@ import {
   isContentManagerRelationPath,
   normalizeRelationSearch,
   runWithCuratedOfferRelationFilter,
-} from '../utils/curated-offer-relations';
+} from '../utils/curated-offer-live-filter';
 
 /**
  * Normalizes the relation-picker search term for every Content Manager

@@ -1,7 +1,7 @@
 import { errors } from '@strapi/utils';
 
 import { CANONICAL_PATH_RULE, isValidCanonicalPath } from './canonical-path';
-import { isIdentityUid } from './identity-validation';
+import { isIdentityUid } from './identity-uids';
 
 const FIELD_LIMITS = {
   metaTitle: 70,

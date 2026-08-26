@@ -18,7 +18,7 @@ import {
   normaliseCouponTypeFields,
   validateCouponTypeFields,
 } from '../coupon-type-consistency';
-import { ensureTransparentDealImageForWrite } from '../deal-image-upload';
+import { ensureTransparentDealImageForWrite } from '../deal-image-write-validation';
 import { validateDealOfTheDaySectionLimits } from '../deal-of-the-day-validation';
 import { validateEntityFieldsForWrite } from '../entity-field-validation';
 import {
@@ -58,8 +58,8 @@ import { INDEPENDENCE_DAY_SALE_UID } from '../../constants/independence-day-sale
 /**
  * The write-validation pipeline, as data.
  *
- * This is the same list of calls the document middleware in src/index.ts used
- * to inline, in the same order, with the same guards — lifted out so the
+ * This is the same list of calls the document-write middleware
+ * (src/register/document-write-middleware.ts) used to inline, in the same order, with the same guards — lifted out so the
  * middleware can decide HOW to run them (fail fast, or collect everything and
  * report once) without that decision being tangled up in a 200-line if/await
  * chain.

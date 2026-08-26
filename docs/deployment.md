@@ -268,6 +268,7 @@ ISR_OUTBOX_REQUEST_TIMEOUT_MS=90000
 ISR_OUTBOX_LEASE_MS=120000
 ISR_OUTBOX_MAX_BACKOFF_MS=300000
 ISR_OUTBOX_ALERT_AFTER_ATTEMPTS=5
+ISR_OUTBOX_BACKLOG_ALERT_MS=1800000
 ISR_OUTBOX_RETENTION_DAYS=30
 ISR_REVALIDATE_MAX_PATHS=5000
 ISR_OUTBOX_MAX_PAYLOAD_BYTES=900000
@@ -376,6 +377,7 @@ normal deployments.
 | `ISR_OUTBOX_LEASE_MS` | Optional | Row lease duration before another dispatcher can reclaim an interrupted delivery. It must exceed the request timeout by at least 30 seconds. |
 | `ISR_OUTBOX_MAX_BACKOFF_MS` | Optional | Maximum exponential retry delay. |
 | `ISR_OUTBOX_ALERT_AFTER_ATTEMPTS` | Optional | Attempt count at which failures become alert-level logs. |
+| `ISR_OUTBOX_BACKLOG_ALERT_MS` | Optional | Age of the oldest undelivered event past which `/api/isr/status` reports unhealthy (HTTP 503) and the dispatcher emits `isr.outbox.backlog_stale` alerts. Default 30 minutes. |
 | `ISR_OUTBOX_RETENTION_DAYS` | Optional | Age after which successfully delivered rows may be cleaned up. |
 | `ISR_REVALIDATE_MAX_PATHS` | Optional | Maximum targeted paths in one durable event before it is promoted to a full invalidation. Must match the gateway; default `5000`. |
 | `ISR_OUTBOX_MAX_PAYLOAD_BYTES` | Optional | Maximum serialized durable payload size before path events are promoted to a full invalidation. Default `900000`. |
@@ -598,6 +600,8 @@ isr.outbox.dispatcher_cycle_failed
 isr.outbox.dispatcher_disabled
 isr.outbox.cleanup_completed
 isr.outbox.cleanup_failed
+isr.outbox.backlog_stale
+isr.outbox.backlog_check_failed
 ```
 
 Alert on:
@@ -608,7 +612,7 @@ Alert on:
 - repeated `isr.outbox.delivery_failed`;
 - any `isr.outbox.invalid` quarantined row;
 - a stalled or failing dispatcher reported by `/api/isr/status`;
-- rows remaining undelivered beyond the normal retry window;
+- rows remaining undelivered beyond the normal retry window (`isr.outbox.backlog_stale`, threshold `ISR_OUTBOX_BACKLOG_ALERT_MS`; also turns `/api/isr/status` unhealthy);
 - more than one active cron scheduler;
 - more than one `isr.outbox.dispatcher_started` process. The render container
   should instead log `isr.outbox.dispatcher_disabled` with

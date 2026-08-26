@@ -4,10 +4,12 @@ import {
   createEntityCouponLayoutService,
   ENTITY_COUPON_LAYOUT_ACTION,
   ENTITY_COUPON_LAYOUT_ACTION_ATTRIBUTES,
-  PREVIEW_COUPON_LIMIT,
-  couponLayoutInvalidation,
-  parseLayoutSelection,
 } from './entity-coupon-layout';
+import {
+  PREVIEW_COUPON_LIMIT,
+  parseLayoutSelection,
+} from './entity-coupon-layout-parse';
+import { couponLayoutInvalidation } from './entity-coupon-layout-invalidation';
 
 describe('entity Coupon layout selection contract', () => {
   it('registers as a core Administration Panel settings action', () => {

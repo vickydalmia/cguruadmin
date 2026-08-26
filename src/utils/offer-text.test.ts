@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { splitOfferWords, arrayizeOfferText, formatBenefitText } from './offer-text';
+import { AMAZON_AFFILIATE_DISCLOSURE_HTML } from './amazon-affiliate-disclosure';
 
 describe('splitOfferWords', () => {
   it('splits a badge string into its render words', () => {
@@ -122,6 +123,35 @@ describe('arrayizeOfferText', () => {
     const deal: any = { salePrice: null, mrp: null, discount: null };
     arrayizeOfferText(deal);
     expect('computedContent' in deal).toBe(false);
+  });
+
+  it('appends an opted-in Amazon disclosure as the final authored condition', () => {
+    const deal: any = {
+      salePrice: 499,
+      content: '<p>Existing condition.</p>',
+      enableAmazonAffiliateDisclosure: true,
+      brands: [{ name: 'Amazon India', slug: 'amazon-coupons' }],
+    };
+
+    arrayizeOfferText(deal);
+
+    expect(deal.content).toBe(
+      `<p>Existing condition.</p>${AMAZON_AFFILIATE_DISCLOSURE_HTML}`,
+    );
+    expect(deal).not.toHaveProperty('enableAmazonAffiliateDisclosure');
+  });
+
+  it('keeps compact Deal projections content-free and strips the internal flag', () => {
+    const deal: any = {
+      salePrice: 499,
+      enableAmazonAffiliateDisclosure: true,
+      stores: [{ name: 'Amazon India', slug: 'amazon-coupons' }],
+    };
+
+    arrayizeOfferText(deal);
+
+    expect(deal).not.toHaveProperty('content');
+    expect(deal).not.toHaveProperty('enableAmazonAffiliateDisclosure');
   });
 });
 

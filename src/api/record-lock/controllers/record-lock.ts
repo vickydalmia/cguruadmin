@@ -1,5 +1,6 @@
 // Admin-only endpoints behind the edit-lock panel. Both routes are mounted on
-// the ADMIN router in src/index.ts (routers loaded from src/api are forced to
+// the ADMIN router by src/register/admin-routes.ts (routers loaded from
+// src/api are forced to
 // content-api, which an admin session cannot authenticate — same reasoning as
 // the entity-deal-page settings endpoints).
 

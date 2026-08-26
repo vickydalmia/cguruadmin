@@ -1,12 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 
-import createSearchService, {
+import createSearchService from "./search";
+import {
   configureSearchRuntime,
   EXPECTED_SEARCH_INDEXES,
   initializeSearchRuntime,
-} from "./search";
+} from "./search-runtime";
+import {
+  AMAZON_AFFILIATE_DISCLOSURE_FIELD,
+  AMAZON_AFFILIATE_DISCLOSURE_HTML,
+} from "../../../utils/amazon-affiliate-disclosure";
 
-function searchService() {
+function searchService({
+  dealOverrides = {},
+}: {
+  dealOverrides?: Record<string, unknown>;
+} = {}) {
   const calls: Array<{ uid: string; operation: string; options: any }> = [];
   const coupon = {
     id: 987,
@@ -67,6 +76,7 @@ function searchService() {
         },
       },
     ],
+    ...dealOverrides,
   };
   const bank = {
     documentId: "bank-sbi",
@@ -367,6 +377,36 @@ describe("public search entity boundaries", () => {
     expect(dealFind?.options.fields).toContain("expiresAt");
     expect(dealFind?.options.fields).toContain("discountPrefix");
     expect(response.deals[0]).not.toHaveProperty("discountPrefix");
+  });
+
+  it("appends the opted-in Amazon disclosure after existing Deal content", async () => {
+    const { calls, service } = searchService({
+      dealOverrides: {
+        enableAmazonAffiliateDisclosure: true,
+        stores: [{ name: "Amazon India", slug: "amazon-coupons" }],
+      },
+    });
+
+    const response = await service.search({
+      query: "shoes",
+      mode: "group",
+      group: "deals",
+      page: 1,
+      pageSize: 20,
+    });
+
+    expect(response.deals[0]?.content).toBe(
+      `<p>Free shipping over Rs. 999.</p>${AMAZON_AFFILIATE_DISCLOSURE_HTML}`,
+    );
+    expect(response.deals[0]).not.toHaveProperty(
+      AMAZON_AFFILIATE_DISCLOSURE_FIELD,
+    );
+    const dealFind = calls.find(
+      (call) => call.uid === "api::deal.deal" && call.operation === "findMany",
+    );
+    expect(dealFind?.options.fields).toContain(
+      AMAZON_AFFILIATE_DISCLOSURE_FIELD,
+    );
   });
 
   it("splits media formats into a WebP srcset and an additive AVIF srcset", async () => {

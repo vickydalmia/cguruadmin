@@ -2,7 +2,7 @@ import type { Core } from '@strapi/strapi';
 
 /**
  * Per-request ceiling for uploadCodes. The admin client already posts in
- * batches of 2,000 (DEFAULT_CHUNK_SIZE in src/admin/utils/parse-codes.ts);
+ * batches of 2,000 (DEFAULT_CHUNK_SIZE in src/admin/features/unique-code/chunk-codes.ts);
  * this rejects hand-rolled API calls that would hold the pool import lock
  * for an unbounded number of rows in a single transaction.
  */
@@ -76,7 +76,7 @@ const uniqueCouponController = ({ strapi }: { strapi: Core.Strapi }) => ({
     }
 
     // Matches the admin client's chunker (DEFAULT_CHUNK_SIZE in
-    // src/admin/utils/parse-codes.ts) — one import request holds the pool row
+    // src/admin/features/unique-code/chunk-codes.ts) — one import request holds the pool row
     // lock for the whole transaction, so a bounded chunk keeps that hold short.
     if (codes.length > MAX_CODES_PER_REQUEST) {
       return ctx.badRequest(

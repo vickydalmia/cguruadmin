@@ -1,8 +1,8 @@
 // Shared, browser-safe tables for the offer text fields. This file is the
 // single source of truth for the write validator (offer-field-validation.ts),
-// the editor-facing hints in index.ts, AND the Offer benefits side panel
-// (src/admin/components/OfferBenefitsPanel.tsx) — what is shown can never
-// drift from what is enforced.
+// the editor-facing hints in src/bootstrap/field-hints.ts, AND the Offer
+// benefits side panel (src/admin/components/offer-benefits-panel.tsx) — what is
+// shown can never drift from what is enforced.
 //
 // Kept free of server-only imports on purpose: the admin panel bundles this
 // file for the browser, where `@strapi/utils` (node:stream) cannot load.

@@ -4,12 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  classifyFalError,
-  DealImageProcessingError,
-  prepareTransparentDealImage,
-  validateTransparentDealPng,
-} from './deal-image-background';
+import { prepareTransparentDealImage } from './deal-image-background';
+import { DealImageProcessingError } from './deal-image-errors';
+import { classifyFalError } from './deal-image-fal';
+import { validateTransparentDealPng } from './deal-image-transparency';
 
 const temporaryDirectories: string[] = [];
 

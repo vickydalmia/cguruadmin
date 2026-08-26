@@ -15,7 +15,8 @@ describe('entity Deal-page routes', () => {
     ).toMatchObject({ auth: false });
   });
 
-  // The settings endpoints are registered on the ADMIN router in src/index.ts.
+  // The settings endpoints are registered on the ADMIN router in
+  // src/register/admin-routes.ts.
   // Anything loaded from src/api/*/routes is forced to `type: 'content-api'`,
   // which cannot authenticate an admin session and would hand
   // super-admin-only a users-permissions user to look up in admin::user.

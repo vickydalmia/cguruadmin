@@ -8,6 +8,7 @@ export interface IsrOutboxConfig {
   leaseMs: number;
   maxBackoffMs: number;
   alertAfterAttempts: number;
+  backlogAlertMs: number;
   retentionDays: number;
   maxPaths: number;
   maxPayloadBytes: number;
@@ -120,6 +121,16 @@ export function readIsrOutboxConfig(): IsrOutboxConfig {
       5,
       1,
       1_000,
+    ),
+    // Undelivered events older than this flip /api/isr/status unhealthy and
+    // emit isr.outbox.backlog_stale alerts. Healthy retries deliver within
+    // ISR_OUTBOX_MAX_BACKOFF_MS (5 min default), so a 30-minute-old backlog
+    // means delivery is genuinely stuck, not merely backing off.
+    backlogAlertMs: integerEnv(
+      'ISR_OUTBOX_BACKLOG_ALERT_MS',
+      1_800_000,
+      60_000,
+      604_800_000,
     ),
     retentionDays: integerEnv('ISR_OUTBOX_RETENTION_DAYS', 30, 1, 365),
     ...readOutboxPayloadBounds(),

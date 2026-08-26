@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { COUPON_FIELDS } from './independence-day-sale-populate';
 import {
-  COUPON_FIELDS,
   fillAllCouponHolder,
   fillAllDealHolder,
-} from './custom';
+} from './independence-day-sale-transforms';
 
 const NOW = new Date('2026-08-06T12:00:00.000Z');
 
