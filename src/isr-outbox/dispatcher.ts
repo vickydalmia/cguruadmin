@@ -9,6 +9,27 @@ import {
 import type { IsrOutboxEvent } from './types';
 
 const OUTBOX_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1_000;
+// Backlog age is re-checked (and re-alerted while stale) at most this often
+// from the dispatcher cycle; status() computes it fresh on every request.
+const BACKLOG_ALERT_INTERVAL_MS = 5 * 60 * 1_000;
+
+/**
+ * Whether the oldest undelivered outbox event has been waiting longer than
+ * the alert threshold. `oldestUndeliveredAt` is statusSummary()'s ISO string
+ * (MIN(created_at) over pending/processing) or null when nothing is waiting.
+ * An unparseable timestamp reads as healthy rather than flapping the status
+ * endpoint on a malformed row.
+ */
+export function backlogExceeded(
+  oldestUndeliveredAt: string | null,
+  nowMs: number,
+  thresholdMs: number,
+): boolean {
+  if (!oldestUndeliveredAt) return false;
+  const oldest = Date.parse(oldestUndeliveredAt);
+  if (!Number.isFinite(oldest)) return false;
+  return nowMs - oldest > thresholdMs;
+}
 
 export function deliveredRetentionCutoff(
   nowMs: number,
@@ -188,6 +209,7 @@ export class IsrOutboxDispatcher {
   private running: Promise<void> | null = null;
   private stopped = false;
   private nextCleanupAt = 0;
+  private nextBacklogCheckAt = 0;
   private readonly store: IsrOutboxStore;
   private readonly startedAt = Date.now();
   private lastCycleStartedAt = 0;
@@ -277,12 +299,27 @@ export class IsrOutboxDispatcher {
     );
     const stalled = !this.stopped && now - cycleReference > staleAfterMs;
     const invalid = outbox.counts.invalid ?? 0;
+    // A dispatcher can be running and error-free while every delivery is
+    // rejected (the gateway 503ing for days looked healthy here). Backlog
+    // age is the delivery-outcome signal the process-level fields miss.
+    const oldestMs = outbox.oldestUndeliveredAt
+      ? Date.parse(outbox.oldestUndeliveredAt)
+      : Number.NaN;
+    const backlogAgeMs = Number.isFinite(oldestMs)
+      ? Math.max(0, now - oldestMs)
+      : null;
+    const backlogStale = backlogExceeded(
+      outbox.oldestUndeliveredAt,
+      now,
+      this.config.backlogAlertMs,
+    );
     return {
       ok:
         !this.stopped &&
         !stalled &&
         invalid === 0 &&
         outbox.expiredProcessing === 0 &&
+        !backlogStale &&
         this.lastError === null,
       dispatcher: {
         running: Boolean(this.running),
@@ -296,7 +333,12 @@ export class IsrOutboxDispatcher {
         lastError: this.lastError,
         stalled,
       },
-      outbox,
+      outbox: {
+        ...outbox,
+        backlogAgeMs,
+        backlogStale,
+        backlogAlertMs: this.config.backlogAlertMs,
+      },
     };
   }
 
@@ -319,6 +361,36 @@ export class IsrOutboxDispatcher {
       } else {
         logIsrOutbox(this.strapi, 'error', 'isr.outbox.cleanup_failed', {
           error: cleanup.error.message,
+        });
+      }
+    }
+
+    // status() only runs when someone curls the endpoint, so a stale backlog
+    // must also alert from the always-running cycle. Rate-limited to one
+    // check per interval; keeps re-alerting while the condition holds.
+    if (now >= this.nextBacklogCheckAt) {
+      this.nextBacklogCheckAt = now + BACKLOG_ALERT_INTERVAL_MS;
+      try {
+        const outbox = await this.store.statusSummary();
+        if (
+          backlogExceeded(
+            outbox.oldestUndeliveredAt,
+            now,
+            this.config.backlogAlertMs,
+          )
+        ) {
+          logIsrOutbox(this.strapi, 'error', 'isr.outbox.backlog_stale', {
+            oldestUndeliveredAt: outbox.oldestUndeliveredAt,
+            backlogAgeMs: now - Date.parse(outbox.oldestUndeliveredAt ?? ''),
+            thresholdMs: this.config.backlogAlertMs,
+            pending: outbox.counts.pending ?? 0,
+            processing: outbox.counts.processing ?? 0,
+            alert: true,
+          });
+        }
+      } catch (cause) {
+        logIsrOutbox(this.strapi, 'warn', 'isr.outbox.backlog_check_failed', {
+          error: cause instanceof Error ? cause.message : String(cause),
         });
       }
     }
