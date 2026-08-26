@@ -35,6 +35,7 @@ REBUILD_POST_TIMEOUT_MS
 REDEEM_INVALIDATE_TIMEOUT_MS
 SITE_BUCKET
 STRAPI_MEDIA_URL
+STRAPI_ADMIN_PUBLIC_SITE_URL
 ```
 
 These old S3 options are also unsupported by the current upload-provider
@@ -104,11 +105,15 @@ docker build -t couponzguru-cms:verify .
 Create a GitHub Release and wait for its GHCR workflow to finish. Record the
 immutable `v*` or `sha-*` tag. Never deploy `latest`.
 
-`STRAPI_ADMIN_PUBLIC_SITE_URL` is compiled into the Strapi admin bundle and
-stored as the runtime image default. If the
-admin Coupon/Deal public-link actions are required, the value must be supplied
-while the release image runs `yarn build`. Adding it only to the running
-container does not rebuild the admin bundle.
+Publishing the GitHub Release is the only automatic image trigger. A raw `v*`
+tag push does not start a second build; `workflow_dispatch` remains available
+for an intentional manual rebuild.
+
+The CMS image is country-neutral. Do not supply a public-site build argument:
+the running container exposes its non-secret `PUBLIC_SITE_URL` through an
+authenticated admin runtime-config endpoint. Coupon/Deal public-link actions
+therefore follow the deployment environment without rebuilding the admin
+bundle, and one immutable image may be promoted to every country stack.
 
 ## 2. Back up PostgreSQL
 
@@ -268,10 +273,10 @@ UPLOAD_CSP_SOURCES=https://media.couponzguru.com,https://<BUCKET>.s3.ap-south-1.
 # Keep empty when public browser requests use Fastify instead of Strapi.
 CORS_ORIGINS=
 
-# Build-time admin value; runtime assignment alone does not rebuild the UI.
-# Builds admin public-link actions and supplies the runtime base from which
-# rich-text sanitization derives the registrable first-party domain.
-STRAPI_ADMIN_PUBLIC_SITE_URL=https://www.couponzguru.com
+# Runtime storefront origin. The authenticated admin config endpoint supplies
+# it to Coupon/Deal public-link actions; rich-text sanitization derives the
+# first-party registrable domain from the same value.
+PUBLIC_SITE_URL=https://www.couponzguru.com
 
 # Persistent-ISR transactional outbox
 # The dispatcher safely retries while the gateway is unavailable. Enable it on
@@ -379,7 +384,7 @@ normal deployments.
 | `FAL_BACKGROUND_REMOVAL_MAX_ATTEMPTS` | Optional | Attempts for transient provider failures. Defaults to `3`; credit/auth errors are not retried. |
 | `UPLOAD_CSP_SOURCES` | Required for external media | Comma-separated media origins added to the Strapi admin `img-src` and `media-src` policy. |
 | `CORS_ORIGINS` | Optional | Browser origins permitted to call Strapi directly. Keep empty when all public browser requests use Fastify. |
-| `STRAPI_ADMIN_PUBLIC_SITE_URL` | Build-time; inherited by the runtime image | Public site origin compiled into Coupon/Deal admin link actions and used at runtime to derive the registrable first-party domain for rich-text links. An explicit runtime value may override the image default, but runtime-only changes do not rebuild the admin bundle. There is no separate `INTERNAL_HOSTS` list. |
+| `PUBLIC_SITE_URL` | Required runtime | Storefront origin returned by the authenticated admin runtime-config endpoint for Coupon/Deal public-link actions and used server-side to derive the registrable first-party domain for rich-text links. It is not compiled into the image, so the same image serves every country. There is no separate `INTERNAL_HOSTS` list. |
 
 #### Persistent-ISR outbox
 

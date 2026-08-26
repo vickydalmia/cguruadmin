@@ -12,6 +12,7 @@
 
 import sanitizeHtmlLib from 'sanitize-html';
 import { getDomain } from 'tldts-icann';
+import { configuredPublicSiteDomain } from './public-site-url';
 
 // First-party link classification derives from the public site URL. The
 // registrable domain keeps apex/www/CMS aliases internal without another
@@ -23,17 +24,7 @@ import { getDomain } from 'tldts-icann';
 // another deployment's domain. Over-nofollowing is the safe direction, and
 // relative hrefs are unaffected.
 function configuredInternalDomain(): string | null {
-  const value =
-    process.env.STRAPI_ADMIN_PUBLIC_SITE_URL?.trim() ||
-    process.env.PUBLIC_SITE_URL?.trim();
-  if (!value) return null;
-
-  try {
-    const hostname = new URL(value).hostname.toLowerCase();
-    return getDomain(hostname) ?? hostname;
-  } catch {
-    return null;
-  }
+  return configuredPublicSiteDomain();
 }
 
 function isInternalHost(hostname: string): boolean {

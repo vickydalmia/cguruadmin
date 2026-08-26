@@ -29,7 +29,7 @@ describe('cleanHtml', () => {
   it('forces rel="noopener noreferrer" on links, adding nofollow when external', () => {
     // First-party classification comes from the deployment's own URL; there is
     // no built-in domain, so the test states which deployment it is.
-    vi.stubEnv('STRAPI_ADMIN_PUBLIC_SITE_URL', 'https://www.example.com');
+    vi.stubEnv('PUBLIC_SITE_URL', 'https://www.example.com');
     expect(cleanHtml('<a href="https://a.b" target="_blank">x</a>')).toContain(
       'rel="nofollow noopener noreferrer"'
     );
@@ -67,7 +67,7 @@ describe('cleanHtml', () => {
   });
 
   it('derives first-party hosts from the deployment domain', () => {
-    vi.stubEnv('STRAPI_ADMIN_PUBLIC_SITE_URL', 'https://www.couponzguru.us');
+    vi.stubEnv('PUBLIC_SITE_URL', 'https://www.couponzguru.us');
     // The registrable domain of the configured URL is internal — apex and
     // every subdomain — so re-saving content never rewrites existing
     // first-party links to nofollow.
@@ -87,7 +87,7 @@ describe('cleanHtml', () => {
   });
 
   it('does not confuse sibling hosts on a multi-label public suffix', () => {
-    vi.stubEnv('STRAPI_ADMIN_PUBLIC_SITE_URL', 'https://www.couponzguru.co.ke');
+    vi.stubEnv('PUBLIC_SITE_URL', 'https://www.couponzguru.co.ke');
     expect(cleanHtml('<a href="https://cms.couponzguru.co.ke/banner/">x</a>')).not.toContain(
       'nofollow',
     );

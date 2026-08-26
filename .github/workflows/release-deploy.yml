@@ -4,9 +4,6 @@ run-name: CMS image · ${{ github.event_name == 'workflow_dispatch' && inputs.im
 on:
   release:
     types: [published]
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       image_tag:
@@ -17,10 +14,6 @@ on:
         description: "Reviewed branch, tag, or commit to build"
         required: true
         default: main
-        type: string
-      public_site_url:
-        description: "Public site this CMS administers, e.g. https://www.example.com. Defaults to the STRAPI_ADMIN_PUBLIC_SITE_URL repository variable."
-        required: false
         type: string
 
 permissions:
@@ -125,11 +118,6 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          # STRAPI_ADMIN_* values are inlined into the admin bundle by
-          # `strapi build`, so this must be a build argument — setting it on the
-          # running container is too late. One image per country stack.
-          build-args: |
-            STRAPI_ADMIN_PUBLIC_SITE_URL=${{ inputs.public_site_url || vars.STRAPI_ADMIN_PUBLIC_SITE_URL }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

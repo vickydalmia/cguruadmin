@@ -171,3 +171,19 @@ export function registerCountrySetupRoutes(strapi: Core.Strapi): void {
     ],
   } as any);
 }
+
+/** Runtime deployment identity consumed by authenticated admin UI actions. */
+export function registerAdminRuntimeConfigRoutes(strapi: Core.Strapi): void {
+  strapi.server.routes({
+    type: 'admin',
+    prefix: '/admin-runtime-config',
+    routes: [
+      {
+        method: 'GET',
+        path: '/',
+        handler: 'api::admin-runtime-config.admin-runtime-config.find',
+        config: { policies: ['admin::isAuthenticatedAdmin'] },
+      },
+    ],
+  } as any);
+}

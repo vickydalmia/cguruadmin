@@ -1,5 +1,5 @@
 import type { DocumentActionComponent } from '@strapi/content-manager/strapi-admin';
-import { useNotification } from '@strapi/strapi/admin';
+import { useFetchClient, useNotification } from '@strapi/strapi/admin';
 import { Link } from '@strapi/icons';
 import * as React from 'react';
 import { useIntl } from 'react-intl';
@@ -8,8 +8,7 @@ import {
   PUBLIC_OFFER_ROUTE_BY_MODEL,
   buildPublicOfferUrl,
 } from '../utils/public-offer-url';
-
-const PUBLIC_SITE_URL = process.env.STRAPI_ADMIN_PUBLIC_SITE_URL;
+import { loadRuntimePublicSiteUrl } from '../features/public-offer-link/runtime-config';
 
 async function copyText(value: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
@@ -37,9 +36,9 @@ async function copyText(value: string): Promise<void> {
 const PublicOfferLinkAction: DocumentActionComponent = ({ model, document: entry }) => {
   const { formatMessage } = useIntl();
   const { toggleNotification } = useNotification();
+  const { get } = useFetchClient();
   const numericId = Number(entry?.id);
   const isPublicOffer = model in PUBLIC_OFFER_ROUTE_BY_MODEL;
-  const publicUrl = buildPublicOfferUrl(model, entry?.id, PUBLIC_SITE_URL);
 
   if (!isPublicOffer || !Number.isSafeInteger(numericId) || numericId <= 0) {
     return null;
@@ -56,6 +55,30 @@ const PublicOfferLinkAction: DocumentActionComponent = ({ model, document: entry
       event.preventDefault();
       event.stopPropagation();
 
+      let configuredSiteUrl: string | null;
+      try {
+        configuredSiteUrl = await loadRuntimePublicSiteUrl(get);
+      } catch {
+        toggleNotification({
+          type: 'danger',
+          title: formatMessage({
+            id: 'couponzguru.public-offer-link.config-load-failed-title',
+            defaultMessage: 'Could not load the public site URL',
+          }),
+          message: formatMessage({
+            id: 'couponzguru.public-offer-link.config-load-failed-message',
+            defaultMessage:
+              'The running Strapi configuration could not be read. Check the connection and try again.',
+          }),
+        });
+        return;
+      }
+
+      const publicUrl = buildPublicOfferUrl(
+        model,
+        entry?.id,
+        configuredSiteUrl ?? undefined,
+      );
       if (!publicUrl) {
         toggleNotification({
           type: 'danger',
@@ -66,7 +89,7 @@ const PublicOfferLinkAction: DocumentActionComponent = ({ model, document: entry
           message: formatMessage({
             id: 'couponzguru.public-offer-link.not-configured-message',
             defaultMessage:
-              'Set STRAPI_ADMIN_PUBLIC_SITE_URL and rebuild the Strapi admin panel.',
+              'Set PUBLIC_SITE_URL on the running Strapi container and restart it.',
           }),
         });
         return;

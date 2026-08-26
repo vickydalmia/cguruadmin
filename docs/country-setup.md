@@ -313,7 +313,7 @@ The design has several independent safety layers:
 | Existing price/date appearance | `Rs.` and the established visible “Valid till” format are preserved. |
 | Existing offer behavior | Coupon versus Product Deal classification, lifecycle rules, API schemas, activation, and affiliate behavior are unchanged. |
 | Existing India links/cookies | The `.couponzguru.com` registrable-domain behavior preserves apex/www classification and cleans legacy Meta cookies. |
-| Older India runtime env | The country-specific admin image carries its build-time public URL into the runtime as a non-secret default, so rich-text link classification does not fall back to `nofollow`; an explicit runtime value may override it. |
+| India and new-country image parity | `PUBLIC_SITE_URL` is runtime-only and the authenticated admin config endpoint supplies it to Coupon/Deal link actions, so one country-neutral image serves every deployment while rich-text classification still uses the correct domain. |
 | Footer country links | A shared registry preserves the existing sibling sites and automatically excludes India itself. |
 | Existing migration progress | The India profile adopts the old `.checkpoints` directory atomically, or safely keeps using it when a non-state log directory blocks the rename. |
 | Cross-country migration mistakes | Profile, state, target-country, table-prefix, configuration-file, Store-count, and Deal-count checks fail before target mutation. Attachment drift warns and is reconciled through the Phase 01 missing-file report. |
