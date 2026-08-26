@@ -38,14 +38,14 @@ async function singletonReady(
   strapi: Core.Strapi,
   config: SiteConfiguration,
   feature: FeatureDefinition,
-): Promise<{ ready: boolean; reason?: string; path?: string }> {
+): Promise<{ ready: boolean; reason?: string }> {
   const row: any = await strapi.documents(feature.sourceUid as any).findFirst({
     populate: '*' as any,
   });
 
   // The committed static-page fixtures are an intentional compatibility
   // source only for the India deployment. Other countries must supply CMS
-  // content before a page can be enabled.
+  // content before an enabled page can become live.
   if (
     !row &&
     config.countryCode === 'IN' &&
@@ -66,29 +66,10 @@ async function singletonReady(
   }
 
   if (feature.key === 'dealOfTheDay') {
-    const [owners, dealCount] = await Promise.all([
-      findEntityTemplateOwners(strapi, 'dealTemplate'),
-      strapi.documents('api::deal.deal').count({
-        filters: { contentStatus: 'published' } as any,
-      }),
-    ]);
-    if (owners.length < 1) return { ready: false, reason: 'No entity uses the Deal template.' };
+    const dealCount = await strapi.documents('api::deal.deal').count({
+      filters: { contentStatus: 'published' } as any,
+    });
     if (dealCount < 1) return { ready: false, reason: 'No eligible live Product Deals exist.' };
-    return { ready: true, path: `/${owners[0]!.slug}/` };
-  }
-
-  if (feature.key === 'independenceDaySale') {
-    const owners = await findEntityTemplateOwners(
-      strapi,
-      'independenceDayTemplate',
-    );
-    if (owners.length < 1) {
-      return {
-        ready: false,
-        reason: 'No entity uses the Independence Day template.',
-      };
-    }
-    return { ready: true, path: `/${owners[0]!.slug}/` };
   }
 
   return { ready: true };
@@ -99,10 +80,19 @@ async function readinessFor(
   config: SiteConfiguration,
   feature: FeatureDefinition,
 ): Promise<FeatureReadiness> {
-  const enabled = config[feature.flag] === true;
+  let enabled = feature.flag ? config[feature.flag] === true : false;
   let ready = true;
   let reason: string | undefined;
   let path: string | undefined;
+
+  // Campaigns have no Country Setup switch. Assigning the template to one
+  // entity is the activation signal; singleton/catalog checks independently
+  // decide when that owner is safe to publish.
+  if (feature.pageTemplate) {
+    const owners = await findEntityTemplateOwners(strapi, feature.pageTemplate);
+    enabled = owners.length > 0;
+    if (enabled) path = `/${owners[0]!.slug}/`;
+  }
 
   if (feature.catalogUid) {
     const count = await countCatalog(strapi, feature);
@@ -112,7 +102,6 @@ async function readinessFor(
     const result = await singletonReady(strapi, config, feature);
     ready = result.ready;
     reason = result.reason;
-    path = result.path;
   }
 
   return {
@@ -120,7 +109,7 @@ async function readinessFor(
     ready,
     live: enabled && ready,
     ...(reason ? { reason } : {}),
-    ...(path ? { path } : {}),
+    ...(path && enabled && ready ? { path } : {}),
   };
 }
 

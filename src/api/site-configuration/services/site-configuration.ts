@@ -1,7 +1,6 @@
 import type { Core } from '@strapi/strapi';
 import { toValidationError, type Problem } from '../../../utils/write-validation/problems';
 import {
-  FEATURE_REGISTRY,
   SITE_CONFIGURATION_FIELDS,
   SITE_CONFIGURATION_UID,
   normalizeSiteConfiguration,
@@ -64,16 +63,6 @@ export async function validateSiteConfigurationForWrite(
   if (!candidate.countryName.trim()) problems.push({ path: ['countryName'], message: 'Country name is required.' });
   if (!/^[A-Z]{2}$/.test(candidate.countryCode)) problems.push({ path: ['countryCode'], message: 'Use a two-letter uppercase ISO country code.' });
 
-  const readiness = await getFeatureReadiness(strapi, candidate);
-  for (const feature of FEATURE_REGISTRY) {
-    const state = readiness[feature.key];
-    if (state.enabled && !state.ready) {
-      problems.push({
-        path: [feature.flag],
-        message: `${feature.label} cannot be enabled: ${state.reason ?? 'required content is incomplete'}`,
-      });
-    }
-  }
   if (problems.length > 0) throw toValidationError(problems);
   return candidate;
 }

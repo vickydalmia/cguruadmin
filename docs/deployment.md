@@ -527,6 +527,17 @@ There must be no startup error involving:
 Also confirm the startup migration added `page_template` to Store, Brand,
 Category and Bank without removing existing fields, and that the hidden Site
 Configuration single type is available through the Country Setup service.
+Country Setup, migration profiles and runtime settings no longer use campaign
+booleans: campaign activation is the selected entity `pageTemplate`. The two
+old columns remain private and ignored for rollback compatibility with the
+previous India image; do not edit or use them for new deployments.
+
+The same startup also removes the two retired Homepage component attachments,
+`exploreDeals` and `dealsByBrand`. Rebuild and restart both Strapi containers
+so Content Manager reads the new Homepage schema; after that it exposes only
+the Coupon-backed **Explore Offers** and **Offers by Brand** sections. The
+shared Deal component tables remain because campaign single types still use
+those components.
 
 Before the frontend gateway starts, outbox delivery failures are expected and
 remain retryable. Strapi itself must remain healthy.
@@ -588,6 +599,8 @@ Verify:
 - scheduled Coupon/Deal state processing.
 - `GET /api/site-settings` identity, localization and feature readiness;
 - the expected `dealTemplate` and `independenceDayTemplate` owner paths;
+- the Content Manager sidebar omits disabled country features and campaign
+  singletons without a template owner;
 - disabled features are absent from public route metadata, search and sitemap
   sources, while the India deployment reports every intended feature live.
 

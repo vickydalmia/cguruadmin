@@ -27,7 +27,7 @@ export type FeatureFormDefinition = {
   key: string;
   field: string;
   label: string;
-  group: 'Catalog' | 'Editorial' | 'Legal' | 'Campaigns';
+  group: 'Catalog' | 'Editorial' | 'Legal';
   destinations: readonly string[];
 };
 
@@ -48,8 +48,6 @@ export const FEATURE_FORM_DEFINITIONS: readonly FeatureFormDefinition[] = [
   { key: 'privacyPolicy', field: 'privacyPolicyEnabled', label: 'Privacy Policy', group: 'Legal', destinations: ['/privacy-policy/'] },
   { key: 'termsAndConditions', field: 'termsAndConditionsEnabled', label: 'Terms and Conditions', group: 'Legal', destinations: ['/terms-and-conditions/'] },
   { key: 'affiliateDisclosure', field: 'affiliateDisclosureEnabled', label: 'Affiliate Disclosure', group: 'Legal', destinations: ['/affiliate-disclosure/'] },
-  { key: 'dealOfTheDay', field: 'dealOfTheDayEnabled', label: 'Deal of the Day', group: 'Campaigns', destinations: ['Entity template: dealTemplate'] },
-  { key: 'independenceDaySale', field: 'independenceDaySaleEnabled', label: 'Independence Day Sale', group: 'Campaigns', destinations: ['Entity template: independenceDayTemplate'] },
 ] as const;
 
 export const EDITABLE_IDENTITY_FIELDS = [

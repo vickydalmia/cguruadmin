@@ -34,6 +34,7 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Middlewar
   },
   'strapi::poweredBy',
   'strapi::query',
+  'global::country-content-visibility',
   'global::live-offer-relations',
   'global::relation-search-config-guard',
   {

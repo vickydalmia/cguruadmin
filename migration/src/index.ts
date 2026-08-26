@@ -26,7 +26,6 @@ import { runOfferBackfill } from "./phases/12-offer-backfill.js";
 import { runEntityUpdatedAtBackfill } from "./backfill-entity-updated-at.js";
 import { runOfferPublishedOnBackfill } from "./phases/12b-offer-published-on.js";
 import { runSiteContent } from "./phases/13-site-content.js";
-import { runHomepageOfferBackfill } from "./phases/13a-homepage-offer-sections.js";
 import { runFooterMediaBackfill } from "./phases/13b-footer-media.js";
 import { runFooterCountryLinksBackfill } from "./phases/13c-footer-country-links.js";
 import { runSiteSelectionBackfill } from "./phases/13d-site-selection-backfill.js";
@@ -84,7 +83,6 @@ const phases: Phase[] = [
   },
   { name: "12b-offer-published-on", fn: runOfferPublishedOnBackfill },
   { name: "13-site-content", fn: runSiteContent },
-  { name: "13a-homepage-offer-sections", fn: runHomepageOfferBackfill },
   { name: "13b-footer-media", fn: runFooterMediaBackfill },
   { name: "13c-footer-country-links", fn: runFooterCountryLinksBackfill },
   { name: "13d-site-selection-backfill", fn: runSiteSelectionBackfill },

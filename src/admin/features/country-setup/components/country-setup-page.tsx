@@ -151,11 +151,19 @@ export default function CountrySetupPage() {
       <Layouts.Root>
         <Layouts.Header
           title="Country Setup"
-          subtitle="Identity, localization and fixed country feature availability"
+          subtitle="Identity, localization, website availability and Content Manager visibility"
           primaryAction={<Button loading={saving} onClick={save}>Save</Button>}
         />
         <Layouts.Content>
           <Flex direction="column" alignItems="stretch" gap={6}>
+            <Box padding={5} background="primary100" hasRadius>
+              <Typography textColor="primary700">
+                Features that are Off are removed from the Content Manager menu
+                and from the public website. Turn a feature On and save to make
+                it available for editing. It remains hidden from the public
+                website until its required content is Ready.
+              </Typography>
+            </Box>
             <Box padding={6} background="neutral0" shadow="filterShadow" hasRadius>
               <Typography variant="beta">Identity and localization</Typography>
               <Box paddingTop={5}>
@@ -196,7 +204,7 @@ export default function CountrySetupPage() {
               </Flex>
             </Box>
 
-            {(['Catalog', 'Editorial', 'Legal', 'Campaigns'] as const).map((group) => (
+            {(['Catalog', 'Editorial', 'Legal'] as const).map((group) => (
               <Box key={group} padding={6} background="neutral0" shadow="filterShadow" hasRadius>
                 <Typography variant="beta">{group}</Typography>
                 <Flex paddingTop={4} direction="column" alignItems="stretch" gap={4}>

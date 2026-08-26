@@ -74,6 +74,9 @@ localization preview and all 18 feature states. Each feature carries
 `enabled`, `ready` and `live`; an unready state may include an operator-facing
 `reason`, and a live campaign includes its authoritative entity-owner `path`.
 No private service URL, secret, origin allowlist or database value is exposed.
+For catalog, editorial and legal features, `enabled` comes from Country Setup.
+For campaigns it is derived from whether an entity owns the corresponding
+`pageTemplate`; campaigns have no separate settings switch.
 
 The public response is cached for 60 seconds. Saving Site Configuration clears
 the process cache and emits ISR invalidation that refreshes routes, sitemap,
@@ -82,8 +85,12 @@ site chrome and affected HTML.
 `GET /country-setup/` and `PUT /country-setup/` are mounted on Strapi's admin
 router, require an authenticated Super Admin session, and are used by
 **Settings → Country Setup**. The write accepts identity/localization fields
-and boolean feature flags. It rejects invalid ISO/locale/timezone values and
-any feature that is enabled before its required source content is ready.
+and the catalog/editorial/legal boolean feature flags. It rejects invalid
+ISO/locale/timezone values, but allows a feature to be enabled before its
+required source content is ready. That enabled-but-incomplete state exposes the
+content type to editors while public routes stay unavailable because `live`
+remains false. Saving also controls which related content types appear in the
+Content Manager navigation.
 
 The complete operator and compatibility contract is in
 [Country Setup and Multi-Country Sites](./country-setup.md).

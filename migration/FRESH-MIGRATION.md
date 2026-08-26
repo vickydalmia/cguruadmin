@@ -52,7 +52,7 @@ Key settings (full list in README § Setup & Configuration):
 |---|---|
 | `MIGRATION_PROFILE` | Validated country profile name, such as `india` or `usa` |
 | `MIGRATION_STATE_DIR` | Profile-only checkpoints, maps, manifests, reports and logs; normally `.state/<profile>` |
-| `MIGRATION_SITE_CONFIGURATION_FILE` | Country identity/localization/feature JSON created or updated in Phase 13 |
+| `MIGRATION_SITE_CONFIGURATION_FILE` | Country identity/localization and catalog/editorial/legal feature JSON created or updated in Phase 13; campaigns are entity templates |
 | `MIGRATION_EXCLUSIONS_FILE` | Exclusions for this source only; USA must not reuse the India retired-store list |
 | `SOURCE_COUNTRY_CODE` / `SOURCE_LOCALE` / `SOURCE_CURRENCY_CODE` / `SOURCE_TIMEZONE` | Source identity asserted against the profile JSON |
 | `WP_TABLE_PREFIX` | Validated WordPress prefix; USA uses `wp_dda10ab629_` |
@@ -157,7 +157,6 @@ trips a fuse above 40% orphans (`--force-orphan-cleanup` to override). Pass
 | `11-copy-used-media` → `12-offer-backfill` | Media wiring and offer relation backfill |
 | `12a-entity-updated-at` | Re-derive entity `created_at`/`updated_at` from the offers now linked to them |
 | `13-site-content` | Global, **homepage**, menu, footer singles |
-| `13a-homepage-offer-sections` | Backfill for **pre-existing** homepages only — on a fresh run phase 13 already seeds everything and this is a no-op |
 | `13b-footer-media` | Upload optimized flags for every other country in the shared registry, plus any profile-specific Google Preferred icon, and fill missing footer media/component relations |
 | `13c-footer-country-links` | Fill blank footer country destinations while preserving editor-entered URLs |
 | `13d-site-selection-backfill` | Preserve legacy homepage Popular Searches and fill empty search-overlay stores/suggestions without overwriting editor selections |
@@ -212,14 +211,18 @@ To repair an already-migrated database without a full re-run, use
       locale, timezone and currency.
 - [ ] Every enabled feature reports `ready: true` and `live: true`; a campaign
       reports the selected entity-owner `path`.
+- [ ] Content Manager omits Off country features; campaign singletons appear
+      only when an entity owns their template.
 - [ ] Admin: log in, open Homepage, **save once** — proves component caps and
       image validation pass on the seeded data.
+- [ ] Homepage contains Coupon-backed **Explore Offers** and **Offers by Brand**
+      only; the retired Deal-backed fallback fields are absent.
 - [ ] Spot-check a store page and a Coupon homepage banner URL (CDN base correct).
 
 For USA, the review report must additionally account for 7,162 Stores, 10,360
 attachments, zero Product Deals, five hero banners and eight featured Stores.
-Brands, Categories, Banks, Product Deals, campaigns and unsupplied
-editorial/legal pages must remain disabled. Run the migration a second time
+Brands, Categories, Banks, Product Deals and unsupplied editorial/legal pages
+must remain disabled; neither campaign template has an owner. Run the migration a second time
 against the disposable target and confirm those counts do not grow.
 
 ## 5. Restart Strapi (required)

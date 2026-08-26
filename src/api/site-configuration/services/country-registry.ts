@@ -18,8 +18,6 @@ export const FEATURE_FIELDS = [
   'privacyPolicyEnabled',
   'termsAndConditionsEnabled',
   'affiliateDisclosureEnabled',
-  'dealOfTheDayEnabled',
-  'independenceDaySaleEnabled',
 ] as const;
 
 export type FeatureField = (typeof FEATURE_FIELDS)[number];
@@ -59,7 +57,8 @@ export type FeatureDefinition = {
   key: FeatureKey;
   label: string;
   group: 'Catalog' | 'Editorial' | 'Legal' | 'Campaigns';
-  flag: FeatureField;
+  /** Country Setup switch. Campaign templates are activated by their entity owner instead. */
+  flag?: FeatureField;
   paths: readonly string[];
   sourceUid?: string;
   sourceFields?: readonly string[];
@@ -84,8 +83,8 @@ export const FEATURE_REGISTRY: readonly FeatureDefinition[] = [
   { key: 'privacyPolicy', label: 'Privacy Policy', group: 'Legal', flag: 'privacyPolicyEnabled', paths: ['/privacy-policy/'], sourceUid: 'api::privacy-policy-page.privacy-policy-page', sourceFields: ['heading', 'sections'] },
   { key: 'termsAndConditions', label: 'Terms and Conditions', group: 'Legal', flag: 'termsAndConditionsEnabled', paths: ['/terms-and-conditions/'], sourceUid: 'api::terms-and-conditions-page.terms-and-conditions-page', sourceFields: ['heading', 'sections'] },
   { key: 'affiliateDisclosure', label: 'Affiliate Disclosure', group: 'Legal', flag: 'affiliateDisclosureEnabled', paths: ['/affiliate-disclosure/'], sourceUid: 'api::affiliate-disclosure-page.affiliate-disclosure-page', sourceFields: ['heading', 'sections'] },
-  { key: 'dealOfTheDay', label: 'Deal of the Day', group: 'Campaigns', flag: 'dealOfTheDayEnabled', paths: [], pageTemplate: 'dealTemplate', sourceUid: 'api::deal-of-the-day-page.deal-of-the-day-page', sourceFields: ['heroTitle'] },
-  { key: 'independenceDaySale', label: 'Independence Day Sale', group: 'Campaigns', flag: 'independenceDaySaleEnabled', paths: [], pageTemplate: 'independenceDayTemplate', sourceUid: 'api::independence-day-sale-page.independence-day-sale-page', sourceFields: ['hero', 'countdown'] },
+  { key: 'dealOfTheDay', label: 'Deal of the Day', group: 'Campaigns', paths: [], pageTemplate: 'dealTemplate', sourceUid: 'api::deal-of-the-day-page.deal-of-the-day-page', sourceFields: ['heroTitle'] },
+  { key: 'independenceDaySale', label: 'Independence Day Sale', group: 'Campaigns', paths: [], pageTemplate: 'independenceDayTemplate', sourceUid: 'api::independence-day-sale-page.independence-day-sale-page', sourceFields: ['hero', 'countdown'] },
 ] as const;
 
 export const INDIA_DEFAULT_CONFIGURATION: SiteConfiguration = {
@@ -112,8 +111,6 @@ export const INDIA_DEFAULT_CONFIGURATION: SiteConfiguration = {
   privacyPolicyEnabled: true,
   termsAndConditionsEnabled: true,
   affiliateDisclosureEnabled: true,
-  dealOfTheDayEnabled: true,
-  independenceDaySaleEnabled: true,
 };
 
 export const IDENTITY_FIELDS = [

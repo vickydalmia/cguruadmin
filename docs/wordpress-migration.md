@@ -52,7 +52,7 @@ config ─► connections ─► phase loop ─► checkpoints ─► verificati
                              ├── SEO backfill (09)
                              ├── Verify (10)
                              ├── Copy used local media (11)
-                             ├── Offer + site-content backfills (12, 13, 13a)
+                             ├── Offer backfill + site content (12, 13)
                              └── Media optimize, formats + safe cleanup (14–16)
 ```
 
@@ -134,8 +134,7 @@ Three mechanisms cooperate:
 | [`11-copy-used-media.ts`](../migration/src/phases/11-copy-used-media.ts) | Copy locally-provisioned files into Strapi's `public/uploads` |
 | [`12-offer-backfill.ts`](../migration/src/phases/12-offer-backfill.ts) | Exact ordered Deal taxonomy reconciliation, with ACF `deal_store` first |
 | [`12a-entity-updated-at`](../migration/src/backfill-entity-updated-at.ts) | Re-derive store/brand/category/bank `created_at`/`updated_at` from the offers now linked to them. Runs after 12 so the relations are final; entities with no offers keep their phase-03 value |
-| [`13-site-content.ts`](../migration/src/phases/13-site-content.ts) | Seed the global / homepage / menu / footer single types |
-| [`13a-homepage-offer-sections.ts`](../migration/src/phases/13a-homepage-offer-sections.ts) | Coupon-backed homepage section backfill for pre-existing homepages |
+| [`13-site-content.ts`](../migration/src/phases/13-site-content.ts) | Seed the global / homepage / menu / footer single types; Homepage Explore Offers and Offers By Brand are Coupon-backed only |
 | [`14-media-optimize.ts`](../migration/src/phases/14-media-optimize.ts) | Optimize + AVIF-twin backfill for already-migrated media |
 | [`15-media-formats-backfill.ts`](../migration/src/phases/15-media-formats-backfill.ts) | Variant-matrix gap backfill (xsmall / thumbnail / AVIF twins) |
 
@@ -721,12 +720,6 @@ header/footer tracking scripts remain excluded unless explicitly approved.
   and a parity test pins those counts to the component schemas' `max`. Every
   component and relation table name is verified against `information_schema`
   first, and each single type is skipped when its table already has a row.
-- **13a — Homepage coupon offer sections.** Backfills the coupon-backed
-  `exploreOffers` / `offersByBrand` component trees onto homepages created before
-  those components existed, preserving the legacy criteria. Idempotent
-  (populated sections are skipped), transactional, and serialized on the homepage
-  row. Missing component infrastructure fails the phase — apply the schemas
-  first, then rerun it standalone.
 - **14 — Media optimize.** Two passes over already-migrated S3 images. Pass 1
   takes rows with no `formats` and an optimizable MIME type, optimizes the
   original and generates the full variant matrix including AVIF twins, writing
@@ -847,8 +840,7 @@ deterministic document ids and conflict clauses. Phase 03 uses one transaction
 per taxonomy so its entity, media links, FAQ and SEO changes commit together;
 slow disk/S3 work is completed before that transaction opens. Phase 07 uses one
 transaction per prepared Coupon batch so every row and its owned relations
-commit atomically. Phase 13a is also transactional and serialized on the
-homepage row.
+commit atomically.
 
 ---
 

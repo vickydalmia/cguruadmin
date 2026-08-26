@@ -45,11 +45,6 @@
       "component": "home.explore-offers",
       "repeatable": false
     },
-    "exploreDeals": {
-      "type": "component",
-      "component": "home.explore-deals",
-      "repeatable": false
-    },
     "newlyAdded": {
       "type": "component",
       "component": "home.newly-added",
@@ -58,11 +53,6 @@
     "offersByBrand": {
       "type": "component",
       "component": "home.offer-list",
-      "repeatable": false
-    },
-    "dealsByBrand": {
-      "type": "component",
-      "component": "home.deal-list",
       "repeatable": false
     },
     "bankOffers": {

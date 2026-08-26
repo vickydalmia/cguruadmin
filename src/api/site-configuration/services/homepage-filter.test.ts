@@ -14,8 +14,6 @@ describe('filterHomepage', () => {
     const homepage = {
       hero: { products: [{ documentId: 'deal-1' }] },
       topDeals: { enabled: true },
-      dealsByBrand: { enabled: true },
-      exploreDeals: { enabled: true },
     };
 
     filterHomepage(homepage, features({ dealOfTheDay: false }));
@@ -23,8 +21,6 @@ describe('filterHomepage', () => {
     // Hero cards link to their own Deal detail pages, not the campaign landing.
     expect(homepage.hero.products).toHaveLength(1);
     expect(homepage.topDeals.enabled).toBe(false);
-    expect(homepage.dealsByBrand.enabled).toBe(false);
-    expect(homepage.exploreDeals.enabled).toBe(false);
   });
 
   it('retains Product Deal rails when catalog and campaign are live', () => {

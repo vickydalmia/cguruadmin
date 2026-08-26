@@ -74,4 +74,23 @@ describe('feature readiness', () => {
       live: true,
     });
   });
+
+  it('treats entity template ownership as campaign enablement', async () => {
+    const config = { ...INDIA_DEFAULT_CONFIGURATION, countryCode: 'US' };
+    const rows = {
+      'api::independence-day-sale-page.independence-day-sale-page': {
+        hero: { image: true },
+        countdown: { saleEndAt: '2026-08-15' },
+      },
+    };
+
+    const readiness = await getFeatureReadiness(strapiHarness(rows, {}), config);
+
+    expect(readiness.independenceDaySale).toMatchObject({
+      enabled: false,
+      ready: true,
+      live: false,
+    });
+    expect(readiness.independenceDaySale.path).toBeUndefined();
+  });
 });

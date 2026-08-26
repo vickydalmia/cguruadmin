@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import homepageSchema from '../content-types/homepage/schema.json';
 import createHomepageController from './custom';
 
 const ALL_FEATURES_LIVE = Object.fromEntries(
@@ -71,6 +72,15 @@ function actionableDeal(index: number, overrides: Record<string, any> = {}) {
 }
 
 describe('homepage aggregate offer population', () => {
+  it('exposes only the Coupon-backed Explore Offers and Offers by Brand fields', () => {
+    const attributes = homepageSchema.attributes as Record<string, unknown>;
+
+    expect(attributes).toHaveProperty('exploreOffers');
+    expect(attributes).toHaveProperty('offersByBrand');
+    expect(attributes).not.toHaveProperty('exploreDeals');
+    expect(attributes).not.toHaveProperty('dealsByBrand');
+  });
+
   it('ships full offer card content on every deal surface, hero included', async () => {
     const harness = createHarness({});
 
@@ -86,8 +96,6 @@ describe('homepage aggregate offer population', () => {
     ];
     const fullDealRefs = [
       populate.topDeals.populate.deals,
-      populate.dealsByBrand.populate.deals,
-      populate.exploreDeals.populate.tabs.populate.deals,
     ];
 
     for (const ref of [...couponRefs, ...fullDealRefs]) {
@@ -132,8 +140,6 @@ describe('homepage aggregate offer population', () => {
 
     for (const ref of [
       populate.topDeals.populate.deals,
-      populate.dealsByBrand.populate.deals,
-      populate.exploreDeals.populate.tabs.populate.deals,
       populate.offersByBrand.populate.offers,
       populate.exploreOffers.populate.tabs.populate.offers,
     ]) {
@@ -162,7 +168,6 @@ describe('homepage aggregate offer population', () => {
       populate.hero.populate.products,
       populate.topOffers.populate.items,
       populate.cgExclusive.populate.items,
-      populate.exploreDeals.populate.tabs,
       populate.exploreOffers.populate.tabs,
       populate.newlyAdded.populate.items,
       populate.bankOffers.populate.items,
@@ -192,7 +197,6 @@ describe('homepage aggregate offer population', () => {
       // would replace these bare curated records as non-actionable.
       topDeals: { enabled: false, deals: [expired, ...published] },
       offersByBrand: { offers: [expired, ...published] },
-      exploreDeals: { tabs: [{ deals: [expired, ...published] }] },
       exploreOffers: { tabs: [{ offers: [expired, ...published] }] },
     });
 
@@ -201,7 +205,6 @@ describe('homepage aggregate offer population', () => {
     expect(response.data.popularStores.stores).toHaveLength(31);
     expect(response.data.topDeals.deals).toHaveLength(10);
     expect(response.data.offersByBrand.offers).toHaveLength(10);
-    expect(response.data.exploreDeals.tabs[0].deals).toHaveLength(10);
     expect(response.data.exploreOffers.tabs[0].offers).toHaveLength(10);
     expect(JSON.stringify(response.data)).not.toContain('expired');
   });

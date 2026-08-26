@@ -38,8 +38,6 @@ const SITE_CONFIGURATION_BOOLEAN_FIELDS = [
   "privacyPolicyEnabled",
   "termsAndConditionsEnabled",
   "affiliateDisclosureEnabled",
-  "dealOfTheDayEnabled",
-  "independenceDaySaleEnabled",
 ] as const;
 
 function validateSiteConfigurationProfile(): void {

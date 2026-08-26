@@ -9,7 +9,9 @@ It does three jobs:
 1. **CMS** — editors manage stores, brands, categories, banks, coupons, deals
    and the curated homepage/menu/footer through a customized admin panel.
    Super Admins also manage the deployment's identity, localization, feature
-   readiness and campaign templates through **Settings → Country Setup**.
+   readiness and country-specific Content Manager visibility through
+   **Settings → Country Setup**. Campaign templates are selected on their
+   Store, Brand, Category, or Bank owner.
 2. **Public API** — a hand-written read surface (`/api/search`,
    `/api/directories/:kind`, `/api/homepage-full`, offer listings, ratings,
    redeem) consumed by the ISR gateway and the Astro frontend. Core Strapi
@@ -46,7 +48,7 @@ lifecycle state.
 | **Global Settings** | single | Site-wide header/footer code injection |
 | **Deal of the Day Page** | single | The curated Deal of the Day page |
 | **Independence Day Sale Page** | single | The curated Independence Day campaign content |
-| **Site Configuration** | hidden single | One deployment's country, locale, timezone, currency, onboarding state and fixed feature switches; edited through Country Setup |
+| **Site Configuration** | hidden single | One deployment's country, locale, timezone, currency, onboarding state and catalog/editorial/legal feature switches; edited through Country Setup |
 
 Schemas live at `src/api/*/content-types/*/schema.json`; reusable components at
 [`src/components/`](./src/components).

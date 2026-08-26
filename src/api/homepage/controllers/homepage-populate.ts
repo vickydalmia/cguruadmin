@@ -35,10 +35,8 @@ export const TOP_DEALS_RENDER_COUNT = 6;
 export const SECTION_LIST_CAPS = {
   popularStores: 31, // site shows 31
   topDeals: 10, // site shows 6
-  dealsByBrand: 10, // legacy fallback, mirrors topDeals
   offersByBrand: 10, // site shows 6
   exploreOffersPerTab: 10, // site shows 6 per tab
-  exploreDealsPerTab: 10, // legacy fallback, mirrors exploreOffers
 } as const;
 
 export const COUPON_FIELDS = [
@@ -135,18 +133,6 @@ export const HOMEPAGE_POPULATE = {
       items: { populate: { coupon: publishedCouponRef, bannerOverride: true } },
     },
   },
-  exploreDeals: {
-    populate: {
-      viewAllCta: true,
-      tabs: {
-        populate: {
-          viewAllCta: true,
-          category: categoryRef,
-          deals: publishedDealListRef,
-        },
-      },
-    },
-  },
   exploreOffers: {
     populate: {
       viewAllCta: true,
@@ -165,7 +151,6 @@ export const HOMEPAGE_POPULATE = {
       items: { populate: { coupon: publishedCouponRef, cardImage: true } },
     },
   },
-  dealsByBrand: { populate: { viewAllCta: true, deals: publishedDealListRef } },
   offersByBrand: { populate: { viewAllCta: true, offers: publishedCouponListRef } },
   bankOffers: { populate: { viewAllCta: true, items: { populate: { bank: bankRef } } } },
   howItWorks: { populate: { steps: true, features: true } },

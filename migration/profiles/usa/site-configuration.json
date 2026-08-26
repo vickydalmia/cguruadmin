@@ -21,7 +21,5 @@
   "cultureEnabled": false,
   "privacyPolicyEnabled": false,
   "termsAndConditionsEnabled": false,
-  "affiliateDisclosureEnabled": false,
-  "dealOfTheDayEnabled": false,
-  "independenceDaySaleEnabled": false
+  "affiliateDisclosureEnabled": false
 }

@@ -112,18 +112,8 @@ export function dropDeadOffers(homepage: any) {
       }
     }
   }
-  for (const key of ['topDeals', 'dealsByBrand']) {
-    const section = homepage[key];
-    if (section?.deals) {
-      section.deals = section.deals.filter(live);
-    }
-  }
-  if (homepage.exploreDeals?.tabs) {
-    for (const tab of homepage.exploreDeals.tabs) {
-      if (tab?.deals) {
-        tab.deals = tab.deals.filter(live);
-      }
-    }
+  if (homepage.topDeals?.deals) {
+    homepage.topDeals.deals = homepage.topDeals.deals.filter(live);
   }
   return homepage;
 }
@@ -142,18 +132,11 @@ export function capCuratedLists(homepage: any) {
       SECTION_LIST_CAPS.popularStores,
     );
   }
-  for (const key of ['topDeals', 'dealsByBrand'] as const) {
-    const section = homepage[key];
-    if (section?.deals) {
-      section.deals = cap(section.deals, SECTION_LIST_CAPS[key]);
-    }
-  }
-  if (homepage.exploreDeals?.tabs) {
-    for (const tab of homepage.exploreDeals.tabs) {
-      if (tab?.deals) {
-        tab.deals = cap(tab.deals, SECTION_LIST_CAPS.exploreDealsPerTab);
-      }
-    }
+  if (homepage.topDeals?.deals) {
+    homepage.topDeals.deals = cap(
+      homepage.topDeals.deals,
+      SECTION_LIST_CAPS.topDeals,
+    );
   }
   if (homepage.offersByBrand?.offers) {
     homepage.offersByBrand.offers = cap(

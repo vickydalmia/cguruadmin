@@ -115,18 +115,6 @@ export const HOMEPAGE_SECTION_LABELS: SectionLabel[] = [
       'Selected entities become canonical Popular Searches links at the bottom of the page.',
   },
   {
-    attr: 'exploreDeals',
-    label: 'Legacy · Explore Deals (temporary fallback)',
-    description:
-      'Deprecated Deal-schema content retained for one compatibility release. Populate Explore Offers instead.',
-  },
-  {
-    attr: 'dealsByBrand',
-    label: 'Legacy · Deals by Brand (temporary fallback)',
-    description:
-      'Deprecated Deal-schema content retained for one compatibility release. Populate Offers by Brand instead.',
-  },
-  {
     attr: 'seo',
     label: 'SEO (search & social)',
     description:

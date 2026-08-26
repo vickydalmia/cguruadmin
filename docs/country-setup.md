@@ -12,6 +12,8 @@ The short version is:
 - every deployment chooses one country, locale, timezone, and currency;
 - the same application code is used everywhere;
 - editors choose which source-backed pages are live;
+- Country Setup also removes disabled types from the Strapi Content Manager
+  menu while preserving their schemas and stored data;
 - campaign designs are selected on an entity, not tied to a hardcoded URL;
 - India-compatible defaults keep the current site working during rollout,
   rollback, an older-CMS overlap, or a temporary settings failure.
@@ -48,6 +50,15 @@ Only a Strapi Super Admin can open **Settings → Country Setup** or call its
 write endpoint. The underlying Site Configuration single type is hidden from
 the ordinary Content Manager so editors cannot accidentally create a second
 configuration row.
+
+The stored switches cover Catalog, Editorial, and Legal features. Deal of the
+Day and Independence Day are not Site Configuration switches: selecting their
+`pageTemplate` on an entity is the campaign activation decision.
+
+Two old private campaign columns remain physically present only so rolling
+back to the previous India application image does not encounter a missing
+database field. They are excluded from Country Setup, migration profiles,
+public settings, and every decision in the current runtime.
 
 ### Identity and localization
 
@@ -91,16 +102,24 @@ Every configurable feature reports three values:
 
 | Value | Plain-language meaning |
 | --- | --- |
-| `enabled` | A Super Admin wants the feature on. |
+| `enabled` | A Super Admin switched the feature on, or an entity owns the campaign template. |
 | `ready` | The required CMS content or catalog records exist. |
 | `live` | Both are true: `enabled && ready`. |
 
-Country Setup refuses a save that enables an unready feature. The error names
-the missing content, such as an absent singleton, an empty required section,
-no catalog records, no campaign-template owner, or no eligible Product Deals.
+Country Setup allows an unready feature to be switched On. This is an authoring
+state, not a publishing bypass: the content type appears in the Content Manager
+sidebar, while `live` remains false and its public routes remain unavailable.
+Once the required content is complete, readiness becomes true and the feature
+becomes live without a second feature-toggle change.
 
-This prevents a switch from publishing a blank page. It also means operators
-should create and review content first, then enable the feature.
+An Off feature is omitted from the ordinary Content Manager sidebar and the
+public website. Turn it On and save before authoring its content. Hiding a link
+never unregisters a schema, deletes a database row, or acts as an RBAC/security
+boundary.
+
+Campaigns use the same three-state response without switches: template
+ownership supplies `enabled`, the singleton (and live Product Deals for the
+Deal template) supplies `ready`, and only their combination is `live`.
 
 ### Feature registry
 
@@ -122,8 +141,8 @@ should create and review content first, then enable the feature.
 | Legal | Privacy Policy | Heading and real sections | `/privacy-policy/` |
 | Legal | Terms and Conditions | Heading and real sections | `/terms-and-conditions/` |
 | Legal | Affiliate Disclosure | Heading and real sections | `/affiliate-disclosure/` |
-| Campaigns | Deal of the Day | Singleton, owner, and live Deals | Selected `dealTemplate` owner path |
-| Campaigns | Independence Day Sale | Singleton and owner | Selected `independenceDayTemplate` owner path |
+| Campaigns | Deal of the Day | `dealTemplate` owner activates it; singleton and live Deals make it ready | Selected owner path |
+| Campaigns | Independence Day Sale | `independenceDayTemplate` owner activates it; singleton makes it ready | Selected owner path |
 
 Homepage, Search, robots, sitemaps, error documents, and other system plumbing
 remain available. Search remains reachable but shows only enabled result types.
@@ -139,6 +158,8 @@ The switch is applied consistently instead of merely hiding one menu link.
 After the settings change is invalidated and the next route inventory is
 installed:
 
+- Content Manager omits the disabled feature's collection/single types from
+  its sidebar; turn the feature On and save to expose its editor.
 - Menu and Footer omit links owned by the feature.
 - Homepage sections or internal “View all” links that need the feature are
   omitted.
@@ -179,11 +200,11 @@ contains one page's content. Assigning the same template to a second entity,
 including by cloning an owner, is rejected. This avoids publishing the same
 campaign at two self-canonical URLs.
 
-Changing or disabling a campaign does not delete the underlying entity:
+Changing or clearing a campaign template does not delete the underlying entity:
 
 - when the campaign is live and complete, the authoritative owner gets the
   campaign design;
-- when the campaign is disabled or its singleton cannot render, the entity
+- when its template is cleared or its singleton cannot render, the entity
   uses its normal design if its Store/Brand/Category/Bank feature is live;
 - duplicate legacy owners, if direct database writes somehow created them,
   do not receive duplicate campaign content; only the authoritative path can
@@ -303,7 +324,7 @@ The design has several independent safety layers:
 
 | Risk | Protection for India |
 | --- | --- |
-| No Site Configuration row yet | Both CMS and UI normalize to India, `en-IN`, `Asia/Kolkata`, `INR`, `Rs.`, and all 18 features enabled. |
+| No Site Configuration row yet | Both CMS and UI normalize identity and all 16 configurable switches to India-compatible defaults; campaign enablement still follows template ownership. |
 | CMS temporarily fails | UI serves the last good settings or built-in India defaults instead of failing every document. |
 | UI is released before the CMS schema | Settings endpoint failure is tolerated; route reads retry without `pageTemplate`. |
 | New database columns | Changes are additive and default existing entities to the normal design. |
@@ -354,7 +375,7 @@ The checked-in USA migration profile starts with:
 - United States (`US`), `en-US`, `America/New_York`, and `USD`/`$`;
 - Stores and Coupons enabled;
 - Brands, Categories, Banks, and Product Deals disabled;
-- Deal of the Day and Independence Day Sale disabled;
+- no Deal of the Day or Independence Day campaign template owner initially;
 - editorial and legal pages disabled until country-specific CMS content is
   supplied and reviewed.
 
@@ -452,21 +473,29 @@ For a new country deployment:
 5. Run it twice to prove idempotency.
 6. Open **Settings → Country Setup**.
 7. Confirm identity/localization previews.
-8. Leave any page without reviewed content disabled.
-9. Assign campaign templates only after their singleton content is ready.
-10. Save, then verify `/api/site-settings`, search, navigation, direct 404s,
+8. Turn a feature **On** and save before preparing its content in Content Manager.
+   Until readiness passes, the feature is editable but remains unavailable on
+   the public website.
+9. Leave any page without reviewed content disabled.
+10. To create a campaign, assign its template to one entity, refresh Content
+    Manager so its singleton appears, and complete that content. The entity
+    keeps its generic design until campaign readiness passes.
+11. Save, then verify `/api/site-settings`, search, navigation, direct 404s,
     route inventory, sitemap, and structured data.
 
-For an existing country, create or review the required CMS content before
-turning on a new feature. If Country Setup says a feature is not ready, correct
-the named source rather than bypassing the validation in the database.
+For an existing country, turn the feature On to expose its editor, then create
+or review the required CMS content. Country Setup continues to show the named
+readiness problem until the source is complete; the public site stays protected
+during that authoring window.
 
 ## 13. Troubleshooting
 
 | Symptom | Likely cause | Action |
 | --- | --- | --- |
-| Country Setup will not enable a page | Required singleton fields or catalog records are missing | Read the readiness reason, complete the source, then save again. |
-| Campaign uses the generic design | Campaign is disabled/unready, the entity is not the authoritative owner, or singleton data could not render | Check the feature state, template owner, and campaign aggregate endpoint. |
+| Feature is On but its public page still returns 404 | Required singleton fields or catalog records are missing | Read the readiness reason in Country Setup and complete the source in Content Manager. |
+| Disabled content type is absent in admin | Country Setup is correctly filtering Content Manager navigation | Turn the feature On and save, then open it from Content Manager. Its public route stays unavailable until readiness passes. |
+| Campaign singleton is absent in admin | No entity owns that campaign template yet | Select the template on one Store, Brand, Category, or Bank, then refresh Content Manager. |
+| Campaign uses the generic design | Campaign is unready, the entity is not the authoritative owner, or singleton data could not render | Check the feature state, template owner, and campaign aggregate endpoint. |
 | Second entity cannot use a campaign template | One-owner validation is working | Clear the template on the current owner first, then assign it to the new owner. |
 | Disabled URL still appears briefly | Old route inventory/HTML is still cached | Confirm the Site Configuration outbox event delivered and install the refreshed inventory. |
 | Page disappeared but menu link remains | CMS/UI versions or site-chrome cache are stale | Verify both release versions and refresh the chrome/routes scopes. |
@@ -511,7 +540,8 @@ the named source rather than bypassing the validation in the database.
 }
 ```
 
-Campaign feature states add `path` when a live authoritative owner exists.
+For campaigns, `enabled` is derived from template ownership. Campaign feature
+states add `path` only when that authoritative owner is live and ready.
 
 ### Admin settings
 
@@ -523,9 +553,10 @@ GET /country-setup/
 PUT /country-setup/
 ```
 
-The PUT body contains the editable identity fields and boolean feature flags.
-`features` and `localization` are calculated response fields and are not written
-back by the admin form.
+The PUT body contains the editable identity fields and the 16
+catalog/editorial/legal boolean feature flags. There are no campaign booleans.
+`features` and `localization` are calculated response fields and are not
+written back by the admin form.
 
 ## Related documentation
 

@@ -5,7 +5,7 @@
     "singularName": "site-configuration",
     "pluralName": "site-configurations",
     "displayName": "Site Configuration",
-    "description": "Country identity, localization, onboarding and fixed feature availability"
+    "description": "Country identity, localization, onboarding and admin/public feature availability"
   },
   "options": {
     "draftAndPublish": false
@@ -43,7 +43,7 @@
     "termsAndConditionsEnabled": { "type": "boolean", "required": true, "default": true },
     "affiliateDisclosureEnabled": { "type": "boolean", "required": true, "default": true },
 
-    "dealOfTheDayEnabled": { "type": "boolean", "required": true, "default": true },
-    "independenceDaySaleEnabled": { "type": "boolean", "required": true, "default": true }
+    "dealOfTheDayEnabled": { "type": "boolean", "required": true, "default": true, "private": true },
+    "independenceDaySaleEnabled": { "type": "boolean", "required": true, "default": true, "private": true }
   }
 }

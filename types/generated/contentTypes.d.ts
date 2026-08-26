@@ -1427,8 +1427,6 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    dealsByBrand: Schema.Attribute.Component<'home.deal-list', false>;
-    exploreDeals: Schema.Attribute.Component<'home.explore-deals', false>;
     exploreOffers: Schema.Attribute.Component<'home.explore-offers', false>;
     faq: Schema.Attribute.Component<'home.faq-block', false>;
     hero: Schema.Attribute.Component<'home.hero-section', false>;
@@ -1962,7 +1960,7 @@ export interface ApiSiteConfigurationSiteConfiguration
   extends Struct.SingleTypeSchema {
   collectionName: 'site_configurations';
   info: {
-    description: 'Country identity, localization, onboarding and fixed feature availability';
+    description: 'Country identity, localization, onboarding and admin/public feature availability';
     displayName: 'Site Configuration';
     pluralName: 'site-configurations';
     singularName: 'site-configuration';
@@ -2028,12 +2026,14 @@ export interface ApiSiteConfigurationSiteConfiguration
       Schema.Attribute.DefaultTo<'INR'>;
     dealOfTheDayEnabled: Schema.Attribute.Boolean &
       Schema.Attribute.Required &
+      Schema.Attribute.Private &
       Schema.Attribute.DefaultTo<true>;
     faqsEnabled: Schema.Attribute.Boolean &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<true>;
     independenceDaySaleEnabled: Schema.Attribute.Boolean &
       Schema.Attribute.Required &
+      Schema.Attribute.Private &
       Schema.Attribute.DefaultTo<true>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<

@@ -16,15 +16,13 @@ export function filterHomepage(
   if (!homepage) return homepage;
 
   // Product Deal rails use the live dealTemplate owner as their "View all"
-  // landing. Keeping the cards while that campaign is disabled/incomplete
-  // would either emit a dead legacy path or strand the section without its
+  // landing. Keeping the cards while that campaign is inactive/incomplete
+  // would either emit a dead owner path or strand the section without its
   // required navigation, so both dependencies must be live.
   const productDealsLive = enabled(features, 'productDeals');
   if (!productDealsLive && homepage.hero) homepage.hero.products = [];
   if (!productDealsLive || !enabled(features, 'dealOfTheDay')) {
-    for (const field of ['topDeals', 'dealsByBrand', 'exploreDeals']) {
-      disableSection(homepage, field);
-    }
+    disableSection(homepage, 'topDeals');
   }
   if (!enabled(features, 'coupons')) {
     for (const field of [
@@ -43,12 +41,10 @@ export function filterHomepage(
   }
   if (!enabled(features, 'brands')) {
     disableSection(homepage, 'offersByBrand');
-    disableSection(homepage, 'dealsByBrand');
     if (homepage.popularSearches) homepage.popularSearches.brands = [];
   }
   if (!enabled(features, 'categories')) {
     disableSection(homepage, 'exploreOffers');
-    disableSection(homepage, 'exploreDeals');
     if (homepage.popularSearches) homepage.popularSearches.categories = [];
   }
   if (!enabled(features, 'banks')) {

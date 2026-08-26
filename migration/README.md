@@ -17,7 +17,7 @@ owner/operator explanation and India compatibility guarantees.
   - [00 Preflight](#phase-00--preflight) · [01 Media Inventory](#phase-01--media-inventory) · [02 Media Upload to S3](#phase-02--media-upload-to-s3) · [03 Taxonomies](#phase-03--taxonomies)
   - [05 Unique Coupon Pools](#phase-05--unique-coupon-pools) · [06 Unique Codes](#phase-06--unique-codes) · [06a Users](#phase-06a--users) · [07 Coupons](#phase-07--coupons) · [08 Deals](#phase-08--deals)
   - [09 SEO Backfill](#phase-09--seo-backfill) · [10 Verification](#phase-10--verification) · [11 Copy Used Media](#phase-11--copy-used-media) · [12 Offer Backfill](#phase-12--offer-backfill)
-  - [13 Site Content](#phase-13--site-content) · [13a Homepage Coupon Offer Sections](#phase-13a--homepage-coupon-offer-sections)
+  - [13 Site Content](#phase-13--site-content)
   - [14 Media Optimize](#phase-14--media-optimize-backfill) · [15 Media Formats Backfill](#phase-15--media-formats-backfill)
 - [Data Mapping](#data-mapping)
 - [Media / S3 Pipeline](#media--s3-pipeline)
@@ -177,7 +177,6 @@ npm run migrate -- --allow-partial-deals
 # Phase 08 or making another background-removal API attempt.
 npm run migrate -- --phase 12-offer-backfill --allow-partial-deals
 npm run migrate -- --phase 13-site-content
-npm run migrate -- --phase 13a-homepage-offer-sections
 npm run migrate -- --phase 13b-footer-media
 npm run migrate -- --phase 13c-footer-country-links
 npm run migrate -- --phase 13d-site-selection-backfill
@@ -477,8 +476,14 @@ Seeds the Strapi single types the frontend needs:
 - `homepage` — created as a **single published row** (draftAndPublish is disabled on the publish-only homepage, menu, footer, and global single types), with the full component tree built once. Also seeds `title: "Homepage"` for the admin entry header. Curated sections: hero banners from the `options_slider_features` ACF repeater; hero products and Top Deals from migrated Deal entities; CG Exclusive, Fresh Drops, Explore Offers, and Offers By Brand from Coupon entities; Popular Stores from `options_featured_stores` (fallback: top stores by published-coupon count); bank offers ranked by published-coupon count; plus How It Works and FAQ copy mirrored from the frontend. Per-section item counts live in `src/utils/homepage-limits.ts` (each holds a +4 buffer over what the site renders; a parity test pins them to the component schema `max` values).
 - `menu` — topStores relation (same curated store list), one shared responsive hierarchy made from explore Categories and their immediate child Categories, and the fixed extra nav items. Desktop renders those sections as mega-menu columns; mobile renders the same ordered groups as icon rows with a child-link drill-down plus the first four configured Top Stores as Popular Stores pills. Section and child-link icons uploaded in Menu override their related Category icons; seeded rows intentionally leave overrides empty so Category icons remain the fallback.
 - `footer` — link sections, social links, countries, and partner card mirrored from the frontend `footer-data.ts`; Popular Stores labels are resolved to real store relations where a matching store name exists. Country flag media is attached by Phase 13b.
-- `site_configuration` — identity, localization, onboarding state and feature
-  flags loaded from the active profile JSON.
+- `site_configuration` — identity, localization, onboarding state and
+  catalog/editorial/legal feature flags loaded from the active profile JSON.
+  Campaign activation is never seeded as a boolean; it follows entity
+  `pageTemplate` ownership.
+
+The retired Deal-backed Homepage fields `exploreDeals` and `dealsByBrand` are
+not seeded, queried, or retained as compatibility fallbacks. Explore Offers
+and Offers By Brand use their Coupon-backed fields only.
 
 The USA profile imports five hero banners and resolves all eight curated
 featured Store URLs to Store slugs. The four old eight-store grids are reported
@@ -489,16 +494,6 @@ scripts are not copied unless `IMPORT_WP_TRACKING_SCRIPTS=true` is explicitly
 approved.
 
 All component and relation link table names are verified against `information_schema` before writing; anything missing (schema not migrated yet) is skipped with a clear warning. Each single type is skipped entirely if its table already has a row, so re-runs are safe.
-
-### Phase 13a — Homepage Coupon Offer Sections
-
-Backfills existing homepages created before the Coupon-backed `exploreOffers` and `offersByBrand` components existed. It preserves the legacy section/category/brand criteria, selects real Coupons whose migration `contentStatus` is `published`, clones safe View All copy, and writes the new component trees transactionally. It never converts a Deal ID into a Coupon ID and is idempotent: populated new sections are skipped. Concurrent runs serialize on the homepage row. Missing Strapi component or relation infrastructure fails the phase so it is not checkpointed; apply the Strapi schemas first and rerun. The legacy Deal-backed fields remain available for one frontend compatibility release.
-
-Run only this compatibility phase after deploying the new Strapi component schemas:
-
-```bash
-npm run migrate -- --phase 13a-homepage-offer-sections
-```
 
 ### Phase 13b — Footer Media
 
