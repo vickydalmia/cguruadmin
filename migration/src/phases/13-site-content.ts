@@ -1811,7 +1811,7 @@ async function parseSliderBanners(): Promise<Banner[]> {
   return banners;
 }
 
-// ── curated store list (options_featured_stores → fallback by coupon count) ──
+// ── curated store list (options_featured_stores only) ──
 
 async function getCuratedStores(): Promise<StoreRow[]> {
   if (!hasTable("stores")) {
@@ -1895,43 +1895,17 @@ async function getCuratedStores(): Promise<StoreRow[]> {
     }
   }
 
-  if (
-    config.source.expectedFeaturedStores > 0 &&
-    stores.length !== config.source.expectedFeaturedStores
-  ) {
-    throw new Error(
-      `Featured Store exception: expected ${config.source.expectedFeaturedStores}, resolved ${stores.length}`,
-    );
-  }
-
   homepageSourceReview.featuredStoresResolved = stores.length;
 
   if (stores.length > 0) {
     logger.info(`curated stores: ${stores.length} from options_featured_stores`);
-    return stores;
+  } else {
+    logger.info(
+      "curated stores: no configured entry resolved to a migrated Store — " +
+        "leaving Homepage and Menu store selections empty for manual setup",
+    );
   }
-
-  // Fallback: top stores by published-coupon count
-  const couponsStoresLnk = await detectLnk("coupons", "stores", "store");
-  if (!couponsStoresLnk) {
-    logger.warn("coupons_stores_lnk not found — curated store list empty");
-    return [];
-  }
-  const fallback = await pgQuery<StoreRow>(
-    `SELECT s.id, s.name
-     FROM "stores" s
-     JOIN "${couponsStoresLnk.table}" l ON l."${couponsStoresLnk.targetCol}" = s.id
-     JOIN "coupons" c ON c.id = l."${couponsStoresLnk.sourceCol}"
-       AND c.published_at IS NOT NULL
-       AND c.content_status = 'published'
-     GROUP BY s.id, s.name
-     ORDER BY COUNT(*) DESC
-     LIMIT ${1 + HOMEPAGE_SEED_LIMITS.popularStores}`
-  );
-  logger.info(
-    `curated stores: options_featured_stores empty/unmapped — fallback to top ${fallback.length} stores by coupon count`
-  );
-  return fallback;
+  return stores;
 }
 
 // ── explore categories (fuzzy slug match) ──

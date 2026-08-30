@@ -486,13 +486,15 @@ The retired Deal-backed Homepage fields `exploreDeals` and `dealsByBrand` are
 not seeded, queried, or retained as compatibility fallbacks. Explore Offers
 and Offers By Brand use their Coupon-backed fields only.
 
-The USA profile imports five hero banners and resolves all eight curated
-featured Store URLs to Store slugs. The four old eight-store grids are reported
-and intentionally ignored. Recommended/Exclusive/Newly Added Coupon sections
-use their WordPress popularity and offer-type values, while sections requiring
-a disabled or unavailable catalog type are disabled. Header/footer tracking
-scripts are not copied unless `IMPORT_WP_TRACKING_SCRIPTS=true` is explicitly
-approved.
+The USA profile imports five hero banners. Curated Featured Store entries are
+linked only when they resolve to migrated Store rows; unmapped entries are
+skipped and no automatic replacement Stores are inserted, so Homepage and Menu
+store selections can be completed manually. The four old eight-store grids are
+reported and intentionally ignored. Recommended/Exclusive/Newly Added Coupon
+sections use their WordPress popularity and offer-type values, while sections
+requiring a disabled or unavailable catalog type are disabled. Header/footer
+tracking scripts are not copied unless `IMPORT_WP_TRACKING_SCRIPTS=true` is
+explicitly approved.
 
 All component and relation link table names are verified against `information_schema` before writing; anything missing (schema not migrated yet) is skipped with a clear warning. Each single type is skipped entirely if its table already has a row, so re-runs are safe.
 

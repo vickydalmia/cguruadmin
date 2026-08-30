@@ -65,7 +65,6 @@ export const config = {
     expectedAttachments: parseInt(optional("EXPECTED_ATTACHMENT_COUNT", migrationProfile() === "usa" ? "10360" : "0"), 10) || 0,
     expectedDeals: parseInt(optional("EXPECTED_DEAL_COUNT", migrationProfile() === "usa" ? "0" : "-1"), 10),
     expectedHeroBanners: parseInt(optional("EXPECTED_HERO_BANNER_COUNT", migrationProfile() === "usa" ? "5" : "0"), 10) || 0,
-    expectedFeaturedStores: parseInt(optional("EXPECTED_FEATURED_STORE_COUNT", migrationProfile() === "usa" ? "8" : "0"), 10) || 0,
   },
   target: {
     internalHosts: optional("TARGET_INTERNAL_HOSTS").split(",").map((value) => value.trim()).filter(Boolean),

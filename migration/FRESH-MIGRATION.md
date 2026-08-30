@@ -220,11 +220,13 @@ To repair an already-migrated database without a full re-run, use
       only; the retired Deal-backed fallback fields are absent.
 - [ ] Spot-check a store page and a Coupon homepage banner URL (CDN base correct).
 
-For USA, the review report must additionally account for 7,162 Stores, 10,360
-attachments, zero Product Deals, five hero banners and eight featured Stores.
-Brands, Categories, Banks, Product Deals and unsupplied editorial/legal pages
-must remain disabled; neither campaign template has an owner. Run the migration a second time
-against the disposable target and confirm those counts do not grow.
+For USA, the review report must additionally account for 549 Stores, 6,504
+Brands, 68 Categories, 7 Banks, 10,360 attachments, zero Product Deals and five
+hero banners. Featured Store relations may remain empty when the WordPress
+selection does not resolve to Store-classified rows; complete those Homepage
+and Menu settings manually. Unsupplied editorial/legal pages must remain
+disabled and neither campaign template has an owner. Run the migration a second
+time against the disposable target and confirm those counts do not grow.
 
 ## 5. Restart Strapi (required)
 
