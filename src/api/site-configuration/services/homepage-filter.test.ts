@@ -68,7 +68,9 @@ describe('filterHomepage', () => {
     const homepage: any = {
       popularStores: {
         enabled: true,
+        featuredEntityType: 'store',
         featuredStore: { documentId: 'store-1' },
+        featuredBrand: { documentId: 'brand-1' },
         stores: [{ documentId: 'store-1' }],
         brands: [{ documentId: 'brand-1' }],
       },
@@ -78,7 +80,9 @@ describe('filterHomepage', () => {
 
     expect(homepage.popularStores).toEqual({
       enabled: true,
+      featuredEntityType: 'store',
       featuredStore: null,
+      featuredBrand: { documentId: 'brand-1' },
       stores: [],
       brands: [{ documentId: 'brand-1' }],
     });
@@ -88,7 +92,9 @@ describe('filterHomepage', () => {
     const homepage: any = {
       popularStores: {
         enabled: true,
+        featuredEntityType: 'brand',
         featuredStore: { documentId: 'store-1' },
+        featuredBrand: { documentId: 'brand-1' },
         stores: [{ documentId: 'store-1' }],
         brands: [{ documentId: 'brand-1' }],
       },
@@ -98,6 +104,7 @@ describe('filterHomepage', () => {
     filterHomepage(homepage, features({ brands: false }));
 
     expect(homepage.popularStores.enabled).toBe(true);
+    expect(homepage.popularStores.featuredBrand).toBeNull();
     expect(homepage.popularStores.stores).toHaveLength(1);
     expect(homepage.popularStores.brands).toEqual([]);
     expect(homepage.offersByBrand.enabled).toBe(false);

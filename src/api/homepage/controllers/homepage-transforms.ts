@@ -192,6 +192,31 @@ export async function fillTopDeals(
 }
 
 type PopularEntityRelation = 'stores' | 'brands';
+type PopularEntityType = 'store' | 'brand';
+
+function selectedFeaturedEntity(section: any): {
+  entity: any;
+  relation: PopularEntityRelation;
+  entityType: PopularEntityType;
+} | null {
+  if (section?.featuredEntityType === 'brand') {
+    return section.featuredBrand
+      ? { entity: section.featuredBrand, relation: 'brands', entityType: 'brand' }
+      : null;
+  }
+  if (section?.featuredEntityType === 'store') {
+    return section.featuredStore
+      ? { entity: section.featuredStore, relation: 'stores', entityType: 'store' }
+      : null;
+  }
+  // Backward compatibility for rows created before featuredEntityType existed.
+  if (section?.featuredStore) {
+    return { entity: section.featuredStore, relation: 'stores', entityType: 'store' };
+  }
+  return section?.featuredBrand
+    ? { entity: section.featuredBrand, relation: 'brands', entityType: 'brand' }
+    : null;
+}
 
 async function countOffersForEntity(
   strapi: Core.Strapi,
@@ -215,8 +240,10 @@ export async function attachOfferCounts(strapi: Core.Strapi, homepage: any) {
   const section = homepage?.popularStores;
   if (!section) return homepage;
 
+  const featured = selectedFeaturedEntity(section);
   const entities = [
-    ...[section.featuredStore, ...(section.stores ?? [])]
+    ...(featured ? [{ entity: featured.entity, relation: featured.relation }] : []),
+    ...(section.stores ?? [])
       .filter(Boolean)
       .map((entity: any) => ({ entity, relation: 'stores' as const })),
     ...(section.brands ?? [])
@@ -265,10 +292,20 @@ export function mergePopularBrandsIntoStores(homepage: any) {
   const section = homepage?.popularStores;
   if (!section) return homepage;
 
+  const featured = selectedFeaturedEntity(section);
+  section.featuredStore = featured
+    ? { ...featured.entity, entityType: featured.entityType }
+    : null;
   section.stores = [
-    ...(Array.isArray(section.stores) ? section.stores : []),
-    ...(Array.isArray(section.brands) ? section.brands : []),
+    ...(Array.isArray(section.stores)
+      ? section.stores.map((entity: any) => ({ ...entity, entityType: 'store' }))
+      : []),
+    ...(Array.isArray(section.brands)
+      ? section.brands.map((entity: any) => ({ ...entity, entityType: 'brand' }))
+      : []),
   ];
+  delete section.featuredBrand;
+  delete section.featuredEntityType;
   delete section.brands;
   return homepage;
 }

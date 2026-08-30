@@ -29,9 +29,9 @@ export const HOMEPAGE_SECTION_LABELS: SectionLabel[] = [
   },
   {
     attr: 'popularStores',
-    label: '2 · Popular Stores',
+    label: '2 · Popular Stores & Brands',
     description:
-      'Store row directly under the hero: one featured store plus up to 24 popular stores.',
+      'Combined entity row directly under the hero: one featured Store or Brand plus selected Stores and Brands.',
   },
   {
     attr: 'topOffers',

@@ -29,6 +29,7 @@ const menuCategoryRef = {
 export const MAX_LIST_ITEMS = 16;
 
 export const MAX_TOP_STORES = 18;
+export const MAX_TOP_BRANDS = 18;
 
 export const TOP_DEALS_RENDER_COUNT = 6;
 
@@ -137,6 +138,7 @@ export const HOMEPAGE_POPULATE = {
   popularStores: {
     populate: {
       viewAllCta: true,
+      featuredBrand: brandRef,
       featuredStore: storeRef,
       stores: storeRef,
       brands: brandRef,
@@ -184,6 +186,7 @@ export const HOMEPAGE_POPULATE = {
 
 export const MENU_POPULATE = {
   topStores: menuStoreRef,
+  topBrands: brandRef,
   searchTopStores: { populate: { store: menuStoreRef } },
   searchSuggestions: true,
   categorySections: {

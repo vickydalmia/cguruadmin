@@ -21,6 +21,7 @@ import {
 
 import {
   COUPON_FIELDS,
+  MAX_TOP_BRANDS,
   MAX_TOP_STORES,
   FOOTER_POPULATE,
   GLOBAL_POPULATE,
@@ -94,6 +95,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
 
     if (sanitizedMenu?.topStores) {
       sanitizedMenu.topStores = cap(sanitizedMenu.topStores, MAX_TOP_STORES);
+    }
+    if (sanitizedMenu?.topBrands) {
+      sanitizedMenu.topBrands = cap(sanitizedMenu.topBrands, MAX_TOP_BRANDS);
     }
     if (sanitizedMenu?.searchTopStores) {
       sanitizedMenu.searchTopStores = cap(sanitizedMenu.searchTopStores, 8);

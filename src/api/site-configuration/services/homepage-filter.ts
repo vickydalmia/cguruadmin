@@ -56,7 +56,10 @@ export function filterHomepage(
     if (homepage.popularSearches) homepage.popularSearches.stores = [];
   }
   if (!brandsLive) {
-    if (homepage.popularStores) homepage.popularStores.brands = [];
+    if (homepage.popularStores) {
+      homepage.popularStores.featuredBrand = null;
+      homepage.popularStores.brands = [];
+    }
     disableSection(homepage, 'offersByBrand');
     if (homepage.popularSearches) homepage.popularSearches.brands = [];
   }

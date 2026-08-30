@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import heroProductSchema from '../../../components/home/hero-product.json';
 import popularStoresSchema from '../../../components/home/popular-stores.json';
+import { COMPONENT_FIELD_LABELS } from '../../../bootstrap/field-hints';
 import homepageSchema from '../content-types/homepage/schema.json';
 import createHomepageController from './custom';
 
@@ -77,6 +79,10 @@ describe('homepage aggregate offer population', () => {
   it('exposes only the Coupon-backed Explore Offers and Offers by Brand fields', () => {
     const attributes = homepageSchema.attributes as Record<string, unknown>;
 
+    expect(heroProductSchema.info.displayName).toBe('Product/Offer');
+    expect(COMPONENT_FIELD_LABELS['home.hero-section']?.products).toBe(
+      'Product/Offer',
+    );
     expect(attributes).toHaveProperty('exploreOffers');
     expect(attributes).toHaveProperty('offersByBrand');
     expect(attributes).not.toHaveProperty('exploreDeals');
@@ -84,6 +90,16 @@ describe('homepage aggregate offer population', () => {
     expect(popularStoresSchema.attributes.brands).toMatchObject({
       type: 'relation',
       relation: 'oneToMany',
+      target: 'api::brand.brand',
+    });
+    expect(popularStoresSchema.attributes.featuredEntityType).toMatchObject({
+      type: 'enumeration',
+      enum: ['store', 'brand'],
+      default: 'store',
+    });
+    expect(popularStoresSchema.attributes.featuredBrand).toMatchObject({
+      type: 'relation',
+      relation: 'oneToOne',
       target: 'api::brand.brand',
     });
   });
@@ -121,6 +137,9 @@ describe('homepage aggregate offer population', () => {
     expect(heroCoupon.fields).not.toContain('excerpt');
 
     expect(populate.popularStores.populate.featuredStore.fields).not.toContain(
+      'shortDescription',
+    );
+    expect(populate.popularStores.populate.featuredBrand.fields).not.toContain(
       'shortDescription',
     );
     expect(populate.popularStores.populate.brands.fields).not.toContain(
@@ -251,6 +270,46 @@ describe('homepage aggregate offer population', () => {
     expect(harness.count).toHaveBeenCalledTimes(4);
     const filters = harness.count.mock.calls.map(([options]) => options.filters);
     expect(filters).toContainEqual({
+      stores: { documentId: 'store-1' },
+      contentStatus: { $eq: 'published' },
+    });
+    expect(filters).toContainEqual({
+      brands: { documentId: 'brand-1' },
+      contentStatus: { $eq: 'published' },
+    });
+  });
+
+  it('normalizes a featured Brand into the existing featuredStore response contract', async () => {
+    const staleStore = { documentId: 'store-1', name: 'Old Store' };
+    const brand = {
+      documentId: 'brand-1',
+      name: 'Featured Brand',
+      slug: 'brands/featured-brand',
+    };
+    const harness = createHarness({
+      popularStores: {
+        featuredEntityType: 'brand',
+        featuredStore: staleStore,
+        featuredBrand: brand,
+        stores: [],
+        brands: [brand],
+      },
+    });
+
+    const response = await harness.controller.homepageFull(harness.ctx as any);
+
+    expect(response.data.popularStores.featuredStore).toMatchObject({
+      documentId: 'brand-1',
+      entityType: 'brand',
+    });
+    expect(response.data.popularStores.stores[0]).toMatchObject({
+      documentId: 'brand-1',
+      entityType: 'brand',
+    });
+    expect(response.data.popularStores).not.toHaveProperty('featuredBrand');
+    expect(response.data.popularStores).not.toHaveProperty('featuredEntityType');
+    const filters = harness.count.mock.calls.map(([options]) => options.filters);
+    expect(filters).not.toContainEqual({
       stores: { documentId: 'store-1' },
       contentStatus: { $eq: 'published' },
     });
@@ -426,6 +485,9 @@ describe('site chrome aggregate population', () => {
         topStores: Array.from({ length: 20 }, (_, index) => ({
           documentId: `top-store-${index}`,
         })),
+        topBrands: Array.from({ length: 20 }, (_, index) => ({
+          documentId: `top-brand-${index}`,
+        })),
         searchTopStores: Array.from({ length: 10 }, (_, index) => ({
           store: { documentId: `store-${index}` },
         })),
@@ -477,6 +539,7 @@ describe('site chrome aggregate population', () => {
     expect(menuCall.populate.searchTopStores).toEqual({
       populate: { store: expect.any(Object) },
     });
+    expect(menuCall.populate.topBrands).toEqual(expect.any(Object));
     expect(menuCall.populate.searchSuggestions).toBe(true);
     expect(menuCall.populate.categorySections.populate.icon).toBe(true);
     expect(
@@ -487,6 +550,7 @@ describe('site chrome aggregate population', () => {
     ).toBe(true);
     expect(response.menu.searchTopStores).toHaveLength(8);
     expect(response.menu.topStores).toHaveLength(18);
+    expect(response.menu.topBrands).toHaveLength(18);
     expect(footerCall.populate.countries).toEqual({
       populate: { flag: true },
     });
