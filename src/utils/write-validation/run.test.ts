@@ -27,6 +27,7 @@ describe('write-validation step order', () => {
       'normaliseCouponTypeFields',
       'normaliseFestiveOfferFields',
       'normaliseAffiliateOfferFields',
+      'normaliseHomepageHeroOfferFields',
     ]);
   });
 
@@ -37,6 +38,7 @@ describe('write-validation step order', () => {
       'validateChangedFields',
       'warnUndersizedSeoOgImage',
       'validateHomepageImages',
+      'validateHomepageHeroOffers',
       'validateHomepagePopularSearches',
       'validateMenuCategorySections',
       'validateMenuNotification',

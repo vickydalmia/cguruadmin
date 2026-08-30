@@ -100,6 +100,32 @@ export type ResolvedOfferTaxonomyRelations = {
   logoStoreId: number | null;
 };
 
+/**
+ * A migrated Coupon related to at least one Brand is an affiliate-brand
+ * offer. Preserve every Brand/category/bank relation, but remove Store and
+ * Logo Store links because the Strapi invariant makes those mutually
+ * exclusive with isForAffiliateBrand=true.
+ */
+export function normaliseMigratedAffiliateBrandRelations(
+  resolved: ResolvedOfferTaxonomyRelations,
+): {
+  isForAffiliateBrand: boolean;
+  resolved: ResolvedOfferTaxonomyRelations;
+} {
+  const isForAffiliateBrand = resolved.idsByTable.brands.length > 0;
+  if (!isForAffiliateBrand) return { isForAffiliateBrand, resolved };
+  return {
+    isForAffiliateBrand,
+    resolved: {
+      idsByTable: {
+        ...resolved.idsByTable,
+        stores: [],
+      },
+      logoStoreId: null,
+    },
+  };
+}
+
 function groupedRelationIds(
   refs: readonly StrapiEntityRef[],
 ): Record<RelationTable, number[]> {
@@ -328,19 +354,3 @@ export async function replaceResolvedOfferTaxonomyRelations(
  * This is the re-import boundary: stale rows disappear and order converges
  * exactly to the current WP source. One SQL statement keeps it atomic.
  */
-export async function replaceOfferTaxonomyRelations(
-  offerTable: OfferTable,
-  entityId: number,
-  input: {
-    termIds: readonly number[];
-    logoStoreTermIds?: readonly number[];
-    logoStoreOnlyWithoutStore?: boolean;
-  },
-): Promise<void> {
-  const resolved = await resolveOfferTaxonomyRelations(input);
-  await replaceResolvedOfferTaxonomyRelations(
-    offerTable,
-    entityId,
-    resolved,
-  );
-}

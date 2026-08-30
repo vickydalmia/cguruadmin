@@ -14,7 +14,11 @@ import {
   replaceMedia,
   replaceContentMedia,
 } from "../utils/strapi-insert.js";
-import { replaceOfferTaxonomyRelations } from "../utils/offer-relations.js";
+import {
+  normaliseMigratedAffiliateBrandRelations,
+  replaceResolvedOfferTaxonomyRelations,
+  resolveOfferTaxonomyRelations,
+} from "../utils/offer-relations.js";
 import {
   computeMigrationStatus,
   shouldImportMigrationOffer,
@@ -140,7 +144,8 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
     row.notes.push("excluded by the shared offer lifecycle policy");
   }
 
-  // Posts filed under an excluded term (Articles tree, retired stores)
+  // Posts filed under an excluded term (Articles tree, Uncategorized,
+  // retired stores)
   // are not deals to import. Excluding them BEFORE expectedDocumentIds means the inventory
   // reconciliation also converges previously imported excluded posts away on
   // a re-import, instead of keeping them alive.
@@ -160,8 +165,8 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
       .slice(0, 10)
       .map((post) => `${post.ID} (${post.post_title})`);
     logger.info(
-      `Skipping ${excludedPosts.length} excluded post(s) (articles/retired ` +
-        `stores): ${sample.join("; ")}` +
+      `Skipping ${excludedPosts.length} excluded post(s) ` +
+        `(articles/Uncategorized/retired stores): ${sample.join("; ")}` +
         (excludedPosts.length > sample.length ? "; ..." : ""),
     );
   }
@@ -292,6 +297,21 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
         const expiryRaw = getWpOfferExpiryRaw(meta);
         const expiresAt = parseExpiryDate(expiryRaw);
 
+        // WordPress ACF `deal_store` selected the logo source, not taxonomy
+        // membership. Keep real membership from `relations` and use the ACF
+        // Store as an image-only logoStore only when the resulting Deal has no
+        // real Store membership. `parseAcfTermId` also handles the serialized
+        // ACF values that a bare parseInt silently dropped. Resolved BEFORE the
+        // INSERT (coupon parity) so the affiliate-brand flag lands in the row.
+        const dealStoreTermId = parseAcfTermId(meta.deal_store);
+        const sourceResolvedRelations = await resolveOfferTaxonomyRelations({
+          termIds: relations,
+          logoStoreTermIds: dealStoreTermId ? [dealStoreTermId] : [],
+          logoStoreOnlyWithoutStore: true,
+        });
+        const { isForAffiliateBrand, resolved: resolvedRelations } =
+          normaliseMigratedAffiliateBrandRelations(sourceResolvedRelations);
+
         const contentStatus = computeMigrationStatus({
           postDate: createdAt,
           postStatus: post.post_status,
@@ -331,10 +351,11 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
             "coupon_type",
             "sale_price", "mrp", "discount", "discount_prefix",
             "badge", "affiliate_link", "expires_at", "scheduled_at", "content_status",
+            "is_for_affiliate_brand",
             "published_at", "published_on", "created_at", "updated_at", "locale",
             "created_by_id", "updated_by_id"
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
           )
           ON CONFLICT ("document_id") DO UPDATE SET
             "title" = EXCLUDED."title",
@@ -353,6 +374,7 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
             "expires_at" = EXCLUDED."expires_at",
             "scheduled_at" = EXCLUDED."scheduled_at",
             "content_status" = EXCLUDED."content_status",
+            "is_for_affiliate_brand" = EXCLUDED."is_for_affiliate_brand",
             "published_at" = EXCLUDED."published_at",
             "published_on" = EXCLUDED."published_on",
             "updated_at" = EXCLUDED."updated_at",
@@ -384,6 +406,7 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
             expiresAt,
             contentStatus.scheduledAt,
             contentStatus.contentStatus,
+            isForAffiliateBrand,
             contentStatus.publishedAt,
             contentStatus.publishedAt ? createdAt : null,
             createdAt,
@@ -413,17 +436,13 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
           targetTable: "deals",
         });
 
-        // WordPress ACF `deal_store` selected the logo source, not taxonomy
-        // membership. Keep real membership from `relations` and use the ACF
-        // Store as an image-only logoStore only when the resulting Deal has no
-        // real Store membership. `parseAcfTermId` also handles the serialized
-        // ACF values that a bare parseInt silently dropped.
-        const dealStoreTermId = parseAcfTermId(meta.deal_store);
-        await replaceOfferTaxonomyRelations("deals", entityId, {
-          termIds: relations,
-          logoStoreTermIds: dealStoreTermId ? [dealStoreTermId] : [],
-          logoStoreOnlyWithoutStore: true,
-        });
+        // Wire the relations resolved (and affiliate-normalized) before the
+        // INSERT so the row flag and its links can never disagree.
+        await replaceResolvedOfferTaxonomyRelations(
+          "deals",
+          entityId,
+          resolvedRelations,
+        );
 
         // Replace dealImage exactly so a source change or clear cannot leave a
         // stale product image active after an in-place re-import.

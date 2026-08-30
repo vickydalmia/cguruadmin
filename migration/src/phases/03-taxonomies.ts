@@ -31,9 +31,16 @@ import { parseDecimal, parseInteger } from "../utils/price.js";
 import { rewriteContentMedia } from "../utils/content-media.js";
 import { logger } from "../utils/logger.js";
 import { parseResumeFromTermFlag } from "../utils/cli.js";
-import { getImportExclusions } from "../utils/import-exclusions.js";
+import {
+  loadExcludedStoreNames,
+  resolveImportExclusions,
+} from "../utils/import-exclusions.js";
 import { restoreManifestFileRows } from "../utils/manifest-file-restore.js";
 import { runBoundedWork } from "../utils/bounded-work.js";
+import {
+  classifyTaxonomyTerms,
+  formatTaxonomyClassificationReport,
+} from "../utils/taxonomy-classification.js";
 
 interface WpTerm {
   term_id: number;
@@ -151,7 +158,7 @@ export async function runTaxonomies(): Promise<void> {
   logger.info("=== Phase 3: Taxonomy Migration ===");
 
   // Get all category terms with their metadata
-  const terms = await wpQuery<WpTerm>(`
+  const sourceTerms = await wpQuery<WpTerm>(`
     SELECT
       t.term_id,
       t.name,
@@ -175,14 +182,34 @@ export async function runTaxonomies(): Promise<void> {
     GROUP BY t.term_id, t.name, t.slug, tt.parent, tt.description, tt.count
     ORDER BY t.term_id
   `);
+  const classification = await classifyTaxonomyTerms(sourceTerms);
+  const terms = classification.terms;
 
   logger.info(`Found ${terms.length} category terms`);
+  logger.info(formatTaxonomyClassificationReport(classification.report));
+  if (classification.report.fallbackTerms.length > 0) {
+    const sample = classification.report.fallbackTerms
+      .slice(0, 12)
+      .map((term) => `${term.name} (${term.slug})`)
+      .join("; ");
+    logger.warn(
+      `${classification.report.fallbackTerms.length} SQL term(s) have no Excel ` +
+        `classification and default to Store: ${sample}` +
+        (classification.report.fallbackTerms.length > 12 ? "; ..." : ""),
+    );
+  }
 
-  // Articles category (+descendants) and retired stores from
+  // Articles (+descendants), Uncategorized, and retired stores from
   // excluded-stores.csv are never imported; phases 07/08 skip their posts.
-  const exclusions = await getImportExclusions();
+  // Resolved over the RAW rows so the Article(s) choose_type signal survives
+  // the Excel classification's Store canonicalization.
+  const exclusions = resolveImportExclusions(
+    sourceTerms,
+    loadExcludedStoreNames(),
+  );
   logger.info(
     `Import exclusions: ${exclusions.articleTermIds.size} article term(s), ` +
+      `${exclusions.uncategorizedTermIds.size} Uncategorized term(s), ` +
       `${exclusions.excludedStoreTermIds.size} listed store term(s) matched`,
   );
   if (exclusions.unmatchedStoreNames.length > 0) {
@@ -360,20 +387,27 @@ export async function runTaxonomies(): Promise<void> {
     Category: 0,
     Bank: 0,
     Articles: 0,
+    Uncategorized: 0,
     ExcludedStore: 0,
-    Unknown: 0,
   };
 
   // Claim slugs in the source's stable term-id order BEFORE concurrent work
   // starts. Completion order can then vary without changing collision suffixes.
   const prepared: PreparedTaxonomy[] = [];
   for (const term of termsToProcess) {
-    // Excluded terms (Articles category tree, retired stores) never import;
-    // phases 07/08 also skip every post filed under them.
+    // Excluded terms never import; phases 07/08 also skip every post filed
+    // under them.
     if (exclusions.articleTermIds.has(term.term_id)) {
       counts.Articles++;
       logger.info(
         `Skipping article term ${term.term_id} (${term.name}) — not a catalog entity`,
+      );
+      continue;
+    }
+    if (exclusions.uncategorizedTermIds.has(term.term_id)) {
+      counts.Uncategorized++;
+      logger.info(
+        `Skipping Uncategorized term ${term.term_id} (${term.name}) — not a catalog entity`,
       );
       continue;
     }
@@ -384,26 +418,19 @@ export async function runTaxonomies(): Promise<void> {
       );
       continue;
     }
-    const chooseType = term.choose_type || "Store"; // Default to Store if missing
+    // classifyTaxonomyTerms guarantees one of the four canonical types
+    // (Excel/legacy value, Store fallback); if that invariant ever breaks,
+    // default to Store so the migration still completes.
+    const chooseType = TYPE_TO_TABLE[term.choose_type]
+      ? term.choose_type
+      : "Store";
+    if (chooseType !== term.choose_type) {
+      logger.warn(
+        `Unknown choose_type '${term.choose_type}' for term ${term.term_id} (${term.name}). Defaulting to Store.`,
+      );
+    }
     const table = TYPE_TO_TABLE[chooseType];
     const strapiType = TYPE_TO_STRAPI_TYPE[chooseType];
-
-    if (!table) {
-      logger.warn(
-        `Unknown choose_type '${chooseType}' for term ${term.term_id} (${term.name}). Defaulting to Store.`
-      );
-      counts.Unknown++;
-      const fallbackTable = "stores";
-      const sourceSlug = cleanSlug(term.slug) || term.slug;
-      prepared.push({
-        term,
-        table: fallbackTable,
-        strapiType: "api::store.store",
-        slug: deduplicateSlug(sourceSlug, fallbackTable),
-        termDates: termDatesByTermId.get(term.term_id),
-      });
-      continue;
-    }
 
     counts[chooseType]++;
     prepared.push({
@@ -516,6 +543,7 @@ async function insertTerm(
     "rating_average",
     "rating_count",
     "is_verified",
+    ...(table === "brands" ? ["is_affiliate_store"] : []),
     "faq_enabled",
     "show_trending_deals",
     ...(table === "stores" ? ["is_cj_enabled"] : []),
@@ -595,6 +623,7 @@ async function insertTerm(
     ratingAverage,
     ratingCount,
     table === "stores",
+    ...(table === "brands" ? [true] : []),
     faqEnabled,
     true, // show_trending_deals (schema default)
     ...(table === "stores" ? [false] : []), // is_cj_enabled (schema default)
@@ -628,6 +657,11 @@ async function insertTerm(
            table === "stores"
              ? `,
          "is_cj_enabled" = COALESCE("stores"."is_cj_enabled", EXCLUDED."is_cj_enabled")`
+             : ""
+         }${
+           table === "brands"
+             ? `,
+         "is_affiliate_store" = COALESCE("brands"."is_affiliate_store", EXCLUDED."is_affiliate_store")`
              : ""
          }
          RETURNING id`,

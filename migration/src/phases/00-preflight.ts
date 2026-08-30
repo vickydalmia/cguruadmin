@@ -19,6 +19,18 @@ const {
 } = require("../../../database/migrations/2026.07.29T00.00.00.add-deal-image-background-removal.js");
 
 import { getImportExclusions } from "../utils/import-exclusions.js";
+import {
+  classifyTaxonomyTerms,
+  formatTaxonomyClassificationReport,
+} from "../utils/taxonomy-classification.js";
+
+type PreflightTaxonomyTerm = {
+  term_id: number;
+  name: string;
+  slug: string;
+  parent: number;
+  choose_type: string | null;
+};
 
 const SITE_CONFIGURATION_BOOLEAN_FIELDS = [
   "onboardingComplete",
@@ -110,14 +122,15 @@ async function validateSourceDataExceptions(): Promise<void> {
     );
   }
 
-  const storeTerms = await wpQuery<{ term_id: number; choose_type: string | null }>(`
-    SELECT t.term_id,
+  const sourceStoreTerms = await wpQuery<PreflightTaxonomyTerm>(`
+    SELECT t.term_id, t.name, t.slug, tt.parent,
            MAX(CASE WHEN tm.meta_key = 'choose_type' THEN tm.meta_value END) AS choose_type
     FROM wp_terms t
     JOIN wp_term_taxonomy tt ON tt.term_id = t.term_id AND tt.taxonomy = 'category'
     LEFT JOIN wp_termmeta tm ON tm.term_id = t.term_id AND tm.meta_key = 'choose_type'
-    GROUP BY t.term_id
+    GROUP BY t.term_id, t.name, t.slug, tt.parent
   `);
+  const { terms: storeTerms } = await classifyTaxonomyTerms(sourceStoreTerms);
   const nonStoreTypes = new Set(["Brand", "Category", "Bank"]);
   const importableStoreCount = storeTerms.filter(
     (term) =>
@@ -346,8 +359,8 @@ export async function runPreflight(): Promise<void> {
   }
 
   // Print WP summary counts
-  // RAW source totals — before the exclusion rules (Articles tree, retired
-  // stores) and the publish/future-only lifecycle. The exclusion-aware
+  // RAW source totals — before the exclusion rules (Articles tree,
+  // Uncategorized, retired stores) and the offer lifecycle. The exclusion-aware
   // numbers that match what actually imports come from `yarn migrate:report`.
   logger.info("WordPress data summary (RAW, before exclusions):");
   const [termCount] = await wpQuery<{ c: number }>(
@@ -398,6 +411,7 @@ export async function runPreflight(): Promise<void> {
   logger.info(
     `  Will be EXCLUDED by import rules: ` +
       `${exclusions.articleTermIds.size} article term(s), ` +
+      `${exclusions.uncategorizedTermIds.size} Uncategorized term(s), ` +
       `${exclusions.excludedStoreTermIds.size} retired store term(s) ` +
       `(+ every post filed under them — run \`yarn migrate:report\` for the ` +
       `exact post funnel)`,
@@ -414,14 +428,17 @@ export async function runPreflight(): Promise<void> {
   );
   logger.info(`  Attachments: ${attachmentCount.c}`);
 
-  const storeTerms = await wpQuery<{ term_id: number; choose_type: string | null }>(`
-    SELECT t.term_id,
+  const sourceStoreTerms = await wpQuery<PreflightTaxonomyTerm>(`
+    SELECT t.term_id, t.name, t.slug, tt.parent,
            MAX(CASE WHEN tm.meta_key = 'choose_type' THEN tm.meta_value END) AS choose_type
     FROM wp_terms t
     JOIN wp_term_taxonomy tt ON tt.term_id = t.term_id AND tt.taxonomy = 'category'
     LEFT JOIN wp_termmeta tm ON tm.term_id = t.term_id AND tm.meta_key = 'choose_type'
-    GROUP BY t.term_id
+    GROUP BY t.term_id, t.name, t.slug, tt.parent
   `);
+  const classification = await classifyTaxonomyTerms(sourceStoreTerms);
+  const storeTerms = classification.terms;
+  logger.info(`  ${formatTaxonomyClassificationReport(classification.report)}`);
   const nonStoreTypes = new Set(["Brand", "Category", "Bank"]);
   const importableStoreCount = storeTerms.filter(
     (term) =>

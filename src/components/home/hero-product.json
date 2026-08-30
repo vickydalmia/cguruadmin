@@ -1,14 +1,45 @@
 {
   "collectionName": "components_home_hero_products",
   "info": {
-    "displayName": "Hero Product",
+    "displayName": "Hero Offer",
     "icon": "shoppingCart"
   },
   "attributes": {
+    "entityType": {
+      "type": "enumeration",
+      "enum": ["deal", "coupon"],
+      "default": "deal",
+      "required": true
+    },
     "deal": {
       "type": "relation",
       "relation": "oneToOne",
-      "target": "api::deal.deal"
+      "target": "api::deal.deal",
+      "conditions": {
+        "visible": {
+          "==": [
+            {
+              "var": "entityType"
+            },
+            "deal"
+          ]
+        }
+      }
+    },
+    "coupon": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::coupon.coupon",
+      "conditions": {
+        "visible": {
+          "==": [
+            {
+              "var": "entityType"
+            },
+            "coupon"
+          ]
+        }
+      }
     },
     "titleOverride": {
       "type": "string"
@@ -16,7 +47,17 @@
     "imageOverride": {
       "type": "media",
       "multiple": false,
-      "allowedTypes": ["images"]
+      "allowedTypes": ["images"],
+      "conditions": {
+        "visible": {
+          "==": [
+            {
+              "var": "entityType"
+            },
+            "deal"
+          ]
+        }
+      }
     }
   }
 }

@@ -35,6 +35,8 @@ import {
   validateEntityOrderedCoupons,
 } from '../entity-ordered-coupon-validation';
 import { validateHomepageImages } from '../homepage-image-validation';
+import { normaliseHomepageHeroOfferFields } from '../homepage-hero-offer';
+import { validateHomepageHeroOffers } from '../homepage-hero-offer-validation';
 import { validateHomepagePopularSearches } from '../homepage-popular-searches-validation';
 import { validateIndependenceDaySale } from '../independence-day-sale-validation';
 import { validateIdentity } from '../identity-validation';
@@ -169,6 +171,13 @@ export const MUTATOR_STEPS: readonly ValidationStep[] = [
     applies: isAffiliateOfferUid,
     run: ({ data }) => normaliseAffiliateOfferFields(data),
   },
+  {
+    // Hero Offer relation fields are conditional. Switching the discriminator
+    // hides and omits the previous relation, so clear it before validation.
+    name: 'normaliseHomepageHeroOfferFields',
+    applies: (uid) => uid === HOMEPAGE_UID,
+    run: ({ data }) => normaliseHomepageHeroOfferFields(data),
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -220,6 +229,12 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     actions: CREATE_UPDATE,
     applies: (uid) => uid === HOMEPAGE_UID,
     run: ({ strapi, data }) => validateHomepageImages(strapi, data),
+  },
+  {
+    name: 'validateHomepageHeroOffers',
+    actions: CREATE_UPDATE,
+    applies: (uid) => uid === HOMEPAGE_UID,
+    run: ({ strapi, data }) => validateHomepageHeroOffers(strapi, data),
   },
   {
     name: 'validateHomepagePopularSearches',

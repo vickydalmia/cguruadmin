@@ -62,7 +62,7 @@ test("attachment count drift is advisory while source validation stays before mu
   const attachmentCheck = preflightSource.indexOf("Attachment count drift (non-blocking)");
   const storeCheck = preflightSource.indexOf("Store count exception");
   const attachmentBlockEnd = preflightSource.indexOf(
-    "\n  const storeTerms",
+    "\n  const sourceStoreTerms",
     attachmentCheck,
   );
 

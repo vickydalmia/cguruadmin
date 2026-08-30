@@ -21,6 +21,10 @@ import {
   type StrapiTaxonomyDescriptionRow,
   type WpTaxonomyDescriptionRow,
 } from "../utils/taxonomy-description-backfill.js";
+import {
+  classifyTaxonomyTerms,
+  formatTaxonomyClassificationReport,
+} from "../utils/taxonomy-classification.js";
 
 interface CountCheck {
   entity: string;
@@ -96,7 +100,7 @@ async function countImportableWpOffers(
   });
 
   // Mirror phases 07/08: posts filed under an excluded term (Articles tree,
-  // retired stores) are never imported, so they must not count as expected.
+  // Uncategorized, retired stores) never import and must not count here.
   const { termIds: excludedTermIds } = await getImportExclusions();
 
   const articlePostIds = new Set<number>();
@@ -134,10 +138,10 @@ export async function runVerification(): Promise<void> {
   logger.info("--- Record Count Verification ---");
 
   // Expected entity counts must mirror how phase 03 actually imports:
-  // excluded terms (Articles tree, retired stores) never import, and an
-  // unknown choose_type defaults to Store. Raw termmeta counts would flag
-  // every exclusion as a false mismatch.
-  const termRows = await wpQuery<WpTaxonomyDescriptionRow>(`
+  // excluded terms (Articles tree, Uncategorized, retired stores) never
+  // import, and an unknown choose_type defaults to Store. Raw termmeta counts
+  // would flag every exclusion as a false mismatch.
+  const sourceTermRows = await wpQuery<WpTaxonomyDescriptionRow>(`
     SELECT t.term_id, t.name, t.slug, tt.parent, tt.description,
            MAX(CASE WHEN tm.meta_key='choose_type' THEN tm.meta_value END) AS choose_type
     FROM wp_terms t
@@ -145,8 +149,13 @@ export async function runVerification(): Promise<void> {
     LEFT JOIN wp_termmeta tm ON t.term_id = tm.term_id AND tm.meta_key = 'choose_type'
     GROUP BY t.term_id, t.name, t.slug, tt.parent
   `);
+  const classification = await classifyTaxonomyTerms(sourceTermRows);
+  const termRows = classification.terms;
+  logger.info(formatTaxonomyClassificationReport(classification.report));
+  // Exclusions read the RAW rows (phase 03 parity): classification would
+  // erase the Article(s) choose_type signal.
   const termExclusions = resolveImportExclusions(
-    termRows,
+    sourceTermRows,
     loadExcludedStoreNames(),
   );
   const expectedByType: Record<string, number> = {
@@ -212,7 +221,7 @@ export async function runVerification(): Promise<void> {
 
   const verificationNow = new Date();
 
-  // Coupons: publish/future only; expired-by-meta published rows count too
+  // Coupons: non-expired publish/future rows only.
   const wpCouponCount = await countImportableWpOffers(
     "coupon",
     verificationNow,

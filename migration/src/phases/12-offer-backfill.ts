@@ -2,9 +2,19 @@ import pLimit from "p-limit";
 import { wpQuery } from "../db/wp-client.js";
 import { pgQuery } from "../db/pg-client.js";
 import { ensurePostMapping } from "../utils/id-maps.js";
-import { replaceOfferTaxonomyRelations } from "../utils/offer-relations.js";
+import {
+  normaliseMigratedAffiliateBrandRelations,
+  replaceResolvedOfferTaxonomyRelations,
+  resolveOfferTaxonomyRelations,
+} from "../utils/offer-relations.js";
 import { logger } from "../utils/logger.js";
 import { parseAcfTermId } from "../utils/acf.js";
+import { shouldImportMigrationOffer } from "../utils/content-status.js";
+import { parseExpiryDate } from "../utils/wp-dates.js";
+import {
+  getWpOfferExpiryRaw,
+  type WpOfferExpiryMeta,
+} from "../utils/wp-offer-expiry.js";
 import {
   getImportExclusions,
   hasExcludedTerm,
@@ -39,9 +49,10 @@ export async function runOfferBackfill(): Promise<void | PhaseOutcome> {
   // otherwise an old ACF owner could never be deleted during a re-import.
   const rows = await wpQuery<{
     post_id: number;
+    post_status: string;
     deal_store: string | null;
   }>(`
-    SELECT p.ID AS post_id,
+    SELECT p.ID AS post_id, p.post_status,
            MAX(CASE WHEN store_meta.meta_key = 'deal_store'
                     THEN store_meta.meta_value END) AS deal_store
     FROM wp_posts p
@@ -58,8 +69,49 @@ export async function runOfferBackfill(): Promise<void | PhaseOutcome> {
     ORDER BY p.ID
   `);
 
-  logger.info(`Found ${rows.length} migrated Deal post(s) to reconcile`);
-  const postIds = rows.map((row) => row.post_id);
+  const expiryMetaByPost = new Map<number, WpOfferExpiryMeta>();
+  const batchSize = 5_000;
+  for (let start = 0; start < rows.length; start += batchSize) {
+    const ids = rows.slice(start, start + batchSize).map((row) => row.post_id);
+    const metaPlaceholders = ids.map(() => "?").join(",");
+    const metaRows = await wpQuery<{
+      post_id: number;
+      meta_key: string;
+      meta_value: string;
+    }>(
+      `SELECT post_id, meta_key, meta_value
+         FROM wp_postmeta
+        WHERE post_id IN (${metaPlaceholders})
+          AND meta_key IN (
+            '_action_manager_date',
+            '_expiration-date',
+            '_expiration-date-status',
+            'expiration-date'
+          )`,
+      ids,
+    );
+    for (const metaRow of metaRows) {
+      const meta = expiryMetaByPost.get(metaRow.post_id) ?? {};
+      meta[metaRow.meta_key] = metaRow.meta_value;
+      expiryMetaByPost.set(metaRow.post_id, meta);
+    }
+  }
+
+  const migrationNow = new Date();
+  const lifecycleRows = rows.filter((row) =>
+    shouldImportMigrationOffer({
+      postStatus: row.post_status,
+      expiresAt: parseExpiryDate(
+        getWpOfferExpiryRaw(expiryMetaByPost.get(row.post_id) ?? {}),
+      ),
+      now: migrationNow,
+    }),
+  );
+  logger.info(
+    `Found ${lifecycleRows.length} importable Deal post(s) to reconcile ` +
+      `(${rows.length - lifecycleRows.length} expired post(s) skipped)`,
+  );
+  const postIds = lifecycleRows.map((row) => row.post_id);
   const placeholders = postIds.map(() => "?").join(",");
   const relationRows = postIds.length
     ? await wpQuery<{ object_id: number; term_id: number }>(
@@ -80,18 +132,18 @@ export async function runOfferBackfill(): Promise<void | PhaseOutcome> {
     relationsByPost.set(relation.object_id, ids);
   }
 
-  // Posts under an excluded term (Articles tree, retired stores) were never
-  // imported — no mapping exists for them BY DESIGN, so they must not count
-  // as reconciliation failures. Mirrors phases 07/08/10.
+  // Posts under an excluded term (Articles tree, Uncategorized, retired
+  // stores) were never imported — no mapping exists for them BY DESIGN, so
+  // they must not count as reconciliation failures. Mirrors phases 07/08/10.
   const exclusions = await getImportExclusions();
-  const importableRows = rows.filter(
+  const importableRows = lifecycleRows.filter(
     (row) =>
       !hasExcludedTerm(relationsByPost.get(row.post_id) ?? [], exclusions.termIds),
   );
-  if (importableRows.length !== rows.length) {
+  if (importableRows.length !== lifecycleRows.length) {
     logger.info(
-      `Skipping ${rows.length - importableRows.length} excluded deal post(s) ` +
-      `(articles/retired stores) — never imported, nothing to reconcile`,
+      `Skipping ${lifecycleRows.length - importableRows.length} excluded deal post(s) ` +
+      `(articles/Uncategorized/retired stores) — never imported, nothing to reconcile`,
     );
   }
 
@@ -123,10 +175,24 @@ export async function runOfferBackfill(): Promise<void | PhaseOutcome> {
             return;
           }
           const dealStoreTermId = parseAcfTermId(row.deal_store);
-          await replaceOfferTaxonomyRelations("deals", ref.id, {
-            termIds: relationsByPost.get(row.post_id) ?? [],
-            logoStoreTermIds: dealStoreTermId ? [dealStoreTermId] : [],
-          });
+          // Phase 08 parity: ACF Store is an image-only logoStore when the
+          // Deal has no real Store membership, and Brand-linked Deals are
+          // affiliate offers whose Store/logoStore links are removed. The row
+          // flag is updated in the same reconciliation so it can never
+          // disagree with the links.
+          const { isForAffiliateBrand, resolved } =
+            normaliseMigratedAffiliateBrandRelations(
+              await resolveOfferTaxonomyRelations({
+                termIds: relationsByPost.get(row.post_id) ?? [],
+                logoStoreTermIds: dealStoreTermId ? [dealStoreTermId] : [],
+                logoStoreOnlyWithoutStore: true,
+              }),
+            );
+          await replaceResolvedOfferTaxonomyRelations("deals", ref.id, resolved);
+          await pgQuery(
+            `UPDATE "deals" SET "is_for_affiliate_brand" = $1 WHERE "id" = $2`,
+            [isForAffiliateBrand, ref.id],
+          );
           reconciled++;
         } catch (err: any) {
           skipped++;

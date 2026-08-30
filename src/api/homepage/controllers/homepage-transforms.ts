@@ -16,6 +16,7 @@ import {
   TOP_DEALS_RENDER_COUNT,
   publishedDealListRef,
 } from './homepage-populate';
+import { homepageHeroOfferTarget } from '../../../utils/homepage-hero-offer';
 
 function nonBlank(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -91,7 +92,9 @@ export function dropDeadOffers(homepage: any) {
   const live = (offer: any) => isLiveOffer(offer, now);
 
   if (homepage.hero?.products) {
-    homepage.hero.products = homepage.hero.products.filter((p: any) => live(p.deal));
+    homepage.hero.products = homepage.hero.products.filter((item: any) =>
+      live(homepageHeroOfferTarget(item)),
+    );
   }
   for (const key of ['topOffers', 'cgExclusive', 'newlyAdded']) {
     const section = homepage[key];

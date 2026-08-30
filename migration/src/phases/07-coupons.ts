@@ -12,6 +12,7 @@ import { generateDocumentId } from "../utils/strapi-insert.js";
 import {
   replaceResolvedOfferTaxonomyRelationBatch,
   resolveOfferTaxonomyRelations,
+  normaliseMigratedAffiliateBrandRelations,
   type ResolvedOfferTaxonomyRelations,
 } from "../utils/offer-relations.js";
 import {
@@ -278,7 +279,8 @@ export async function runCoupons(): Promise<void> {
     row.notes.push("excluded by the shared offer lifecycle policy");
   }
 
-  // Posts filed under an excluded term (Articles tree, retired stores)
+  // Posts filed under an excluded term (Articles tree, Uncategorized,
+  // retired stores)
   // are not coupons to import. Excluding them BEFORE expectedDocumentIds means the inventory
   // reconciliation also converges previously imported excluded posts away on
   // a re-import, instead of keeping them alive.
@@ -294,8 +296,8 @@ export async function runCoupons(): Promise<void> {
       .slice(0, 10)
       .map((post) => `${post.ID} (${post.post_title})`);
     logger.info(
-      `Skipping ${excludedPosts.length} excluded post(s) (articles/retired ` +
-        `stores): ${sample.join("; ")}` +
+      `Skipping ${excludedPosts.length} excluded post(s) ` +
+        `(articles/Uncategorized/retired stores): ${sample.join("; ")}` +
         (excludedPosts.length > sample.length ? "; ..." : ""),
     );
   }
@@ -380,7 +382,7 @@ export async function runCoupons(): Promise<void> {
     const documentId = generateDocumentId(sourceKey);
     const isUnique = meta.unique_coupon === "1" || meta.unique_coupon === "true";
     const uniqueCouponPoolName = clean(meta.unique_coupon_name);
-    const [contentMedia, resolvedRelations] = await Promise.all([
+    const [contentMedia, sourceResolvedRelations] = await Promise.all([
       rewriteContentMedia(cleanHtml(stripShortcodes(post.post_content))),
       resolveOfferTaxonomyRelations({
         termIds: relations,
@@ -392,6 +394,8 @@ export async function runCoupons(): Promise<void> {
         logoStoreOnlyWithoutStore: true,
       }),
     ]);
+    const { isForAffiliateBrand, resolved: resolvedRelations } =
+      normaliseMigratedAffiliateBrandRelations(sourceResolvedRelations);
     const content = contentMedia.html;
     const title = clean(post.post_title) || post.post_title;
     const extractedOfferText = extractOfferText(title, content, {
@@ -486,6 +490,7 @@ export async function runCoupons(): Promise<void> {
         expiresAt,
         contentStatus.scheduledAt,
         contentStatus.contentStatus,
+        isForAffiliateBrand,
         contentStatus.publishedAt,
         contentStatus.publishedAt ? createdAt : null,
         createdAt,

@@ -25,7 +25,7 @@ test("taxonomy workers use bounded concurrency and report every ten records", ()
 });
 
 test("slug ownership is fixed before concurrent taxonomy workers start", () => {
-  const prepareAt = taxonomySource.indexOf("deduplicateSlug(sourceSlug");
+  const prepareAt = taxonomySource.indexOf("deduplicateSlug(cleanSlug(term.slug)");
   const workersAt = taxonomySource.indexOf("await runBoundedWork({");
 
   assert.ok(prepareAt >= 0, "taxonomy slugs must be deduplicated");

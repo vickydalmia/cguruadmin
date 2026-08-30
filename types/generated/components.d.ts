@@ -1689,11 +1689,15 @@ export interface HomeFaqBlock extends Struct.ComponentSchema {
 export interface HomeHeroProduct extends Struct.ComponentSchema {
   collectionName: 'components_home_hero_products';
   info: {
-    displayName: 'Hero Product';
+    displayName: 'Hero Offer';
     icon: 'shoppingCart';
   };
   attributes: {
+    coupon: Schema.Attribute.Relation<'oneToOne', 'api::coupon.coupon'>;
     deal: Schema.Attribute.Relation<'oneToOne', 'api::deal.deal'>;
+    entityType: Schema.Attribute.Enumeration<['deal', 'coupon']> &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'deal'>;
     imageOverride: Schema.Attribute.Media<'images'>;
     titleOverride: Schema.Attribute.String;
   };

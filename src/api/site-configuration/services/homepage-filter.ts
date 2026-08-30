@@ -1,4 +1,5 @@
 import type { FeatureReadinessMap } from './feature-readiness';
+import { homepageHeroEntityType } from '../../../utils/homepage-hero-offer';
 
 function enabled(features: FeatureReadinessMap, key: keyof FeatureReadinessMap) {
   return features[key]?.live === true;
@@ -20,11 +21,21 @@ export function filterHomepage(
   // would either emit a dead owner path or strand the section without its
   // required navigation, so both dependencies must be live.
   const productDealsLive = enabled(features, 'productDeals');
-  if (!productDealsLive && homepage.hero) homepage.hero.products = [];
+  const couponsLive = enabled(features, 'coupons');
+  if (homepage.hero?.products) {
+    homepage.hero.products = homepage.hero.products.filter((item: any) => {
+      const entityType = homepageHeroEntityType(item);
+      return entityType === 'deal'
+        ? productDealsLive
+        : entityType === 'coupon'
+          ? couponsLive
+          : false;
+    });
+  }
   if (!productDealsLive || !enabled(features, 'dealOfTheDay')) {
     disableSection(homepage, 'topDeals');
   }
-  if (!enabled(features, 'coupons')) {
+  if (!couponsLive) {
     for (const field of [
       'topOffers',
       'cgExclusive',

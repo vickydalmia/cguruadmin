@@ -21,6 +21,11 @@ test("taxonomy INSERT seeds defaulted booleans explicitly", () => {
   );
   assert.match(source, /true, \/\/ show_trending_deals/);
   assert.match(source, /\.\.\.\(table === "stores" \? \[false\] : \[\]\)/);
+  assert.match(
+    source,
+    /\.\.\.\(table === "brands" \? \["is_affiliate_store"\] : \[\]\)/,
+  );
+  assert.match(source, /\.\.\.\(table === "brands" \? \[true\] : \[\]\)/);
 });
 
 test("defaulted booleans are fill-only on conflict (editor toggles win)", () => {
@@ -35,6 +40,14 @@ test("defaulted booleans are fill-only on conflict (editor toggles win)", () => 
   // Never bare-EXCLUDED these — that would overwrite editor values on re-run.
   assert.doesNotMatch(source, /"show_trending_deals" = EXCLUDED/);
   assert.doesNotMatch(source, /"is_cj_enabled" = EXCLUDED/);
+});
+
+test("Brand affiliate seeding is fill-only so editor toggles win on re-import", () => {
+  assert.match(
+    source,
+    /"is_affiliate_store" = COALESCE\("brands"\."is_affiliate_store", EXCLUDED\."is_affiliate_store"\)/,
+  );
+  assert.doesNotMatch(source, /"is_affiliate_store" = EXCLUDED/);
 });
 
 test("taxonomy import seeds entity page templates without overwriting editor choices", () => {

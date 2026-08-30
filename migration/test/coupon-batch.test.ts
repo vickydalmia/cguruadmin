@@ -17,7 +17,7 @@ test("Coupon upserts combine multiple records into one parameterized query", () 
 
   assert.equal(query.params.length, COUPON_INSERT_COLUMNS.length * 2);
   assert.match(query.sql, /VALUES \(\$1,/);
-  assert.match(query.sql, /\(\$22,/);
+  assert.match(query.sql, /\(\$23,/);
   assert.match(query.sql, /ON CONFLICT \("document_id"\) DO UPDATE/);
   assert.match(query.sql, /RETURNING id, document_id/);
 });
@@ -25,7 +25,7 @@ test("Coupon upserts combine multiple records into one parameterized query", () 
 test("Coupon upserts reject malformed rows before PostgreSQL is called", () => {
   assert.throws(
     () => buildCouponUpsertBatchQuery([["too-short"]]),
-    /expected 21/,
+    /expected 22/,
   );
 });
 

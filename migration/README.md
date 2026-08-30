@@ -61,7 +61,7 @@ cp .env.migration.example .env.migration
 MIGRATION_PROFILE=india       # india or usa
 MIGRATION_STATE_DIR=.state/india
 MIGRATION_SITE_CONFIGURATION_FILE=profiles/india/site-configuration.json
-MIGRATION_EXCLUSIONS_FILE=excluded-stores.csv
+# MIGRATION_EXCLUSIONS_FILE=profiles/india/excluded-stores.csv  # optional
 WP_TABLE_PREFIX=wp_           # validated before any source query
 SOURCE_COUNTRY_CODE=IN
 SOURCE_LOCALE=en-IN
@@ -299,7 +299,7 @@ one promise, so they cannot transform or upload the same image twice.
 
 ### Phase 03 — Taxonomies
 
-Migrates WordPress category terms into **four** Strapi collections — `stores`, `brands`, `categories`, `banks` — based on the ACF `choose_type` termmeta field (defaults to "Store"). Also migrates FAQ items and SEO components for each entity, and links logo/icon media. Images embedded in term descriptions are rewritten through the content-media pipeline (see below).
+Migrates WordPress category terms into **four** Strapi collections — `stores`, `brands`, `categories`, `banks`. USA uses the approved Excel classification workbook matched by slug; SQL terms absent from the workbook default to Store. Profiles without a workbook use ACF `choose_type` with the same Store fallback. Also migrates FAQ items and SEO components for each entity, and links logo/icon media. Images embedded in term descriptions are rewritten through the content-media pipeline (see below).
 
 Before starting the workers, the phase validates manifest entries against the
 objects that still exist in S3 and restores all reusable missing Strapi `files`
@@ -355,9 +355,8 @@ modified post.
 ### Phase 07 — Coupons
 
 Migrates WordPress posts where `is_deal` is not `'yes'` into the `coupons`
-table. Only `publish` and `future` rows are included (a published row whose
-expiry meta has elapsed imports as `expired`); `draft`/`trash` rows never
-import — the old withdrawn-by-expiry retention was deliberately dropped. On
+table. Only non-expired `publish` and `future` rows are included;
+`draft`/`trash` rows never import. On
 re-import, migration-owned Coupon rows no longer in that source inventory are
 removed, so deletion, withdrawal, and Coupon → Product Deal changes converge.
 For each coupon:
@@ -410,12 +409,14 @@ Rich-text HTML (`coupons.content`, `deals.content`, taxonomy `description`) can 
 ### Phase 08 — Deals
 
 Migrates deal posts (`is_deal='yes'`) into the `deals` table using the same
-publish/future-only lifecycle rule as Coupons. Re-import
+non-expired publish/future lifecycle rule as Coupons. Re-import
 removes migration-owned Deal rows that were withdrawn, deleted, or changed back
 to Coupons. Relationship wiring is the same as Coupons, plus deal-specific
 fields: `mrp`, `sale_price`, `discount`, and `dealImage`. The `deal_store` meta
 is merged into the `stores` relation (deduplicated against taxonomy-linked
-stores).
+stores). Brand-linked Deals follow the same affiliate rule as Coupons:
+`is_for_affiliate_brand` is `true` and the mutually-exclusive Store/Logo Store
+relations are cleared (phase 12's reconciliation applies the identical rule).
 
 ### Phase 09 — SEO Backfill
 
@@ -473,7 +474,7 @@ begin using Strapi's explicit bump action.
 Seeds the Strapi single types the frontend needs:
 
 - `global` — header/footer codes from WP ACF option keys (`options_header_code`, `options_footer_code`).
-- `homepage` — created as a **single published row** (draftAndPublish is disabled on the publish-only homepage, menu, footer, and global single types), with the full component tree built once. Also seeds `title: "Homepage"` for the admin entry header. Curated sections: hero banners from the `options_slider_features` ACF repeater; hero products and Top Deals from migrated Deal entities; CG Exclusive, Fresh Drops, Explore Offers, and Offers By Brand from Coupon entities; Popular Stores from `options_featured_stores` (fallback: top stores by published-coupon count); bank offers ranked by published-coupon count; plus How It Works and FAQ copy mirrored from the frontend. Per-section item counts live in `src/utils/homepage-limits.ts` (each holds a +4 buffer over what the site renders; a parity test pins them to the component schema `max` values).
+- `homepage` — created as a **single published row** (draftAndPublish is disabled on the publish-only homepage, menu, footer, and global single types), with the full component tree built once. Also seeds `title: "Homepage"` for the admin entry header. Curated sections: hero banners from the `options_slider_features` ACF repeater; hero offers prefer migrated Deal entities and fall back to the newest renderable Coupon entities (named Store/Brand owner, routable slug, and real logo) only when no published Deals exist; an existing homepage is editor-owned, except that an empty Hero Offer list is filled without replacing existing selections. Top Deals remain Deal-only; CG Exclusive, Fresh Drops, Explore Offers, and Offers By Brand use Coupon entities; Popular Stores come from `options_featured_stores` (fallback: top stores by published-coupon count); bank offers are ranked by published-coupon count; plus How It Works and FAQ copy mirrored from the frontend. Per-section item counts live in `src/utils/homepage-limits.ts` (each holds a +4 buffer over what the site renders; a parity test pins them to the component schema `max` values).
 - `menu` — topStores relation (same curated store list), one shared responsive hierarchy made from explore Categories and their immediate child Categories, and the fixed extra nav items. Desktop renders those sections as mega-menu columns; mobile renders the same ordered groups as icon rows with a child-link drill-down plus the first four configured Top Stores as Popular Stores pills. Section and child-link icons uploaded in Menu override their related Category icons; seeded rows intentionally leave overrides empty so Category icons remain the fallback.
 - `footer` — link sections, social links, countries, and partner card mirrored from the frontend `footer-data.ts`; Popular Stores labels are resolved to real store relations where a matching store name exists. Country flag media is attached by Phase 13b.
 - `site_configuration` — identity, localization, onboarding state and
@@ -592,27 +593,40 @@ Content HTML srcsets are frozen at migration time, so rich-text `<img>` tags don
 
 ### Taxonomies (Phase 03)
 
-WordPress stores all taxonomy terms in `wp_terms` with `taxonomy='category'`. The ACF `choose_type` termmeta determines which Strapi collection each term maps to:
+WordPress stores all taxonomy terms in `wp_terms` with `taxonomy='category'`.
+For USA, `MIGRATION_CLASSIFICATION_FILE` points to the approved Excel workbook;
+its `Classification` value is matched to the SQL term by exact normalized
+slug. Excel is authoritative, and SQL slugs absent from the workbook default
+to Store. Other profiles use ACF `choose_type` with the same fallback.
 
-| `choose_type` value | Strapi table |
-|---------------------|-------------|
+| Classification / `choose_type` | Strapi table |
+|--------------------------------|-------------|
 | `Store` (default)   | `stores`    |
 | `Brand`             | `brands`    |
 | `Category`          | `categories`|
 | `Bank`              | `banks`     |
 | `Article`/`Articles` | **not imported** — editorial content, skipped entirely |
 
-**Import exclusions** (`src/utils/import-exclusions.ts`) — two rules, both
+The approved USA workbook contains 7,169 unique classified slugs (542 Store,
+6,552 Brand, 68 Category, 7 Bank). Against the 2026-08-30 SQL, 7,119 match;
+50 obsolete workbook rows are reported, while 10 new SQL terms default to
+Store. `Uncategorized` is then excluded, producing 549 Stores, 6,504 Brands,
+68 Categories, and 7 Banks.
+
+**Import exclusions** (`src/utils/import-exclusions.ts`) — three rules, all
 applied in phases 03/07/08 and mirrored by phase 10's expected counts:
 
 1. **Articles category**: the term with slug `articles` / name `Articles`
    (case-insensitive; an `Article(s)` choose_type also counts) plus every
    descendant term under it.
-2. **Retired stores**: `migration/excluded-stores.csv` — one store name per
-   line, `#` comments, matched case/whitespace-insensitively against terms
-   whose `choose_type` is `Store` or missing (a Brand/Bank/Category sharing
-   a name is never swallowed). Names that match no WP term are logged for
-   review. This file is deliberately un-gitignored — it is import config.
+2. **Uncategorized**: the exact WordPress fallback category (name or slug,
+   case-insensitive). The term and every post filed under it are excluded.
+3. **Optional retired stores**: when `MIGRATION_EXCLUSIONS_FILE` points to an
+   operator-supplied CSV, its store names are matched case/whitespace-
+   insensitively against terms whose `choose_type` is `Store` or missing (a
+   Brand/Bank/Category sharing a name is never swallowed). The repo
+   intentionally ships no historical retired-store CSV for India or USA; an
+   unset or missing file means zero listed-store exclusions.
 
 An excluded term is never imported, and every post filed under one is
 excluded from phases 07/08 — *before* the inventory reconciliation, so a
@@ -622,12 +636,13 @@ objects as orphans.
 
 **Dry run**: `yarn migrate:report` (read-only, WordPress only) prints how
 many stores/brands/categories/banks and how many coupons/deals would import
-after all exclusions, plus the withdrawn/excluded breakdown — and writes two
+after all exclusions, plus the expired/excluded breakdown — and writes three
 CSVs: `migration/dry-run-report.csv` (one row per imported term: type,
-associated coupon/deal counts, dropped counts, valid remainder) and
+associated coupon/deal counts, dropped counts, valid remainder),
 `migration/dry-run-excluded.csv` (one row per EXCLUDED term — articles /
-retired stores — with the coupon/deal counts its exclusion deletes, plus a
-row per listed name that matched no WP term).
+Uncategorized / retired stores — with the coupon/deal counts its exclusion
+deletes, plus a row per listed name that matched no WP term), and
+`migration/dry-run-summary.csv` (the expired and taxonomy-exclusion funnel).
 
 **Field mapping:**
 
@@ -640,12 +655,14 @@ row per listed name that matched no WP term).
 | `store_cat_image` (termmeta) | `logo` / `icon` | Media link via `files_related_mph` |
 | `store_image_alt` (termmeta) | `logo_alt` | Stores, brands, banks only |
 | `enable_faq_schema` (termmeta) | `faq_enabled` | Boolean (`'1'` → true) |
+| Excel `Brand` classification | `is_affiliate_store` | Seeded `true` on the imported Brand; fill-only on re-import so an editor's panel toggle wins |
 
 ### Posts: Coupons vs Deals (Phases 07–08)
 
 WordPress posts with `post_type='post'` are first filtered by lifecycle:
-only `publish`/`future` are included — `draft`/`trash` never import. They are
-then split:
+only non-expired `publish`/`future` rows are included — `draft`/`trash` and
+rows whose valid expiry is at or before the migration time never import. They
+are then split:
 
 - **Deal** — `is_deal` postmeta = `'yes'` → `deals` table
 - **Coupon** — everything else → `coupons` table
@@ -664,6 +681,7 @@ then split:
 | `unique_coupon_name` (postmeta) | `uniqueCouponPool` relation | Resolved by pool name for unique coupons |
 | Expiration meta* | `expires_at` | Unix timestamp or ISO date |
 | `post_date` | `published_at` | |
+| Related Excel-classified Brand | `is_for_affiliate_brand` + `brands` | Coupon flag is `true`, Brand relation is retained, and mutually-exclusive Store/Logo Store relations are cleared; Coupons without Brands are explicitly `false` |
 
 *Expiration checked in order: `_action_manager_date`, `_expiration-date`, `expiration-date`.
 

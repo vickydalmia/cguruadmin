@@ -72,7 +72,7 @@ describe('getAdminRelationSearchFields', () => {
       }))
       .sort((a, b) => relationKey(a).localeCompare(relationKey(b)));
 
-    expect(actual).toHaveLength(21);
+    expect(actual).toHaveLength(22);
     expect(configured).toEqual(actual);
   });
 
@@ -101,6 +101,7 @@ describe('getAdminRelationSearchFields', () => {
 
     expect(derived).toEqual(
       expect.arrayContaining([
+        { sourceUid: 'home.hero-product', field: 'coupon', mainField: 'title' },
         { sourceUid: 'header.coupon-notification', field: 'coupon', mainField: 'title' },
         { sourceUid: 'header.product-deal-notification', field: 'productDeal', mainField: 'title' },
         { sourceUid: 'header.search-top-store', field: 'store', mainField: 'name' },

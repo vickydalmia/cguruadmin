@@ -61,7 +61,7 @@ export const config = {
     currencyCode: optional("SOURCE_CURRENCY_CODE", migrationProfile() === "usa" ? "USD" : "INR"),
     timezone: optional("SOURCE_TIMEZONE", migrationProfile() === "usa" ? "America/New_York" : "Asia/Kolkata"),
     internalHosts: optional("SOURCE_INTERNAL_HOSTS").split(",").map((value) => value.trim()).filter(Boolean),
-    expectedStores: parseInt(optional("EXPECTED_STORE_COUNT", migrationProfile() === "usa" ? "7162" : "0"), 10) || 0,
+    expectedStores: parseInt(optional("EXPECTED_STORE_COUNT", migrationProfile() === "usa" ? "549" : "0"), 10) || 0,
     expectedAttachments: parseInt(optional("EXPECTED_ATTACHMENT_COUNT", migrationProfile() === "usa" ? "10360" : "0"), 10) || 0,
     expectedDeals: parseInt(optional("EXPECTED_DEAL_COUNT", migrationProfile() === "usa" ? "0" : "-1"), 10),
     expectedHeroBanners: parseInt(optional("EXPECTED_HERO_BANNER_COUNT", migrationProfile() === "usa" ? "5" : "0"), 10) || 0,

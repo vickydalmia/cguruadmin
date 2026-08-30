@@ -88,6 +88,7 @@ describe('homepage aggregate offer population', () => {
 
     const populate = harness.findFirst.mock.calls[0]?.[0].populate;
     const couponRefs = [
+      populate.hero.populate.products.populate.coupon,
       populate.topOffers.populate.items.populate.coupon,
       populate.cgExclusive.populate.items.populate.coupon,
       populate.newlyAdded.populate.items.populate.coupon,
@@ -103,11 +104,14 @@ describe('homepage aggregate offer population', () => {
       expect(ref.fields).not.toContain('excerpt');
     }
 
-    // The hero CTA opens the shared redeem modal, whose "Deal Details" is
-    // composed from written `content` — the hero projection must ship it.
+    // The hero CTA opens the shared redeem modal for either schema, so both
+    // projections must ship full written content.
     const heroDeal = populate.hero.populate.products.populate.deal;
+    const heroCoupon = populate.hero.populate.products.populate.coupon;
     expect(heroDeal.fields).toContain('content');
     expect(heroDeal.fields).not.toContain('excerpt');
+    expect(heroCoupon.fields).toContain('content');
+    expect(heroCoupon.fields).not.toContain('excerpt');
 
     expect(populate.popularStores.populate.featuredStore.fields).not.toContain(
       'shortDescription',
@@ -181,6 +185,9 @@ describe('homepage aggregate offer population', () => {
     expect(populate.hero.populate.products.populate.deal.filters).toEqual(
       publishedFilter,
     );
+    expect(populate.hero.populate.products.populate.coupon.filters).toEqual(
+      publishedFilter,
+    );
     expect(populate.topOffers.populate.items.populate.coupon.filters).toEqual(
       publishedFilter,
     );
@@ -215,7 +222,14 @@ describe('homepage aggregate offer population', () => {
     const staleItem = { banner: { url: '/stale.png' }, coupon: null };
     const liveItem = { banner: { url: '/live.png' }, coupon: publishedOffer(1) };
     const harness = createHarness({
-      hero: { products: [{ deal: null }, { deal: publishedOffer(2) }] },
+      hero: {
+        products: [
+          { entityType: 'deal', deal: null },
+          { entityType: 'deal', deal: publishedOffer(2) },
+          { entityType: 'coupon', coupon: null },
+          { entityType: 'coupon', coupon: publishedOffer(3) },
+        ],
+      },
       topOffers: { items: [staleItem, liveItem] },
       cgExclusive: { items: [staleItem, liveItem] },
       newlyAdded: { items: [staleItem, liveItem] },
@@ -224,7 +238,11 @@ describe('homepage aggregate offer population', () => {
 
     const response = await harness.controller.homepageFull(harness.ctx as any);
 
-    expect(response.data.hero.products).toHaveLength(1);
+    expect(response.data.hero.products).toHaveLength(2);
+    expect(response.data.hero.products.map((item: any) => item.entityType)).toEqual([
+      'deal',
+      'coupon',
+    ]);
     expect(response.data.topOffers.items).toHaveLength(1);
     expect(response.data.cgExclusive.items).toHaveLength(1);
     expect(response.data.newlyAdded.items).toHaveLength(1);

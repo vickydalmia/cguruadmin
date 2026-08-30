@@ -9,6 +9,12 @@ import {
 } from "../utils/homepage-bank-offers.js";
 import { FOOTER_COUNTRY_ASSETS } from "../utils/footer-media-assets.js";
 import { HOMEPAGE_SEED_LIMITS } from "../utils/homepage-limits.js";
+import {
+  homepageCouponOwnerEligibilitySql,
+  selectHomepageHeroOffers,
+  type HomepageCouponOwnerLink,
+  type HomepageHeroSeedOffer,
+} from "../utils/homepage-hero.js";
 import { ensureTermMapping } from "../utils/id-maps.js";
 import { resolveMediaRef } from "../utils/media-resolver.js";
 import {
@@ -34,8 +40,9 @@ import { isAcfTrue } from "../utils/acf.js";
  * All component/link table names are verified against information_schema
  * before writing; missing tables (Strapi schema not migrated yet) are
  * skipped gracefully with a clear log line. Each single type is seeded
- * inside one transaction and skipped entirely when its table already has
- * a row, so re-runs are safe and a crash never leaves a half-built tree.
+ * inside one transaction. Existing singles remain editor-owned; the homepage
+ * gets one fill-only exception for an empty Hero Offer list so a Coupons-only
+ * site can adopt the schema fallback without replacing curated selections.
  */
 
 // ─────────────────────────────────────────────────────────────────────
@@ -641,8 +648,9 @@ type CouponWithPresentationImage = { couponId: number; imageFileId: number };
 
 interface HomepageData {
   banners: Banner[];
-  heroDealIds: number[];
+  heroOffers: HomepageHeroSeedOffer[];
   heroDealLnk: Lnk | null;
+  heroCouponLnk: Lnk | null;
   popularFeatured: StoreRow | null;
   popularStores: StoreRow[];
   popularFeaturedLnk: Lnk | null;
@@ -662,6 +670,90 @@ interface HomepageData {
   offerListOffersLnk: Lnk | null;
   bankOffers: Array<{ bankId: number; subtitle: string | null }>;
   bankItemBankLnk: Lnk | null;
+}
+
+type HomepageHeroData = Pick<
+  HomepageData,
+  "heroOffers" | "heroDealLnk" | "heroCouponLnk"
+>;
+
+function homepageCouponOwnerLink(
+  relation: Lnk | null,
+  entityTable: HomepageCouponOwnerLink["entityTable"],
+  entityType: HomepageCouponOwnerLink["entityType"],
+): HomepageCouponOwnerLink | null {
+  return relation
+    ? {
+        table: relation.table,
+        sourceCol: relation.sourceCol,
+        targetCol: relation.targetCol,
+        entityTable,
+        entityType,
+      }
+    : null;
+}
+
+async function gatherHomepageHeroData(): Promise<HomepageHeroData> {
+  const [heroDealLnk, heroCouponLnk] = await Promise.all([
+    detectLnk("components_home_hero_products", "deal", "deal"),
+    detectLnk("components_home_hero_products", "coupon", "coupon"),
+  ]);
+
+  // Preserve the existing Product Deal preference, but do not select records
+  // the component schema cannot link.
+  const heroDeals = heroDealLnk && hasTable("deals")
+    ? await pgQuery<{ id: number }>(
+        `SELECT id FROM "deals"
+         WHERE published_at IS NOT NULL
+           AND content_status = 'published'
+           AND (expires_at IS NULL OR expires_at > NOW())
+         ORDER BY published_at DESC
+         LIMIT $1`,
+        [HOMEPAGE_SEED_LIMITS.heroProducts],
+      )
+    : [];
+  let heroOffers = selectHomepageHeroOffers(
+    heroDeals.map(({ id }) => id),
+    [],
+  );
+
+  if (heroOffers.length === 0 && hasTable("coupons") && heroCouponLnk) {
+    const [storesLnk, brandsLnk] = await Promise.all([
+      detectLnk("coupons", "stores", "store"),
+      detectLnk("coupons", "brands", "brand"),
+    ]);
+    const ownerLinks = [
+      homepageCouponOwnerLink(storesLnk, "stores", "api::store.store"),
+      homepageCouponOwnerLink(brandsLnk, "brands", "api::brand.brand"),
+    ].filter((link): link is HomepageCouponOwnerLink => link !== null);
+
+    if (ownerLinks.length === 0) {
+      logger.warn(
+        "Coupon hero fallback has no Store/Brand relation tables — no Hero Offers seeded",
+      );
+    } else {
+      const ownerEligibility = homepageCouponOwnerEligibilitySql(ownerLinks);
+      const heroCoupons = await pgQuery<{ id: number }>(
+        `SELECT c.id FROM "coupons" c
+         WHERE c.published_at IS NOT NULL
+           AND c.content_status = 'published'
+           AND (c.expires_at IS NULL OR c.expires_at > NOW())
+           AND NULLIF(BTRIM(c.title), '') IS NOT NULL
+           AND (
+             ${ownerEligibility}
+           )
+         ORDER BY c.published_at DESC
+         LIMIT $1`,
+        [HOMEPAGE_SEED_LIMITS.heroProducts],
+      );
+      heroOffers = selectHomepageHeroOffers(
+        [],
+        heroCoupons.map(({ id }) => id),
+      );
+    }
+  }
+
+  return { heroOffers, heroDealLnk, heroCouponLnk };
 }
 
 function couponSourcePostId(sourceKey: string): number | null {
@@ -808,9 +900,17 @@ async function seedHomepage(
     summary.push("homepage: skipped (table missing)");
     return;
   }
-  if (await singleTypeHasRow("homepages")) {
-    logger.info("homepages already seeded, skipping homepage");
-    summary.push("homepage: skipped (already seeded)");
+  const existingHomepage = await pgQuery<{ id: number }>(
+    `SELECT id FROM "homepages" ORDER BY id DESC LIMIT 1`,
+  );
+  if (existingHomepage[0]) {
+    const heroData = await gatherHomepageHeroData();
+    const result = await backfillExistingHomepageHeroOffers(
+      existingHomepage[0].id,
+      heroData,
+    );
+    logger.info(result);
+    summary.push(result);
     return;
   }
 
@@ -842,15 +942,7 @@ async function gatherHomepageData(
 ): Promise<HomepageData> {
   // ── hero banners from WP ACF options repeater ──
   const banners = await parseSliderBanners();
-
-  // ── hero products: newest published deals ──
-  const heroDeals = await pgQuery<{ id: number }>(
-    `SELECT id FROM "deals"
-     WHERE published_at IS NOT NULL
-       AND content_status = 'published'
-     ORDER BY published_at DESC
-     LIMIT ${HOMEPAGE_SEED_LIMITS.heroProducts}`
-  );
+  const heroData = await gatherHomepageHeroData();
 
   // ── topOffers: newest published migrated Coupons with legacy art for the
   //    component's required presentation banner. ──
@@ -1037,8 +1129,7 @@ async function gatherHomepageData(
 
   return {
     banners,
-    heroDealIds: heroDeals.map((r) => r.id),
-    heroDealLnk: await detectLnk("components_home_hero_products", "deal", "deal"),
+    ...heroData,
     popularFeatured: curatedStores[0] ?? null,
     popularStores: curatedStores.slice(1, 1 + HOMEPAGE_SEED_LIMITS.popularStores),
     popularFeaturedLnk: await detectLnk(
@@ -1097,6 +1188,103 @@ async function gatherHomepageData(
   };
 }
 
+async function insertHomepageHeroOffers(
+  heroId: number,
+  data: HomepageHeroData,
+  skip: (message: string) => void,
+): Promise<number> {
+  if (
+    missingTables(
+      "components_home_hero_products",
+      "components_home_hero_sections_cmps",
+    ).length > 0
+  ) {
+    skip("hero-product tables/link not found — hero products skipped");
+    return 0;
+  }
+
+  let productCount = 0;
+  for (let i = 0; i < data.heroOffers.length; i++) {
+    const offer = data.heroOffers[i];
+    const relation = offer.entityType === "deal"
+      ? data.heroDealLnk
+      : data.heroCouponLnk;
+    if (!relation) {
+      skip(`hero ${offer.entityType} relation link not found — offer skipped`);
+      continue;
+    }
+    const prodId = await insertRow("components_home_hero_products", {
+      entity_type: offer.entityType,
+    });
+    await addCmp(
+      "components_home_hero_sections_cmps",
+      heroId,
+      prodId,
+      "home.hero-product",
+      "products",
+      i + 1,
+    );
+    await linkRel(relation, prodId, offer.id);
+    productCount++;
+  }
+  return productCount;
+}
+
+async function backfillExistingHomepageHeroOffers(
+  homepageId: number,
+  data: HomepageHeroData,
+): Promise<string> {
+  const missing = missingTables(
+    "homepages_cmps",
+    "components_home_hero_sections",
+    "components_home_hero_sections_cmps",
+    "components_home_hero_products",
+  );
+  if (missing.length > 0) {
+    return `homepage: existing Hero Offers skipped (${missing.join(", ")} missing)`;
+  }
+
+  const heroRows = await pgQuery<{ hero_id: number }>(
+    `SELECT cmp_id AS hero_id
+     FROM "homepages_cmps"
+     WHERE entity_id = $1
+       AND component_type = 'home.hero-section'
+       AND field = 'hero'
+     ORDER BY "order", cmp_id
+     LIMIT 1`,
+    [homepageId],
+  );
+  const heroId = heroRows[0]?.hero_id;
+  if (!heroId) {
+    return "homepage: existing row preserved (no Hero section to fill)";
+  }
+
+  const existingProducts = await pgQuery<{ count: string }>(
+    `SELECT COUNT(*)::text AS count
+     FROM "components_home_hero_sections_cmps"
+     WHERE entity_id = $1
+       AND component_type = 'home.hero-product'
+       AND field = 'products'`,
+    [heroId],
+  );
+  if (Number(existingProducts[0]?.count ?? 0) > 0) {
+    return "homepage: existing Hero Offers preserved";
+  }
+
+  const inserted = await insertHomepageHeroOffers(heroId, data, (message) =>
+    logger.warn(message),
+  );
+  if (inserted > 0) {
+    await pgQuery(
+      `UPDATE "homepages" SET updated_at = NOW() WHERE id = $1`,
+      [homepageId],
+    );
+  }
+  return inserted > 0
+    ? `homepage: filled empty Hero Offers (${inserted} ${data.heroOffers[0]?.entityType ?? "offer"})`
+    : "homepage: Hero Offers remain empty (no eligible Deal or Coupon)";
+}
+
 /**
  * Builds the full component tree for one homepage row (draft or published).
  * Returns per-section summary strings (only meaningful on the first call;
@@ -1153,31 +1341,8 @@ async function buildHomepageTree(
       );
     }
 
-    // products (nested home.hero-product + deal relation)
-    let productCount = 0;
-    if (
-      missingTables(
-        "components_home_hero_products",
-        "components_home_hero_sections_cmps"
-      ).length === 0 &&
-      data.heroDealLnk
-    ) {
-      for (let i = 0; i < data.heroDealIds.length; i++) {
-        const prodId = await insertRow("components_home_hero_products", {});
-        await addCmp(
-          "components_home_hero_sections_cmps",
-          heroId,
-          prodId,
-          "home.hero-product",
-          "products",
-          i + 1
-        );
-        await linkRel(data.heroDealLnk, prodId, data.heroDealIds[i]);
-        productCount++;
-      }
-    } else {
-      skip("hero-product tables/link not found — hero products skipped");
-    }
+    // offers (nested home.hero-product + explicit Deal/Coupon relation)
+    const productCount = await insertHomepageHeroOffers(heroId, data, skip);
 
     counts.push(`hero(${bannerCount} banners, ${productCount} products)`);
   } else {

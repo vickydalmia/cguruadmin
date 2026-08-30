@@ -113,10 +113,18 @@ test("state pin validation requires a complete profile path segment", () => {
   assert.equal(statePathIncludesProfile(".state/usa", "india"), false);
 });
 
-test("USA exclusions resolve only inside the USA profile", () => {
+test("missing profile exclusion files do not fall back across countries", () => {
   const usaExclusions = excludedStoresFile({
     MIGRATION_PROFILE: "usa",
   } as NodeJS.ProcessEnv);
+  const indiaExclusions = excludedStoresFile({
+    MIGRATION_PROFILE: "india",
+  } as NodeJS.ProcessEnv);
+
   assert.match(usaExclusions, /profiles\/usa\/excluded-stores\.csv$/u);
   assert.doesNotMatch(usaExclusions, /migration\/excluded-stores\.csv$/u);
+  assert.match(indiaExclusions, /profiles\/india\/excluded-stores\.csv$/u);
+  assert.doesNotMatch(indiaExclusions, /migration\/excluded-stores\.csv$/u);
+  assert.equal(fs.existsSync(usaExclusions), false);
+  assert.equal(fs.existsSync(indiaExclusions), false);
 });

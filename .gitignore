@@ -38,9 +38,6 @@ $RECYCLE.BIN/
 
 *.7z
 *.csv
-# Load-bearing import config, not a data artifact: without it a fresh
-# checkout would silently re-import the retired stores it lists.
-!migration/excluded-stores.csv
 *.dat
 *.dmg
 *.gz
@@ -150,7 +147,10 @@ migration/.checkpoints/
 migration/node_modules/
 migration/dist/
 migration/*.log
-migration/usa/
+# USA SQL/uploads remain local, but the approved classification workbook is
+# migration input and must ship with the importer.
+migration/usa/*
+!migration/usa/CouponzGuru_USA_Taxonomy_Classification (1).xlsx
 # This is an audited DML script, not a database dump.
 # !migration/sql/2026-07-30-update-wordpress-taxonomy-slugs.sql
 .astro/

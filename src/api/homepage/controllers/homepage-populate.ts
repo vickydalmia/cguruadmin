@@ -93,6 +93,11 @@ const publishedHeroDealRef = {
   filters: PUBLISHED_OFFER_FILTER,
 };
 
+const publishedHeroCouponRef = {
+  ...couponRef,
+  filters: PUBLISHED_OFFER_FILTER,
+};
+
 // Strapi's Document Service accepts nested ordering here, but adding `sort`
 // would override the relation order editors set by drag-and-drop. It rejects
 // nested `limit`/pagination keys, so the response-level cap below remains the
@@ -114,7 +119,13 @@ export const HOMEPAGE_POPULATE = {
   hero: {
     populate: {
       banners: bannerSlides,
-      products: { populate: { deal: publishedHeroDealRef, imageOverride: true } },
+      products: {
+        populate: {
+          deal: publishedHeroDealRef,
+          coupon: publishedHeroCouponRef,
+          imageOverride: true,
+        },
+      },
     },
   },
   topOffers: {

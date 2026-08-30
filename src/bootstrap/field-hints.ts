@@ -31,6 +31,12 @@ COMPONENT_FIELD_DESCRIPTIONS['shared.seo'].ogImage =
   'Share-card image shown when the deal page is shared on social apps. Recommended: at least 1200 × 630 px (1.91:1). Smaller images are allowed but may crop or blur in previews. Leave empty to use the site default card.';
 (COMPONENT_FIELD_DESCRIPTIONS['homepage.slider-slide'] ??= {}).link =
   'Optional banner destination. Use /path/ for a CouponzGuru page or a full http(s) URL. CouponzGuru links open in this tab and remain followed; external links open in a new tab with nofollow. Leave empty for a non-clickable banner.';
+(COMPONENT_FIELD_DESCRIPTIONS['home.hero-product'] ??= {}).entityType =
+  'Choose Product Deal or Coupon. Only the matching relation picker is shown below.';
+COMPONENT_FIELD_DESCRIPTIONS['home.hero-product'].deal =
+  'Select the Product Deal for this Hero Offer. Shown only when Offer type is Product Deal.';
+COMPONENT_FIELD_DESCRIPTIONS['home.hero-product'].coupon =
+  'Select the Coupon for this Hero Offer. Shown only when Offer type is Coupon; its Store or Brand logo is centered in the card.';
 (COMPONENT_FIELD_DESCRIPTIONS['deal-day.telegram-deal-item'] ??= {}).deal =
   'The Product Deal shown as a locked Telegram card. Its promo code is never sent to the site for this section.';
 COMPONENT_FIELD_DESCRIPTIONS['deal-day.telegram-deal-item'].linkOverride =
