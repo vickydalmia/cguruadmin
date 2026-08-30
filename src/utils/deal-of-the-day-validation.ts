@@ -1,5 +1,6 @@
 import type { Core } from '@strapi/strapi';
 import { errors } from '@strapi/utils';
+import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
 import {
   DOTD_SECTION_CAPS,
   DOTD_SMART_STACK_MINIMUM,
@@ -125,13 +126,16 @@ function dealRelationWhere(relations: readonly RelationEntry[]) {
 
 async function qualifyingSmartStackDealCount(
   strapi: Core.Strapi,
-  relations: readonly RelationEntry[]
+  relations: readonly RelationEntry[],
+  locale?: string
 ): Promise<number> {
   const where = dealRelationWhere(relations);
   if (!where) return 0;
 
+  // documentId matches every locale row of a deal; without the locale pin
+  // each selected deal would count once per locale.
   const deals = await strapi.db.query(DEAL_UID).findMany({
-    where,
+    where: { $and: [{ locale: locale ?? DEFAULT_CONTENT_LOCALE }, where] },
     select: ['id', 'documentId', 'cashbackText', 'bankOfferText'],
   });
   return deals.filter(
@@ -182,7 +186,8 @@ function collectTelegramItemProblems(data: any, problems: Problem[]): void {
 
 export async function validateDealOfTheDaySectionLimits(
   strapi: Core.Strapi,
-  data: any
+  data: any,
+  locale?: string
 ): Promise<void> {
   if (!data || typeof data !== 'object') return;
   const touchedLimited = LIMITED_SECTIONS.filter(([section]) =>
@@ -205,9 +210,11 @@ export async function validateDealOfTheDaySectionLimits(
 
   // Only relation-backed sections need the stored row to resolve a partial
   // relation command. Telegram items arrive as a complete component list, so
-  // a telegram-only write skips the query entirely.
+  // a telegram-only write skips the query entirely. The read is pinned to
+  // the locale being written — the single type holds one row per locale.
   const current = touchedSections.length
     ? await strapi.db.query(DOTD_UID).findOne({
+        where: { locale: locale ?? DEFAULT_CONTENT_LOCALE },
         populate: Object.fromEntries(
           touchedSections.map((section) => [section, { populate: ['deals'] }])
         ) as any,
@@ -249,7 +256,7 @@ export async function validateDealOfTheDaySectionLimits(
       const count =
         relations == null
           ? null
-          : await qualifyingSmartStackDealCount(strapi, relations);
+          : await qualifyingSmartStackDealCount(strapi, relations, locale);
       if (count != null && count < DOTD_SMART_STACK_MINIMUM) {
         problems.push({
           path: ['smartSavingStack', 'deals'],

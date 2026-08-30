@@ -44,6 +44,9 @@
     "affiliateDisclosureEnabled": { "type": "boolean", "required": true, "default": true },
 
     "dealOfTheDayEnabled": { "type": "boolean", "required": true, "default": true, "private": true },
-    "independenceDaySaleEnabled": { "type": "boolean", "required": true, "default": true, "private": true }
+    "independenceDaySaleEnabled": { "type": "boolean", "required": true, "default": true, "private": true },
+
+    "translationEnabled": { "type": "boolean", "required": true, "default": false },
+    "translationLocales": { "type": "string", "required": false, "default": "", "maxLength": 80, "regex": "^$|^[a-z]{2,3}(-[a-z]{2,4})?(,[a-z]{2,3}(-[a-z]{2,4})?)*$" }
   }
 }

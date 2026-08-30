@@ -31,6 +31,15 @@ export type SiteConfiguration = {
   timezone: string;
   currencyCode: string;
   onboardingComplete: boolean;
+  /**
+   * AI content translation. `translationEnabled` is the master switch;
+   * `translationLocales` is a csv of CONTENT locale codes to translate into
+   * (bare codes such as "ar" — a different axis from `locale`, which is the
+   * regional formatting locale like "en-AE"). Both default off/empty so
+   * every deployment without an explicit opt-in stays untouched.
+   */
+  translationEnabled: boolean;
+  translationLocales: string;
 } & Record<FeatureField, boolean>;
 
 export type FeatureKey =
@@ -111,6 +120,8 @@ export const INDIA_DEFAULT_CONFIGURATION: SiteConfiguration = {
   privacyPolicyEnabled: true,
   termsAndConditionsEnabled: true,
   affiliateDisclosureEnabled: true,
+  translationEnabled: false,
+  translationLocales: '',
 };
 
 export const IDENTITY_FIELDS = [
@@ -123,8 +134,14 @@ export const IDENTITY_FIELDS = [
   'onboardingComplete',
 ] as const;
 
+export const TRANSLATION_FIELDS = [
+  'translationEnabled',
+  'translationLocales',
+] as const;
+
 export const SITE_CONFIGURATION_FIELDS = [
   ...IDENTITY_FIELDS,
+  ...TRANSLATION_FIELDS,
   ...FEATURE_FIELDS,
 ] as const;
 
@@ -146,8 +163,34 @@ export function normalizeSiteConfiguration(value: any): SiteConfiguration {
   normalized.timezone = String(normalized.timezone ?? '').trim();
   normalized.currencyCode = String(normalized.currencyCode ?? '').trim().toUpperCase();
   normalized.onboardingComplete = normalized.onboardingComplete === true;
+  normalized.translationEnabled = normalized.translationEnabled === true;
+  normalized.translationLocales = normalizeTranslationLocales(
+    normalized.translationLocales,
+  );
   for (const field of FEATURE_FIELDS) normalized[field] = normalized[field] === true;
   return normalized;
+}
+
+/**
+ * Canonical csv of content locale codes: lowercased, trimmed, deduped, empty
+ * tokens dropped. Whether a code is actually SUPPORTED (has a prompt
+ * template) is the translation locale registry's call — this only makes the
+ * stored value deterministic.
+ */
+export function normalizeTranslationLocales(value: unknown): string {
+  const tokens = String(value ?? '')
+    .split(',')
+    .map((token) => token.trim().toLowerCase())
+    .filter((token) => /^[a-z]{2,3}(-[a-z]{2,4})?$/.test(token));
+  return [...new Set(tokens)].join(',');
+}
+
+export function translationLocaleCodes(
+  configuration: Pick<SiteConfiguration, 'translationEnabled' | 'translationLocales'>,
+): string[] {
+  if (configuration.translationEnabled !== true) return [];
+  const csv = normalizeTranslationLocales(configuration.translationLocales);
+  return csv ? csv.split(',') : [];
 }
 
 export function featureByPath(path: string): FeatureDefinition | undefined {

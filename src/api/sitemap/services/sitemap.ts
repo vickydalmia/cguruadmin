@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
 import { cachedSiteConfiguration } from '../../site-configuration/services/cached-configuration';
 
 // Sitemap entity feed.
@@ -184,6 +185,10 @@ async function fetchOfferAggregates(
     try {
       let query = connection(linkTable)
         .join(`${source.table} as o`, `${linkTable}.${source.ownerColumn}`, 'o.id')
+        // The sitemap is built from default-locale rows (fetchEntities reads
+        // the documents API, which defaults the locale); pin the aggregates
+        // to the same rows so locale twins don't add spurious group rows.
+        .where('o.locale', DEFAULT_CONTENT_LOCALE)
         .where('o.content_status', 'published')
         .andWhere((builder: any) =>
           builder.whereNull('o.expires_at').orWhere('o.expires_at', '>', cutoff),

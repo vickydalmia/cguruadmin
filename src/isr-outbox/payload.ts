@@ -119,6 +119,45 @@ export function createOutboxPayload(
   };
 }
 
+/**
+ * Locale twins for every page path: with content locales enabled, the same
+ * document renders at `/x/` AND `/<locale>/x/`, and an invalidation that
+ * misses the twin leaves a stale translated page live indefinitely. Pure —
+ * the caller (insertIsrOutboxEvent) supplies the boot-primed locale codes.
+ * A full sweep (`all`) already covers everything; the sitemap index is
+ * shard-expanded by the gateway and has no locale twin of its own.
+ */
+export function expandPayloadPathsForLocales(
+  payload: IsrOutboxPayload,
+  localeCodes: readonly string[],
+): IsrOutboxPayload {
+  if (payload.all || localeCodes.length === 0 || !payload.paths?.length) {
+    return payload;
+  }
+  const twin = (path: string, code: string): string | null => {
+    if (path === SITEMAP_INDEX_PATH) return null;
+    if (!path.startsWith('/')) return null;
+    if (path === `/${code}/` || path.startsWith(`/${code}/`)) return null;
+    return path === '/' ? `/${code}/` : `/${code}${path}`;
+  };
+  const paths = new Set(payload.paths);
+  const optionalPaths = new Set(payload.optionalPaths ?? []);
+  for (const code of localeCodes) {
+    for (const path of payload.paths) {
+      const twinPath = twin(path, code);
+      if (!twinPath) continue;
+      paths.add(twinPath);
+      // A twin inherits optionality: only optional sources stay optional.
+      if (optionalPaths.has(path)) optionalPaths.add(twinPath);
+    }
+  }
+  return {
+    ...payload,
+    paths: [...paths],
+    ...(optionalPaths.size > 0 ? { optionalPaths: [...optionalPaths] } : {}),
+  };
+}
+
 export function hasOutboxWork(payload: IsrOutboxPayload): boolean {
   return Boolean(
     payload.all ||

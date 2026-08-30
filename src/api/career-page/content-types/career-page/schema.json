@@ -7,18 +7,125 @@
     "displayName": "Career Page",
     "description": "All editable copy and media shared by the Careers listing and job detail pages. Missing fields use the deployed Figma fallback."
   },
-  "options": { "draftAndPublish": false },
+  "options": {
+    "draftAndPublish": false
+  },
   "attributes": {
-    "title": { "type": "string", "default": "Career Page" },
-    "homeBreadcrumbLabel": { "type": "string", "default": "Home", "maxLength": 60 },
-    "careersBreadcrumbLabel": { "type": "string", "default": "Careers", "maxLength": 60 },
-    "hero": { "type": "component", "repeatable": false, "component": "career.hero" },
-    "whyJoinHeader": { "type": "component", "repeatable": false, "component": "shared.section-header" },
-    "benefits": { "type": "component", "repeatable": true, "component": "career.benefit-card", "max": 4 },
-    "values": { "type": "component", "repeatable": true, "component": "career.value-card", "max": 4 },
-    "jobsSection": { "type": "component", "repeatable": false, "component": "career.jobs-section" },
-    "life": { "type": "component", "repeatable": false, "component": "career.life" },
-    "jobDetail": { "type": "component", "repeatable": false, "component": "career.job-detail-copy" },
-    "seo": { "type": "component", "repeatable": false, "component": "shared.seo" }
+    "title": {
+      "type": "string",
+      "default": "Career Page",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "homeBreadcrumbLabel": {
+      "type": "string",
+      "default": "Home",
+      "maxLength": 60,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "careersBreadcrumbLabel": {
+      "type": "string",
+      "default": "Careers",
+      "maxLength": 60,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "hero": {
+      "type": "component",
+      "repeatable": false,
+      "component": "career.hero",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "whyJoinHeader": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.section-header",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "benefits": {
+      "type": "component",
+      "repeatable": true,
+      "component": "career.benefit-card",
+      "max": 4,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "values": {
+      "type": "component",
+      "repeatable": true,
+      "component": "career.value-card",
+      "max": 4,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "jobsSection": {
+      "type": "component",
+      "repeatable": false,
+      "component": "career.jobs-section",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "life": {
+      "type": "component",
+      "repeatable": false,
+      "component": "career.life",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "jobDetail": {
+      "type": "component",
+      "repeatable": false,
+      "component": "career.job-detail-copy",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "seo": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.seo",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    }
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
   }
 }

@@ -6,7 +6,12 @@ import type {
   IsrOutboxPayload,
 } from './types';
 import { readOutboxPayloadBounds } from './config';
-import { boundOutboxPayload, hasOutboxWork } from './payload';
+import {
+  boundOutboxPayload,
+  expandPayloadPathsForLocales,
+  hasOutboxWork,
+} from './payload';
+import { enabledContentLocaleCodesSync } from '../translation/locales/registry';
 
 export const ISR_OUTBOX_TABLE = 'isr_outbox';
 
@@ -116,8 +121,10 @@ export async function insertIsrOutboxEvent(
   const eventKey = input.eventKey ?? randomUUID();
   const now = new Date();
   const bounds = readOutboxPayloadBounds();
+  // Locale twins BEFORE bounding, so a twin-doubled path list can still
+  // collapse to the full-sweep fallback instead of overflowing.
   const payload = boundOutboxPayload(
-    input.payload,
+    expandPayloadPathsForLocales(input.payload, enabledContentLocaleCodesSync()),
     bounds.maxPaths,
     bounds.maxPayloadBytes,
   );

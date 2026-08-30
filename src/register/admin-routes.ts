@@ -172,6 +172,53 @@ export function registerCountrySetupRoutes(strapi: Core.Strapi): void {
   } as any);
 }
 
+// AI-translation endpoints for the edit-view Translation panel and the
+// super-admin backfill. Per-entry status is readable by any authenticated
+// admin (the panel must render for editors); triggering paid LLM work
+// additionally requires the translation.manage RBAC action, and the
+// catalogue-wide backfill/estimate stays Super Admin only.
+export function registerTranslationRoutes(strapi: Core.Strapi): void {
+  strapi.server.routes({
+    type: 'admin',
+    prefix: '/translation',
+    routes: [
+      {
+        method: 'GET',
+        path: '/status/:uid/:documentId',
+        handler: 'api::translation.translation.entryStatus',
+        config: { policies: ['admin::isAuthenticatedAdmin'] },
+      },
+      {
+        method: 'POST',
+        path: '/enqueue',
+        handler: 'api::translation.translation.enqueue',
+        config: {
+          policies: [
+            'admin::isAuthenticatedAdmin',
+            'global::translation-manage-only',
+          ],
+        },
+      },
+      {
+        method: 'POST',
+        path: '/backfill',
+        handler: 'api::translation.translation.backfill',
+        config: {
+          policies: ['admin::isAuthenticatedAdmin', 'global::super-admin-only'],
+        },
+      },
+      {
+        method: 'GET',
+        path: '/outbox-status',
+        handler: 'api::translation.translation.outboxStatus',
+        config: {
+          policies: ['admin::isAuthenticatedAdmin', 'global::super-admin-only'],
+        },
+      },
+    ],
+  } as any);
+}
+
 /** Runtime deployment identity consumed by authenticated admin UI actions. */
 export function registerAdminRuntimeConfigRoutes(strapi: Core.Strapi): void {
   strapi.server.routes({

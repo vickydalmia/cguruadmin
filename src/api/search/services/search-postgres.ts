@@ -102,6 +102,7 @@ export async function hydrateByDocumentId(
     fields: string[];
     populate: Record<string, any>;
     visibility: Record<string, any>;
+    locale: string;
   },
 ) {
   if (documentIds.length === 0) return [];
@@ -114,6 +115,7 @@ export async function hydrateByDocumentId(
       },
       fields: options.fields,
       populate: options.populate,
+      locale: options.locale,
       limit: documentIds.length,
     } as any)
     .finally(() => recordPhase("hydrate", startedAt));

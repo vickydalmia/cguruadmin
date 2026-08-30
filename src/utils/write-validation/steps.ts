@@ -86,6 +86,14 @@ export type StepContext = {
    * own grandfathering, this pipeline never second-guesses them.
    */
   strict: boolean;
+  /**
+   * `context.params.locale` — set on writes that target a non-default content
+   * locale (a manual Arabic edit, the translation writer). Validators that
+   * read the STORED row to resolve a partial payload must read the row of the
+   * locale being written, or they would judge an `ar` save against the `en`
+   * document. Undefined means the default locale.
+   */
+  locale?: string;
 };
 
 export type ValidationStep = {
@@ -234,7 +242,8 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     name: 'validateHomepageHeroOffers',
     actions: CREATE_UPDATE,
     applies: (uid) => uid === HOMEPAGE_UID,
-    run: ({ strapi, data }) => validateHomepageHeroOffers(strapi, data),
+    run: ({ strapi, data, locale }) =>
+      validateHomepageHeroOffers(strapi, data, locale),
   },
   {
     name: 'validateHomepagePopularSearches',
@@ -261,13 +270,15 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     name: 'validateDealOfTheDaySectionLimits',
     actions: CREATE_UPDATE,
     applies: (uid) => uid === DOTD_UID,
-    run: ({ strapi, data }) => validateDealOfTheDaySectionLimits(strapi, data),
+    run: ({ strapi, data, locale }) =>
+      validateDealOfTheDaySectionLimits(strapi, data, locale),
   },
   {
     name: 'validateIndependenceDaySale',
     actions: CREATE_UPDATE,
     applies: (uid) => uid === INDEPENDENCE_DAY_SALE_UID,
-    run: ({ strapi, data }) => validateIndependenceDaySale(strapi, data),
+    run: ({ strapi, data, locale }) =>
+      validateIndependenceDaySale(strapi, data, locale),
   },
   {
     name: 'validateContentManagerOfferStore',
@@ -343,8 +354,16 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     // card slots.
     name: 'validateOfferFieldsForWrite',
     applies: (uid) => uid === 'api::coupon.coupon' || uid === 'api::deal.deal',
-    run: ({ strapi, uid, action, data, documentId, strict }) =>
-      validateOfferFieldsForWrite(strapi, uid, action, data, documentId, strict),
+    run: ({ strapi, uid, action, data, documentId, strict, locale }) =>
+      validateOfferFieldsForWrite(
+        strapi,
+        uid,
+        action,
+        data,
+        documentId,
+        strict,
+        locale,
+      ),
   },
   {
     // Taxonomy cross-field checks: rating range, FAQ-enabled-but-empty,

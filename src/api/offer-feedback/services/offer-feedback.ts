@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
 
 export const OFFER_ENTITY_TYPES = ['coupon', 'deal'] as const;
 export type OfferEntityType = (typeof OFFER_ENTITY_TYPES)[number];
@@ -51,8 +52,12 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const table = OFFER_TABLES[entityType];
     const knex = strapi.db.connection;
     const client = String((knex as any)?.client?.config?.client ?? '').toLowerCase();
+    // One document may hold one row per locale; pin the read to the default
+    // locale so `.first()` stays deterministic. The counter UPDATE below
+    // targets the whole document — the counts are shared data, and this knex
+    // write never reaches the i18n non-localized sync.
     const offer = await knex(table)
-      .where({ document_id: documentId })
+      .where({ document_id: documentId, locale: DEFAULT_CONTENT_LOCALE })
       .select(['id', 'document_id', 'worked_count', 'failed_count'])
       .first();
     if (!offer) return null;
@@ -71,7 +76,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         });
 
         const update = trx(table)
-          .where({ id: offer.id })
+          .where({ document_id: documentId })
           .update({
             [counterColumn]: trx.raw(`COALESCE(${counterColumn}, 0) + 1`),
           });

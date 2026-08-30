@@ -17,6 +17,12 @@ import {
   type SqlQuery,
 } from "./search-sql";
 import { publishedOnlyFilters } from "../../../utils/content-status";
+// Public search serves the default-locale catalogue. The ranked SQL must say
+// so explicitly — the tables hold one row per locale once i18n is enabled —
+// while the documents-API hydrate/fallback reads already default to the
+// default locale. A localized search (e.g. /ar/) threads its own locale here
+// when the storefront grows one.
+import { DEFAULT_CONTENT_LOCALE } from "../../../constants/content-locales";
 import {
   GROUPS,
   MAX_PAGE,
@@ -67,22 +73,29 @@ export async function entityPage(
   query: string,
   window: PageWindow,
   fallbackCache: FallbackRequestCache,
+  locale = DEFAULT_CONTENT_LOCALE,
 ) {
   return withSearchMode(
     strapi,
     async (connection) => {
       const ids = await rankedDocumentIds(
         connection,
-        entityRankedQuery(config.key, searchNeedles(query), {
-          limit: window.limit + (window.lookahead ?? 0),
-          offset: window.offset,
-        }),
+        entityRankedQuery(
+          config.key,
+          searchNeedles(query),
+          {
+            limit: window.limit + (window.lookahead ?? 0),
+            offset: window.offset,
+          },
+          locale,
+        ),
       );
       const documents = await hydrateByDocumentId(strapi, config.uid, ids, {
         fields: entityFields(config),
         populate: { [config.mediaField]: true },
         // Same published constraint as the ranked SQL WHERE.
         visibility: { publishedAt: { $notNull: true } },
+        locale,
       });
       return documents
         .map((item) => mapEntity(item, config))
@@ -95,6 +108,7 @@ export async function entityPage(
         config,
         query,
         fallbackCache,
+        locale,
       );
       const ranked = rank(
         documents,
@@ -125,13 +139,17 @@ export async function entityTotal(
   config: EntityConfig,
   query: string,
   fallbackCache: FallbackRequestCache,
+  locale = DEFAULT_CONTENT_LOCALE,
 ) {
   return withSearchMode(
     strapi,
     (connection) =>
-      rankedTotal(connection, entityCountQuery(config.key, searchNeedles(query))),
+      rankedTotal(
+        connection,
+        entityCountQuery(config.key, searchNeedles(query), locale),
+      ),
     async () =>
-      (await fallbackEntities(strapi, config, query, fallbackCache)).length,
+      (await fallbackEntities(strapi, config, query, fallbackCache, locale)).length,
   );
 }
 
@@ -143,6 +161,7 @@ export async function offerPage(
   window: PageWindow,
   fallbackCache: FallbackRequestCache,
   nowIso: string,
+  locale = DEFAULT_CONTENT_LOCALE,
 ) {
   return withSearchMode(
     strapi,
@@ -157,6 +176,7 @@ export async function offerPage(
             offset: window.offset,
           },
           nowIso,
+          locale,
         ),
       );
       const documents = await hydrateByDocumentId(
@@ -170,11 +190,13 @@ export async function offerPage(
               fields: COUPON_FIELDS,
               populate: couponPopulate,
               visibility: publishedOnlyFilters(nowIso),
+              locale,
             }
           : {
               fields: DEAL_FIELDS,
               populate: dealPopulate,
               visibility: publishedOnlyFilters(nowIso),
+              locale,
             },
       );
       return documents
@@ -189,6 +211,7 @@ export async function offerPage(
         query,
         fallbackCache,
         nowIso,
+        locale,
       );
       const ranked = rankOfferDocuments(documents, kind, query);
       if (window.lookahead !== undefined) {
@@ -211,16 +234,17 @@ export async function offerTotal(
   query: string,
   fallbackCache: FallbackRequestCache,
   nowIso: string,
+  locale = DEFAULT_CONTENT_LOCALE,
 ) {
   return withSearchMode(
     strapi,
     (connection) =>
       rankedTotal(
         connection,
-        offerCountQuery(kind, searchNeedles(query), nowIso),
+        offerCountQuery(kind, searchNeedles(query), nowIso, locale),
       ),
     async () =>
-      (await fallbackOffers(strapi, kind, query, fallbackCache, nowIso)).length,
+      (await fallbackOffers(strapi, kind, query, fallbackCache, nowIso, locale)).length,
   );
 }
 
@@ -286,8 +310,8 @@ export async function preview(
     Promise.all(
       ENTITIES.filter((config) => isLive(config.key)).map(async (config) => {
         const [items, total] = await Promise.all([
-          entityPage(strapi, config, request.query, entityWindow, fallbackCache),
-          entityTotal(strapi, config, request.query, fallbackCache),
+          entityPage(strapi, config, request.query, entityWindow, fallbackCache, request.locale),
+          entityTotal(strapi, config, request.query, fallbackCache, request.locale),
         ]);
         return [config, items, total] as const;
       }),
@@ -300,10 +324,11 @@ export async function preview(
           offerWindow,
           fallbackCache,
           nowIso,
+          request.locale,
         )
       : Promise.resolve([]),
     isLive("coupons")
-      ? offerTotal(strapi, "coupon", request.query, fallbackCache, nowIso)
+      ? offerTotal(strapi, "coupon", request.query, fallbackCache, nowIso, request.locale)
       : Promise.resolve(0),
     isLive("deals")
       ? offerPage(
@@ -313,10 +338,11 @@ export async function preview(
           offerWindow,
           fallbackCache,
           nowIso,
+          request.locale,
         )
       : Promise.resolve([]),
     isLive("deals")
-      ? offerTotal(strapi, "deal", request.query, fallbackCache, nowIso)
+      ? offerTotal(strapi, "deal", request.query, fallbackCache, nowIso, request.locale)
       : Promise.resolve(0),
   ]);
 
@@ -339,12 +365,20 @@ export async function preview(
     response.categories[0]?.name ??
     response.banks[0]?.name ??
     request.query;
-  const labels = [
-    matchedName + " coupons",
-    matchedName + " deals",
-    request.query + " promo codes",
-    request.query + " offers",
-  ];
+  const labels =
+    request.locale === 'ar'
+      ? [
+          `كوبونات ${matchedName}`,
+          `عروض ${matchedName}`,
+          `أكواد خصم ${request.query}`,
+          `عروض ${request.query}`,
+        ]
+      : [
+          matchedName + " coupons",
+          matchedName + " deals",
+          request.query + " promo codes",
+          request.query + " offers",
+        ];
   response.suggestions = Array.from(new Set(labels.map(normalizeQuery)))
     .slice(0, 4)
     .map((label, index) => ({
@@ -377,10 +411,10 @@ export async function group(
   ) {
     const [couponCount, dealCount] = await Promise.all([
       isLive("coupons")
-        ? offerTotal(strapi, "coupon", request.query, fallbackCache, nowIso)
+        ? offerTotal(strapi, "coupon", request.query, fallbackCache, nowIso, request.locale)
         : Promise.resolve(0),
       isLive("deals")
-        ? offerTotal(strapi, "deal", request.query, fallbackCache, nowIso)
+        ? offerTotal(strapi, "deal", request.query, fallbackCache, nowIso, request.locale)
         : Promise.resolve(0),
     ]);
     response.totals.coupons = couponCount;
@@ -394,6 +428,7 @@ export async function group(
         window,
         fallbackCache,
         nowIso,
+        request.locale,
       );
       response.coupons = items.map(toPublicOffer);
       total = couponCount;
@@ -405,6 +440,7 @@ export async function group(
         window,
         fallbackCache,
         nowIso,
+        request.locale,
       );
       response.deals = items.map(toPublicOffer);
       total = dealCount;
@@ -415,8 +451,8 @@ export async function group(
     );
     if (config) {
       const [items, entityCount] = await Promise.all([
-        entityPage(strapi, config, request.query, window, fallbackCache),
-        entityTotal(strapi, config, request.query, fallbackCache),
+        entityPage(strapi, config, request.query, window, fallbackCache, request.locale),
+        entityTotal(strapi, config, request.query, fallbackCache, request.locale),
       ]);
       response[config.key] = items;
       response.totals[config.key] = entityCount;

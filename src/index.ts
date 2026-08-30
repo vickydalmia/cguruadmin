@@ -17,6 +17,7 @@ import { installDocumentWriteMiddleware } from './register/document-write-middle
 // this module has none — it would register 'global::record-lock-document' as
 // an undefined factory that throws the moment anything references it.
 import { installRecordLockDocumentMiddleware } from './register/record-lock-document';
+import { installContentLocaleReadMiddleware } from './register/content-locale-read-middleware';
 import { getCuratedOfferRelations } from './utils/curated-offer-relations';
 import { registerCuratedOfferRelationQueryFilter } from './utils/curated-offer-live-filter';
 import { primeOfferContentLocalization } from './utils/offer-content-localization';
@@ -65,7 +66,15 @@ import {
   registerEntityCouponLayoutRoutes,
   registerEntityDealPageRoutes,
   registerRecordLockRoutes,
+  registerTranslationRoutes,
 } from './register/admin-routes';
+import { TRANSLATION_ACTION_ATTRIBUTES } from './api/translation/controllers/translation';
+import { ensureContentLocales } from './translation/ensure-locales';
+import { primeEnabledContentLocales } from './translation/locales/registry';
+import {
+  startTranslationOutbox,
+  stopTranslationOutbox,
+} from './translation/outbox/runtime';
 
 export default {
   async register({ strapi }: { strapi: Core.Strapi }) {
@@ -112,6 +121,9 @@ export default {
     // bootstrap), so this is both early enough and allowed.
     await strapi.service('admin::permission').actionProvider.registerMany([
       ENTITY_COUPON_LAYOUT_ACTION_ATTRIBUTES,
+      // Same register-not-bootstrap rule as above, or its grants are wiped
+      // on every restart by cleanPermissionsInDatabase().
+      TRANSLATION_ACTION_ATTRIBUTES,
     ]);
 
     registerEntityCouponLayoutRoutes(strapi);
@@ -119,11 +131,14 @@ export default {
     registerCsvExportRoutes(strapi);
     registerCountrySetupRoutes(strapi);
     registerAdminRuntimeConfigRoutes(strapi);
+    registerTranslationRoutes(strapi);
 
     // Document-service middlewares. Registration order = execution order:
     // the record-lock guard must run before the document-write pipeline
     // (validation + integrity side-effects + ISR outbox), matching the order
-    // the two blocks had inline here.
+    // the two blocks had inline here. The content-locale read injector is
+    // read-only and order-independent of the two write guards.
+    installContentLocaleReadMiddleware(strapi);
     installRecordLockDocumentMiddleware(strapi);
     installDocumentWriteMiddleware(strapi);
   },
@@ -247,10 +262,30 @@ export default {
       );
     }
 
+    // AI translation: create the opted-in content locales, prime the sync
+    // locale mirror the ISR path expansion reads, then start the job
+    // dispatcher. All BEFORE startIsrOutbox so every event created after
+    // boot carries its locale path twins. Fail safe throughout: a broken
+    // TRANSLATION_* env logs loudly and stays off.
+    let translationBootstrapReady = false;
+    try {
+      await ensureContentLocales(strapi);
+      await primeEnabledContentLocales(strapi);
+      translationBootstrapReady = true;
+    } catch (err: any) {
+      strapi.log.error(
+        `[translation] content-locale bootstrap failed: ${err?.message ?? err}`,
+      );
+    }
+    if (translationBootstrapReady) {
+      await startTranslationOutbox(strapi);
+    }
+
     startIsrOutbox(strapi);
   },
 
   async destroy() {
     await stopIsrOutbox();
+    await stopTranslationOutbox();
   },
 };

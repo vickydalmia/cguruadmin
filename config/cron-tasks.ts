@@ -4,6 +4,8 @@ import { computeContentStatus } from '../src/utils/content-status';
 import { enqueueStandaloneIsrEvent } from '../src/isr-outbox/runtime';
 import { removeInactiveCuratedOfferRelations } from '../src/utils/curated-offer-cleanup';
 import { removeDisplayedTopPicksFromOrdered } from '../src/utils/curated-offer-top-picks';
+import { enqueueTranslationBackfill } from '../src/translation/backfill';
+import { translationRuntimeActive } from '../src/translation/outbox/runtime';
 
 /**
  * Resolve from the application ROOT, not from this module's directory, and not
@@ -327,6 +329,34 @@ export default {
     },
     options: {
       rule: "30 3 * * *",
+    },
+  },
+
+  // AI-translation consistency: re-enqueue every localized document into the
+  // translation outbox. Guarded like every other nightly scan; a no-op on
+  // deployments with translation off. Cheap by construction — the dispatcher
+  // no-ops hash-current entries without an LLM call, so this only pays for
+  // (a) entries whose English changed through a path the middleware missed
+  // and (b) relation drift, both of which it repairs by the next morning.
+  nightlyTranslationConsistency: {
+    task: async ({ strapi }: { strapi: any }) => {
+      try {
+        if (!(await translationRuntimeActive(strapi))) return;
+        const result = await enqueueTranslationBackfill(strapi);
+        strapi.log.info({
+          event: 'translation.nightly_consistency_enqueued',
+          enqueued: result.enqueued,
+          locales: result.locales,
+        });
+      } catch (err: any) {
+        strapi.log.error({
+          event: 'translation.nightly_consistency_failed',
+          error: err?.message ?? String(err),
+        });
+      }
+    },
+    options: {
+      rule: "45 4 * * *",
     },
   },
 };

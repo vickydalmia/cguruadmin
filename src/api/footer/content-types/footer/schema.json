@@ -13,38 +13,83 @@
   "attributes": {
     "title": {
       "type": "string",
-      "default": "Footer"
+      "default": "Footer",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "sections": {
       "type": "component",
       "repeatable": true,
-      "component": "footer.link-section"
+      "component": "footer.link-section",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "socialLinks": {
       "type": "component",
       "repeatable": true,
-      "component": "footer.social-link"
+      "component": "footer.social-link",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "countries": {
       "type": "component",
       "repeatable": true,
-      "component": "footer.country"
+      "component": "footer.country",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "partnerCard": {
       "type": "component",
       "repeatable": false,
-      "component": "footer.partner-card"
+      "component": "footer.partner-card",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "googlePreferredCard": {
       "type": "component",
       "repeatable": false,
-      "component": "footer.google-preferred-card"
+      "component": "footer.google-preferred-card",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "badgeText": {
-      "type": "string"
+      "type": "string",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "copyrightText": {
-      "type": "string"
+      "type": "string",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    }
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
     }
   }
 }

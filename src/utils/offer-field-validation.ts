@@ -1,5 +1,6 @@
 import type { Core } from '@strapi/strapi';
 import { errors } from '@strapi/utils';
+import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
 
 // Rules for the offer text fields, enforced on coupon/deal create+update via
 // the documents middleware, throwing the same ValidationError shape the
@@ -64,9 +65,14 @@ const DEAL_DISCOUNT_RULE: FieldRule = {
       : `Discount must be an amount only — a percent ("10%") or a currency amount ("₹100") — got "${value.trim()}". The selected prefix and any applicable “OFF” suffix are assembled automatically on the site.`,
 };
 
-function fieldRulesForUid(uid?: string): FieldRule[] {
-  return uid === DEAL_UID
-    ? [...BENEFIT_FIELD_RULES, DEAL_DISCOUNT_RULE]
+function fieldRulesForUid(uid?: string, skipWordRules = false): FieldRule[] {
+  if (uid === DEAL_UID) return [...BENEFIT_FIELD_RULES, DEAL_DISCOUNT_RULE];
+  // Word caps encode ENGLISH editorial conventions ("Flat 50% Off" fits in
+  // 3 words); a localized offerText (Arabic, later Hindi) may legitimately
+  // need more. Amount rules stay — those fields are non-localized and shared,
+  // so garbage entered through any locale's form would leak everywhere.
+  return skipWordRules
+    ? [...BENEFIT_FIELD_RULES]
     : [...WORD_FIELD_RULES, ...BENEFIT_FIELD_RULES];
 }
 
@@ -94,6 +100,7 @@ export function validateOfferFields(
   stored: any = null,
   strict = false,
   uid?: string,
+  skipWordRules = false,
 ): void {
   if (!data || typeof data !== 'object') return;
 
@@ -115,7 +122,7 @@ export function validateOfferFields(
     if (!unchanged(comparisonFields)) problems.push({ path, message });
   };
 
-  for (const { field, problem } of fieldRulesForUid(uid)) {
+  for (const { field, problem } of fieldRulesForUid(uid, skipWordRules)) {
     const value = data[field];
     if (typeof value !== 'string' || value.trim() === '') continue;
     const message = problem(value);
@@ -191,6 +198,7 @@ export async function validateOfferFieldsForWrite(
   data: any,
   documentId?: string,
   strict = false,
+  locale?: string,
 ): Promise<void> {
   if (!data || typeof data !== 'object') return;
   const isClone = action === 'clone';
@@ -219,6 +227,9 @@ export async function validateOfferFieldsForWrite(
           : touched;
     stored = await strapi.documents(uid as any).findOne({
       documentId,
+      // Grandfather comparisons must read the locale version being written,
+      // or an `ar` save would be judged against the `en` row's values.
+      ...(locale ? { locale } : {}),
       fields: [
         'documentId',
         ...fields,
@@ -232,5 +243,8 @@ export async function validateOfferFieldsForWrite(
     (isClone || strict || needsDealPairContext) && stored && typeof stored === 'object'
       ? { ...stored, ...data }
       : data;
-  validateOfferFields(effective, action, stored, strict, uid);
+  // Word caps are English editorial rules; localized text skips them (see
+  // fieldRulesForUid). Amount rules always run — those fields are shared.
+  const skipWordRules = Boolean(locale) && locale !== DEFAULT_CONTENT_LOCALE;
+  validateOfferFields(effective, action, stored, strict, uid, skipWordRules);
 }

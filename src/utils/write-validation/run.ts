@@ -49,7 +49,11 @@ import {
  */
 export async function runWriteValidation(
   strapi: Core.Strapi,
-  context: { uid: string; action: string; params?: { data?: any; documentId?: string } },
+  context: {
+    uid: string;
+    action: string;
+    params?: { data?: any; documentId?: string; locale?: string };
+  },
 ): Promise<WriteLockRelease | null> {
   const { uid, action } = context;
   if (!WRITE_ACTIONS.includes(action as (typeof WRITE_ACTIONS)[number])) return null;
@@ -67,6 +71,13 @@ export async function runWriteValidation(
     // context, so it stays grandfathered/touched-only and never throws on
     // migrated data. Computed once; passed to each validator.
     strict: isHumanWrite(strapi),
+    // Which locale version of the document this write targets (undefined =
+    // default). Validators that resolve partial payloads against the STORED
+    // row must read that locale's row, not whichever one db.query finds first.
+    locale:
+      typeof context.params?.locale === 'string'
+        ? context.params.locale
+        : undefined,
   };
 
   // --- Group A: mutators. Never throw; every validator below reads what they

@@ -4,6 +4,7 @@ import {
   INDEPENDENCE_DAY_SALE_CAPS,
   INDEPENDENCE_DAY_SALE_UID,
 } from '../constants/independence-day-sale-sections';
+import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
 import { resultingRelationCount } from './deal-of-the-day-validation';
 
 type Problem = { path: string[]; message: string };
@@ -17,10 +18,15 @@ function dateValue(value: unknown): number | null {
 export async function validateIndependenceDaySale(
   strapi: Core.Strapi,
   data: any,
+  locale?: string,
 ): Promise<void> {
   if (!data || typeof data !== 'object') return;
 
+  // Pin the stored-state read to the locale being written: the single type
+  // holds one row per content locale, and a bare findOne would resolve the
+  // partial payload against whichever locale row it found first.
   const current = await strapi.db.query(INDEPENDENCE_DAY_SALE_UID).findOne({
+    where: { locale: locale ?? DEFAULT_CONTENT_LOCALE },
     populate: {
       countdown: true,
       topPicks: { populate: ['offers'] },

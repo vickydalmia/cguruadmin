@@ -41,6 +41,17 @@ import { CHECKOUT_MERCHANT_FIELD } from '../constants/checkout-merchant';
 import { clearDeletedCheckoutMerchant } from '../utils/checkout-merchant-validation';
 import { fillHomepageOverrides } from '../utils/homepage-override-fill';
 import { DOCUMENT_WRITE_ACTIONS } from '../constants/document-write';
+import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
+import { isTranslationWrite } from '../translation/write-flag';
+import {
+  translationRuntimeActive,
+  wakeTranslationOutbox,
+} from '../translation/outbox/runtime';
+import {
+  insertTranslationJob,
+  TRANSLATION_STATE_TABLE,
+} from '../translation/outbox/store';
+import { enabledContentLocales } from '../translation/locales/registry';
 
 // The document-write pipeline: the one document-service middleware every
 // editor-facing write flows through. In order: pre-write validation
@@ -164,6 +175,7 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
       // this snapshot every Store/Brand save would escalate to a full-site
       // rebuild (see festiveOfferChanged in isr-outbox/scopes.ts). A failed
       // read stays null, which fails toward invalidation, never away.
+      let translationEnqueued = false;
       let festiveOfferBefore: FestiveOfferSnapshot | null = null;
       if (
         context.action === 'update' &&
@@ -171,8 +183,15 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
         context.params?.documentId
       ) {
         try {
+          // Same locale as the write: festive title/description are
+          // localized, so an `ar` save compared against the `en` snapshot
+          // would read as "festive edited" and wrongly escalate every
+          // translation write to a full-site rebuild.
           festiveOfferBefore = await strapi.documents(context.uid).findOne({
             documentId: context.params.documentId,
+            ...(context.params?.locale
+              ? { locale: context.params.locale }
+              : {}),
             fields: [
               'isFestiveOffer',
               'festiveOfferTitle',
@@ -266,6 +285,86 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
 
           const documentId =
             (result as any)?.documentId ?? context.params?.documentId;
+
+          // AI translation: a default-locale write to a localized type
+          // enqueues one coalesced job per enabled target locale, in THIS
+          // transaction — the job either commits with the content or not at
+          // all. The dispatcher's own locale writes are excluded twice over
+          // (non-default locale + the AsyncLocalStorage write flag). Fully
+          // inert unless the site opted in AND the env parses
+          // (translationRuntimeActive), so India/USA never see a row.
+          try {
+            const writesDefaultLocale =
+              !context.params?.locale ||
+              context.params.locale === DEFAULT_CONTENT_LOCALE;
+            const localizedType =
+              (strapi.getModel(context.uid as any) as any)?.pluginOptions?.i18n
+                ?.localized === true;
+            if (localizedType && documentId) {
+              if (context.action === 'delete') {
+                const deletedLocale = String(
+                  context.params?.locale ?? DEFAULT_CONTENT_LOCALE,
+                );
+                const stateRows = trx(TRANSLATION_STATE_TABLE).where({
+                  uid: context.uid,
+                  document_id: documentId,
+                });
+                // Strapi deletes one locale unless the caller explicitly
+                // uses locale="*". A target-locale delete must therefore
+                // retain the source and every sibling locale's memory.
+                if (
+                  deletedLocale !== DEFAULT_CONTENT_LOCALE &&
+                  deletedLocale !== '*'
+                ) {
+                  stateRows.andWhere({ locale: deletedLocale });
+                }
+                await stateRows.delete();
+                if (
+                  deletedLocale === DEFAULT_CONTENT_LOCALE &&
+                  !isTranslationWrite() &&
+                  (await translationRuntimeActive(strapi))
+                ) {
+                  // Durable cleanup: the dispatcher sees that the English
+                  // source is gone and removes each generated locale through
+                  // the documents API, including all component/relation rows.
+                  for (const locale of await enabledContentLocales(strapi)) {
+                    await insertTranslationJob(trx, {
+                      uid: context.uid,
+                      documentId,
+                      targetLocale: locale.code,
+                      kind: 'translate',
+                      reason: `${context.uid} delete`,
+                    });
+                  }
+                  translationEnqueued = true;
+                }
+              } else if (
+                writesDefaultLocale &&
+                !isTranslationWrite() &&
+                ['create', 'update', 'clone', 'publish'].includes(context.action) &&
+                (await translationRuntimeActive(strapi))
+              ) {
+                for (const locale of await enabledContentLocales(strapi)) {
+                  await insertTranslationJob(trx, {
+                    uid: context.uid,
+                    documentId,
+                    targetLocale: locale.code,
+                    kind: 'translate',
+                    reason: `${context.uid} ${context.action}`,
+                  });
+                }
+                translationEnqueued = true;
+              }
+            }
+          } catch (err: any) {
+            // Never fail an editor's save on translation bookkeeping; the
+            // nightly consistency sweep re-enqueues hash-stale entries.
+            strapi.log.warn(
+              `[translation] enqueue failed for ${context.uid} ${documentId}: ` +
+                `${err?.message ?? err}`,
+            );
+          }
+
           const afterScope =
             context.action === 'delete' && preScope
               ? null
@@ -372,6 +471,8 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
           };
         },
         (event) => {
+          // Only after the database commit — the job row is durable now.
+          if (translationEnqueued) wakeTranslationOutbox();
           if (!event) return;
           // Only after the database commit: renderers must never observe
           // invalidation before the content and its durable outbox event.

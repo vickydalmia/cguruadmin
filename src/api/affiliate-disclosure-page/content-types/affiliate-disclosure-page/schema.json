@@ -10,63 +10,127 @@
   "options": {
     "draftAndPublish": false
   },
-  "pluginOptions": {},
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
+  },
   "attributes": {
     "title": {
       "type": "string",
-      "default": "Affiliate Disclosure"
+      "default": "Affiliate Disclosure",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "breadcrumbAriaLabel": {
       "type": "string",
       "default": "Breadcrumb",
-      "maxLength": 60
+      "maxLength": 60,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "breadcrumbItems": {
       "type": "component",
       "repeatable": true,
       "component": "shared.breadcrumb-item",
-      "max": 5
+      "max": 5,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "eyebrow": {
       "type": "string",
-      "maxLength": 60
+      "maxLength": 60,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "heading": {
       "type": "string",
-      "maxLength": 100
+      "maxLength": 100,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "effectiveDate": {
       "type": "string",
-      "maxLength": 100
+      "maxLength": 100,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "contentHeading": {
       "type": "string",
-      "maxLength": 160
+      "maxLength": 160,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "navigationTitle": {
       "type": "string",
-      "maxLength": 80
+      "maxLength": 80,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "navigationItems": {
       "type": "component",
       "repeatable": true,
       "component": "legal.navigation-item",
-      "max": 12
+      "max": 12,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "supportCta": {
       "type": "component",
       "repeatable": false,
-      "component": "legal.support-cta"
+      "component": "legal.support-cta",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "sections": {
       "type": "component",
       "repeatable": true,
-      "component": "legal.section"
+      "component": "legal.section",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "seo": {
       "type": "component",
       "repeatable": false,
-      "component": "shared.seo"
+      "component": "shared.seo",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     }
   }
 }

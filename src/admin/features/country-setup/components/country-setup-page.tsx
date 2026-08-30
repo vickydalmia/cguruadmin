@@ -204,6 +204,41 @@ export default function CountrySetupPage() {
               </Flex>
             </Box>
 
+            <Box padding={6} background="neutral0" shadow="filterShadow" hasRadius>
+              <Typography variant="beta">AI content translation</Typography>
+              <Box paddingTop={2}>
+                <Typography variant="pi" textColor="neutral600">
+                  Automatically writes a translated version of every localized
+                  entry (stores, coupons, pages, …) whenever the English source
+                  is saved, and serves it under its own URL prefix (e.g. /ar/).
+                  Needs the TRANSLATION_* server environment configured, and a
+                  RESTART after changing these switches.
+                </Typography>
+              </Box>
+              <Flex paddingTop={4} gap={5} alignItems="flex-end" wrap="wrap">
+                <Field.Root name="translationEnabled">
+                  <Field.Label>Translation enabled</Field.Label>
+                  <Toggle
+                    checked={form.translationEnabled === true}
+                    onLabel="On"
+                    offLabel="Off"
+                    onChange={() =>
+                      set('translationEnabled', form.translationEnabled !== true)
+                    }
+                  />
+                </Field.Root>
+                <Box grow={1} minWidth="240px">
+                  <FieldInput
+                    field="translationLocales"
+                    label="Target locales (comma-separated codes)"
+                    placeholder="ar"
+                    value={String(form.translationLocales ?? '')}
+                    onChange={(value) => set('translationLocales', value)}
+                  />
+                </Box>
+              </Flex>
+            </Box>
+
             {(['Catalog', 'Editorial', 'Legal'] as const).map((group) => (
               <Box key={group} padding={6} background="neutral0" shadow="filterShadow" hasRadius>
                 <Typography variant="beta">{group}</Typography>

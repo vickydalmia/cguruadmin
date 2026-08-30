@@ -1,5 +1,6 @@
 // Search REQUEST PARSING: query/page/group normalisation and limits.
 // One of the modules split out of the search service (see ./search.ts).
+import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
 
 // 3 is a hard floor for performance, not taste: pg_trgm needs a full
 // trigram, so an unanchored LIKE '%xx%' with a 2-char needle can never use
@@ -28,6 +29,7 @@ export type SearchRequest = {
   group?: SearchGroup;
   page: number;
   pageSize: number;
+  locale: string;
 };
 
 export function oneString(value: unknown): string | null {
@@ -49,7 +51,7 @@ function positiveInteger(
 }
 
 export function parseRequest(raw: Record<string, unknown>) {
-  const allowed = new Set(["query", "mode", "group", "page", "pageSize"]);
+  const allowed = new Set(["query", "mode", "group", "page", "pageSize", "locale"]);
   if (Object.keys(raw).some((key) => !allowed.has(key))) {
     return { ok: false as const, message: "Unsupported search parameter" };
   }
@@ -99,6 +101,7 @@ export function parseRequest(raw: Record<string, unknown>) {
       group,
       page: positiveInteger(raw.page, 1, MAX_PAGE),
       pageSize: positiveInteger(raw.pageSize, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
+      locale: oneString(raw.locale) ?? DEFAULT_CONTENT_LOCALE,
     } satisfies SearchRequest,
   };
 }

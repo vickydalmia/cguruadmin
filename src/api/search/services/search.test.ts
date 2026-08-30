@@ -853,7 +853,11 @@ describe("ranked SQL path (Postgres)", () => {
         /FROM (?:coupons|deals) o/u.test(sql),
       );
       expect(offerSql).toHaveLength(3);
-      expect(offerSql.every(([, bindings]) => bindings?.[0] === nowIso)).toBe(
+      // The locale pin binds first, the shared request cutoff right after it.
+      expect(offerSql.every(([, bindings]) => bindings?.[0] === "en")).toBe(
+        true,
+      );
+      expect(offerSql.every(([, bindings]) => bindings?.[1] === nowIso)).toBe(
         true,
       );
       const hydrate = calls.find(

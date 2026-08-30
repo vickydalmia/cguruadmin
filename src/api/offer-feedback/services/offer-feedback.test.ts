@@ -100,11 +100,22 @@ function createKnex(initial: Tables) {
 
 describe('offer-feedback service', () => {
   it('writes and counts a coupon vote atomically, then deduplicates it', async () => {
+    // Two locale rows of one document: the read pins the default locale, the
+    // counter update must move BOTH rows (the knex write is invisible to the
+    // i18n non-localized sync).
     const db = createKnex({
       coupons: [
         {
           id: 1,
           document_id: 'coupon-1',
+          locale: 'en',
+          worked_count: 4,
+          failed_count: 1,
+        },
+        {
+          id: 2,
+          document_id: 'coupon-1',
+          locale: 'ar',
           worked_count: 4,
           failed_count: 1,
         },
@@ -135,6 +146,8 @@ describe('offer-feedback service', () => {
       ip_hash: 'client-a',
       value: 'worked',
     });
+    // Both locale rows of the document moved in lockstep.
+    expect(db.tables.coupons.map((row) => row.worked_count)).toEqual([5, 5]);
   });
 
   it('bumps the failed counter on deals and treats null counters as zero', async () => {
@@ -143,6 +156,7 @@ describe('offer-feedback service', () => {
         {
           id: 9,
           document_id: 'deal-9',
+          locale: 'en',
           worked_count: null,
           failed_count: null,
         },

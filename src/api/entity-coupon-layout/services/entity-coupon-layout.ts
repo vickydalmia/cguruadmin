@@ -5,6 +5,12 @@ import { insertIsrOutboxEvent } from '../../../isr-outbox/store';
 import { SITEMAP_INDEX_PATH } from '../../../isr-outbox/payload';
 import { wakeIsrOutbox } from '../../../isr-outbox/runtime';
 import { purgeResponseCaches } from '../../../middlewares/cache';
+import { enabledContentLocaleCodesSync } from '../../../translation/locales/registry';
+import {
+  translationRuntimeActive,
+  wakeTranslationOutbox,
+} from '../../../translation/outbox/runtime';
+import { insertTranslationJob } from '../../../translation/outbox/store';
 import { publishedOnlyFilters } from '../../../utils/content-status';
 import { toRouteSlug } from '../../../utils/route-normalization';
 
@@ -321,10 +327,13 @@ export function createEntityCouponLayoutService({
               orderedCoupons: { set: orderedIds },
             },
           } as any);
+          // document_id addressing: locale twins share the public timestamp
+          // (sitemap lastmod), and this raw write never reaches the i18n
+          // non-localized sync.
           const touched = await trx(config.table)
-            .where({ id: entity.id })
+            .where({ document_id: entity.documentId })
             .update({ updated_at: now });
-          if (Number(touched) !== 1) {
+          if (Number(touched) < 1) {
             throw new Error('Entity disappeared while saving Coupon layout.');
           }
           const event = await insertIsrOutboxEvent(trx, {
@@ -334,9 +343,26 @@ export function createEntityCouponLayoutService({
             payload: { paths: pagePaths, scopes: ['sitemap'] },
             reason: `${config.uid} coupon layout update`,
           });
+          // Curated relations changed at the Query Engine layer, which the
+          // translation enqueue in the document middleware never sees — the
+          // locale twin's topPickCoupons/orderedCoupons would drift without
+          // this. Same transaction, no LLM cost: an unchanged source hash
+          // makes it a pure relation re-mirror.
+          if (await translationRuntimeActive(strapi)) {
+            for (const code of enabledContentLocaleCodesSync()) {
+              await insertTranslationJob(trx, {
+                uid: config.uid,
+                documentId: entityDocumentId,
+                targetLocale: code,
+                kind: 'relation-sync',
+                reason: `${config.uid} coupon layout update`,
+              });
+            }
+          }
           onCommit(() => {
             purgeResponseCaches(cachePaths);
             wakeIsrOutbox();
+            wakeTranslationOutbox();
           });
           return event;
         },

@@ -59,7 +59,7 @@ export function changesEntityOfferMembership(
  * hang, which no test or error log would surface on its own.
  */
 export async function touchEntityPageUpdatedAt(
-  strapi: Core.Strapi,
+  _strapi: Core.Strapi,
   trx: any,
   uid: EntityUid,
   result: unknown,
@@ -73,24 +73,32 @@ export async function touchEntityPageUpdatedAt(
     );
   }
 
-  let id = Number((result as any)?.id);
+  const table = ENTITY_TABLE_BY_UID[uid];
 
-  if ((!Number.isSafeInteger(id) || id <= 0) && documentId) {
-    const entity: any = await strapi.documents(uid).findOne({
-      documentId,
-      fields: ['documentId'] as any,
-    });
-    id = Number(entity?.id);
+  // Touch EVERY locale row of the document, not just the written one. The
+  // public page timestamp (sitemap lastmod, entity endpoints) must move for
+  // the locale twins too, and this raw write is invisible to the i18n sync
+  // that aligns non-localized fields on documents-API writes.
+  if (documentId) {
+    const updated = await trx(table)
+      .where({ document_id: documentId })
+      .update({ updated_at: now });
+    if (Number(updated) < 1) {
+      throw new Error(
+        `Expected to touch at least one ${uid} row, updated ${String(updated)}`,
+      );
+    }
+    return;
   }
 
+  // Relation writes always address a document; a missing documentId leaves
+  // only the written row's numeric id to go by.
+  const id = Number((result as any)?.id);
   if (!Number.isSafeInteger(id) || id <= 0) {
     throw new Error(`Could not resolve ${uid} row while touching entity-page updatedAt`);
   }
 
-  const updated = await trx(ENTITY_TABLE_BY_UID[uid])
-    .where({ id })
-    .update({ updated_at: now });
-
+  const updated = await trx(table).where({ id }).update({ updated_at: now });
   if (Number(updated) !== 1) {
     throw new Error(`Expected to touch one ${uid} row, updated ${String(updated)}`);
   }

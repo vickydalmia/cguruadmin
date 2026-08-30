@@ -9,76 +9,150 @@
   "options": {
     "draftAndPublish": false
   },
-  "pluginOptions": {},
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
+  },
   "attributes": {
     "title": {
       "type": "string",
-      "default": "Homepage"
+      "default": "Homepage",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "hero": {
       "type": "component",
       "component": "home.hero-section",
-      "repeatable": false
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "topOffers": {
       "type": "component",
       "component": "home.top-offers",
-      "repeatable": false
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "popularStores": {
       "type": "component",
       "component": "home.popular-stores",
-      "repeatable": false
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "topDeals": {
       "type": "component",
       "component": "home.deal-list",
-      "repeatable": false
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "cgExclusive": {
       "type": "component",
       "component": "home.cg-exclusive",
-      "repeatable": false
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "exploreOffers": {
       "type": "component",
       "component": "home.explore-offers",
-      "repeatable": false
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "newlyAdded": {
       "type": "component",
       "component": "home.newly-added",
-      "repeatable": false
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "offersByBrand": {
       "type": "component",
       "component": "home.offer-list",
-      "repeatable": false
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "bankOffers": {
       "type": "component",
       "component": "home.bank-offers",
-      "repeatable": false
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "howItWorks": {
       "type": "component",
       "component": "home.how-it-works",
-      "repeatable": false
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "faq": {
       "type": "component",
       "component": "home.faq-block",
-      "repeatable": false
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "popularSearches": {
       "type": "component",
       "repeatable": false,
-      "component": "home.popular-searches"
+      "component": "home.popular-searches",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "latestInsights": {
       "type": "component",
       "repeatable": false,
-      "component": "home.latest-insights"
+      "component": "home.latest-insights",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "latestInsightsEnabled": {
       "type": "boolean",
@@ -87,7 +161,12 @@
     "seo": {
       "type": "component",
       "component": "shared.seo",
-      "repeatable": false
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     }
   }
 }

@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
 
 export const ENTITY_PAGE_TYPES = ['store', 'brand', 'category', 'bank'] as const;
 export type EntityPageType = (typeof ENTITY_PAGE_TYPES)[number];
@@ -42,13 +43,21 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const table = ENTITY_TABLES[entityType];
     const knex = strapi.db.connection;
     const client = String((knex as any)?.client?.config?.client ?? '').toLowerCase();
+    // The slug is shared by every locale row of the document, so pin the
+    // lookup to the default locale for a deterministic row. The aggregate
+    // UPDATE below then moves ALL locale rows of the document together —
+    // ratings are shared data, and this knex write is invisible to the i18n
+    // sync that keeps non-localized fields aligned on documents-API writes.
     const entity = await knex(table)
-      .where({ slug })
+      .where({ slug, locale: DEFAULT_CONTENT_LOCALE })
       .select(['id', 'document_id', 'rating_average', 'rating_count'])
       .first();
     if (!entity) return null;
 
     const entityDocumentId = String(entity.document_id ?? `id:${entity.id}`);
+    const documentWhere = entity.document_id
+      ? { document_id: entity.document_id }
+      : { id: entity.id };
     const dualWriteStore =
       entityType === 'store' &&
       (await knex.schema.hasTable('store_rating_votes'));
@@ -69,8 +78,10 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
           });
         }
 
+        // Per-row arithmetic over every locale row of the document: each row
+        // folds the vote into its own aggregate, so twins stay in lockstep.
         const update = trx(table)
-          .where({ id: entity.id })
+          .where(documentWhere)
           .update({
             rating_average: trx.raw(
               'ROUND(((COALESCE(rating_average, 0) * COALESCE(rating_count, 0)) + ?) / (COALESCE(rating_count, 0) + 1.0), 2)',

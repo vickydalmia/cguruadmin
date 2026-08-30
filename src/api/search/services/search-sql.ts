@@ -132,25 +132,33 @@ function matchClauses(
   return clauses;
 }
 
+// Every membership/ranking query filters on the row's content locale. The
+// tables hold one row per locale once i18n is enabled (en + ar + …), and a
+// locale-blind WHERE would return each match once per locale. The locale is
+// always bound as a parameter, right before the LIKE patterns its clause
+// precedes.
 function entityWhere(
   needles: SearchNeedles,
+  locale: string,
   bindings: Array<string | number>,
 ): string {
+  bindings.push(locale);
   const clauses = matchClauses(
     { contains: ["name"], prefix: ["slug"] },
     needles,
     bindings,
   );
-  return `published_at IS NOT NULL AND (${clauses.join(" OR ")})`;
+  return `locale = ? AND published_at IS NOT NULL AND (${clauses.join(" OR ")})`;
 }
 
 export function entityRankedQuery(
   table: EntityTable,
   needles: SearchNeedles,
   page: PageWindow,
+  locale: string,
 ): SqlQuery {
   const bindings: Array<string | number> = [];
-  const where = entityWhere(needles, bindings);
+  const where = entityWhere(needles, locale, bindings);
   const tier = variantTier("name", needles.variants, bindings);
   bindings.push(page.limit, page.offset);
   return {
@@ -167,9 +175,10 @@ export function entityRankedQuery(
 export function entityCountQuery(
   table: EntityTable,
   needles: SearchNeedles,
+  locale: string,
 ): SqlQuery {
   const bindings: Array<string | number> = [];
-  const where = entityWhere(needles, bindings);
+  const where = entityWhere(needles, locale, bindings);
   return { sql: `SELECT count(*) AS total FROM ${table} WHERE ${where}`, bindings };
 }
 
@@ -214,8 +223,10 @@ const OFFER_DIRECT_COLUMNS: Record<OfferKind, string[]> = {
 function directMembershipArm(
   kind: OfferKind,
   needles: SearchNeedles,
+  locale: string,
   bindings: Array<string | number>,
 ): string {
+  bindings.push(locale);
   const clauses = matchClauses(
     {
       contains: OFFER_DIRECT_COLUMNS[kind].map((column) =>
@@ -226,14 +237,19 @@ function directMembershipArm(
     needles,
     bindings,
   );
-  return `SELECT d.id FROM ${OFFER_TABLE[kind]} d WHERE ${clauses.join(" OR ")}`;
+  return (
+    `SELECT d.id FROM ${OFFER_TABLE[kind]} d ` +
+    `WHERE d.locale = ? AND (${clauses.join(" OR ")})`
+  );
 }
 
 function relationMembershipArm(
   relation: OfferRelation,
   needles: SearchNeedles,
+  locale: string,
   bindings: Array<string | number>,
 ): string {
+  bindings.push(locale);
   const clauses = matchClauses(
     { contains: ["r.name"], prefix: ["r.slug"] },
     needles,
@@ -242,10 +258,14 @@ function relationMembershipArm(
   return (
     `SELECT l.${relation.ownerColumn} FROM ${relation.link} l ` +
     `JOIN ${relation.table} r ON r.id = l.${relation.targetColumn} ` +
-    `WHERE ${clauses.join(" OR ")}`
+    `WHERE r.locale = ? AND (${clauses.join(" OR ")})`
   );
 }
 
+// No locale filter here: the subquery is correlated on o.id, and an offer
+// row's link-table rows only ever point at entity rows of its own locale
+// (relations are localized per locale version), so o's locale filter in
+// offerWhere already pins the joined rows.
 function relationTier(
   relation: OfferRelation,
   variants: string[],
@@ -274,16 +294,17 @@ function offerWhere(
   kind: OfferKind,
   needles: SearchNeedles,
   nowIso: string,
+  locale: string,
   bindings: Array<string | number>,
 ): string {
-  bindings.push(nowIso);
+  bindings.push(locale, nowIso);
   const visibility =
-    "o.published_at IS NOT NULL AND o.content_status = 'published' " +
+    "o.locale = ? AND o.published_at IS NOT NULL AND o.content_status = 'published' " +
     "AND (o.expires_at IS NULL OR o.expires_at > ?)";
   const arms = [
-    directMembershipArm(kind, needles, bindings),
+    directMembershipArm(kind, needles, locale, bindings),
     ...OFFER_RELATIONS[kind].map((relation) =>
-      relationMembershipArm(relation, needles, bindings),
+      relationMembershipArm(relation, needles, locale, bindings),
     ),
   ];
   return `${visibility} AND o.id IN (${arms.join(" UNION ALL ")})`;
@@ -294,9 +315,10 @@ export function offerRankedQuery(
   needles: SearchNeedles,
   page: PageWindow,
   nowIso: string,
+  locale: string,
 ): SqlQuery {
   const bindings: Array<string | number> = [];
-  const where = offerWhere(kind, needles, nowIso, bindings);
+  const where = offerWhere(kind, needles, nowIso, locale, bindings);
   const tiers = [
     ...OFFER_DIRECT_COLUMNS[kind].map((column) =>
       variantTier(column, needles.variants, bindings),
@@ -321,9 +343,10 @@ export function offerCountQuery(
   kind: OfferKind,
   needles: SearchNeedles,
   nowIso: string,
+  locale: string,
 ): SqlQuery {
   const bindings: Array<string | number> = [];
-  const where = offerWhere(kind, needles, nowIso, bindings);
+  const where = offerWhere(kind, needles, nowIso, locale, bindings);
   return {
     sql: `SELECT count(*) AS total FROM ${OFFER_TABLE[kind]} o WHERE ${where}`,
     bindings,

@@ -13,7 +13,12 @@
   "attributes": {
     "name": {
       "type": "string",
-      "required": true
+      "required": true,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "slug": {
       "type": "string",
@@ -32,12 +37,22 @@
     },
     "description": {
       "type": "richtext",
-      "searchable": false
+      "searchable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "shortDescription": {
       "type": "text",
       "required": true,
-      "searchable": false
+      "searchable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "logo": {
       "type": "media",
@@ -50,7 +65,12 @@
     "logoAlt": {
       "type": "string",
       "required": true,
-      "searchable": false
+      "searchable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "websiteUrl": {
       "type": "string",
@@ -104,17 +124,37 @@
     "faqs": {
       "type": "component",
       "repeatable": true,
-      "component": "shared.faq-item"
+      "component": "shared.faq-item",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "seo": {
       "type": "component",
       "repeatable": false,
-      "component": "shared.seo"
+      "component": "shared.seo",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "entityDealPageSeo": {
       "type": "component",
       "repeatable": false,
-      "component": "shared.entity-deal-page-seo"
+      "component": "shared.entity-deal-page-seo",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    }
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
     }
   }
 }

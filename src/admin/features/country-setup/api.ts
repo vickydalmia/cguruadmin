@@ -15,7 +15,11 @@ export function countrySetupError(error: any): string {
 }
 
 export function countrySetupPayload(form: CountrySetup): Record<string, unknown> {
+  // `features`, `localization` and `languages` are DERIVED payload keys the
+  // server rebuilds on every read; only the editable fields go back.
   return Object.fromEntries(
-    Object.entries(form).filter(([key]) => key !== 'features' && key !== 'localization'),
+    Object.entries(form).filter(
+      ([key]) => key !== 'features' && key !== 'localization' && key !== 'languages',
+    ),
   );
 }

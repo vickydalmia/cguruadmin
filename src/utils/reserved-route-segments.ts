@@ -21,8 +21,15 @@
 //   sitemap_index.xml.ts + sitemap/[shard].xml.ts, stores.astro
 // (index.astro is the root and [...slug].astro is the entity catch-all
 // itself, so neither reserves a segment.)
+import { CONTENT_LOCALE_REGISTRY } from '../translation/locales/table';
+
+const CONTENT_LOCALE_SEGMENTS = CONTENT_LOCALE_REGISTRY.map(
+  (locale) =>
+    [locale.code, `the ${locale.name} content-language namespace`] as const,
+);
 
 export const RESERVED_ROUTE_SEGMENTS = new Map<string, string>([
+  ...CONTENT_LOCALE_SEGMENTS,
   ['404', 'the 404 page (src/pages/404.astro)'],
   ['500', 'the 500 page (src/pages/500.astro)'],
   ['about-us', 'the About Us page (src/pages/about-us.astro)'],
@@ -45,6 +52,7 @@ export const RESERVED_ROUTE_SEGMENTS = new Map<string, string>([
 ]);
 
 export const REDIRECT_RESERVED_ROUTE_LABELS = new Map<string, string>([
+  ...CONTENT_LOCALE_SEGMENTS,
   ['404', 'the 404 page'],
   ['500', 'the 500 page'],
   ['about-us', 'the About Us page'],

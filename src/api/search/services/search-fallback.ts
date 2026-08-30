@@ -88,6 +88,7 @@ async function readAllDocuments(
     filters: Record<string, any>;
     fields: string[];
     populate: Record<string, any>;
+    locale: string;
   },
 ): Promise<any[]> {
   const documents: any[] = [];
@@ -139,14 +140,16 @@ export function fallbackEntities(
   config: EntityConfig,
   query: string,
   cache: FallbackRequestCache,
+  locale: string,
 ): Promise<any[]> {
-  return cachedFallbackRead(cache, `entity:${config.key}`, async () => {
+  return cachedFallbackRead(cache, `entity:${config.key}:${locale}`, async () => {
     const needles = searchNeedles(query);
     const documents = await readAllDocuments(strapi, config.uid, {
       status: "published",
       filters: {},
       fields: entityFields(config),
       populate: { [config.mediaField]: true },
+      locale,
     });
     return documents.filter((document) => entityMatches(document, needles));
   });
@@ -158,8 +161,9 @@ export function fallbackOffers(
   query: string,
   cache: FallbackRequestCache,
   nowIso: string,
+  locale: string,
 ): Promise<any[]> {
-  return cachedFallbackRead(cache, `offer:${kind}`, async () => {
+  return cachedFallbackRead(cache, `offer:${kind}:${locale}`, async () => {
     const needles = searchNeedles(query);
     const documents = await readAllDocuments(
       strapi,
@@ -170,12 +174,14 @@ export function fallbackOffers(
             filters: publishedOnlyFilters(nowIso),
             fields: COUPON_FIELDS,
             populate: couponPopulate,
+            locale,
           }
         : {
             status: "published",
             filters: publishedOnlyFilters(nowIso),
             fields: DEAL_FIELDS,
             populate: dealPopulate,
+            locale,
           },
     );
     return documents.filter((document) =>

@@ -1,5 +1,6 @@
 import type { Core } from '@strapi/strapi';
 
+import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
 import { HOMEPAGE_UID } from '../constants/homepage-sections';
 import {
   relationKeys,
@@ -57,6 +58,7 @@ const resultingRelation = (
 export async function validateHomepageHeroOffers(
   strapi: Core.Strapi,
   data: unknown,
+  locale?: string,
 ): Promise<void> {
   if (!data || typeof data !== 'object') return;
   const hero = Reflect.get(data, 'hero');
@@ -65,7 +67,10 @@ export async function validateHomepageHeroOffers(
 
   const incomingRows = rows(Reflect.get(hero, 'products'));
   if (incomingRows.length === 0) return;
+  // Pinned to the locale being written: the homepage holds one row per
+  // content locale, and the stored rows resolve partial hero payloads.
   const current: any = await strapi.db.query(HOMEPAGE_UID).findOne({
+    where: { locale: locale ?? DEFAULT_CONTENT_LOCALE },
     populate: {
       hero: {
         populate: {

@@ -20,6 +20,11 @@ import {
  * directly.
  */
 describe('reserved route segments', () => {
+  it('reserves content-language prefixes before a locale is enabled', () => {
+    expect(RESERVED_ROUTE_SEGMENTS.get('ar')).toMatch(/Arabic content-language/);
+    expect(REDIRECT_RESERVED_ROUTE_LABELS.has('ar')).toBe(true);
+  });
+
   it('keeps the identity and redirect key sets in step', () => {
     const identityKeys = [...RESERVED_ROUTE_SEGMENTS.keys()];
     const redirectKeys = [...REDIRECT_RESERVED_ROUTE_LABELS.keys()];

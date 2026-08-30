@@ -18,6 +18,7 @@ import OfferBenefitsPanel from './components/offer-benefits-panel';
 import RecordLockPanel from './features/record-lock/record-lock-panel';
 import UniqueCodeImportPanel from './components/unique-code-import-panel';
 import ValidationProblemsPanel from './components/validation-problems-panel';
+import TranslationPanel from './features/translation/components/translation-panel';
 import { installEnterKeyGuard, installTitleRewrite } from './utils/dom-behaviors';
 import {
   INJECT_COLUMN_IN_TABLE,
@@ -195,6 +196,9 @@ export default {
       EntityCouponLayoutPanel,
       UniqueCodeImportPanel,
       ValidationProblemsPanel,
+      // Self-hides unless this deployment translates content (Country
+      // Setup + TRANSLATION_* env) and the model is localized.
+      TranslationPanel,
     ]);
 
     // Registered after every plugin's bootstrap, so this sees (and preserves)

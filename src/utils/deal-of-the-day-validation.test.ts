@@ -10,7 +10,11 @@ function strapiWithCurrent(
 ) {
   const findOne = vi.fn().mockResolvedValue(current);
   const findMany = vi.fn(({ where }: any) => {
-    const clauses = where?.$or ?? [];
+    // The real query pins the content locale around the relation match:
+    // { $and: [{ locale }, { $or: [...] }] }.
+    const relationWhere =
+      where?.$and?.find((clause: any) => clause?.$or) ?? where;
+    const clauses = relationWhere?.$or ?? [];
     const ids = clauses.flatMap((clause: any) => clause.id?.$in ?? []);
     const documentIds = clauses.flatMap(
       (clause: any) => clause.documentId?.$in ?? []
