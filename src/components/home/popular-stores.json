@@ -1,7 +1,7 @@
 {
   "collectionName": "components_home_popular_stores",
   "info": {
-    "displayName": "Popular Stores Section",
+    "displayName": "Popular Stores & Brands Section",
     "icon": "store"
   },
   "attributes": {
@@ -26,6 +26,11 @@
       "type": "relation",
       "relation": "oneToMany",
       "target": "api::store.store"
+    },
+    "brands": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::brand.brand"
     }
   }
 }

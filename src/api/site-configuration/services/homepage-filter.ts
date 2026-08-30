@@ -46,13 +46,22 @@ export function filterHomepage(
       disableSection(homepage, field);
     }
   }
-  if (!enabled(features, 'stores')) {
-    disableSection(homepage, 'popularStores');
+  const storesLive = enabled(features, 'stores');
+  const brandsLive = enabled(features, 'brands');
+  if (!storesLive) {
+    if (homepage.popularStores) {
+      homepage.popularStores.featuredStore = null;
+      homepage.popularStores.stores = [];
+    }
     if (homepage.popularSearches) homepage.popularSearches.stores = [];
   }
-  if (!enabled(features, 'brands')) {
+  if (!brandsLive) {
+    if (homepage.popularStores) homepage.popularStores.brands = [];
     disableSection(homepage, 'offersByBrand');
     if (homepage.popularSearches) homepage.popularSearches.brands = [];
+  }
+  if (!storesLive && !brandsLive) {
+    disableSection(homepage, 'popularStores');
   }
   if (!enabled(features, 'categories')) {
     disableSection(homepage, 'exploreOffers');

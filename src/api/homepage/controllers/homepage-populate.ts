@@ -135,7 +135,12 @@ export const HOMEPAGE_POPULATE = {
     },
   },
   popularStores: {
-    populate: { viewAllCta: true, featuredStore: storeRef, stores: storeRef },
+    populate: {
+      viewAllCta: true,
+      featuredStore: storeRef,
+      stores: storeRef,
+      brands: brandRef,
+    },
   },
   topDeals: { populate: { viewAllCta: true, deals: publishedDealListRef } },
   cgExclusive: {

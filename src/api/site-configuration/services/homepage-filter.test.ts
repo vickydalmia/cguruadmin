@@ -63,4 +63,57 @@ describe('filterHomepage', () => {
 
     expect(homepage.hero.products).toEqual([legacyDeal]);
   });
+
+  it('keeps brands in Popular Stores when the Store catalog is disabled', () => {
+    const homepage: any = {
+      popularStores: {
+        enabled: true,
+        featuredStore: { documentId: 'store-1' },
+        stores: [{ documentId: 'store-1' }],
+        brands: [{ documentId: 'brand-1' }],
+      },
+    };
+
+    filterHomepage(homepage, features({ stores: false }));
+
+    expect(homepage.popularStores).toEqual({
+      enabled: true,
+      featuredStore: null,
+      stores: [],
+      brands: [{ documentId: 'brand-1' }],
+    });
+  });
+
+  it('keeps stores in Popular Stores when the Brand catalog is disabled', () => {
+    const homepage: any = {
+      popularStores: {
+        enabled: true,
+        featuredStore: { documentId: 'store-1' },
+        stores: [{ documentId: 'store-1' }],
+        brands: [{ documentId: 'brand-1' }],
+      },
+      offersByBrand: { enabled: true },
+    };
+
+    filterHomepage(homepage, features({ brands: false }));
+
+    expect(homepage.popularStores.enabled).toBe(true);
+    expect(homepage.popularStores.stores).toHaveLength(1);
+    expect(homepage.popularStores.brands).toEqual([]);
+    expect(homepage.offersByBrand.enabled).toBe(false);
+  });
+
+  it('disables Popular Stores only when both entity catalogs are disabled', () => {
+    const homepage: any = {
+      popularStores: {
+        enabled: true,
+        stores: [{ documentId: 'store-1' }],
+        brands: [{ documentId: 'brand-1' }],
+      },
+    };
+
+    filterHomepage(homepage, features({ stores: false, brands: false }));
+
+    expect(homepage.popularStores.enabled).toBe(false);
+  });
 });

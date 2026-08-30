@@ -1817,10 +1817,11 @@ export interface HomePopularSearches extends Struct.ComponentSchema {
 export interface HomePopularStores extends Struct.ComponentSchema {
   collectionName: 'components_home_popular_stores';
   info: {
-    displayName: 'Popular Stores Section';
+    displayName: 'Popular Stores & Brands Section';
     icon: 'store';
   };
   attributes: {
+    brands: Schema.Attribute.Relation<'oneToMany', 'api::brand.brand'>;
     enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     featuredStore: Schema.Attribute.Relation<'oneToOne', 'api::store.store'>;
     heading: Schema.Attribute.String;
