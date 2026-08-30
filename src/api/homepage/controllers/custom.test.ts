@@ -240,10 +240,10 @@ describe('homepage aggregate offer population', () => {
 
     const response = await harness.controller.homepageFull(harness.ctx as any);
 
-    expect(response.data.popularStores.stores).toHaveLength(31);
+    expect(response.data.popularStores.stores).toHaveLength(30);
     expect(response.data.popularStores.stores.map((entity: any) => entity.documentId)).toEqual([
       ...Array.from({ length: 20 }, (_, i) => `store-${i}`),
-      ...Array.from({ length: 11 }, (_, i) => `brand-${i}`),
+      ...Array.from({ length: 10 }, (_, i) => `brand-${i}`),
     ]);
     expect(response.data.popularStores).not.toHaveProperty('brands');
     expect(response.data.topDeals.deals).toHaveLength(10);
@@ -337,7 +337,7 @@ describe('homepage aggregate offer population', () => {
     const response = await harness.controller.homepageFull(harness.ctx as any);
 
     expect(response.data.popularStores.enabled).not.toBe(false);
-    expect(response.data.popularStores.stores).toHaveLength(31);
+    expect(response.data.popularStores.stores).toHaveLength(30);
     expect(response.data.popularStores.stores[0].documentId).toBe('brand-0');
     expect(response.data.popularStores).not.toHaveProperty('brands');
   });

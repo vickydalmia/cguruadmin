@@ -5,6 +5,8 @@
 // content-manager view config) and the admin bundle (src/admin/app.tsx uses
 // the labels in the validation-problems side panel) — keep it dependency-free.
 export const HOMEPAGE_UID = 'api::homepage.homepage';
+export const HOMEPAGE_POPULAR_REGULAR_LIMIT = 30;
+export const HOMEPAGE_POPULAR_TOTAL_LIMIT = 31;
 
 export type SectionLabel = {
   attr: string;
@@ -31,7 +33,7 @@ export const HOMEPAGE_SECTION_LABELS: SectionLabel[] = [
     attr: 'popularStores',
     label: '2 · Popular Stores & Brands',
     description:
-      'Combined entity row directly under the hero: one featured Store or Brand plus selected Stores and Brands.',
+      'Combined entity row directly under the hero: one featured Store or Brand plus at most 30 regular selections across Stores and Brands (31 cards total).',
   },
   {
     attr: 'topOffers',

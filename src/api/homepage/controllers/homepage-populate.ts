@@ -9,6 +9,7 @@ import {
   PUBLISHED_OFFER_FILTER,
   storeRef,
 } from '../../../utils/offer-visibility';
+import { HOMEPAGE_POPULAR_REGULAR_LIMIT } from '../../../constants/homepage-sections';
 
 const BANK_FIELDS = ['name', 'slug', 'shortDescription', 'logoAlt'];
 const menuStoreRef = {
@@ -34,7 +35,7 @@ export const MAX_TOP_BRANDS = 18;
 export const TOP_DEALS_RENDER_COUNT = 6;
 
 export const SECTION_LIST_CAPS = {
-  popularStores: 31, // site shows 31
+  popularStores: HOMEPAGE_POPULAR_REGULAR_LIMIT,
   topDeals: 10, // site shows 6
   offersByBrand: 10, // site shows 6
   exploreOffersPerTab: 10, // site shows 6 per tab

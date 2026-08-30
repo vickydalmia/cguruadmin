@@ -59,9 +59,9 @@ COMPONENT_FIELD_DESCRIPTIONS['home.popular-stores'].featuredStore =
 COMPONENT_FIELD_DESCRIPTIONS['home.popular-stores'].featuredBrand =
   'Select the featured Brand. Shown only when Featured type is Brand.';
 COMPONENT_FIELD_DESCRIPTIONS['home.popular-stores'].stores =
-  'Select Stores for the combined Popular Stores & Brands row.';
+  'Select Stores for the combined row. Stores plus Brands may contain at most 30 regular cards; the featured card is the 31st.';
 COMPONENT_FIELD_DESCRIPTIONS['home.popular-stores'].brands =
-  'Select Brands for the combined Popular Stores & Brands row.';
+  'Select Brands for the combined row. Stores plus Brands may contain at most 30 regular cards; the featured card is the 31st.';
 (COMPONENT_FIELD_DESCRIPTIONS['deal-day.telegram-deal-item'] ??= {}).deal =
   'The Product Deal shown as a locked Telegram card. Its promo code is never sent to the site for this section.';
 COMPONENT_FIELD_DESCRIPTIONS['deal-day.telegram-deal-item'].linkOverride =
