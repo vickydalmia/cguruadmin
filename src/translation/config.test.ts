@@ -39,4 +39,50 @@ describe('translation environment configuration', () => {
       outputCostPerMTok: 5,
     });
   });
+
+  it('uses official OpenAI Responses without requiring a base URL', () => {
+    vi.stubEnv('TRANSLATION_PROVIDER', 'openai');
+    vi.stubEnv('TRANSLATION_API_KEY', 'secret');
+    vi.stubEnv('TRANSLATION_MODEL', 'gpt-5.6-luna');
+    vi.stubEnv('TRANSLATION_BASE_URL', '');
+    vi.stubEnv('TRANSLATION_REASONING_EFFORT', '');
+
+    expect(translationConfigProblem()).toBeNull();
+    expect(translationConfigFromEnv()).toMatchObject({
+      provider: 'openai',
+      baseUrl: '',
+      model: 'gpt-5.6-luna',
+      reasoningEffort: 'none',
+    });
+  });
+
+  it('accepts every supported OpenAI reasoning effort', () => {
+    vi.stubEnv('TRANSLATION_PROVIDER', 'openai');
+    vi.stubEnv('TRANSLATION_API_KEY', 'secret');
+    vi.stubEnv('TRANSLATION_MODEL', 'gpt-5.6-luna');
+    vi.stubEnv('TRANSLATION_REASONING_EFFORT', 'max');
+
+    expect(translationConfigProblem()).toBeNull();
+    expect(translationConfigFromEnv()?.reasoningEffort).toBe('max');
+  });
+
+  it('rejects unsupported reasoning values for official OpenAI', () => {
+    vi.stubEnv('TRANSLATION_PROVIDER', 'openai');
+    vi.stubEnv('TRANSLATION_API_KEY', 'secret');
+    vi.stubEnv('TRANSLATION_MODEL', 'gpt-5.6-luna');
+    vi.stubEnv('TRANSLATION_REASONING_EFFORT', 'minimal');
+
+    expect(translationConfigFromEnv()).toBeNull();
+    expect(translationConfigProblem()).toContain(
+      'TRANSLATION_REASONING_EFFORT must be one of',
+    );
+  });
+
+  it('ignores reasoning configuration for compatible providers', () => {
+    validEnvironment();
+    vi.stubEnv('TRANSLATION_REASONING_EFFORT', 'vendor-specific');
+
+    expect(translationConfigProblem()).toBeNull();
+    expect(translationConfigFromEnv()?.reasoningEffort).toBe('none');
+  });
 });

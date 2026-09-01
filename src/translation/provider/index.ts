@@ -4,8 +4,6 @@
 // (retry counts, slot limits, timeouts) is identical across vendors.
 import type { TranslationConfig } from '../config';
 import { classifyProviderError, TranslationError } from '../errors';
-import { createAnthropicProvider } from './anthropic';
-import { createOpenAiCompatibleProvider } from './openai-compatible';
 import type { ProviderCompletion, TranslationProvider } from './types';
 
 export type CompletionAttemptContext = {
@@ -32,7 +30,13 @@ export function createTranslationProvider(
   config: TranslationConfig,
   fetchImpl?: typeof fetch,
 ): TranslationProvider {
+  // SDK packages are intentionally lazy: sites with translation disabled do
+  // not pay their startup/memory cost, and an enabled site loads one vendor,
+  // not all three. Provider construction happens once when the dispatcher starts.
   if (config.provider === 'anthropic') {
+    const { createAnthropicProvider } = require('./anthropic') as typeof import(
+      './anthropic'
+    );
     return createAnthropicProvider({
       apiKey: config.apiKey,
       baseUrl: config.baseUrl || undefined,
@@ -40,6 +44,21 @@ export function createTranslationProvider(
       fetchImpl,
     });
   }
+  if (config.provider === 'openai') {
+    const { createOpenAiProvider } = require('./openai') as typeof import(
+      './openai'
+    );
+    return createOpenAiProvider({
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl || undefined,
+      model: config.model,
+      reasoningEffort: config.reasoningEffort,
+      fetchImpl,
+    });
+  }
+  const { createOpenAiCompatibleProvider } = require(
+    './openai-compatible'
+  ) as typeof import('./openai-compatible');
   return createOpenAiCompatibleProvider({
     apiKey: config.apiKey,
     baseUrl: config.baseUrl,

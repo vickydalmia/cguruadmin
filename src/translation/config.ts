@@ -4,19 +4,35 @@
 // translationLocales) AND this env config is complete; a half-configured
 // state logs loudly at bootstrap and stays off.
 
-export type TranslationProviderKind = 'openai-compatible' | 'anthropic';
+export type TranslationProviderKind =
+  | 'openai'
+  | 'openai-compatible'
+  | 'anthropic';
+
+export const TRANSLATION_REASONING_EFFORTS = [
+  'none',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as const;
+
+export type TranslationReasoningEffort =
+  (typeof TRANSLATION_REASONING_EFFORTS)[number];
 
 export type TranslationConfig = {
   provider: TranslationProviderKind;
   apiKey: string;
   /**
-   * Chat-completions base URL for the openai-compatible provider (e.g.
-   * https://api.openai.com/v1, https://openrouter.ai/api/v1, or any
-   * OpenAI-compatible gateway). Ignored by the anthropic provider unless set,
-   * where it overrides https://api.anthropic.com.
+   * API prefix. Required for openai-compatible (e.g.
+   * https://openrouter.ai/api/v1), optional for the official OpenAI and
+   * Anthropic providers, where their official API endpoints are the defaults.
    */
   baseUrl: string;
   model: string;
+  /** Official OpenAI Responses reasoning level; ignored by other providers. */
+  reasoningEffort: TranslationReasoningEffort;
   concurrency: number;
   timeoutMs: number;
   maxAttempts: number;
@@ -47,6 +63,24 @@ function floatFromEnv(name: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
+function isTranslationProviderKind(
+  value: string,
+): value is TranslationProviderKind {
+  return (
+    value === 'openai' ||
+    value === 'openai-compatible' ||
+    value === 'anthropic'
+  );
+}
+
+function reasoningEffortFromEnv(): TranslationReasoningEffort | null {
+  const value =
+    String(process.env.TRANSLATION_REASONING_EFFORT ?? '').trim() || 'none';
+  return (TRANSLATION_REASONING_EFFORTS as readonly string[]).includes(value)
+    ? (value as TranslationReasoningEffort)
+    : null;
+}
+
 /**
  * Parse the env block. Returns null when the required trio (provider kind,
  * API key, model) is incomplete — the caller decides whether that is an
@@ -58,11 +92,13 @@ export function translationConfigFromEnv(): TranslationConfig | null {
   const model = String(process.env.TRANSLATION_MODEL ?? '').trim();
   const baseUrl = String(process.env.TRANSLATION_BASE_URL ?? '').trim();
 
-  if (provider !== 'openai-compatible' && provider !== 'anthropic') return null;
+  if (!isTranslationProviderKind(provider)) return null;
   if (!apiKey || !model) return null;
   // openai-compatible has no sane default host — the whole point is that the
-  // deployment names its vendor. Anthropic has exactly one.
+  // deployment names its vendor. Official OpenAI and Anthropic have defaults.
   if (provider === 'openai-compatible' && !baseUrl) return null;
+  const reasoningEffort = reasoningEffortFromEnv();
+  if (provider === 'openai' && !reasoningEffort) return null;
 
   const dailyBudgetUsd = floatFromEnv('TRANSLATION_DAILY_BUDGET_USD', 0);
   const inputCostPerMTok = floatFromEnv('TRANSLATION_INPUT_COST_PER_MTOK', 0);
@@ -81,6 +117,7 @@ export function translationConfigFromEnv(): TranslationConfig | null {
     apiKey,
     baseUrl,
     model,
+    reasoningEffort: reasoningEffort ?? 'none',
     concurrency: intFromEnv('TRANSLATION_CONCURRENCY', 2),
     timeoutMs: intFromEnv('TRANSLATION_TIMEOUT_MS', 120_000, 1_000),
     maxAttempts: intFromEnv('TRANSLATION_MAX_ATTEMPTS', 3),
@@ -96,8 +133,8 @@ export function translationConfigFromEnv(): TranslationConfig | null {
 export function translationConfigProblem(): string | null {
   const provider = String(process.env.TRANSLATION_PROVIDER ?? '').trim();
   if (!provider) return 'TRANSLATION_PROVIDER is not set';
-  if (provider !== 'openai-compatible' && provider !== 'anthropic') {
-    return `TRANSLATION_PROVIDER must be "openai-compatible" or "anthropic", got "${provider}"`;
+  if (!isTranslationProviderKind(provider)) {
+    return `TRANSLATION_PROVIDER must be "openai", "openai-compatible", or "anthropic", got "${provider}"`;
   }
   if (!String(process.env.TRANSLATION_API_KEY ?? '').trim()) {
     return 'TRANSLATION_API_KEY is not set';
@@ -110,6 +147,11 @@ export function translationConfigProblem(): string | null {
     !String(process.env.TRANSLATION_BASE_URL ?? '').trim()
   ) {
     return 'TRANSLATION_BASE_URL is required for the openai-compatible provider';
+  }
+  if (provider === 'openai' && !reasoningEffortFromEnv()) {
+    return `TRANSLATION_REASONING_EFFORT must be one of ${TRANSLATION_REASONING_EFFORTS.join(
+      ', ',
+    )}`;
   }
   const dailyBudgetUsd = floatFromEnv('TRANSLATION_DAILY_BUDGET_USD', 0);
   if (dailyBudgetUsd > 0) {

@@ -298,6 +298,7 @@ TRANSLATION_PROVIDER=
 TRANSLATION_API_KEY=
 TRANSLATION_BASE_URL=
 TRANSLATION_MODEL=
+TRANSLATION_REASONING_EFFORT=none
 TRANSLATION_CONCURRENCY=2
 TRANSLATION_TIMEOUT_MS=120000
 TRANSLATION_MAX_ATTEMPTS=3
@@ -379,9 +380,30 @@ normal deployments.
 
 The `TRANSLATION_*` block is conditional on Country Setup's translation switch
 and target-language list. Provider, API key and model must be configured
-together; `openai-compatible` also requires a base URL. A positive daily
-budget requires positive input/output per-million-token prices. An incomplete
-block stays safely disabled and logs the configuration problem.
+together. Choose `openai` for the official Responses API, `openai-compatible`
+for a Chat-Completions gateway, or `anthropic` for native Messages;
+`openai-compatible` also requires a base URL. Official OpenAI accepts
+`TRANSLATION_REASONING_EFFORT=none|low|medium|high|xhigh|max` and defaults to
+`none`; the setting is ignored by other providers. A positive daily budget
+requires positive input/output per-million-token prices. An incomplete block
+stays safely disabled and logs the configuration problem.
+
+For AE with Luna, the provider-specific portion is:
+
+```dotenv
+TRANSLATION_PROVIDER=openai
+TRANSLATION_API_KEY=<SERVER_SIDE_OPENAI_KEY>
+TRANSLATION_BASE_URL=
+TRANSLATION_MODEL=gpt-5.6-luna
+TRANSLATION_REASONING_EFFORT=none
+```
+
+Use the current official Luna per-million-token rates for the two cost
+variables at deployment time. Do not run a paid backfill with stale rates:
+they drive both the dry-run estimate and the concurrency-safe daily stop.
+The adapter uses OpenAI Responses with `store: false`, omits temperature, and
+disables AI SDK retries; the existing dispatcher remains the sole owner of
+timeouts, retries, attempt accounting and budget enforcement.
 
 Defaults and every queue/cost control are defined in the cross-system
 [environment guide](https://github.com/vickydalmia/cguru-ui/blob/main/docs/environment.md#cms-translation-engine).

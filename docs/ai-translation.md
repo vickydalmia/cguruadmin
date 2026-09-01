@@ -60,8 +60,12 @@ edits made there.
   dictionary (`ui_catalogue` / `ui_translations`) that each storefront
   deployment synchronizes once, and the same outbox translates in key groups. See
   [ui-dictionary.md](./ui-dictionary.md) for the contract and the page.
-- **Provider** — `TRANSLATION_PROVIDER=openai-compatible` (any
-  /chat/completions vendor via `TRANSLATION_BASE_URL`) or `anthropic`.
+- **Provider** — every transport uses AI SDK 6 behind the existing application
+  retry/budget boundary. `TRANSLATION_PROVIDER=openai` uses the official OpenAI
+  Responses API (including `gpt-5.6-luna`), `openai-compatible` uses any
+  `/chat/completions` vendor via `TRANSLATION_BASE_URL`, and `anthropic` uses
+  native Messages. SDK retries are set to zero so every physical request is
+  reserved and settled exactly once in `translation_usage`.
 - **Publication** — a validated writer+editor result is written directly to
   the published locale version. Translation runs asynchronously after the
   English save, so the English request stays fast; until it succeeds, the
@@ -97,6 +101,15 @@ edits made there.
    variable reference is the frontend repository's
    [CMS translation engine](https://github.com/vickydalmia/cguru-ui/blob/main/docs/environment.md#cms-translation-engine))
    on the CMS hosts and deploy/restart once with it set.
+   For the AE Luna rollout use `TRANSLATION_PROVIDER=openai`,
+   `TRANSLATION_MODEL=gpt-5.6-luna`, leave `TRANSLATION_BASE_URL` empty, and
+   begin with `TRANSLATION_REASONING_EFFORT=none`. Supported reasoning values
+   are `none`, `low`, `medium`, `high`, `xhigh` and `max`; use a higher value
+   only when the dry run and quality failures justify its extra output cost.
+   Set `TRANSLATION_INPUT_COST_PER_MTOK` and
+   `TRANSLATION_OUTPUT_COST_PER_MTOK` to the model's current official prices
+   before enabling a positive daily budget—model pricing can change, so verify
+   it at deployment time rather than copying an old estimate.
 2. In **Settings → Country Setup** turn **Translation enabled** on and pick
    the target languages in the multi-select (it lists every language ICU can
    name, with native name, `RTL` badge, script and the `/xx/` prefix). Save.

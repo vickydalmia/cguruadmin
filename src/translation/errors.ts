@@ -69,6 +69,7 @@ export function classifyProviderError(
   error: unknown,
   status?: number,
   bodyText?: string,
+  safeDetail?: string,
 ): TranslationError {
   if (error instanceof TranslationError) return error;
   const message = [
@@ -77,7 +78,14 @@ export function classifyProviderError(
   ]
     .join(' ')
     .toLowerCase();
-  const options = { cause: error, providerStatus: status, detail: bodyText?.slice(0, 300) };
+  // Response bodies are useful for recognizing quota errors, but must not be
+  // copied into durable outbox errors or logs: a provider/gateway can echo
+  // request content. Callers can supply a deliberately non-sensitive detail.
+  const options = {
+    cause: error,
+    providerStatus: status,
+    detail: safeDetail,
+  };
 
   if (
     status === 402 ||

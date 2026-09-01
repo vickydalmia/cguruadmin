@@ -45,6 +45,7 @@ const CONFIG: TranslationConfig = {
   apiKey: 'k',
   baseUrl: 'https://api.example/v1',
   model: 'test-model',
+  reasoningEffort: 'none',
   concurrency: 1,
   timeoutMs: 1_000,
   maxAttempts: 1,
