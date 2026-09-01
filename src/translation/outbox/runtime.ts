@@ -30,6 +30,11 @@ export async function translationRuntimeActive(
   return (await enabledContentLocales(strapi)).length > 0;
 }
 
+/** True while this process runs a dispatcher (started at boot or by hot-apply). */
+export function translationOutboxRunning(): boolean {
+  return dispatcher !== null;
+}
+
 export async function startTranslationOutbox(strapi: Core.Strapi): Promise<void> {
   const locales = await enabledContentLocales(strapi);
   const config = translationConfigFromEnv();

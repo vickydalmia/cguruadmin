@@ -365,27 +365,31 @@ export async function preview(
     response.categories[0]?.name ??
     response.banks[0]?.name ??
     request.query;
-  const labels =
-    request.locale === 'ar'
-      ? [
-          `كوبونات ${matchedName}`,
-          `عروض ${matchedName}`,
-          `أكواد خصم ${request.query}`,
-          `عروض ${request.query}`,
-        ]
-      : [
-          matchedName + " coupons",
-          matchedName + " deals",
-          request.query + " promo codes",
-          request.query + " offers",
-        ];
-  response.suggestions = Array.from(new Set(labels.map(normalizeQuery)))
-    .slice(0, 4)
-    .map((label, index) => ({
-      id: "suggestion-" + (index + 1),
+  // Generated suggestions are STRUCTURED: the storefront words them in the
+  // page language through its UI dictionary (`kind` + `name`), so no language
+  // is special-cased here. `label`/`query` carry the English wording only for
+  // consumers that predate the structured shape.
+  const candidates: { kind: string; name: string; suffix: string }[] = [
+    { kind: "coupons", name: matchedName, suffix: " coupons" },
+    { kind: "deals", name: matchedName, suffix: " deals" },
+    { kind: "promoCodes", name: request.query, suffix: " promo codes" },
+    { kind: "offers", name: request.query, suffix: " offers" },
+  ];
+  const seen = new Set<string>();
+  response.suggestions = [];
+  for (const candidate of candidates) {
+    const name = normalizeQuery(candidate.name);
+    const label = normalizeQuery(candidate.name + candidate.suffix);
+    if (!name || seen.has(label)) continue;
+    seen.add(label);
+    response.suggestions.push({
+      id: "suggestion-" + (response.suggestions.length + 1),
+      kind: candidate.kind,
+      name,
       label,
       query: label,
-    }));
+    });
+  }
 
   return response;
 }

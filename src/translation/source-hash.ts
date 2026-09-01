@@ -6,7 +6,8 @@ import type { TranslatableLeaf } from './field-map';
  * entry. Same hash ⇒ the stored translation is current and the job no-ops
  * (idempotent backfill resume, edit-that-changed-nothing, relation-only
  * writes). Paths are already emitted in stable schema order by the walker;
- * sorting here makes the hash robust even if that ever changes.
+ * sorting here makes the hash robust even if that ever changes. The tuple is
+ * explicit on purpose: `note` (LLM guidance) must never enter the hash.
  */
 export function sourceContentHash(
   leaves: readonly TranslatableLeaf[],

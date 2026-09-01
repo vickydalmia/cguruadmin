@@ -2,7 +2,7 @@ import type { Core } from '@strapi/strapi';
 import { readIsrOutboxConfig } from './config';
 import { IsrOutboxDispatcher } from './dispatcher';
 import { logIsrOutbox } from './log';
-import { insertIsrOutboxEvent } from './store';
+import { insertIsrOutboxEvent, ISR_OUTBOX_TABLE } from './store';
 import type { IsrOutboxInsert } from './types';
 import { purgeResponseCaches } from '../middlewares/cache';
 import { purgeEntityPopularSearchCatalog } from '../api/store/services/entity-popular-searches';
@@ -86,6 +86,56 @@ export async function enqueueStandaloneIsrEvent(
         wakeIsrOutbox();
       });
       return event;
+    },
+  );
+}
+
+export type CoalescedIsrSweepResult =
+  | { skipped: true; id: string; eventKey: string }
+  | { skipped: false; id: string; eventKey: string };
+
+/**
+ * One full sweep per `reason` at a time. `isr_outbox.event_key` is globally
+ * unique with no ON CONFLICT path, so coalescing is "skip while a PENDING
+ * row with this reason exists", serialized by an advisory lock. A sweep
+ * already PROCESSING may have read state from before the caller's write, so
+ * only pending rows count. The skip path still purges the response caches —
+ * the caller's write is visible either way.
+ */
+export async function enqueueCoalescedIsrSweep(
+  strapi: Core.Strapi,
+  input: { reason: string; scopes?: readonly string[] },
+): Promise<CoalescedIsrSweepResult> {
+  return strapi.db.transaction(
+    async ({ trx, onCommit }: { trx: any; onCommit: (fn: () => void) => void }) => {
+      await trx.raw(`SELECT pg_advisory_xact_lock(hashtext(?))`, [
+        `isr-sweep:${input.reason}`,
+      ]);
+      const pending = await trx(ISR_OUTBOX_TABLE)
+        .where({ reason: input.reason, status: 'pending' })
+        .select('id', 'event_key')
+        .first();
+      if (pending) {
+        onCommit(() => purgeResponseCaches());
+        return {
+          skipped: true as const,
+          id: String(pending.id),
+          eventKey: String(pending.event_key ?? ''),
+        };
+      }
+      const event = await insertIsrOutboxEvent(trx, {
+        payload: {
+          all: true,
+          ...(input.scopes?.length ? { scopes: [...input.scopes] } : {}),
+        },
+        reason: input.reason,
+      });
+      onCommit(() => {
+        purgeResponseCaches();
+        purgeEntityPopularSearchCatalog();
+        wakeIsrOutbox();
+      });
+      return { skipped: false as const, id: event.id, eventKey: event.eventKey };
     },
   );
 }

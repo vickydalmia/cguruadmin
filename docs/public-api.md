@@ -34,6 +34,9 @@ listener also strips this reserved header before proxying anything to Strapi.
 | `PATCH /entity-deal-page/pages/:kind/:documentId` | **Super Admin session** | — | none |
 | `GET /country-setup/` | **Super Admin session** | — | none |
 | `PUT /country-setup/` | **Super Admin session** | — | none |
+| `GET /country-setup/languages` | **Super Admin session** | — | none |
+| `GET /api/ui-dictionary` | anonymous | 60 / 60s | 60s, keyed by path (+ enabled `locale`) |
+| `POST /api/ui-dictionary/catalogue` | **API token** (Custom, `Ui-dictionary → syncCatalogue`) | 12 / 60s | `Cache-Control: no-store` |
 | `GET /api/site-chrome` | anonymous | — | 300s |
 | `GET /api/public-route-metadata` | anonymous | 60 / 60s | 60s, keyed by path |
 | `GET /api/sitemap-entities` | anonymous | 60 / 60s | 60s, keyed by path |
@@ -48,6 +51,11 @@ listener also strips this reserved header before proxying anything to Strapi.
 | `POST /unique-coupon/redeem` | anonymous | 30 / 60s (plugin backstop; the ISR gateway's 10 / 60s binds first) | none |
 | `GET /unique-coupon/stats/:poolDocumentId` | **admin session** | — | none |
 | `POST /unique-coupon/upload` | **admin session** | — | none |
+
+The catalogue POST is deployment-only: the immutable storefront image invokes
+it once through its blocking deployment step with a dedicated token. Visitor
+requests and long-running storefront containers do not receive that token and
+never call the write endpoint.
 
 The `keyByPath` entries ignore the query string entirely, so `?nonce=1`,
 `?nonce=2`, … all share one cache entry and cannot be used to force repeated
@@ -93,7 +101,12 @@ remains false. Saving also controls which related content types appear in the
 Content Manager navigation.
 
 The complete operator and compatibility contract is in
-[Country Setup and Multi-Country Sites](./country-setup.md).
+[Country Setup and Multi-Country Sites](./country-setup.md). The response's
+`languages[]` (the English default plus every language picked in Country
+Setup, with `dir`, native name, `ogLocale` and URL prefix) is what the
+storefront routes and renders languages from; the storefront's UI strings per
+language come from `GET /api/ui-dictionary?locale=xx` — see
+[Storefront UI-text dictionary](./ui-dictionary.md).
 
 ---
 
@@ -141,7 +154,7 @@ consumers never need existence checks.
 ```json
 {
   "query": "flipkart",
-  "suggestions": [{ "id": "suggestion-1", "label": "Flipkart coupons", "query": "Flipkart coupons" }],
+  "suggestions": [{ "id": "suggestion-1", "kind": "coupons", "name": "flipkart", "label": "flipkart coupons", "query": "flipkart coupons" }],
   "stores": [],
   "brands": [],
   "categories": [],
@@ -166,9 +179,13 @@ consumers never need existence checks.
   `{ group, page, pageSize, pageCount, total }`, with `pageCount` clamped to
   20 pages so `hasMore` goes false at the clamp instead of advertising
   unreachable pages.
-- **`suggestions`** — preview only; up to four derived query strings seeded
-  from the best-matching entity name, deduplicated. `group` mode leaves it
-  empty.
+- **`suggestions`** — preview only; up to four derived queries seeded from the
+  best-matching entity name, deduplicated. Each carries a structured `kind`
+  (`coupons` | `deals` | `promoCodes` | `offers`) and `name`; the storefront
+  words the label in the page language through its UI dictionary
+  (`search.suggestion.<kind>`), so the CMS never special-cases a language.
+  `label`/`query` are the English wording for consumers without that
+  dictionary. `group` mode leaves it empty.
 - **`partialSources`** — always an empty array today. It is a reserved slot in
   the envelope for degraded-source reporting; consumers should tolerate
   entries but must not depend on any.

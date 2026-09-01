@@ -11,6 +11,9 @@ import { collectTranslatableLeaves } from './field-map';
 import { enabledContentLocales } from './locales/registry';
 import { wakeTranslationOutbox } from './outbox/runtime';
 import { insertTranslationJobsBulk, type TranslationJobInsert } from './outbox/store';
+import { UI_DICTIONARY_UID } from './ui-dictionary/constants';
+import { enqueueUiDictionaryJobs } from './ui-dictionary/enqueue';
+import { UiDictionaryStore } from './ui-dictionary/store';
 import { loadPopulatedEntry } from './writer';
 import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
 
@@ -70,6 +73,11 @@ async function* defaultLocaleDocumentIds(
   }
 }
 
+/** The dictionary rides along unless `uids` names types and leaves it out. */
+function includesDictionary(uids?: readonly string[]): boolean {
+  return !uids || uids.includes(UI_DICTIONARY_UID);
+}
+
 export type BackfillResult = {
   enqueued: number;
   perUid: Record<string, number>;
@@ -111,6 +119,17 @@ export async function enqueueTranslationBackfill(
       perUid[uid] += page.length;
       enqueued += inputs.length;
     }
+  }
+  // After the content waves: the storefront's UI text, one job per locale
+  // (inert unless the translation runtime is up — same as every enqueue).
+  if (includesDictionary(options.uids)) {
+    const dictionary = await enqueueUiDictionaryJobs(strapi, {
+      locales,
+      force: options.force === true,
+      reason: 'backfill',
+    });
+    perUid[UI_DICTIONARY_UID] = dictionary.enqueued.length;
+    enqueued += dictionary.enqueued.length;
   }
   wakeTranslationOutbox();
   return { enqueued, perUid, locales };
@@ -157,6 +176,19 @@ export async function estimateTranslationBackfill(
   const localeEntries = perEntryChars.flatMap((chars) =>
     locales.map(() => chars),
   );
+  // The dictionary is already per locale: one line per locale holding the
+  // characters of every key still missing or stale there. Nothing pending
+  // (or translation off → no locales) adds no line at all.
+  if (includesDictionary(options.uids) && locales.length > 0) {
+    const dictionary = new UiDictionaryStore(strapi);
+    perUid[UI_DICTIONARY_UID] = 0;
+    for (const locale of locales) {
+      const leaves = await dictionary.pendingLeaves(locale, false);
+      const chars = leaves.reduce((sum, leaf) => sum + leaf.text.length, 0);
+      perUid[UI_DICTIONARY_UID] += leaves.length;
+      if (chars > 0) localeEntries.push(chars);
+    }
+  }
   const estimate = estimateBackfillCost(
     config ?? { inputCostPerMTok: 0, outputCostPerMTok: 0, chunkChars: 12_000 },
     localeEntries,

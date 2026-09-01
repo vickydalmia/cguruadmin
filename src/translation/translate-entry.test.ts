@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { TranslationConfig } from './config';
 import type { TranslatableLeaf } from './field-map';
-import type { ContentLocale } from './locales/registry';
+import { resolveContentLocale, type ContentLocale } from './locales/resolve';
 import { resetPromptCacheForTest } from './prompts';
 import { resetTranslationSlotsForTest } from './provider';
 import { translateEntryLeaves } from './translate-entry';
@@ -21,16 +21,10 @@ const CONFIG: TranslationConfig = {
   outputCostPerMTok: 2,
 };
 
-const LOCALE: ContentLocale = {
-  code: 'ar',
-  name: 'Arabic',
-  nativeName: 'العربية',
-  dir: 'rtl',
-  ogLocale: 'ar_AE',
-  promptFile: 'ar.md',
-  editorPromptFile: 'ar-editor.md',
-  glossaryFile: 'ar.md',
-};
+const LOCALE = resolveContentLocale('ar', {
+  countryCode: 'AE',
+  countryName: 'United Arab Emirates',
+}) as ContentLocale;
 
 // The real prompt file is read from the repo via strapi.dirs.app.root.
 const strapi = {
@@ -170,5 +164,92 @@ describe('translateEntryLeaves', () => {
     );
     expect(result.translations.get('summary')).toBe('وفّر أكثر مع هذا العرض');
     expect(complete.mock.calls[0][0].user).toContain('Content type: Store');
+  });
+
+  it('renders the batch brief and per-leaf notes in the writer message', async () => {
+    const complete = vi.fn(async () => ({
+      text: JSON.stringify({ 'offers.count.one': 'عرض واحد', 'common.viewAll': 'عرض الكل' }),
+      inputTokens: 1,
+      outputTokens: 1,
+      model: 'm',
+    }));
+    await translateEntryLeaves(
+      strapi,
+      { name: 'fake', complete },
+      CONFIG,
+      LOCALE,
+      [
+        leaf('offers.count.one', 'One offer available', {
+          note: "plural form 'one' for a count like 1",
+        }),
+        leaf('common.viewAll', 'View all offers'),
+      ],
+      {
+        uid: 'ui-dictionary',
+        contentType: 'Storefront UI text',
+        brief: 'Short UI labels and buttons; keep {placeholders} intact.',
+      },
+    );
+    const writerUser = complete.mock.calls[0][0].user as string;
+    expect(writerUser).toContain('Content type: Storefront UI text');
+    expect(writerUser).toContain(
+      'Short UI labels and buttons; keep {placeholders} intact.',
+    );
+    expect(writerUser).toContain('## Field notes');
+    expect(writerUser).toContain(
+      "* offers.count.one: plural form 'one' for a count like 1",
+    );
+    expect(writerUser).not.toContain('* common.viewAll:');
+    // The editor pass sees the same guidance and is addressed by language name.
+    const editorUser = complete.mock.calls[1][0].user as string;
+    expect(editorUser).toContain('## Arabic draft JSON');
+    expect(editorUser).toContain('## Field notes');
+  });
+
+  it('uses the generic prompts and language name for a locale without overrides', async () => {
+    const hindi = resolveContentLocale('hi', {
+      countryCode: 'IN',
+      countryName: 'India',
+    }) as ContentLocale;
+    const complete = vi.fn(async () => ({
+      text: JSON.stringify({ tagline: 'और बचाएँ' }),
+      inputTokens: 1,
+      outputTokens: 1,
+      model: 'm',
+    }));
+    const result = await translateEntryLeaves(
+      strapi,
+      { name: 'fake', complete },
+      CONFIG,
+      hindi,
+      [leaf('tagline', 'Save more with this offer')],
+    );
+    expect(result.translations.get('tagline')).toBe('और बचाएँ');
+    expect(complete.mock.calls[0][0].system).toContain('native-level Hindi');
+    expect(complete.mock.calls[0][0].system).not.toContain('{{');
+    expect(complete.mock.calls[1][0].system).toContain('senior Hindi copy editor');
+    expect(complete.mock.calls[1][0].user).toContain('## Hindi draft JSON');
+  });
+
+  it('rejects an untranslated batch for a non-Latin target via the script check', async () => {
+    const hindi = resolveContentLocale('hi', {
+      countryCode: 'IN',
+      countryName: 'India',
+    }) as ContentLocale;
+    const complete = vi.fn(async () => ({
+      text: JSON.stringify({ tagline: 'Save even more with this offer' }),
+      inputTokens: 1,
+      outputTokens: 1,
+      model: 'm',
+    }));
+    await expect(
+      translateEntryLeaves(
+        strapi,
+        { name: 'fake', complete },
+        CONFIG,
+        hindi,
+        [leaf('tagline', 'Save more with this offer')],
+      ),
+    ).rejects.toThrow(/target-language-missing/);
   });
 });

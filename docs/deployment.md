@@ -90,6 +90,20 @@ route projections without `pageTemplate`. This protection keeps the site up;
 it does not remove the requirement to verify Country Setup before completing
 the release. See [Country Setup and Multi-Country Sites](./country-setup.md).
 
+### Localization and UI Text release note
+
+The translation outbox/state/usage tables and the UI catalogue/translation
+tables are additive. Deploy this CMS image before the localized storefront so
+`GET /api/ui-dictionary`, `POST /api/ui-dictionary/catalogue`, Settings → UI
+Text, the language registry and localized read middleware all exist when the
+frontend activates.
+
+After the CMS is healthy, create a dedicated **Custom** Strapi API token with
+only **Ui-dictionary → syncCatalogue**. Give that token only to the frontend
+host's `env/catalogue-sync.env`; it is not a CMS runtime variable and must not
+be shared with the SSR read token. The first frontend deployment performs the
+catalogue sync. Normal page traffic never writes the catalogue.
+
 ## 1. Publish an immutable image
 
 Run the CMS checks before creating the GitHub Release:
@@ -278,6 +292,29 @@ CORS_ORIGINS=
 # first-party registrable domain from the same value.
 PUBLIC_SITE_URL=https://www.couponzguru.com
 
+# Conditional AI translation. Leave provider/key/model empty when Country
+# Setup translation is disabled. A partial block never starts the dispatcher.
+TRANSLATION_PROVIDER=
+TRANSLATION_API_KEY=
+TRANSLATION_BASE_URL=
+TRANSLATION_MODEL=
+TRANSLATION_CONCURRENCY=2
+TRANSLATION_TIMEOUT_MS=120000
+TRANSLATION_MAX_ATTEMPTS=3
+TRANSLATION_MAX_OUTPUT_TOKENS=8192
+TRANSLATION_CHUNK_CHARS=12000
+TRANSLATION_DAILY_BUDGET_USD=0
+TRANSLATION_INPUT_COST_PER_MTOK=0
+TRANSLATION_OUTPUT_COST_PER_MTOK=0
+TRANSLATION_OUTBOX_POLL_MS=5000
+TRANSLATION_OUTBOX_BATCH_SIZE=5
+TRANSLATION_OUTBOX_LEASE_MS=900000
+TRANSLATION_OUTBOX_MAX_BACKOFF_MS=21600000
+TRANSLATION_OUTBOX_RETENTION_DAYS=30
+TRANSLATION_OUTBOX_ALERT_AFTER_ATTEMPTS=5
+TRANSLATION_OUTBOX_BACKLOG_ALERT_MS=3600000
+TRANSLATION_RELATION_RETRY_MAX=5
+
 # Persistent-ISR transactional outbox
 # The dispatcher safely retries while the gateway is unavailable. Enable it on
 # the admin process only; docker.compose.yml disables it on strapi-render.
@@ -337,6 +374,18 @@ chmod 600 /opt/couponzguru/.env.production
 
 Every value must be independent. Retain existing production values during
 normal deployments.
+
+#### AI translation
+
+The `TRANSLATION_*` block is conditional on Country Setup's translation switch
+and target-language list. Provider, API key and model must be configured
+together; `openai-compatible` also requires a base URL. A positive daily
+budget requires positive input/output per-million-token prices. An incomplete
+block stays safely disabled and logs the configuration problem.
+
+Defaults and every queue/cost control are defined in the cross-system
+[environment guide](https://github.com/vickydalmia/cguru-ui/blob/main/docs/environment.md#cms-translation-engine).
+The operating workflow is in [AI content translation](./ai-translation.md).
 
 #### PostgreSQL and TLS
 
@@ -480,11 +529,12 @@ waits for its health check, verifies `/_health`, and prints the final service
 state.
 
 Database migrations run during Strapi startup. The ISR outbox creation
-migration and the legacy optional-path reconciliation migration must complete
-before production content writes resume. The reconciliation changes only the
-payload of matching pending/processing legacy rows; it preserves their lease,
-attempt counter, and next-attempt schedule so a rolling deploy cannot steal
-work from the previous container.
+migration, translation tables, UI dictionary tables and the legacy
+optional-path reconciliation migration must complete before production content
+writes resume. The reconciliation changes only the payload of matching
+pending/processing legacy rows; it preserves their lease, attempt counter, and
+next-attempt schedule so a rolling deploy cannot steal work from the previous
+container.
 
 ## 9. Verify the deployment
 
@@ -527,6 +577,9 @@ There must be no startup error involving:
 Also confirm the startup migration added `page_template` to Store, Brand,
 Category and Bank without removing existing fields, and that the hidden Site
 Configuration single type is available through the Country Setup service.
+Confirm `ui_catalogue`, `ui_translations`, `translation_outbox`,
+`translation_state` and `translation_usage` exist before enabling translation
+or deploying the localized storefront.
 Country Setup, migration profiles and runtime settings no longer use campaign
 booleans: campaign activation is the selected entity `pageTemplate`. The two
 old columns remain private and ignored for rollback compatibility with the
@@ -598,6 +651,12 @@ Verify:
 - search status and indexes;
 - scheduled Coupon/Deal state processing.
 - `GET /api/site-settings` identity, localization and feature readiness;
+- **Settings → UI Text** loads and shows “no catalogue synced yet” before the
+  first frontend sync, rather than failing the page;
+- a dedicated Custom token can call `POST /api/ui-dictionary/catalogue` while
+  a Read-only token receives `403`;
+- `GET /api/ui-dictionary?locale=en` returns the dictionary envelope with
+  `Cache-Control: public, max-age=60`;
 - the expected `dealTemplate` and `independenceDayTemplate` owner paths;
 - the Content Manager sidebar omits disabled country features and campaign
   singletons without a template owner;

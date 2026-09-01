@@ -71,6 +71,8 @@ public settings, and every decision in the current runtime.
 | Timezone | Offer/date interpretation | Asia/Kolkata | America/New_York |
 | Currency code | Three-letter ISO currency | INR | USD |
 | Onboarding complete | Operator checklist status | true after setup | true after setup |
+| Translation enabled | Master switch for AI translation | false | false |
+| Target languages | Multi-select of extra content languages (stored as a CSV, e.g. `ar,hi`) | — | — |
 
 The form previews values derived with the JavaScript internationalization
 standard. For example, `USD` produces `$` for display while structured data
@@ -80,6 +82,20 @@ application code.
 
 `onboardingComplete` records an operator decision. It does not turn the site
 off and does not gate the India site when no configuration row exists.
+
+**Target languages** is a multi-select, not free text. It is fed by
+`GET /country-setup/languages`: every ISO 639-1 code the runtime's ICU data
+can name (about 180), sorted by English name, each shown with its native
+name, an `RTL` badge where applicable, its script and the URL prefix it will
+be served under (`/ar/`). English is the source language on every deployment
+and is not offered as a target. The field is disabled while the master switch
+is off; saving with the switch on and no language selected is rejected, as is
+a stored code ICU cannot name. Saving applies to the CMS instance that handled
+the request at once (locale rows, ISR path twins, translator); restart any
+other CMS containers. The public effect is `languages[]` in
+`GET /api/site-settings` (section 14), which drives the storefront's routing,
+`<html dir>`, hreflang and language switcher. See
+[AI content translation](./ai-translation.md) for the full runbook.
 
 ### What stays outside Strapi
 
@@ -520,6 +536,8 @@ during that authoring window.
     "timezone": "America/New_York",
     "currencyCode": "USD",
     "onboardingComplete": true,
+    "translationEnabled": false,
+    "translationLocales": "",
     "localization": {
       "currencyCode": "USD",
       "currencySymbol": "$",
@@ -527,6 +545,17 @@ during that authoring window.
       "numberExample": "$1,234.56",
       "dateExample": "Aug 26, 2026"
     },
+    "languages": [
+      {
+        "code": "en",
+        "name": "English",
+        "nativeName": "English",
+        "dir": "ltr",
+        "ogLocale": null,
+        "default": true,
+        "pathPrefix": ""
+      }
+    ],
     "features": {
       "stores": { "enabled": true, "ready": true, "live": true },
       "dealOfTheDay": {
@@ -543,6 +572,22 @@ during that authoring window.
 For campaigns, `enabled` is derived from template ownership. Campaign feature
 states add `path` only when that authoritative owner is live and ready.
 
+`languages[]` always starts with the English default row (`ogLocale: null` —
+the storefront derives `en_IN` / `en_US` from `locale`). With translation
+enabled, one row per picked language follows, resolved against the site's
+country, for example on a UAE deployment with `translationLocales: "ar,hi"`:
+
+```json
+{ "code": "ar", "name": "Arabic", "nativeName": "العربية", "dir": "rtl",
+  "ogLocale": "ar_AE", "default": false, "pathPrefix": "/ar" },
+{ "code": "hi", "name": "Hindi", "nativeName": "हिन्दी", "dir": "ltr",
+  "ogLocale": "hi_AE", "default": false, "pathPrefix": "/hi" }
+```
+
+A stored code that no longer resolves is dropped from the list rather than
+invented; with the switch off the list is the English row only, so India/USA
+output is unchanged.
+
 ### Admin settings
 
 These endpoints use the Strapi admin router and require an authenticated Super
@@ -551,16 +596,33 @@ Admin session:
 ```http
 GET /country-setup/
 PUT /country-setup/
+GET /country-setup/languages
 ```
 
-The PUT body contains the editable identity fields and the 16
+The PUT body contains the editable identity fields, the translation switch
+and CSV (`translationEnabled`, `translationLocales`), and the 16
 catalog/editorial/legal boolean feature flags. There are no campaign booleans.
-`features` and `localization` are calculated response fields and are not
-written back by the admin form.
+`features`, `localization` and `languages` are calculated response fields and
+are not written back by the admin form. After the row is written the service
+hot-applies the translation settings to its own process (see section 2); the
+response is the same payload as `GET /api/site-settings`.
+
+`GET /country-setup/languages` returns the options for the Target languages
+multi-select — every ICU-resolvable ISO 639-1 language for this site, English
+excluded:
+
+```json
+{ "data": [
+  { "code": "ar", "name": "Arabic", "nativeName": "العربية", "dir": "rtl", "script": "Arab" },
+  { "code": "hi", "name": "Hindi", "nativeName": "हिन्दी", "dir": "ltr", "script": "Deva" }
+] }
+```
 
 ## Related documentation
 
 - [Public API](./public-api.md)
+- [AI content translation](./ai-translation.md)
+- [Storefront UI-text dictionary](./ui-dictionary.md)
 - [CMS deployment](./deployment.md)
 - [WordPress migration internals](./wordpress-migration.md)
 - [Migration operator runbook](../migration/FRESH-MIGRATION.md)

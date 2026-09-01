@@ -21,15 +21,14 @@
 //   sitemap_index.xml.ts + sitemap/[shard].xml.ts, stores.astro
 // (index.astro is the root and [...slug].astro is the entity catch-all
 // itself, so neither reserves a segment.)
-import { CONTENT_LOCALE_REGISTRY } from '../translation/locales/table';
-
-const CONTENT_LOCALE_SEGMENTS = CONTENT_LOCALE_REGISTRY.map(
-  (locale) =>
-    [locale.code, `the ${locale.name} content-language namespace`] as const,
-);
+//
+// Content-language prefixes (`/ar/`, `/hi/`, …) are NOT in the static maps:
+// the admin picks languages in Country Setup, so the reservation is read
+// from the boot-primed enabled-locale mirror by reservedRouteSegment().
+import { enabledContentLocaleCodesSync } from '../translation/locales/registry';
+import { englishLanguageName } from '../translation/locales/resolve';
 
 export const RESERVED_ROUTE_SEGMENTS = new Map<string, string>([
-  ...CONTENT_LOCALE_SEGMENTS,
   ['404', 'the 404 page (src/pages/404.astro)'],
   ['500', 'the 500 page (src/pages/500.astro)'],
   ['about-us', 'the About Us page (src/pages/about-us.astro)'],
@@ -52,7 +51,6 @@ export const RESERVED_ROUTE_SEGMENTS = new Map<string, string>([
 ]);
 
 export const REDIRECT_RESERVED_ROUTE_LABELS = new Map<string, string>([
-  ...CONTENT_LOCALE_SEGMENTS,
   ['404', 'the 404 page'],
   ['500', 'the 500 page'],
   ['about-us', 'the About Us page'],
@@ -73,3 +71,22 @@ export const REDIRECT_RESERVED_ROUTE_LABELS = new Map<string, string>([
   ['sitemap_index.xml', 'the sitemap index route'],
   ['stores', 'the store listing page'],
 ]);
+
+/** The label when `segment` is an enabled content-language URL prefix. */
+export function contentLanguageReservation(segment: string): string | undefined {
+  if (!enabledContentLocaleCodesSync().includes(segment)) return undefined;
+  const name = englishLanguageName(segment) ?? segment;
+  return `the ${name} content-language namespace`;
+}
+
+/**
+ * Consumer-facing lookup: the static page label from `labels`, else the
+ * content-language reservation. Both validators must call this rather than
+ * `labels.get()` so an enabled language is reserved on both sides.
+ */
+export function reservedRouteSegment(
+  labels: ReadonlyMap<string, string>,
+  segment: string,
+): string | undefined {
+  return labels.get(segment) ?? contentLanguageReservation(segment);
+}

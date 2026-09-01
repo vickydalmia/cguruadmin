@@ -2,9 +2,10 @@ import type { Core } from '@strapi/strapi';
 import { toValidationError, type Problem } from '../../../utils/write-validation/problems';
 import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
 import {
-  contentLocaleByCode,
-  supportedContentLocaleCodes,
-} from '../../../translation/locales/table';
+  isResolvableContentLocale,
+  resolveContentLocale,
+  selectableContentLocales,
+} from '../../../translation/locales/resolve';
 import {
   SITE_CONFIGURATION_FIELDS,
   SITE_CONFIGURATION_UID,
@@ -14,6 +15,7 @@ import {
 } from './country-registry';
 import { getFeatureReadiness } from './feature-readiness';
 import { localizationPreview, validateLocalization } from './localization';
+import { applyTranslationSettings } from './translation-hot-apply';
 
 function safeFields(config: SiteConfiguration) {
   return Object.fromEntries(
@@ -32,15 +34,17 @@ export async function loadSiteConfiguration(
 
 /**
  * The site's content languages for the frontend: the default language plus
- * every enabled, registry-known translation locale. The frontend derives
- * routing (`/ar/` prefix), `<html dir>`, og:locale and its switcher from
- * this — never from hardcoded lists.
+ * every enabled translation locale ICU can resolve, bound to this site's
+ * country (og:locale = `code_COUNTRY`). The frontend derives routing
+ * (`/ar/` prefix), `<html dir>`, og:locale and its switcher from this —
+ * never from hardcoded lists.
  */
 export function siteLanguages(config: SiteConfiguration) {
+  const site = { countryCode: config.countryCode, countryName: config.countryName };
   const extra = translationLocaleCodes(config)
     .filter((code) => code !== DEFAULT_CONTENT_LOCALE)
-    .map((code) => contentLocaleByCode(code))
-    .filter((locale): locale is NonNullable<typeof locale> => Boolean(locale))
+    .map((code) => resolveContentLocale(code, site))
+    .filter((locale): locale is NonNullable<typeof locale> => locale !== null)
     .map((locale) => ({
       code: locale.code,
       name: locale.name,
@@ -106,23 +110,25 @@ export async function validateSiteConfigurationForWrite(
   if (!candidate.countryName.trim()) problems.push({ path: ['countryName'], message: 'Country name is required.' });
   if (!/^[A-Z]{2}$/.test(candidate.countryCode)) problems.push({ path: ['countryCode'], message: 'Use a two-letter uppercase ISO country code.' });
 
-  // Translation opt-in must name locales the registry can actually produce
-  // (a prompt template exists). Unknown codes are a config typo — reject
-  // loudly instead of silently running a zero-locale pipeline.
+  // Translation opt-in must name languages the resolver can actually
+  // produce (ICU names the code, so prompts, direction and og:locale exist).
+  // Unknown codes are a config typo and English is the source, never a
+  // target — reject loudly instead of silently running a zero-locale pipeline.
   const requestedLocales = translationLocaleCodes({
     translationEnabled: true,
     translationLocales: candidate.translationLocales,
   });
-  const supported = new Set(supportedContentLocaleCodes());
   const unknown = requestedLocales.filter(
-    (code) => code !== DEFAULT_CONTENT_LOCALE && !supported.has(code),
+    (code) => !isResolvableContentLocale(code),
   );
   if (unknown.length > 0) {
     problems.push({
       path: ['translationLocales'],
       message:
         `Unsupported translation locale(s): ${unknown.join(', ')}. ` +
-        `Supported: ${[...supported].join(', ') || '(none registered)'}.`,
+        'Each target must be an ISO 639-1 two-letter language code ICU can ' +
+        `name (for example "ar" or "hi"); "${DEFAULT_CONTENT_LOCALE}" is the ` +
+        'source language and cannot be a target.',
     });
   }
   if (
@@ -140,9 +146,24 @@ export async function validateSiteConfigurationForWrite(
   return candidate;
 }
 
+/** Country Setup's language picker: every language ICU can resolve for this site. */
+export async function selectableSiteLanguages(strapi: Core.Strapi) {
+  const config = await loadSiteConfiguration(strapi);
+  return selectableContentLocales(config).map(
+    ({ code, name, nativeName, dir, script }) => ({
+      code,
+      name,
+      nativeName,
+      dir,
+      script,
+    }),
+  );
+}
+
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   load: () => loadSiteConfiguration(strapi),
   publicSettings: () => buildSiteSettings(strapi),
+  selectableLanguages: () => selectableSiteLanguages(strapi),
   async update(data: any) {
     const current = await strapi.documents(SITE_CONFIGURATION_UID as any).findFirst({
       fields: ['documentId', ...SITE_CONFIGURATION_FIELDS] as any,
@@ -162,6 +183,10 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         data: safeFields(candidate) as any,
       });
     }
+    // The row is committed; bring THIS process in line with it (locale rows,
+    // sync mirror, dispatcher). Logged-and-swallowed inside — a hot-apply
+    // problem must never turn a successful save into an error response.
+    await applyTranslationSettings(strapi);
     return buildSiteSettings(strapi, candidate);
   },
 });

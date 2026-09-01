@@ -26,6 +26,7 @@ import {
   FEATURE_FORM_DEFINITIONS,
   type CountrySetup,
 } from '../types';
+import { TranslationLanguagesField } from './translation-languages-field';
 
 const IDENTITY_FIELDS = [
   ['siteName', 'Site / brand name', 'CouponzGuru'],
@@ -211,8 +212,10 @@ export default function CountrySetupPage() {
                   Automatically writes a translated version of every localized
                   entry (stores, coupons, pages, …) whenever the English source
                   is saved, and serves it under its own URL prefix (e.g. /ar/).
-                  Needs the TRANSLATION_* server environment configured, and a
-                  RESTART after changing these switches.
+                  Needs the TRANSLATION_* server environment configured. Saving
+                  applies to this CMS instance immediately (locale rows, URL
+                  twins, translator); other CMS containers pick the change up
+                  when they restart.
                 </Typography>
               </Box>
               <Flex paddingTop={4} gap={5} alignItems="flex-end" wrap="wrap">
@@ -228,12 +231,10 @@ export default function CountrySetupPage() {
                   />
                 </Field.Root>
                 <Box grow={1} minWidth="240px">
-                  <FieldInput
-                    field="translationLocales"
-                    label="Target locales (comma-separated codes)"
-                    placeholder="ar"
+                  <TranslationLanguagesField
                     value={String(form.translationLocales ?? '')}
-                    onChange={(value) => set('translationLocales', value)}
+                    disabled={form.translationEnabled !== true}
+                    onChange={(csv) => set('translationLocales', csv)}
                   />
                 </Box>
               </Flex>

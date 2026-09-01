@@ -3,7 +3,10 @@ import { errors } from '@strapi/utils';
 import { slugify } from '../constants/slugify';
 import { toRouteSlug, type IdentityKind } from './route-normalization';
 import { entityDealPageSlug } from '../api/entity-deal-page/services/entity-deal-route';
-import { RESERVED_ROUTE_SEGMENTS } from './reserved-route-segments';
+import {
+  RESERVED_ROUTE_SEGMENTS,
+  reservedRouteSegment,
+} from './reserved-route-segments';
 import {
   IDENTITY_UIDS,
   KIND_BY_UID,
@@ -167,7 +170,10 @@ export async function validateIdentity(
         message: emptySlugMessage(kind, String(effectiveName ?? '')),
       });
     } else {
-      const reserved = RESERVED_ROUTE_SEGMENTS.get(incomingRoute.split('/')[0] ?? '');
+      const reserved = reservedRouteSegment(
+        RESERVED_ROUTE_SEGMENTS,
+        incomingRoute.split('/')[0] ?? '',
+      );
       if (reserved) {
         problems.push({
           path: ['slug'],

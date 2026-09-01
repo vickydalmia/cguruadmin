@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { TranslatableLeaf } from './field-map';
-import { validateTranslatedBatch } from './validate';
+import { protectedValues, validateTranslatedBatch } from './validate';
 import { parseBatchJson } from './translate-entry';
+
+const ARABIC = /\p{Script=Arabic}/u;
 
 const leaf = (
   path: string,
@@ -78,7 +80,7 @@ describe('validateTranslatedBatch', () => {
       validateTranslatedBatch(
         leaves,
         { copy: 'وفّر 25% على AED 150', invented: 'قيمة' },
-        'ar',
+        ARABIC,
       ),
     ).toEqual([
       { path: 'copy', problems: ['protected-value-changed'] },
@@ -86,16 +88,36 @@ describe('validateTranslatedBatch', () => {
     ]);
   });
 
+  it('protects any currency code or symbol, before or after the amount', () => {
+    const cases: [string, string][] = [
+      ['Get INR 500 off', 'خصم INR 50'],
+      ['Save ¥1,200 today', 'وفّر ¥1,20 اليوم'],
+      ['Spend 150 SAR', 'أنفق 15 SAR'],
+      ['Only ₹99', 'فقط ₹9'],
+      ['From 200 د.إ', 'من 20 د.إ'],
+    ];
+    for (const [source, translated] of cases) {
+      expect(
+        validateTranslatedBatch([leaf('copy', source)], { copy: translated }, ARABIC),
+      ).toEqual([{ path: 'copy', problems: ['protected-value-changed'] }]);
+    }
+    expect(
+      validateTranslatedBatch([leaf('copy', 'Get INR 500 off')], { copy: 'خصم INR 500' }, ARABIC),
+    ).toEqual([]);
+    // Ordinary upper-case words are not currencies.
+    expect(protectedValues('GET 50 today')).toEqual(['50']);
+  });
+
   it('rejects invented protected facts and collapsed duplicate values', () => {
     const invented = validateTranslatedBatch(
       [leaf('body', 'Save 20% today')],
       { body: 'وفّر 20% واحصل على 50% اليوم' },
-      'ar',
+      ARABIC,
     );
     const duplicateLost = validateTranslatedBatch(
       [leaf('body', 'Use AED 100, then another AED 100')],
       { body: 'استخدم AED 100 مرة واحدة' },
-      'ar',
+      ARABIC,
     );
 
     expect(invented[0]?.problems).toContain('protected-value-changed');
@@ -107,7 +129,7 @@ describe('validateTranslatedBatch', () => {
       validateTranslatedBatch(
         [leaf('summary', 'Save more with this offer')],
         { summary: 'Save more with this offer' },
-        'ar',
+        ARABIC,
       ),
     ).toEqual([
       {
@@ -115,6 +137,41 @@ describe('validateTranslatedBatch', () => {
         problems: ['untranslated-source', 'target-language-missing'],
       },
     ]);
+  });
+
+  it('flags English output that lacks the target script', () => {
+    expect(
+      validateTranslatedBatch(
+        [leaf('summary', 'Save more with this offer')],
+        { summary: 'Save even more with this offer' },
+        ARABIC,
+      ),
+    ).toEqual([{ path: 'summary', problems: ['target-language-missing'] }]);
+    expect(
+      validateTranslatedBatch(
+        [leaf('summary', 'Save more with this offer')],
+        { summary: 'इस ऑफ़र के साथ और बचाएँ' },
+        /\p{Script=Devanagari}/u,
+      ),
+    ).toEqual([]);
+  });
+
+  it('skips the script check for Latin-script targets (null pattern)', () => {
+    expect(
+      validateTranslatedBatch(
+        [leaf('summary', 'Save more with this offer')],
+        { summary: 'Hemat lebih banyak dengan penawaran ini' },
+        null,
+      ),
+    ).toEqual([]);
+    // Unchanged prose is still caught by the source-equality check.
+    expect(
+      validateTranslatedBatch(
+        [leaf('summary', 'Save more with this offer')],
+        { summary: 'Save more with this offer' },
+        null,
+      ),
+    ).toEqual([{ path: 'summary', problems: ['untranslated-source'] }]);
   });
 });
 

@@ -42,16 +42,44 @@ function sameHtmlStructure(source: string, translated: string): boolean {
  * `code` fields are non-localized — so codes inside prose are the LLM's
  * brief, not a hard gate: too many false positives on ALL-CAPS words.)
  */
-function protectedValues(value: string): string[] {
+export function protectedValues(value: string): string[] {
   const patterns = [
     /https?:\/\/[^\s"'<>]+/gu,
     /[\w.+-]+@[\w-]+\.[\w.]+/gu,
     /\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[a-zA-Z_][\w.-]*\}|%[a-z]/gu,
-    /(?:AED|USD|EUR|GBP|د\.إ)\s*\d[\d,.]*/giu,
+    currencyAmountPattern(),
     /\d[\d,.]*\s*(?:%|٪)/gu,
     /\b\d[\d,.]*(?:st|nd|rd|th)?\b/giu,
   ];
   return patterns.flatMap((pattern) => value.match(pattern) ?? []);
+}
+
+/**
+ * Any currency, not a per-site list: every ISO 4217 code ICU knows plus the
+ * common symbols and Arabic abbreviations, before OR after the amount. The
+ * code list is case-sensitive so ordinary words ("GET 50") stay unprotected.
+ */
+let currencyAmountRegExp: RegExp | null = null;
+
+export function currencyAmountPattern(): RegExp {
+  if (!currencyAmountRegExp) {
+    // ES2022 API; the compile target's lib predates it. Node 22 has it.
+    const intl = Intl as typeof Intl & {
+      supportedValuesOf?: (key: 'currency') => string[];
+    };
+    const codes = (intl.supportedValuesOf?.('currency') ?? []).join('|');
+    const symbols = '[$€£¥₹₩₺₪฿₫₱₦₴₵₡₲₭₮₸₼₽₾₿]';
+    const arabic = 'د\\.إ|ر\\.س|ج\\.م|د\\.ك|ر\\.ق|د\\.ب|ر\\.ع|د\\.ا|ل\\.ل|د\\.م';
+    const code = codes ? `\\b(?:${codes})\\b|` : '';
+    const unit = `(?:${code}${symbols}|${arabic})`;
+    const amount = '\\d[\\d,.]*';
+    currencyAmountRegExp = new RegExp(
+      `${unit}\\s*${amount}|${amount}\\s*${unit}`,
+      'gu',
+    );
+  }
+  currencyAmountRegExp.lastIndex = 0;
+  return currencyAmountRegExp;
 }
 
 function keepsProtectedValues(source: string, translated: string): boolean {
@@ -79,11 +107,16 @@ function sameVisibleText(source: string, translated: string): boolean {
 /**
  * Validate one batch response against its leaves. Returns ONLY the leaves
  * with problems — an empty array is a clean pass.
+ *
+ * `targetScript` (from unicodeScriptPattern) enables the "target language
+ * missing" check: English prose whose output contains no character of the
+ * target script was left untranslated. Null for Latin-script targets, where
+ * the check cannot distinguish source from translation.
  */
 export function validateTranslatedBatch(
   leaves: readonly TranslatableLeaf[],
   translated: Record<string, unknown>,
-  targetLocale?: string,
+  targetScript?: RegExp | null,
 ): LeafVerdict[] {
   const verdicts: LeafVerdict[] = [];
   const expectedPaths = new Set(leaves.map((leaf) => leaf.path));
@@ -108,11 +141,7 @@ export function validateTranslatedBatch(
       if (isEnglishProse(leaf.value) && sameVisibleText(leaf.value, value)) {
         problems.push('untranslated-source');
       }
-      if (
-        targetLocale === 'ar' &&
-        isEnglishProse(leaf.value) &&
-        !/\p{Script=Arabic}/u.test(value)
-      ) {
+      if (targetScript && isEnglishProse(leaf.value) && !targetScript.test(value)) {
         problems.push('target-language-missing');
       }
     }

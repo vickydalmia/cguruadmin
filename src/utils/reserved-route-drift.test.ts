@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
+import { setEnabledContentLocaleCodesForTest } from '../translation/locales/registry';
 import {
   REDIRECT_RESERVED_ROUTE_LABELS,
   RESERVED_ROUTE_SEGMENTS,
+  reservedRouteSegment,
 } from './reserved-route-segments';
 
 /**
@@ -20,9 +22,26 @@ import {
  * directly.
  */
 describe('reserved route segments', () => {
-  it('reserves content-language prefixes before a locale is enabled', () => {
-    expect(RESERVED_ROUTE_SEGMENTS.get('ar')).toMatch(/Arabic content-language/);
-    expect(REDIRECT_RESERVED_ROUTE_LABELS.has('ar')).toBe(true);
+  afterEach(() => setEnabledContentLocaleCodesForTest([]));
+
+  it('reserves the enabled content-language prefixes for both consumers', () => {
+    setEnabledContentLocaleCodesForTest(['ar', 'hi']);
+    expect(reservedRouteSegment(RESERVED_ROUTE_SEGMENTS, 'ar')).toMatch(
+      /Arabic content-language/,
+    );
+    expect(reservedRouteSegment(REDIRECT_RESERVED_ROUTE_LABELS, 'hi')).toMatch(
+      /Hindi content-language/,
+    );
+    // Static page labels still win and are unaffected by languages.
+    expect(reservedRouteSegment(RESERVED_ROUTE_SEGMENTS, 'search')).toMatch(
+      /search page/,
+    );
+  });
+
+  it('does not reserve a language prefix the site has not enabled', () => {
+    expect(reservedRouteSegment(RESERVED_ROUTE_SEGMENTS, 'ar')).toBeUndefined();
+    expect(RESERVED_ROUTE_SEGMENTS.has('ar')).toBe(false);
+    expect(REDIRECT_RESERVED_ROUTE_LABELS.has('ar')).toBe(false);
   });
 
   it('keeps the identity and redirect key sets in step', () => {

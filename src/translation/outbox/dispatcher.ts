@@ -12,6 +12,8 @@ import { enabledContentLocales } from '../locales/registry';
 import { createTranslationProvider } from '../provider';
 import type { TranslationProvider } from '../provider/types';
 import { sourceContentHash } from '../source-hash';
+import { UI_DICTIONARY_UID } from '../ui-dictionary/constants';
+import { processUiDictionaryJob } from '../ui-dictionary/translate-dictionary';
 import { translationPromptFingerprint } from '../prompts';
 import { translateEntryLeaves } from '../translate-entry';
 import {
@@ -304,6 +306,20 @@ export class TranslationDispatcher {
         outcome: { state: 'skipped', reason: 'locale no longer enabled' },
         usage: noUsage,
       };
+    }
+
+    // The UI-text dictionary has no document: its own tables are its memory
+    // and it persists per key group. Everything below is per-entry work.
+    if (job.uid === UI_DICTIONARY_UID) {
+      return processUiDictionaryJob({
+        strapi: this.strapi,
+        provider: this.provider,
+        config: this.config,
+        store: this.store,
+        job,
+        locale,
+        assertLease,
+      });
     }
 
     // 2. Source of truth: the latest committed default-locale entry, deeply

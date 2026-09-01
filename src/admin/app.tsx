@@ -165,6 +165,25 @@ export default {
         return { default: page.default };
       },
     });
+    // Storefront UI text (English overrides + every language). `permissions:
+    // []` gates nothing on its own: the endpoints behind it require the
+    // ui-dictionary.manage RBAC action server-side, and the page renders the
+    // resulting 403 as an explanation rather than an empty table.
+    app.addSettingsLink('global', {
+      id: 'ui-dictionary',
+      to: '/settings/ui-dictionary',
+      permissions: [],
+      intlLabel: {
+        id: 'ui-dictionary.settings.label',
+        defaultMessage: 'UI Text',
+      },
+      Component: async () => {
+        const page = await import(
+          './features/ui-dictionary/components/ui-dictionary-page'
+        );
+        return { default: page.default };
+      },
+    });
     installRecordLockLeaseInterceptor();
     const contentManager = app.getPlugin('content-manager') as any;
     const apis = contentManager.apis;

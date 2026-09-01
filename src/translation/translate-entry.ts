@@ -1,5 +1,5 @@
-// Translate ONE ENTRY's leaves with two independent roles: a first Arabic
-// writer and a native copy editor. Both outputs are structurally validated;
+// Translate ONE ENTRY's leaves with two independent roles: a first
+// target-language writer and a native copy editor. Both outputs are structurally validated;
 // a failed stage receives one corrective pass. Nothing is returned to the
 // writer unless every leaf passes, so partial English or clipped text can
 // never be persisted as a locale version.
@@ -7,7 +7,7 @@ import type { Core } from '@strapi/strapi';
 import type { TranslationConfig } from './config';
 import { TranslationError } from './errors';
 import type { TranslatableLeaf } from './field-map';
-import type { ContentLocale } from './locales/registry';
+import { unicodeScriptPattern, type ContentLocale } from './locales/resolve';
 import { editorSystemPrompt, writerSystemPrompt } from './prompts';
 import {
   completeWithRetry,
@@ -35,6 +35,8 @@ export type TranslationContentContext = {
   contentType?: string;
   sourceLocale?: string;
   targetLocale?: string;
+  /** Free-form guidance about THIS batch (e.g. "short UI labels"), shown under the context. */
+  brief?: string;
 };
 
 export type TranslationAttemptStage =
@@ -57,6 +59,7 @@ function contextSection(
     `* Source locale: ${context?.sourceLocale ?? 'en'}`,
     `* Target locale: ${context?.targetLocale ?? locale.code}`,
     '* Field identifiers in the JSON describe each text’s role and are not copy.',
+    ...(context?.brief?.trim() ? ['', context.brief.trim()] : []),
   ].join('\n');
 }
 
@@ -64,6 +67,13 @@ function sourcePayload(leaves: readonly TranslatableLeaf[]): Record<string, stri
   const payload: Record<string, string> = {};
   for (const leaf of leaves) payload[leaf.path] = leaf.value;
   return payload;
+}
+
+function fieldNotesSection(leaves: readonly TranslatableLeaf[]): string {
+  const notes = leaves
+    .filter((leaf) => leaf.note?.trim())
+    .map((leaf) => `* ${leaf.path}: ${leaf.note?.trim()}`);
+  return notes.length ? ['## Field notes', notes.join('\n')].join('\n') : '';
 }
 
 function budgetsSection(leaves: readonly TranslatableLeaf[]): string {
@@ -82,6 +92,7 @@ function writerMessage(
     contextSection(locale, context),
     '## English source JSON',
     JSON.stringify(sourcePayload(leaves), null, 1),
+    fieldNotesSection(leaves),
     budgetsSection(leaves),
   ]
     .filter(Boolean)
@@ -98,10 +109,11 @@ function editorMessage(
     contextSection(locale, context),
     '## English source JSON',
     JSON.stringify(sourcePayload(leaves), null, 1),
-    '## Arabic draft JSON',
+    `## ${locale.name} draft JSON`,
     JSON.stringify(draft, null, 1),
+    fieldNotesSection(leaves),
     budgetsSection(leaves),
-    'Return the fully edited final Arabic JSON. Rewrite any draft wording that does not sound native.',
+    `Return the fully edited final ${locale.name} JSON. Rewrite any draft wording that does not sound native.`,
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -125,7 +137,7 @@ function correctiveMessage(
     '- Rephrase naturally to fit maxChars; never truncate.',
     '- Reproduce source HTML tags, order, and attributes exactly.',
     '- Preserve numbers, prices, percentages, URLs, emails, and placeholders verbatim.',
-    '- Replace unchanged English prose with fluent Arabic.',
+    `- Replace unchanged English prose with fluent ${locale.name}.`,
     '',
     stage === 'editor'
       ? editorMessage(locale, leaves, draft ?? {}, context)
@@ -190,6 +202,7 @@ export async function translateEntryLeaves(
 ): Promise<EntryTranslation> {
   const writerSystem = writerSystemPrompt(strapi, locale);
   const editorSystem = editorSystemPrompt(strapi, locale);
+  const targetScript = unicodeScriptPattern(locale.script);
   const translations = new Map<string, string>();
   const reviewNotes: string[] = [];
   let inputTokens = 0;
@@ -219,7 +232,7 @@ export async function translateEntryLeaves(
     chunk: readonly TranslatableLeaf[],
     batch: Record<string, unknown>,
   ): Record<string, unknown> => {
-    const verdicts = validateTranslatedBatch(chunk, batch, locale.code);
+    const verdicts = validateTranslatedBatch(chunk, batch, targetScript);
     if (verdicts.length) {
       const detail = verdicts
         .map(({ path, problems }) => `${path}: ${problems.join(', ')}`)
@@ -238,7 +251,7 @@ export async function translateEntryLeaves(
     }, attemptHooks?.('writer'));
     addUsage(first);
     let writerBatch = parseOrEmpty(first.text);
-    let writerVerdicts = validateTranslatedBatch(chunk, writerBatch, locale.code);
+    let writerVerdicts = validateTranslatedBatch(chunk, writerBatch, targetScript);
     if (writerVerdicts.length) {
       const correction = await completeWithRetry(provider, config, {
         system: writerSystem,
@@ -261,7 +274,7 @@ export async function translateEntryLeaves(
     }, attemptHooks?.('editor'));
     addUsage(edited);
     let editorBatch = parseOrEmpty(edited.text);
-    let editorVerdicts = validateTranslatedBatch(chunk, editorBatch, locale.code);
+    let editorVerdicts = validateTranslatedBatch(chunk, editorBatch, targetScript);
     if (editorVerdicts.length) {
       const correction = await completeWithRetry(provider, config, {
         system: editorSystem,

@@ -4,21 +4,16 @@ import {
 } from '../../api/site-configuration/services/country-registry';
 import { cachedSiteConfiguration } from '../../api/site-configuration/services/cached-configuration';
 import { DEFAULT_CONTENT_LOCALE } from '../../constants/content-locales';
-import { contentLocaleByCode, type ContentLocale } from './table';
+import { resolveContentLocale, type ContentLocale } from './resolve';
 
-// The static table lives in ./table (import-free) so site-configuration's
+// The resolver lives in ./resolve (import-free) so site-configuration's
 // payload builder can read it without a cycle; this module owns everything
 // that needs `strapi`.
-export {
-  CONTENT_LOCALE_REGISTRY,
-  contentLocaleByCode,
-  supportedContentLocaleCodes,
-  type ContentLocale,
-} from './table';
 
 /**
- * The locales THIS deployment translates into: the site-configuration opt-in
- * intersected with the built-in registry. Codes the registry does not know
+ * The locales THIS deployment translates into: every code the admin picked
+ * in Country Setup that ICU can resolve, bound to the site's country so
+ * og:locale and the prompt context are right. Codes that no longer resolve
  * are reported by site-configuration validation at save time; here they are
  * simply dropped so a stale stored value can never invent a pipeline.
  * Returns [] whenever translation is off — the subsystem's inert state.
@@ -27,10 +22,14 @@ export async function enabledContentLocales(
   strapi: Core.Strapi,
 ): Promise<ContentLocale[]> {
   const configuration = await cachedSiteConfiguration(strapi);
+  const site = {
+    countryCode: configuration.countryCode,
+    countryName: configuration.countryName,
+  };
   return translationLocaleCodes(configuration)
     .filter((code) => code !== DEFAULT_CONTENT_LOCALE)
-    .map((code) => contentLocaleByCode(code))
-    .filter((locale): locale is ContentLocale => Boolean(locale));
+    .map((code) => resolveContentLocale(code, site))
+    .filter((locale): locale is ContentLocale => locale !== null);
 }
 
 // Boot-primed sync mirror for hot paths that cannot await (the ISR outbox

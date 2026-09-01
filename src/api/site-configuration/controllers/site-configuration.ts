@@ -15,6 +15,13 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     return ctx.send({ data: await service.publicSettings() });
   },
 
+  async adminLanguages(ctx: any) {
+    const service = strapi.service(
+      'api::site-configuration.site-configuration',
+    ) as any;
+    return ctx.send({ data: await service.selectableLanguages() });
+  },
+
   async adminUpdate(ctx: any) {
     const service = strapi.service(
       'api::site-configuration.site-configuration',

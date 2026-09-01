@@ -25,6 +25,13 @@ export type TranslatableLeaf = {
   /** Hard schema budget for the TRANSLATED value, when the field has one. */
   maxLength?: number;
   value: string;
+  /**
+   * Optional guidance shown to the LLM under "## Field notes" (e.g. which
+   * plural form a UI-dictionary row is). Never set by the schema walker and
+   * deliberately excluded from sourceContentHash — it is prompt context, not
+   * source content.
+   */
+  note?: string;
 };
 
 /**

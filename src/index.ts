@@ -67,8 +67,10 @@ import {
   registerEntityDealPageRoutes,
   registerRecordLockRoutes,
   registerTranslationRoutes,
+  registerUiDictionaryRoutes,
 } from './register/admin-routes';
 import { TRANSLATION_ACTION_ATTRIBUTES } from './api/translation/controllers/translation';
+import { UI_DICTIONARY_ACTION_ATTRIBUTES } from './api/ui-dictionary/controllers/ui-dictionary-admin';
 import { ensureContentLocales } from './translation/ensure-locales';
 import { primeEnabledContentLocales } from './translation/locales/registry';
 import {
@@ -124,6 +126,7 @@ export default {
       // Same register-not-bootstrap rule as above, or its grants are wiped
       // on every restart by cleanPermissionsInDatabase().
       TRANSLATION_ACTION_ATTRIBUTES,
+      UI_DICTIONARY_ACTION_ATTRIBUTES,
     ]);
 
     registerEntityCouponLayoutRoutes(strapi);
@@ -132,6 +135,7 @@ export default {
     registerCountrySetupRoutes(strapi);
     registerAdminRuntimeConfigRoutes(strapi);
     registerTranslationRoutes(strapi);
+    registerUiDictionaryRoutes(strapi);
 
     // Document-service middlewares. Registration order = execution order:
     // the record-lock guard must run before the document-write pipeline

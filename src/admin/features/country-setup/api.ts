@@ -1,4 +1,4 @@
-import type { CountrySetup } from './types';
+import type { CountrySetup, SelectableLanguage } from './types';
 
 export function unwrapCountrySetup(response: unknown): CountrySetup {
   const value: any = (response as any)?.data?.data ?? (response as any)?.data ?? response;
@@ -22,4 +22,29 @@ export function countrySetupPayload(form: CountrySetup): Record<string, unknown>
       ([key]) => key !== 'features' && key !== 'localization' && key !== 'languages',
     ),
   );
+}
+
+export function unwrapLanguages(response: unknown): SelectableLanguage[] {
+  const value: any = (response as any)?.data?.data ?? (response as any)?.data ?? response;
+  if (!Array.isArray(value) || value.some((row) => typeof row?.code !== 'string')) {
+    throw new Error('Country Setup returned an unexpected language list.');
+  }
+  return value as SelectableLanguage[];
+}
+
+// The stored `translationLocales` column is a csv; the picker works on the
+// code list. Same token rule as the server's normalizeTranslationLocales so
+// the round trip never drops a value the server would keep.
+const LOCALE_TOKEN = /^[a-z]{2,3}(-[a-z]{2,4})?$/;
+
+export function parseTranslationLocales(csv: unknown): string[] {
+  const tokens = String(csv ?? '')
+    .split(',')
+    .map((token) => token.trim().toLowerCase())
+    .filter((token) => LOCALE_TOKEN.test(token));
+  return [...new Set(tokens)];
+}
+
+export function serializeTranslationLocales(codes: readonly string[]): string {
+  return parseTranslationLocales(codes.join(',')).join(',');
 }

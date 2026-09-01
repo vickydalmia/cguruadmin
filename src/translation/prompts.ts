@@ -4,13 +4,64 @@
 // only compile src/**/*.ts into dist/, so non-code assets are addressed
 // through strapi.dirs.app.root, which points at the repo root in both dev
 // and production layouts.
+//
+// A language with hand-tuned files (locales/table.ts) renders those; every
+// other language renders the generic default templates with the locale's
+// facts substituted for `{{placeholders}}`. Rendered system prompts are
+// hashed into every stored translation (translationPromptFingerprint), so
+// the `ar` output is pinned byte-for-byte by prompts.test.ts.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Core } from '@strapi/strapi';
 import { TranslationError } from './errors';
-import type { ContentLocale } from './locales/registry';
+import type { ContentLocale } from './locales/resolve';
+
+const DEFAULT_PROMPT_FILE = 'default.md';
+const DEFAULT_EDITOR_PROMPT_FILE = 'default-editor.md';
+
+const PLACEHOLDER = /\{\{\s*([A-Za-z][\w.-]*)\s*\}\}/gu;
 
 const cache = new Map<string, string>();
+
+function templateValues(locale: ContentLocale): Record<string, string> {
+  return {
+    languageName: locale.name,
+    nativeName: locale.nativeName,
+    countryName: locale.countryName,
+    countryCode: locale.countryCode,
+    script: locale.script ?? 'native',
+    dir: locale.dir,
+  };
+}
+
+/**
+ * Substitute `{{name}}` tokens. An unknown or empty token is a configuration
+ * error (a typo in a template, or a site without a country name) — throw the
+ * same non-retryable error a missing template raises rather than sending an
+ * LLM a prompt with a hole in it.
+ */
+function renderTemplate(
+  template: string,
+  locale: ContentLocale,
+  file: string,
+): string {
+  const values = templateValues(locale);
+  const unresolved: string[] = [];
+  const rendered = template.replace(PLACEHOLDER, (token, name: string) => {
+    const value = values[name];
+    if (typeof value === 'string' && value.trim()) return value;
+    unresolved.push(token);
+    return token;
+  });
+  if (unresolved.length > 0) {
+    throw new TranslationError('TRANSLATION_NOT_CONFIGURED', {
+      detail:
+        `prompt template ${file} has unresolved placeholder(s) for locale ` +
+        `"${locale.code}": ${[...new Set(unresolved)].join(', ')}`,
+    });
+  }
+  return rendered;
+}
 
 function loadLocaleAsset(
   strapi: Core.Strapi,
@@ -18,7 +69,7 @@ function loadLocaleAsset(
   directory: 'prompts' | 'glossaries',
   file: string,
 ): string {
-  const cacheKey = `${directory}:${file}`;
+  const cacheKey = `${locale.code}:${directory}:${file}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
   const path = join(
@@ -43,15 +94,21 @@ function loadLocaleAsset(
       detail: `${directory} asset for locale "${locale.code}" is empty`,
     });
   }
-  cache.set(cacheKey, template);
-  return template;
+  const rendered = renderTemplate(template, locale, file);
+  cache.set(cacheKey, rendered);
+  return rendered;
 }
 
 export function loadPromptTemplate(
   strapi: Core.Strapi,
   locale: ContentLocale,
 ): string {
-  return loadLocaleAsset(strapi, locale, 'prompts', locale.promptFile);
+  return loadLocaleAsset(
+    strapi,
+    locale,
+    'prompts',
+    locale.promptFile ?? DEFAULT_PROMPT_FILE,
+  );
 }
 
 export function loadEditorPromptTemplate(
@@ -62,10 +119,11 @@ export function loadEditorPromptTemplate(
     strapi,
     locale,
     'prompts',
-    locale.editorPromptFile,
+    locale.editorPromptFile ?? DEFAULT_EDITOR_PROMPT_FILE,
   );
 }
 
+/** Only a language with a declared glossary file gets a terminology section. */
 export function loadGlossary(
   strapi: Core.Strapi,
   locale: ContentLocale,
@@ -89,14 +147,14 @@ export function resetPromptCacheForTest(): void {
  * brief describes HOW to write; this describes the exact I/O envelope the
  * pipeline parses.
  */
-export function batchOutputContract(): string {
+export function batchOutputContract(locale: ContentLocale): string {
   return [
     '## Input and output format (machine contract)',
     '',
     'The user message contains an "English source JSON" object. Each key is',
     'an opaque field identifier; each value is one English source text',
     '(plain text or an HTML fragment). An editor request also contains an',
-    '"Arabic draft JSON" object. Some entries carry a "maxChars" limit',
+    `"${locale.name} draft JSON" object. Some entries carry a "maxChars" limit`,
     'listed under "## Length budgets" in the user message.',
     '',
     'Return ONLY a JSON object — no code fences, no commentary — with',
@@ -124,7 +182,7 @@ export function writerSystemPrompt(
   return [
     loadPromptTemplate(strapi, locale),
     glossarySection(loadGlossary(strapi, locale)),
-    batchOutputContract(),
+    batchOutputContract(locale),
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -137,7 +195,7 @@ export function editorSystemPrompt(
   return [
     loadEditorPromptTemplate(strapi, locale),
     glossarySection(loadGlossary(strapi, locale)),
-    batchOutputContract(),
+    batchOutputContract(locale),
   ]
     .filter(Boolean)
     .join('\n\n');
