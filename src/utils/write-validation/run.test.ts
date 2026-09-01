@@ -39,6 +39,7 @@ describe('write-validation step order', () => {
       'warnUndersizedSeoOgImage',
       'validateHomepageImages',
       'validateHomepageHeroOffers',
+      'validateHomepagePopularStores',
       'validateHomepagePopularSearches',
       'validateMenuCategorySections',
       'validateMenuNotification',

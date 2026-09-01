@@ -54,7 +54,7 @@ const resultingRelation = (
     : null;
 };
 
-/** Every Hero Offer row selects exactly one schema matching entityType. */
+/** Every Product/Offer row selects exactly one schema matching entityType. */
 export async function validateHomepageHeroOffers(
   strapi: Core.Strapi,
   data: unknown,
@@ -99,7 +99,7 @@ export async function validateHomepageHeroOffers(
     if (!entityType) {
       problems.push({
         path: [...path, 'entityType'],
-        message: 'Choose whether this Hero Offer is a Product Deal or Coupon.',
+        message: 'Choose whether this Product/Offer is a Product Deal or Coupon.',
       });
       return;
     }
@@ -108,13 +108,13 @@ export async function validateHomepageHeroOffers(
       if (!deal) {
         problems.push({
           path: [...path, 'deal'],
-          message: 'Select a Product Deal for this Hero Offer.',
+          message: 'Select a Product Deal for this Product/Offer.',
         });
       }
       if (coupon) {
         problems.push({
           path: [...path, 'coupon'],
-          message: 'A Product Deal Hero Offer cannot also select a Coupon.',
+          message: 'A Product/Offer set to Product Deal cannot also select a Coupon.',
         });
       }
       return;
@@ -123,13 +123,13 @@ export async function validateHomepageHeroOffers(
     if (!coupon) {
       problems.push({
         path: [...path, 'coupon'],
-        message: 'Select a Coupon for this Hero Offer.',
+        message: 'Select a Coupon for this Product/Offer.',
       });
     }
     if (deal) {
       problems.push({
         path: [...path, 'deal'],
-        message: 'A Coupon Hero Offer cannot also select a Product Deal.',
+        message: 'A Product/Offer set to Coupon cannot also select a Product Deal.',
       });
     }
   });

@@ -121,18 +121,29 @@ export function dropDeadOffers(homepage: any) {
   return homepage;
 }
 
-// The curated store/deal lists are unbounded oneToMany relations (schema
+// The curated entity/deal lists are unbounded oneToMany relations (schema
 // `max` only exists for repeatable components), so cap them here — per
-// section — to keep the payload and the per-store count queries bounded no
-// matter what an admin attaches in the CMS. Runs after dropDeadOffers, so
-// the caps count only live offers.
+// section — to keep the payload and per-entity count queries bounded no
+// matter what an admin attaches in the CMS. Popular Stores keeps stores first
+// for backward-compatible editor ordering, then fills the remaining combined
+// slots with brands. Runs after dropDeadOffers, so the caps count only live
+// offers.
 export function capCuratedLists(homepage: any) {
   if (!homepage) return homepage;
 
-  if (homepage.popularStores?.stores) {
-    homepage.popularStores.stores = cap(
-      homepage.popularStores.stores,
+  if (homepage.popularStores) {
+    const stores = cap(
+      homepage.popularStores.stores ?? [],
       SECTION_LIST_CAPS.popularStores,
+    );
+    const remaining = Math.max(
+      0,
+      SECTION_LIST_CAPS.popularStores - stores.length,
+    );
+    homepage.popularStores.stores = stores;
+    homepage.popularStores.brands = cap(
+      homepage.popularStores.brands ?? [],
+      remaining,
     );
   }
   if (homepage.topDeals?.deals) {
@@ -180,9 +191,40 @@ export async function fillTopDeals(
   return homepage;
 }
 
-async function countOffersForStore(strapi: Core.Strapi, documentId: string) {
+type PopularEntityRelation = 'stores' | 'brands';
+type PopularEntityType = 'store' | 'brand';
+
+function selectedFeaturedEntity(section: any): {
+  entity: any;
+  relation: PopularEntityRelation;
+  entityType: PopularEntityType;
+} | null {
+  if (section?.featuredEntityType === 'brand') {
+    return section.featuredBrand
+      ? { entity: section.featuredBrand, relation: 'brands', entityType: 'brand' }
+      : null;
+  }
+  if (section?.featuredEntityType === 'store') {
+    return section.featuredStore
+      ? { entity: section.featuredStore, relation: 'stores', entityType: 'store' }
+      : null;
+  }
+  // Backward compatibility for rows created before featuredEntityType existed.
+  if (section?.featuredStore) {
+    return { entity: section.featuredStore, relation: 'stores', entityType: 'store' };
+  }
+  return section?.featuredBrand
+    ? { entity: section.featuredBrand, relation: 'brands', entityType: 'brand' }
+    : null;
+}
+
+async function countOffersForEntity(
+  strapi: Core.Strapi,
+  relation: PopularEntityRelation,
+  documentId: string,
+) {
   const filters = {
-    stores: { documentId },
+    [relation]: { documentId },
     contentStatus: { $eq: 'published' },
   } as any;
   const [coupons, deals] = await Promise.all([
@@ -192,34 +234,79 @@ async function countOffersForStore(strapi: Core.Strapi, documentId: string) {
   return coupons + deals;
 }
 
-// Attach a computed offerCount to every store in the popularStores section.
+// Attach a computed offerCount to every store and brand in popularStores.
 // Computed (not stored) so m2m edits and cron status flips can never drift.
 export async function attachOfferCounts(strapi: Core.Strapi, homepage: any) {
   const section = homepage?.popularStores;
   if (!section) return homepage;
 
-  const stores = [section.featuredStore, ...(section.stores ?? [])].filter(Boolean);
-  const uniqueIds = [...new Set(stores.map((s: any) => s.documentId))] as string[];
-  // Two counts per store, so an unbounded Promise.all here scales the burst
+  const featured = selectedFeaturedEntity(section);
+  const entities = [
+    ...(featured ? [{ entity: featured.entity, relation: featured.relation }] : []),
+    ...(section.stores ?? [])
+      .filter(Boolean)
+      .map((entity: any) => ({ entity, relation: 'stores' as const })),
+    ...(section.brands ?? [])
+      .filter(Boolean)
+      .map((entity: any) => ({ entity, relation: 'brands' as const })),
+  ];
+  const uniqueEntities = [
+    ...new Map(
+      entities.map(({ entity, relation }) => [
+        `${relation}:${entity.documentId}`,
+        { documentId: entity.documentId, relation },
+      ]),
+    ).values(),
+  ];
+  // Two counts per entity, so an unbounded Promise.all here scales the burst
   // with the section cap (31 + featured = 64 statements). The pool is 5-10
   // connections shared with the admin, cron, redeem and outbox paths, so a
   // single homepage cache miss could otherwise starve them. Batching keeps
   // the burst flat as the cap grows; results and order are unchanged.
   const counts: (readonly [string, number])[] = [];
-  const BATCH = 4; // 4 stores in flight = 8 concurrent count statements
-  for (let index = 0; index < uniqueIds.length; index += BATCH) {
+  const BATCH = 4; // 4 entities in flight = 8 concurrent count statements
+  for (let index = 0; index < uniqueEntities.length; index += BATCH) {
     counts.push(
       ...(await Promise.all(
-        uniqueIds
+        uniqueEntities
           .slice(index, index + BATCH)
-          .map(async (id) => [id, await countOffersForStore(strapi, id)] as const),
+          .map(async ({ documentId, relation }) => [
+            `${relation}:${documentId}`,
+            await countOffersForEntity(strapi, relation, documentId),
+          ] as const),
       )),
     );
   }
   const byId = new Map(counts);
-  for (const store of stores) {
-    store.offerCount = byId.get(store.documentId) ?? 0;
+  for (const { entity, relation } of entities) {
+    entity.offerCount = byId.get(`${relation}:${entity.documentId}`) ?? 0;
   }
+  return homepage;
+}
+
+// `brands` is an editor-only relation. The public homepage contract remains
+// unchanged: every selected Store/Brand is emitted through the existing
+// popularStores.stores array, whose items already share the same public card
+// shape (name, slug, logo, logoAlt and computed offerCount).
+export function mergePopularBrandsIntoStores(homepage: any) {
+  const section = homepage?.popularStores;
+  if (!section) return homepage;
+
+  const featured = selectedFeaturedEntity(section);
+  section.featuredStore = featured
+    ? { ...featured.entity, entityType: featured.entityType }
+    : null;
+  section.stores = [
+    ...(Array.isArray(section.stores)
+      ? section.stores.map((entity: any) => ({ ...entity, entityType: 'store' }))
+      : []),
+    ...(Array.isArray(section.brands)
+      ? section.brands.map((entity: any) => ({ ...entity, entityType: 'brand' }))
+      : []),
+  ];
+  delete section.featuredBrand;
+  delete section.featuredEntityType;
+  delete section.brands;
   return homepage;
 }
 

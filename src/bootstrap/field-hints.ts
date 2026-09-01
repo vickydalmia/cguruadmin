@@ -19,6 +19,21 @@ import { AFFILIATE_OFFER_TOGGLE_FIELD } from '../constants/affiliate-offer';
 // Uses the same DB config store + config-as-code approach as entry titles.
 // Exported for hint-coverage.test.ts only.
 export const COMPONENT_FIELD_DESCRIPTIONS: Record<string, Record<string, string>> = {};
+// Component field labels that must not fall back to Strapi's raw attribute
+// names. The API/storage key remains unchanged; this only controls the label
+// editors see in Content Manager.
+export const COMPONENT_FIELD_LABELS: Record<string, Record<string, string>> = {
+  'home.hero-section': {
+    products: 'Product/Offer',
+  },
+  'home.popular-stores': {
+    featuredEntityType: 'Featured type',
+    featuredStore: 'Featured Store',
+    featuredBrand: 'Featured Brand',
+    stores: 'Stores',
+    brands: 'Brands',
+  },
+};
 for (const rule of HOMEPAGE_IMAGE_RULES) {
   (COMPONENT_FIELD_DESCRIPTIONS[rule.componentUid] ??= {})[rule.field] =
     imageRuleDescription(rule);
@@ -34,9 +49,19 @@ COMPONENT_FIELD_DESCRIPTIONS['shared.seo'].ogImage =
 (COMPONENT_FIELD_DESCRIPTIONS['home.hero-product'] ??= {}).entityType =
   'Choose Product Deal or Coupon. Only the matching relation picker is shown below.';
 COMPONENT_FIELD_DESCRIPTIONS['home.hero-product'].deal =
-  'Select the Product Deal for this Hero Offer. Shown only when Offer type is Product Deal.';
+  'Select the Product Deal for this Product/Offer. Shown only when Offer type is Product Deal.';
 COMPONENT_FIELD_DESCRIPTIONS['home.hero-product'].coupon =
-  'Select the Coupon for this Hero Offer. Shown only when Offer type is Coupon; its Store or Brand logo is centered in the card.';
+  'Select the Coupon for this Product/Offer. Shown only when Offer type is Coupon; its Store or Brand logo is centered in the card.';
+(COMPONENT_FIELD_DESCRIPTIONS['home.popular-stores'] ??= {}).featuredEntityType =
+  'Choose whether the featured homepage card uses a Store or Brand.';
+COMPONENT_FIELD_DESCRIPTIONS['home.popular-stores'].featuredStore =
+  'Select the featured Store. Shown only when Featured type is Store.';
+COMPONENT_FIELD_DESCRIPTIONS['home.popular-stores'].featuredBrand =
+  'Select the featured Brand. Shown only when Featured type is Brand.';
+COMPONENT_FIELD_DESCRIPTIONS['home.popular-stores'].stores =
+  'Select Stores for the combined row. Stores plus Brands may contain at most 30 regular cards; the featured card is the 31st.';
+COMPONENT_FIELD_DESCRIPTIONS['home.popular-stores'].brands =
+  'Select Brands for the combined row. Stores plus Brands may contain at most 30 regular cards; the featured card is the 31st.';
 (COMPONENT_FIELD_DESCRIPTIONS['deal-day.telegram-deal-item'] ??= {}).deal =
   'The Product Deal shown as a locked Telegram card. Its promo code is never sent to the site for this section.';
 COMPONENT_FIELD_DESCRIPTIONS['deal-day.telegram-deal-item'].linkOverride =
@@ -81,7 +106,12 @@ export async function ensureComponentFieldDescriptions(strapi: Core.Strapi): Pro
   const service: any = strapi.plugin('content-manager').service('components');
   if (!service) return;
 
-  for (const [uid, fields] of Object.entries(COMPONENT_FIELD_DESCRIPTIONS)) {
+  const uids = new Set([
+    ...Object.keys(COMPONENT_FIELD_DESCRIPTIONS),
+    ...Object.keys(COMPONENT_FIELD_LABELS),
+  ]);
+
+  for (const uid of uids) {
     try {
       const component = service.findComponent(uid);
       if (!component) continue;
@@ -89,24 +119,41 @@ export async function ensureComponentFieldDescriptions(strapi: Core.Strapi): Pro
       const config = await service.findConfiguration(component);
       const metadatas = { ...(config.metadatas ?? {}) };
       let changed = false;
+      const descriptions = COMPONENT_FIELD_DESCRIPTIONS[uid] ?? {};
+      const labels = COMPONENT_FIELD_LABELS[uid] ?? {};
 
-      for (const [field, description] of Object.entries(fields)) {
+      for (const field of new Set([
+        ...Object.keys(descriptions),
+        ...Object.keys(labels),
+      ])) {
         if (!strapi.components[uid as any]?.attributes?.[field]) {
-          strapi.log.warn(`[content-manager] ${uid} has no field "${field}" — description skipped`);
+          strapi.log.warn(`[content-manager] ${uid} has no field "${field}" — metadata skipped`);
           continue;
         }
+        const description = descriptions[field];
+        const label = labels[field];
         const prev = metadatas[field] ?? {};
-        if (prev.edit?.description === description) continue;
-        metadatas[field] = { ...prev, edit: { ...(prev.edit ?? {}), description } };
+        const descriptionSettled =
+          description === undefined || prev.edit?.description === description;
+        const labelSettled = label === undefined || prev.edit?.label === label;
+        if (descriptionSettled && labelSettled) continue;
+        metadatas[field] = {
+          ...prev,
+          edit: {
+            ...(prev.edit ?? {}),
+            ...(description === undefined ? {} : { description }),
+            ...(label === undefined ? {} : { label }),
+          },
+        };
         changed = true;
       }
 
       if (!changed) continue;
       await service.updateConfiguration(component, { ...config, metadatas });
-      strapi.log.info(`[content-manager] field descriptions set for ${uid}`);
+      strapi.log.info(`[content-manager] field metadata set for ${uid}`);
     } catch (err: any) {
       strapi.log.warn(
-        `[content-manager] field descriptions for ${uid} failed: ${err?.message ?? err}`
+        `[content-manager] field metadata for ${uid} failed: ${err?.message ?? err}`
       );
     }
   }
@@ -311,6 +358,24 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
   },
   {
     uid: 'api::menu.menu',
+    field: 'topBrandsLabel',
+    hint:
+      'Label used by the desktop and mobile Top Brands navigation trigger and panel heading.',
+  },
+  {
+    uid: 'api::menu.menu',
+    field: 'topBrandsTitle',
+    hint:
+      'Label on the All Brands control shown in both desktop and mobile brand menus.',
+  },
+  {
+    uid: 'api::menu.menu',
+    field: 'topBrandsViewAllUrl',
+    hint:
+      'Destination for the All Brands control. Enter a rooted site path or full http(s) URL.',
+  },
+  {
+    uid: 'api::menu.menu',
     field: 'categoriesLabel',
     hint:
       'Label used by the desktop navigation trigger, desktop mega-menu heading, and mobile Categories panel.',
@@ -435,9 +500,14 @@ const CONTENT_TYPE_FIELD_LABELS: Record<string, Record<string, string>> = {
   },
   'api::menu.menu': {
     notification: 'Notification',
+    topStores: 'Top Stores',
     topStoresLabel: 'Top Stores navigation label',
     topStoresTitle: 'All Stores button label',
     topStoresViewAllUrl: 'All Stores button URL',
+    topBrands: 'Top Brands',
+    topBrandsLabel: 'Top Brands navigation label',
+    topBrandsTitle: 'All Brands button label',
+    topBrandsViewAllUrl: 'All Brands button URL',
     categoriesLabel: 'Categories navigation label',
     categoriesTitle: 'All Categories button label',
     categoriesPopularStoresTitle: 'Mobile Popular Stores heading',

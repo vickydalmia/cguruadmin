@@ -54,6 +54,7 @@ export function filterSiteChrome(
       menu.topStores = [];
       menu.searchTopStores = [];
     }
+    if (!live(features, 'brands')) menu.topBrands = [];
     if (!live(features, 'categories')) menu.categorySections = [];
     menu.categorySections = (menu.categorySections ?? [])
       .filter((section: any) => !section?.category || live(features, 'categories'))

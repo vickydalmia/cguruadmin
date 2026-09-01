@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import heroProductSchema from '../../../components/home/hero-product.json';
+import popularStoresSchema from '../../../components/home/popular-stores.json';
+import { COMPONENT_FIELD_LABELS } from '../../../bootstrap/field-hints';
 import homepageSchema from '../content-types/homepage/schema.json';
 import createHomepageController from './custom';
 
@@ -48,6 +51,7 @@ function createHarness(homepage: any, fallbackDeals: any[] = []) {
     ctx,
     findFirst,
     findManyDeals,
+    count,
     sanitizeOutput,
     publicSettings,
   };
@@ -75,10 +79,29 @@ describe('homepage aggregate offer population', () => {
   it('exposes only the Coupon-backed Explore Offers and Offers by Brand fields', () => {
     const attributes = homepageSchema.attributes as Record<string, unknown>;
 
+    expect(heroProductSchema.info.displayName).toBe('Product/Offer');
+    expect(COMPONENT_FIELD_LABELS['home.hero-section']?.products).toBe(
+      'Product/Offer',
+    );
     expect(attributes).toHaveProperty('exploreOffers');
     expect(attributes).toHaveProperty('offersByBrand');
     expect(attributes).not.toHaveProperty('exploreDeals');
     expect(attributes).not.toHaveProperty('dealsByBrand');
+    expect(popularStoresSchema.attributes.brands).toMatchObject({
+      type: 'relation',
+      relation: 'oneToMany',
+      target: 'api::brand.brand',
+    });
+    expect(popularStoresSchema.attributes.featuredEntityType).toMatchObject({
+      type: 'enumeration',
+      enum: ['store', 'brand'],
+      default: 'store',
+    });
+    expect(popularStoresSchema.attributes.featuredBrand).toMatchObject({
+      type: 'relation',
+      relation: 'oneToOne',
+      target: 'api::brand.brand',
+    });
   });
 
   it('ships full offer card content on every deal surface, hero included', async () => {
@@ -114,6 +137,12 @@ describe('homepage aggregate offer population', () => {
     expect(heroCoupon.fields).not.toContain('excerpt');
 
     expect(populate.popularStores.populate.featuredStore.fields).not.toContain(
+      'shortDescription',
+    );
+    expect(populate.popularStores.populate.featuredBrand.fields).not.toContain(
+      'shortDescription',
+    );
+    expect(populate.popularStores.populate.brands.fields).not.toContain(
       'shortDescription',
     );
     expect(
@@ -157,6 +186,7 @@ describe('homepage aggregate offer population', () => {
     // offer-status filter, but their saved relation order must remain intact.
     for (const ref of [
       populate.popularStores.populate.stores,
+      populate.popularStores.populate.brands,
       populate.popularSearches.populate.stores,
       populate.popularSearches.populate.brands,
       populate.popularSearches.populate.categories,
@@ -193,12 +223,13 @@ describe('homepage aggregate offer population', () => {
     );
   });
 
-  it('removes unpublished rows and caps each list at its own +4 buffer', async () => {
+  it('caps stores plus brands into the existing stores response field', async () => {
     const published = Array.from({ length: 30 }, (_, index) => publishedOffer(index));
     const expired = { documentId: 'expired', contentStatus: 'expired' };
     const harness = createHarness({
       popularStores: {
-        stores: Array.from({ length: 40 }, (_, i) => ({ documentId: `store-${i}` })),
+        stores: Array.from({ length: 20 }, (_, i) => ({ documentId: `store-${i}` })),
+        brands: Array.from({ length: 20 }, (_, i) => ({ documentId: `brand-${i}` })),
       },
       // enabled:false pins the raw drop/cap path — backfill (tested separately)
       // would replace these bare curated records as non-actionable.
@@ -209,11 +240,106 @@ describe('homepage aggregate offer population', () => {
 
     const response = await harness.controller.homepageFull(harness.ctx as any);
 
-    expect(response.data.popularStores.stores).toHaveLength(31);
+    expect(response.data.popularStores.stores).toHaveLength(30);
+    expect(response.data.popularStores.stores.map((entity: any) => entity.documentId)).toEqual([
+      ...Array.from({ length: 20 }, (_, i) => `store-${i}`),
+      ...Array.from({ length: 10 }, (_, i) => `brand-${i}`),
+    ]);
+    expect(response.data.popularStores).not.toHaveProperty('brands');
     expect(response.data.topDeals.deals).toHaveLength(10);
     expect(response.data.offersByBrand.offers).toHaveLength(10);
     expect(response.data.exploreOffers.tabs[0].offers).toHaveLength(10);
     expect(JSON.stringify(response.data)).not.toContain('expired');
+  });
+
+  it('computes offer counts through the matching Store or Brand relation', async () => {
+    const store = { documentId: 'store-1' };
+    const brand = { documentId: 'brand-1' };
+    const harness = createHarness({
+      popularStores: { stores: [store], brands: [brand] },
+    });
+
+    const response = await harness.controller.homepageFull(harness.ctx as any);
+
+    expect(response.data.popularStores.stores[0].offerCount).toBe(0);
+    expect(response.data.popularStores.stores[1]).toMatchObject({
+      documentId: 'brand-1',
+      offerCount: 0,
+    });
+    expect(response.data.popularStores).not.toHaveProperty('brands');
+    expect(harness.count).toHaveBeenCalledTimes(4);
+    const filters = harness.count.mock.calls.map(([options]) => options.filters);
+    expect(filters).toContainEqual({
+      stores: { documentId: 'store-1' },
+      contentStatus: { $eq: 'published' },
+    });
+    expect(filters).toContainEqual({
+      brands: { documentId: 'brand-1' },
+      contentStatus: { $eq: 'published' },
+    });
+  });
+
+  it('normalizes a featured Brand into the existing featuredStore response contract', async () => {
+    const staleStore = { documentId: 'store-1', name: 'Old Store' };
+    const brand = {
+      documentId: 'brand-1',
+      name: 'Featured Brand',
+      slug: 'brands/featured-brand',
+    };
+    const harness = createHarness({
+      popularStores: {
+        featuredEntityType: 'brand',
+        featuredStore: staleStore,
+        featuredBrand: brand,
+        stores: [],
+        brands: [brand],
+      },
+    });
+
+    const response = await harness.controller.homepageFull(harness.ctx as any);
+
+    expect(response.data.popularStores.featuredStore).toMatchObject({
+      documentId: 'brand-1',
+      entityType: 'brand',
+    });
+    expect(response.data.popularStores.stores[0]).toMatchObject({
+      documentId: 'brand-1',
+      entityType: 'brand',
+    });
+    expect(response.data.popularStores).not.toHaveProperty('featuredBrand');
+    expect(response.data.popularStores).not.toHaveProperty('featuredEntityType');
+    const filters = harness.count.mock.calls.map(([options]) => options.filters);
+    expect(filters).not.toContainEqual({
+      stores: { documentId: 'store-1' },
+      contentStatus: { $eq: 'published' },
+    });
+    expect(filters).toContainEqual({
+      brands: { documentId: 'brand-1' },
+      contentStatus: { $eq: 'published' },
+    });
+  });
+
+  it('filters disabled stores before brands consume the combined cap', async () => {
+    const harness = createHarness({
+      popularStores: {
+        stores: Array.from({ length: 40 }, (_, i) => ({ documentId: `store-${i}` })),
+        brands: Array.from({ length: 40 }, (_, i) => ({ documentId: `brand-${i}` })),
+      },
+    });
+    harness.publicSettings.mockResolvedValueOnce({
+      countryCode: 'US',
+      features: {
+        ...ALL_FEATURES_LIVE,
+        stores: { enabled: false, ready: false, live: false },
+      },
+    });
+
+    const response = await harness.controller.homepageFull(harness.ctx as any);
+
+    expect(response.data.popularStores.enabled).not.toBe(false);
+    expect(response.data.popularStores.stores).toHaveLength(30);
+    expect(response.data.popularStores.stores[0].documentId).toBe('brand-0');
+    expect(response.data.popularStores).not.toHaveProperty('brands');
   });
 
   it('drops card-wrapper items whose relation is missing (deleted/expired coupon or deal)', async () => {
@@ -359,6 +485,9 @@ describe('site chrome aggregate population', () => {
         topStores: Array.from({ length: 20 }, (_, index) => ({
           documentId: `top-store-${index}`,
         })),
+        topBrands: Array.from({ length: 20 }, (_, index) => ({
+          documentId: `top-brand-${index}`,
+        })),
         searchTopStores: Array.from({ length: 10 }, (_, index) => ({
           store: { documentId: `store-${index}` },
         })),
@@ -410,6 +539,7 @@ describe('site chrome aggregate population', () => {
     expect(menuCall.populate.searchTopStores).toEqual({
       populate: { store: expect.any(Object) },
     });
+    expect(menuCall.populate.topBrands).toEqual(expect.any(Object));
     expect(menuCall.populate.searchSuggestions).toBe(true);
     expect(menuCall.populate.categorySections.populate.icon).toBe(true);
     expect(
@@ -420,6 +550,7 @@ describe('site chrome aggregate population', () => {
     ).toBe(true);
     expect(response.menu.searchTopStores).toHaveLength(8);
     expect(response.menu.topStores).toHaveLength(18);
+    expect(response.menu.topBrands).toHaveLength(18);
     expect(footerCall.populate.countries).toEqual({
       populate: { flag: true },
     });

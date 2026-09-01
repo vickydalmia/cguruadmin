@@ -9,6 +9,7 @@ import {
   PUBLISHED_OFFER_FILTER,
   storeRef,
 } from '../../../utils/offer-visibility';
+import { HOMEPAGE_POPULAR_REGULAR_LIMIT } from '../../../constants/homepage-sections';
 
 const BANK_FIELDS = ['name', 'slug', 'shortDescription', 'logoAlt'];
 const menuStoreRef = {
@@ -29,11 +30,12 @@ const menuCategoryRef = {
 export const MAX_LIST_ITEMS = 16;
 
 export const MAX_TOP_STORES = 18;
+export const MAX_TOP_BRANDS = 18;
 
 export const TOP_DEALS_RENDER_COUNT = 6;
 
 export const SECTION_LIST_CAPS = {
-  popularStores: 31, // site shows 31
+  popularStores: HOMEPAGE_POPULAR_REGULAR_LIMIT,
   topDeals: 10, // site shows 6
   offersByBrand: 10, // site shows 6
   exploreOffersPerTab: 10, // site shows 6 per tab
@@ -135,7 +137,13 @@ export const HOMEPAGE_POPULATE = {
     },
   },
   popularStores: {
-    populate: { viewAllCta: true, featuredStore: storeRef, stores: storeRef },
+    populate: {
+      viewAllCta: true,
+      featuredBrand: brandRef,
+      featuredStore: storeRef,
+      stores: storeRef,
+      brands: brandRef,
+    },
   },
   topDeals: { populate: { viewAllCta: true, deals: publishedDealListRef } },
   cgExclusive: {
@@ -179,6 +187,7 @@ export const HOMEPAGE_POPULATE = {
 
 export const MENU_POPULATE = {
   topStores: menuStoreRef,
+  topBrands: brandRef,
   searchTopStores: { populate: { store: menuStoreRef } },
   searchSuggestions: true,
   categorySections: {

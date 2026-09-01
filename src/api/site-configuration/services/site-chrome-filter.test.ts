@@ -8,6 +8,7 @@ describe('site chrome feature filtering', () => {
   it('removes disabled static, relation-backed and offer links', () => {
     const features: any = {
       stores: feature(false),
+      brands: feature(false),
       categories: feature(false),
       careers: feature(false),
       coupons: feature(false),
@@ -17,6 +18,7 @@ describe('site chrome feature filtering', () => {
     const result = filterSiteChrome(
       {
         topStores: [{ name: 'Store' }],
+        topBrands: [{ name: 'Brand' }],
         categorySections: [{ category: { slug: 'fashion' }, links: [] }],
         extraItems: [
           { label: 'Careers', url: '/careers/' },
@@ -31,6 +33,7 @@ describe('site chrome feature filtering', () => {
       features,
     );
     expect(result.menu.topStores).toEqual([]);
+    expect(result.menu.topBrands).toEqual([]);
     expect(result.menu.categorySections).toEqual([]);
     expect(result.menu.extraItems).toEqual([{ label: 'Home', url: '/' }]);
     expect(result.footer.partnerCard).toBeNull();

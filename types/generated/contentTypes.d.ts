@@ -1646,6 +1646,19 @@ export interface ApiMenuMenu extends Struct.SingleTypeSchema {
       >;
     title: Schema.Attribute.String &
       Schema.Attribute.DefaultTo<'Header Settings'>;
+    topBrands: Schema.Attribute.Relation<'oneToMany', 'api::brand.brand'> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 18;
+        },
+        number
+      >;
+    topBrandsLabel: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Top Brands'>;
+    topBrandsTitle: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'All Brands'>;
+    topBrandsViewAllUrl: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'/brands/'>;
     topStores: Schema.Attribute.Relation<'oneToMany', 'api::store.store'> &
       Schema.Attribute.SetMinMax<
         {

@@ -37,6 +37,7 @@ import {
 import { validateHomepageImages } from '../homepage-image-validation';
 import { normaliseHomepageHeroOfferFields } from '../homepage-hero-offer';
 import { validateHomepageHeroOffers } from '../homepage-hero-offer-validation';
+import { validateHomepagePopularStores } from '../homepage-popular-stores-validation';
 import { validateHomepagePopularSearches } from '../homepage-popular-searches-validation';
 import { validateIndependenceDaySale } from '../independence-day-sale-validation';
 import { validateIdentity } from '../identity-validation';
@@ -244,6 +245,13 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     applies: (uid) => uid === HOMEPAGE_UID,
     run: ({ strapi, data, locale }) =>
       validateHomepageHeroOffers(strapi, data, locale),
+  },
+  {
+    name: 'validateHomepagePopularStores',
+    actions: CREATE_UPDATE,
+    applies: (uid) => uid === HOMEPAGE_UID,
+    run: ({ strapi, data, documentId }) =>
+      validateHomepagePopularStores(strapi, data, documentId),
   },
   {
     name: 'validateHomepagePopularSearches',

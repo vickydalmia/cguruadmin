@@ -58,6 +58,24 @@
       "type": "string",
       "default": "/stores/"
     },
+    "topBrands": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::brand.brand",
+      "max": 18
+    },
+    "topBrandsLabel": {
+      "type": "string",
+      "default": "Top Brands"
+    },
+    "topBrandsTitle": {
+      "type": "string",
+      "default": "All Brands"
+    },
+    "topBrandsViewAllUrl": {
+      "type": "string",
+      "default": "/brands/"
+    },
     "searchTopStores": {
       "type": "component",
       "repeatable": true,

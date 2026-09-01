@@ -21,6 +21,7 @@ import {
 
 import {
   COUPON_FIELDS,
+  MAX_TOP_BRANDS,
   MAX_TOP_STORES,
   FOOTER_POPULATE,
   GLOBAL_POPULATE,
@@ -35,6 +36,7 @@ import {
   dropDeadOffers,
   fillTopDeals,
   headerNotificationPayload,
+  mergePopularBrandsIntoStores,
   routeMetadata,
 } from './homepage-transforms';
 import { featureByPath } from '../../site-configuration/services/country-registry';
@@ -59,8 +61,13 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const sanitized = await sanitizeOutput(strapi, ctx, 'api::homepage.homepage', homepage);
     dropDeadOffers(sanitized);
     await fillTopDeals(strapi, ctx, sanitized);
+    // Remove catalog-disabled entities before applying combined list caps or
+    // running per-entity count queries. Otherwise disabled stores could consume
+    // every Popular Stores & Brands slot before the live brands are retained.
+    filterHomepage(sanitized, siteSettings.features);
     capCuratedLists(sanitized);
     await attachOfferCounts(strapi, sanitized);
+    mergePopularBrandsIntoStores(sanitized);
     // Nested Coupon cards emit offerText as words; Deal benefit labels and
     // computed pricing content are normalized by the same response walker.
     arrayizeOfferText(sanitized);
@@ -68,7 +75,6 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     // database read, so it cannot ride the synchronous walker above; it walks
     // the same nested section tree.
     await attachFestiveOffers(strapi, sanitized);
-    filterHomepage(sanitized, siteSettings.features);
 
     return ctx.send({ data: sanitized, siteSettings });
   },
@@ -89,6 +95,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
 
     if (sanitizedMenu?.topStores) {
       sanitizedMenu.topStores = cap(sanitizedMenu.topStores, MAX_TOP_STORES);
+    }
+    if (sanitizedMenu?.topBrands) {
+      sanitizedMenu.topBrands = cap(sanitizedMenu.topBrands, MAX_TOP_BRANDS);
     }
     if (sanitizedMenu?.searchTopStores) {
       sanitizedMenu.searchTopStores = cap(sanitizedMenu.searchTopStores, 8);

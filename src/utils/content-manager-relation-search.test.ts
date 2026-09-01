@@ -72,7 +72,7 @@ describe('getAdminRelationSearchFields', () => {
       }))
       .sort((a, b) => relationKey(a).localeCompare(relationKey(b)));
 
-    expect(actual).toHaveLength(22);
+    expect(actual).toHaveLength(24);
     expect(configured).toEqual(actual);
   });
 
