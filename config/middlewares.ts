@@ -26,12 +26,15 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Middlewar
       // Direct browser-to-CMS access is not needed for the beta/production site:
       // search/redeem go through the public site's ISR gateway proxy. Add
       // origins only for trusted direct-CMS browser clients such as local dev.
-      origin: env.array('CORS_ORIGINS', ['http://localhost:4321']),
+      // Empty by default: an unset value must not silently admit a dev origin
+      // in production. Local development sets CORS_ORIGINS in its own .env.
+      origin: env.array('CORS_ORIGINS', []),
       headers: ['Content-Type', 'Authorization'],
     },
   },
   'strapi::poweredBy',
   'strapi::query',
+  'global::country-content-visibility',
   'global::live-offer-relations',
   'global::relation-search-config-guard',
   {

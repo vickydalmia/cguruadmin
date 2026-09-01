@@ -1,0 +1,40 @@
+{
+  "countries": [
+    {
+      "code": "in",
+      "name": "India",
+      "url": "https://www.couponzguru.com/",
+      "fileName": "in.png"
+    },
+    {
+      "code": "us",
+      "name": "USA",
+      "url": "https://www.couponzguruusa.com/",
+      "fileName": "us.png"
+    },
+    {
+      "code": "sg",
+      "name": "Singapore",
+      "url": "https://www.couponzguru.sg/",
+      "fileName": "sg.png"
+    },
+    {
+      "code": "ph",
+      "name": "Philippines",
+      "url": "https://www.couponzguru.ph/",
+      "fileName": "ph.png"
+    },
+    {
+      "code": "ae",
+      "name": "UAE",
+      "url": "https://www.couponzguru.ae/",
+      "fileName": "ae.png"
+    },
+    {
+      "code": "my",
+      "name": "Malaysia",
+      "url": "https://www.couponzguru.my/",
+      "fileName": "my.png"
+    }
+  ]
+}

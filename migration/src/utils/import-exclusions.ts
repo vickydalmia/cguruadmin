@@ -1,18 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { migrationRoot, profileFile } from "./profile-state.js";
 
-// Terms excluded from the WordPress import, for two independent reasons:
+// Terms excluded from the WordPress import, for three independent reasons:
 //
 //   1. The ARTICLES category — the term with slug "articles" / name
 //      "Articles" (and every descendant term under it) holds editorial blog
 //      content, not catalog entities. A `choose_type` of Article(s) is also
 //      honored as a belt-and-braces signal.
-//   2. LISTED STORES — migration/excluded-stores.csv names stores the
-//      business has retired; the store and everything filed under it must
-//      not reach the new catalog.
+//   2. UNCATEGORIZED — WordPress's fallback category is not a real catalog
+//      entity, and every post still filed under it is incomplete source data.
+//   3. OPTIONAL LISTED STORES — when MIGRATION_EXCLUSIONS_FILE is configured,
+//      it names stores that source has retired; the store and everything filed
+//      under it must not reach the new catalog.
 //
-// In both cases phase 03 skips the term and phases 07/08 skip (and, via the
+// In all cases phase 03 skips the term and phases 07/08 skip (and, via the
 // inventory reconciliation, converge away) every post filed under it; phase
 // 10's expected counts apply the same rule.
 //
@@ -22,6 +24,7 @@ import { fileURLToPath } from "node:url";
 
 const ARTICLE_SLUG = "articles";
 const ARTICLE_CHOOSE_TYPES = new Set(["article", "articles"]);
+const UNCATEGORIZED_SLUG = "uncategorized";
 
 export function isArticleChooseType(value: string | null | undefined): boolean {
   return ARTICLE_CHOOSE_TYPES.has((value ?? "").trim().toLowerCase());
@@ -71,6 +74,14 @@ export function collectArticleTermIds(
   return articleIds;
 }
 
+/** WordPress's exact fallback category (case-insensitive name or slug). */
+export function isUncategorizedTerm(term: TermRowLike): boolean {
+  return (
+    term.slug.trim().toLowerCase() === UNCATEGORIZED_SLUG ||
+    term.name.trim().toLowerCase() === UNCATEGORIZED_SLUG
+  );
+}
+
 /** Store choose_type values the excluded-stores list may match (missing → Store). */
 function isStoreChooseType(value: string | null | undefined): boolean {
   const normalized = (value ?? "").trim().toLowerCase();
@@ -107,20 +118,23 @@ export function parseExcludedStoreNames(csv: string): Set<string> {
   return names;
 }
 
-const EXCLUDED_STORES_CSV = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../excluded-stores.csv",
-);
+export function excludedStoresFile(environment: NodeJS.ProcessEnv = process.env): string {
+  const explicit = environment.MIGRATION_EXCLUSIONS_FILE?.trim();
+  if (explicit) return path.resolve(migrationRoot(), explicit);
+  return profileFile("excluded-stores.csv", environment);
+}
 
 export function loadExcludedStoreNames(): Set<string> {
-  if (!fs.existsSync(EXCLUDED_STORES_CSV)) return new Set();
-  return parseExcludedStoreNames(fs.readFileSync(EXCLUDED_STORES_CSV, "utf8"));
+  const file = excludedStoresFile();
+  if (!fs.existsSync(file)) return new Set();
+  return parseExcludedStoreNames(fs.readFileSync(file, "utf8"));
 }
 
 export interface ImportExclusions {
   /** Union of every excluded term id — what the phases consume. */
   termIds: Set<number>;
   articleTermIds: Set<number>;
+  uncategorizedTermIds: Set<number>;
   excludedStoreTermIds: Set<number>;
   /** Listed names that matched no WP store term (review these). */
   unmatchedStoreNames: string[];
@@ -132,11 +146,21 @@ export function resolveImportExclusions(
   excludedNames: ReadonlySet<string>,
 ): ImportExclusions {
   const articleTermIds = collectArticleTermIds(terms);
+  const uncategorizedTermIds = new Set(
+    terms
+      .filter((term) => isUncategorizedTerm(term))
+      .map((term) => term.term_id),
+  );
   const excludedStoreTermIds = new Set<number>();
   const matchedNames = new Set<string>();
 
   for (const term of terms) {
-    if (articleTermIds.has(term.term_id)) continue;
+    if (
+      articleTermIds.has(term.term_id) ||
+      uncategorizedTermIds.has(term.term_id)
+    ) {
+      continue;
+    }
     if (
       excludedNames.size > 0 &&
       isStoreChooseType(term.choose_type) &&
@@ -148,8 +172,13 @@ export function resolveImportExclusions(
   }
 
   return {
-    termIds: new Set([...articleTermIds, ...excludedStoreTermIds]),
+    termIds: new Set([
+      ...articleTermIds,
+      ...uncategorizedTermIds,
+      ...excludedStoreTermIds,
+    ]),
     articleTermIds,
+    uncategorizedTermIds,
     excludedStoreTermIds,
     unmatchedStoreNames: [...excludedNames].filter(
       (name) => !matchedNames.has(name),
@@ -169,7 +198,10 @@ export function getImportExclusions(): Promise<ImportExclusions> {
   if (exclusionsPromise) return exclusionsPromise;
   exclusionsPromise = (async () => {
     const { wpQuery } = await import("../db/wp-client.js");
-    const rows = await wpQuery<TermRowLike>(`
+    // RAW rows on purpose: the Excel classification canonicalizes every
+    // choose_type to a catalog type, which would blind isArticleRootTerm's
+    // Article(s) choose_type signal. Exclusions always read the source as-is.
+    const sourceRows = await wpQuery<TermRowLike>(`
       SELECT t.term_id, t.name, t.slug, tt.parent,
              MAX(CASE WHEN tm.meta_key='choose_type' THEN tm.meta_value END) AS choose_type
       FROM wp_terms t
@@ -177,7 +209,7 @@ export function getImportExclusions(): Promise<ImportExclusions> {
       LEFT JOIN wp_termmeta tm ON t.term_id = tm.term_id AND tm.meta_key = 'choose_type'
       GROUP BY t.term_id, t.name, t.slug, tt.parent
     `);
-    return resolveImportExclusions(rows, loadExcludedStoreNames());
+    return resolveImportExclusions(sourceRows, loadExcludedStoreNames());
   })();
   return exclusionsPromise;
 }

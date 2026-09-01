@@ -21,11 +21,11 @@ export const logger = winston.createLogger({
     }),
     new winston.transports.File({
       filename: "migration.log",
-      dirname: ".",
+      dirname: config.stateDir,
     }),
     new winston.transports.File({
       filename: "migration-errors.log",
-      dirname: ".",
+      dirname: config.stateDir,
       level: "error",
     }),
   ],

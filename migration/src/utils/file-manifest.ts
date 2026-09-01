@@ -1,6 +1,5 @@
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
 import {
   S3Client,
   DeleteObjectsCommand,
@@ -19,18 +18,17 @@ import {
   type FilesRowLike,
 } from "./manifest-core.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // `*Map.json` survives clearCheckpoints() — the manifest must outlive --clean,
 // exactly like the ID maps: it IS the reuse index once the DB is wiped.
 const MANIFEST_PATH = path.resolve(
-  __dirname,
-  "../../.checkpoints/fileManifestMap.json",
+  config.stateDir,
+  "fileManifestMap.json",
 );
 
 /** S3 prefix reserved for migration bookkeeping, excluded from orphan cleanup. */
 export function manifestMirrorKey(): string {
   const rootPath = config.s3.rootPath?.replace(/^\/+|\/+$/g, "") ?? "";
-  return `${rootPath ? `${rootPath}/` : ""}.migration/files-manifest.json`;
+  return `${rootPath ? `${rootPath}/` : ""}.migration/${config.profile}/files-manifest.json`;
 }
 
 /** Root prefix with trailing slash ("" when unscoped), as the key index uses. */
@@ -199,7 +197,7 @@ export async function clearFileManifest(): Promise<void> {
 }
 
 export const FILES_ROW_SELECT = `
-  SELECT name, alternative_text, caption, width, height, formats, ext, mime,
+  SELECT id, document_id, name, alternative_text, caption, width, height, formats, ext, mime,
          size, hash, url, provider, provider_metadata, background_colour,
          background_removal_source_hash, background_removal_version,
          background_removed_at

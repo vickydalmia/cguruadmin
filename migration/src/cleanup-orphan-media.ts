@@ -16,6 +16,10 @@ import {
   syncManifestFromDb,
   uploadManifestMirror,
 } from "./utils/file-manifest.js";
+import {
+  deleteUnreferencedManifestFiles,
+  findUnreferencedManifestFiles,
+} from "./utils/manifest-file-restore.js";
 
 /**
  * If more than this share of listed objects would be deleted, refuse without
@@ -58,10 +62,22 @@ export async function runOrphanMediaCleanup(
   const { synced } = await syncManifestFromDb();
   logger.info(`Manifest refreshed from files table (${synced} row(s))`);
 
+  const restoredCandidates = await findUnreferencedManifestFiles();
+  const restoredCandidateIds = new Set(
+    restoredCandidates.map((candidate) => candidate.id),
+  );
+  if (restoredCandidates.length > 0) {
+    logger.info(
+      `Manifest restore cleanup: ${restoredCandidates.length} unreferenced ` +
+        `migration-owned files row(s) ${options.dryRun ? "would be pruned" : "eligible for pruning"}`,
+    );
+  }
+
   const urlPrefix = s3UrlPrefix();
-  const rows = await pgQuery<FilesRowLike>(FILES_ROW_SELECT);
+  const rows = await pgQuery<FilesRowLike & { id: number }>(FILES_ROW_SELECT);
   const referenced = new Set<string>();
   for (const row of rows) {
+    if (restoredCandidateIds.has(row.id)) continue;
     for (const key of referencedKeysFromRow(row, urlPrefix, rootPrefix)) {
       referenced.add(key);
     }
@@ -94,6 +110,16 @@ export async function runOrphanMediaCleanup(
       `(${(orphanBytes / 1024 / 1024).toFixed(1)} MB)`,
   );
   if (orphans.length === 0) {
+    if (!options.dryRun && restoredCandidates.length > 0) {
+      const deletedRows = await deleteUnreferencedManifestFiles(
+        restoredCandidates,
+      );
+      const deletedHashes = new Set(deletedRows.map((row) => row.hash));
+      await pruneManifestEntries((hash) => !deletedHashes.has(hash));
+      logger.info(
+        `Pruned ${deletedRows.length} unreferenced manifest-restored files row(s)`,
+      );
+    }
     await saveFileManifest();
     await uploadManifestMirror();
     return;
@@ -120,16 +146,27 @@ export async function runOrphanMediaCleanup(
     return;
   }
 
+  const deletedRows = await deleteUnreferencedManifestFiles(
+    restoredCandidates,
+  );
   await deleteS3Objects(orphans);
   logger.info(`Deleted ${orphans.length} orphan object(s)`);
 
   // Manifest entries whose master no longer exists are dead — prune them so
   // the reuse path never has to discover the staleness one miss at a time.
   const deleted = new Set(orphans);
+  const deletedHashes = new Set(deletedRows.map((row) => row.hash));
   const pruned = await pruneManifestEntries(
-    (_hash, entry) => !entry.masterKeys.every((key) => deleted.has(key)),
+    (hash, entry) =>
+      !deletedHashes.has(hash) &&
+      !entry.masterKeys.every((key) => deleted.has(key)),
   );
   if (pruned > 0) logger.info(`Pruned ${pruned} stale manifest entrie(s)`);
+  if (deletedRows.length > 0) {
+    logger.info(
+      `Pruned ${deletedRows.length} unreferenced manifest-restored files row(s)`,
+    );
+  }
 
   await saveFileManifest();
   await uploadManifestMirror();

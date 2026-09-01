@@ -1,0 +1,130 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+
+import { excludedStoresFile } from "../src/utils/import-exclusions.js";
+import {
+  migrationProfile,
+  migrationStateDir,
+  statePathIncludesProfile,
+} from "../src/utils/profile-state.js";
+
+function withTempRoot(run: (root: string) => void): void {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cguru-profile-state-"));
+  try {
+    run(root);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test("profile state defaults and USA state never share a directory", () => {
+  withTempRoot((root) => {
+    const options = { rootDir: root };
+    const india = migrationStateDir(
+      { MIGRATION_PROFILE: "india" } as NodeJS.ProcessEnv,
+      options,
+    );
+    const usa = migrationStateDir(
+      { MIGRATION_PROFILE: "usa" } as NodeJS.ProcessEnv,
+      options,
+    );
+    assert.notEqual(india, usa);
+    assert.match(india, /\.state\/india$/u);
+    assert.match(usa, /\.state\/usa$/u);
+  });
+});
+
+test("India uses legacy state without mutating either directory", () => {
+  withTempRoot((root) => {
+    const legacy = path.join(root, ".checkpoints");
+    fs.mkdirSync(legacy, { recursive: true });
+    fs.writeFileSync(path.join(legacy, "03-stores.json"), "{}");
+    fs.writeFileSync(path.join(legacy, "storeIdMap.json"), "{}");
+
+    const stateDir = migrationStateDir(
+      { MIGRATION_PROFILE: "india" } as NodeJS.ProcessEnv,
+      { rootDir: root },
+    );
+
+    assert.equal(stateDir, legacy);
+    assert.equal(fs.existsSync(legacy), true);
+    assert.equal(fs.existsSync(path.join(legacy, "03-stores.json")), true);
+    assert.equal(fs.existsSync(path.join(legacy, "storeIdMap.json")), true);
+    assert.equal(fs.existsSync(path.join(root, ".state", "india")), false);
+  });
+});
+
+test("conflicting legacy and India state fail closed without moving either", () => {
+  withTempRoot((root) => {
+    const legacy = path.join(root, ".checkpoints");
+    const target = path.join(root, ".state", "india");
+    fs.mkdirSync(legacy, { recursive: true });
+    fs.mkdirSync(target, { recursive: true });
+    fs.writeFileSync(path.join(legacy, "legacy.json"), "{}");
+    fs.writeFileSync(path.join(target, "current.json"), "{}");
+
+    assert.throws(
+      () =>
+        migrationStateDir(
+          { MIGRATION_PROFILE: "india" } as NodeJS.ProcessEnv,
+          { rootDir: root },
+        ),
+      /both \.checkpoints\/ and \.state\/india hold state/u,
+    );
+    assert.equal(fs.existsSync(path.join(legacy, "legacy.json")), true);
+    assert.equal(fs.existsSync(path.join(target, "current.json")), true);
+  });
+});
+
+test("a non-empty log-only target safely falls back to intact legacy state", () => {
+  withTempRoot((root) => {
+    const legacy = path.join(root, ".checkpoints");
+    const target = path.join(root, ".state", "india");
+    fs.mkdirSync(legacy, { recursive: true });
+    fs.mkdirSync(target, { recursive: true });
+    fs.writeFileSync(path.join(legacy, "phase.json"), "{}");
+    fs.writeFileSync(path.join(target, "migration.log"), "booted");
+
+    const stateDir = migrationStateDir(
+      { MIGRATION_PROFILE: "india" } as NodeJS.ProcessEnv,
+      { rootDir: root },
+    );
+
+    assert.equal(stateDir, legacy);
+    assert.equal(fs.existsSync(path.join(legacy, "phase.json")), true);
+    assert.equal(fs.existsSync(path.join(target, "migration.log")), true);
+  });
+});
+
+test("unsafe profile names fail closed", () => {
+  assert.equal(migrationProfile({ MIGRATION_PROFILE: "USA" } as NodeJS.ProcessEnv), "usa");
+  assert.throws(() =>
+    migrationProfile({ MIGRATION_PROFILE: "../india" } as NodeJS.ProcessEnv),
+  );
+});
+
+test("state pin validation requires a complete profile path segment", () => {
+  assert.equal(statePathIncludesProfile(".state/india", "india"), true);
+  assert.equal(statePathIncludesProfile("/srv/india/.state", "india"), true);
+  assert.equal(statePathIncludesProfile(".state/india-usa", "india"), false);
+  assert.equal(statePathIncludesProfile(".state/usa", "india"), false);
+});
+
+test("missing profile exclusion files do not fall back across countries", () => {
+  const usaExclusions = excludedStoresFile({
+    MIGRATION_PROFILE: "usa",
+  } as NodeJS.ProcessEnv);
+  const indiaExclusions = excludedStoresFile({
+    MIGRATION_PROFILE: "india",
+  } as NodeJS.ProcessEnv);
+
+  assert.match(usaExclusions, /profiles\/usa\/excluded-stores\.csv$/u);
+  assert.doesNotMatch(usaExclusions, /migration\/excluded-stores\.csv$/u);
+  assert.match(indiaExclusions, /profiles\/india\/excluded-stores\.csv$/u);
+  assert.doesNotMatch(indiaExclusions, /migration\/excluded-stores\.csv$/u);
+  assert.equal(fs.existsSync(usaExclusions), false);
+  assert.equal(fs.existsSync(indiaExclusions), false);
+});

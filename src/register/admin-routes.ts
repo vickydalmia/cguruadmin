@@ -145,3 +145,45 @@ export function registerCsvExportRoutes(strapi: Core.Strapi): void {
     ],
   } as any);
 }
+
+/** Country onboarding is a Super-Admin deployment decision, not editorial content. */
+export function registerCountrySetupRoutes(strapi: Core.Strapi): void {
+  const policies = [
+    'admin::isAuthenticatedAdmin',
+    'global::super-admin-only',
+  ];
+  strapi.server.routes({
+    type: 'admin',
+    prefix: '/country-setup',
+    routes: [
+      {
+        method: 'GET',
+        path: '/',
+        handler: 'api::site-configuration.site-configuration.adminFind',
+        config: { policies },
+      },
+      {
+        method: 'PUT',
+        path: '/',
+        handler: 'api::site-configuration.site-configuration.adminUpdate',
+        config: { policies },
+      },
+    ],
+  } as any);
+}
+
+/** Runtime deployment identity consumed by authenticated admin UI actions. */
+export function registerAdminRuntimeConfigRoutes(strapi: Core.Strapi): void {
+  strapi.server.routes({
+    type: 'admin',
+    prefix: '/admin-runtime-config',
+    routes: [
+      {
+        method: 'GET',
+        path: '/',
+        handler: 'api::admin-runtime-config.admin-runtime-config.find',
+        config: { policies: ['admin::isAuthenticatedAdmin'] },
+      },
+    ],
+  } as any);
+}

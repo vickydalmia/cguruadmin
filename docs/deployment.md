@@ -35,6 +35,7 @@ REBUILD_POST_TIMEOUT_MS
 REDEEM_INVALIDATE_TIMEOUT_MS
 SITE_BUCKET
 STRAPI_MEDIA_URL
+STRAPI_ADMIN_PUBLIC_SITE_URL
 ```
 
 These old S3 options are also unsupported by the current upload-provider
@@ -75,6 +76,20 @@ If an old and a new Strapi instance share PostgreSQL, enable
 `CRON_ENABLED=true` on exactly one instance. Prefer an in-place replacement
 instead of running two production schedulers.
 
+### Multi-country/Country Setup release note
+
+The Site Configuration table and entity `page_template` columns are additive.
+For India, the migration defaults existing entities to `default` and backfills
+the two legacy campaign owners. Older application images ignore these columns,
+so rollback does not require dropping them.
+
+Deploying the CMS contract before the matching UI remains the preferred order.
+The reverse overlap is nevertheless tolerated: the new UI falls back to
+India-compatible settings if an old CMS lacks `/api/site-settings`, and retries
+route projections without `pageTemplate`. This protection keeps the site up;
+it does not remove the requirement to verify Country Setup before completing
+the release. See [Country Setup and Multi-Country Sites](./country-setup.md).
+
 ## 1. Publish an immutable image
 
 Run the CMS checks before creating the GitHub Release:
@@ -90,10 +105,15 @@ docker build -t couponzguru-cms:verify .
 Create a GitHub Release and wait for its GHCR workflow to finish. Record the
 immutable `v*` or `sha-*` tag. Never deploy `latest`.
 
-`STRAPI_ADMIN_PUBLIC_SITE_URL` is compiled into the Strapi admin bundle. If the
-admin Coupon/Deal public-link actions are required, the value must be supplied
-while the release image runs `yarn build`. Adding it only to the running
-container does not rebuild the admin bundle.
+Publishing the GitHub Release is the only automatic image trigger. A raw `v*`
+tag push does not start a second build; `workflow_dispatch` remains available
+for an intentional manual rebuild.
+
+The CMS image is country-neutral. Do not supply a public-site build argument:
+the running container exposes its non-secret `PUBLIC_SITE_URL` through an
+authenticated admin runtime-config endpoint. Coupon/Deal public-link actions
+therefore follow the deployment environment without rebuilding the admin
+bundle, and one immutable image may be promoted to every country stack.
 
 ## 2. Back up PostgreSQL
 
@@ -253,8 +273,10 @@ UPLOAD_CSP_SOURCES=https://media.couponzguru.com,https://<BUCKET>.s3.ap-south-1.
 # Keep empty when public browser requests use Fastify instead of Strapi.
 CORS_ORIGINS=
 
-# Build-time admin value; runtime assignment alone does not rebuild the UI.
-STRAPI_ADMIN_PUBLIC_SITE_URL=https://www.couponzguru.com
+# Runtime storefront origin. The authenticated admin config endpoint supplies
+# it to Coupon/Deal public-link actions; rich-text sanitization derives the
+# first-party registrable domain from the same value.
+PUBLIC_SITE_URL=https://www.couponzguru.com
 
 # Persistent-ISR transactional outbox
 # The dispatcher safely retries while the gateway is unavailable. Enable it on
@@ -362,7 +384,7 @@ normal deployments.
 | `FAL_BACKGROUND_REMOVAL_MAX_ATTEMPTS` | Optional | Attempts for transient provider failures. Defaults to `3`; credit/auth errors are not retried. |
 | `UPLOAD_CSP_SOURCES` | Required for external media | Comma-separated media origins added to the Strapi admin `img-src` and `media-src` policy. |
 | `CORS_ORIGINS` | Optional | Browser origins permitted to call Strapi directly. Keep empty when all public browser requests use Fastify. |
-| `STRAPI_ADMIN_PUBLIC_SITE_URL` | Optional build-time | Public site origin compiled into Coupon/Deal admin link actions. Runtime-only changes do not rebuild the admin bundle. |
+| `PUBLIC_SITE_URL` | Required runtime | Storefront origin returned by the authenticated admin runtime-config endpoint for Coupon/Deal public-link actions and used server-side to derive the registrable first-party domain for rich-text links. It is not compiled into the image, so the same image serves every country. There is no separate `INTERNAL_HOSTS` list. |
 
 #### Persistent-ISR outbox
 
@@ -502,6 +524,21 @@ There must be no startup error involving:
 - cron task registration;
 - the ISR outbox configuration.
 
+Also confirm the startup migration added `page_template` to Store, Brand,
+Category and Bank without removing existing fields, and that the hidden Site
+Configuration single type is available through the Country Setup service.
+Country Setup, migration profiles and runtime settings no longer use campaign
+booleans: campaign activation is the selected entity `pageTemplate`. The two
+old columns remain private and ignored for rollback compatibility with the
+previous India image; do not edit or use them for new deployments.
+
+The same startup also removes the two retired Homepage component attachments,
+`exploreDeals` and `dealsByBrand`. Rebuild and restart both Strapi containers
+so Content Manager reads the new Homepage schema; after that it exposes only
+the Coupon-backed **Explore Offers** and **Offers by Brand** sections. The
+shared Deal component tables remain because campaign single types still use
+those components.
+
 Before the frontend gateway starts, outbox delivery failures are expected and
 remain retryable. Strapi itself must remain healthy.
 
@@ -560,6 +597,21 @@ Verify:
 - route-inventory APIs used by Astro;
 - search status and indexes;
 - scheduled Coupon/Deal state processing.
+- `GET /api/site-settings` identity, localization and feature readiness;
+- the expected `dealTemplate` and `independenceDayTemplate` owner paths;
+- the Content Manager sidebar omits disabled country features and campaign
+  singletons without a template owner;
+- disabled features are absent from public route metadata, search and sitemap
+  sources, while the India deployment reports every intended feature live.
+
+For India, stop the rollout if an intended feature is not simultaneously
+`enabled`, `ready` and `live`, or if either campaign path differs from the
+existing public URL. Do not bypass readiness with a direct database edit.
+
+```bash
+curl -fsS http://127.0.0.1:1337/api/site-settings | jq
+curl -fsS http://127.0.0.1:1337/api/public-route-metadata | jq '.data | length'
+```
 
 With `ISR_ADMIN_SECRET` exported from the secret manager:
 

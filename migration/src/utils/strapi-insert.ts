@@ -119,6 +119,29 @@ export async function insertComponent(
     return existingLink[0].cmp_id;
   }
 
+  return insertComponentWithoutLookup(
+    componentTable,
+    componentData,
+    entityTable,
+    entityId,
+    field,
+    componentType,
+    order,
+  );
+}
+
+/** Caller has already established that this component order is absent. */
+async function insertComponentWithoutLookup(
+  componentTable: string,
+  componentData: Record<string, any>,
+  entityTable: string,
+  entityId: number,
+  field: string,
+  componentType: string,
+  order: number,
+): Promise<number> {
+  const cmpTable = `${entityTable}_cmps`;
+
   // Insert component row
   const columns = Object.keys(componentData);
   const values = columns.map((c) => componentData[c] ?? null);
@@ -173,7 +196,10 @@ export async function replaceComponents(
       const order = index + 1;
       const currentId = byOrder.get(order);
       if (!currentId) {
-        await insertComponent(
+        // The SELECT above already proved this order is absent. Avoid the
+        // duplicate lookup, which otherwise costs one remote round trip for
+        // every taxonomy SEO component in a fresh database.
+        await insertComponentWithoutLookup(
           componentTable,
           rows[index],
           entityTable,

@@ -1,10 +1,9 @@
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
 import { logger } from "./logger.js";
+import { config } from "../config.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CHECKPOINT_DIR = path.resolve(__dirname, "../../.checkpoints");
+const CHECKPOINT_DIR = config.stateDir;
 
 export function isPhaseComplete(phase: string): boolean {
   const file = path.join(CHECKPOINT_DIR, `${phase}.json`);

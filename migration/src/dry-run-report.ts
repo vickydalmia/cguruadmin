@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { config } from "./config.js";
 import { wpQuery, closeWp } from "./db/wp-client.js";
 import { logger } from "./utils/logger.js";
 import { shouldImportMigrationOffer } from "./utils/content-status.js";
@@ -15,21 +16,16 @@ import {
   resolveImportExclusions,
   type TermRowLike,
 } from "./utils/import-exclusions.js";
+import {
+  classifyTaxonomyTerms,
+  formatTaxonomyClassificationReport,
+} from "./utils/taxonomy-classification.js";
 
 const TYPE_LABELS = ["Store", "Brand", "Category", "Bank"] as const;
 
-const REPORT_CSV = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../dry-run-report.csv",
-);
-const EXCLUDED_CSV = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../dry-run-excluded.csv",
-);
-const SUMMARY_CSV = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../dry-run-summary.csv",
-);
+const REPORT_CSV = path.resolve(config.stateDir, "dry-run-report.csv");
+const EXCLUDED_CSV = path.resolve(config.stateDir, "dry-run-excluded.csv");
+const SUMMARY_CSV = path.resolve(config.stateDir, "dry-run-summary.csv");
 
 interface TermTally {
   /** Every fetched post carrying this term. */
@@ -37,7 +33,7 @@ interface TermTally {
   /** Posts that will actually import (lifecycle-valid AND not excluded). */
   valid: number;
   /** Lifecycle-valid posts — for an excluded term, these are the ones the
-   * exclusion deletes (the remainder were withdrawn/expired anyway). */
+   * exclusion deletes (the remainder were expired anyway). */
   lifecycleOk: number;
 }
 
@@ -48,11 +44,13 @@ interface OfferStats {
   valid: number;
   /** Deleted because filed under the Articles tree (counted first). */
   articleExcluded: number;
-  /** Deleted because filed under a retired store (and NOT under Articles —
-   * buckets are mutually exclusive so the funnel math adds up exactly). */
+  /** Deleted because filed under Uncategorized (and not Articles). */
+  uncategorizedExcluded: number;
+  /** Deleted because filed under a retired store (and not under either rule
+   * above — buckets are mutually exclusive so the funnel adds up exactly). */
   storeExcluded: number;
-  /** Lifecycle-rejected leftovers (should be ~0 with publish/future-only). */
-  withdrawn: number;
+  /** Publish/future posts rejected because their expiry has elapsed. */
+  expiredExcluded: number;
   /** term_id → tallies over every fetched post carrying that term. */
   byTerm: Map<number, TermTally>;
 }
@@ -67,6 +65,7 @@ async function collectOfferStats(
   exclusions: {
     termIds: ReadonlySet<number>;
     articleTermIds: ReadonlySet<number>;
+    uncategorizedTermIds: ReadonlySet<number>;
   },
 ): Promise<OfferStats> {
   const dealPredicate =
@@ -131,8 +130,9 @@ async function collectOfferStats(
     totalPublished: posts.length,
     valid: 0,
     articleExcluded: 0,
+    uncategorizedExcluded: 0,
     storeExcluded: 0,
-    withdrawn: 0,
+    expiredExcluded: 0,
     byTerm: new Map(),
   };
   for (const post of posts) {
@@ -147,9 +147,11 @@ async function collectOfferStats(
     const excluded = hasExcludedTerm(terms, exclusions.termIds);
     const valid = lifecycleOk && !excluded;
     if (valid) stats.valid++;
-    else if (!lifecycleOk) stats.withdrawn++;
+    else if (!lifecycleOk) stats.expiredExcluded++;
     else if (hasExcludedTerm(terms, exclusions.articleTermIds)) {
       stats.articleExcluded++;
+    } else if (hasExcludedTerm(terms, exclusions.uncategorizedTermIds)) {
+      stats.uncategorizedExcluded++;
     } else stats.storeExcluded++;
 
     for (const termId of terms) {
@@ -171,14 +173,14 @@ function csvField(value: string | number): string {
 
 /**
  * `yarn migrate:report` — read-only preview of what a full import would
- * bring in, after every exclusion rule (Articles category tree, retired
- * stores from excluded-stores.csv, offer lifecycle). Reads WordPress only;
- * writes nothing except dry-run-report.csv beside this workspace.
+ * bring in, after every exclusion rule (Articles category tree,
+ * Uncategorized, retired stores, offer lifecycle). Reads WordPress only;
+ * writes only the three dry-run CSV reports beside this workspace.
  */
 async function main(): Promise<void> {
   logger.info("=== Import dry-run report (read-only) ===");
 
-  const terms = await wpQuery<TermRowLike>(`
+  const sourceTerms = await wpQuery<TermRowLike>(`
     SELECT t.term_id, t.name, t.slug, tt.parent,
            MAX(CASE WHEN tm.meta_key='choose_type' THEN tm.meta_value END) AS choose_type
     FROM wp_terms t
@@ -186,14 +188,22 @@ async function main(): Promise<void> {
     LEFT JOIN wp_termmeta tm ON t.term_id = tm.term_id AND tm.meta_key = 'choose_type'
     GROUP BY t.term_id, t.name, t.slug, tt.parent
   `);
-  const exclusions = resolveImportExclusions(terms, loadExcludedStoreNames());
+  const classification = await classifyTaxonomyTerms(sourceTerms);
+  const terms = classification.terms;
+  logger.info(formatTaxonomyClassificationReport(classification.report));
+  // RAW rows for exclusions (phase 03 parity): classification would erase
+  // the Article(s) choose_type signal.
+  const exclusions = resolveImportExclusions(
+    sourceTerms,
+    loadExcludedStoreNames(),
+  );
 
   const now = new Date();
   const couponStats = await collectOfferStats("coupon", now, exclusions);
   const dealStats = await collectOfferStats("deal", now, exclusions);
 
   // Per-imported-term CSV: type, associated offer counts, how many of those
-  // will not import (withdrawn or excluded), and the remaining valid counts.
+  // will not import (expired or excluded), and the remaining valid counts.
   const entityCounts: Record<string, number> = {
     Store: 0,
     Brand: 0,
@@ -251,7 +261,7 @@ async function main(): Promise<void> {
 
   // Second CSV: every EXCLUDED term with what its exclusion deletes.
   // `*_deleted` counts lifecycle-valid posts (they would have imported);
-  // the rest of `*_associated` were withdrawn/expired regardless. Unmatched
+  // the rest of `*_associated` were expired regardless. Unmatched
   // CSV names get a row too, so the whole exclusion list is accounted for.
   const excludedLines: string[] = [
     [
@@ -271,7 +281,9 @@ async function main(): Promise<void> {
       term,
       reason: exclusions.articleTermIds.has(term.term_id)
         ? "articles"
-        : "retired-store",
+        : exclusions.uncategorizedTermIds.has(term.term_id)
+          ? "uncategorized"
+          : "retired-store",
     }))
     .sort(
       (a, b) =>
@@ -311,17 +323,16 @@ async function main(): Promise<void> {
   }
   fs.writeFileSync(EXCLUDED_CSV, excludedLines.join("\n") + "\n");
 
-  // Third CSV: the funnel — total published (incl. expired-by-meta and
-  // future) minus article deletions minus retired-store deletions = final.
-  // Buckets are mutually exclusive (a post under both counts as article), so
-  // every row satisfies: total = articles + retired stores + other + final.
+  // Third CSV: the mutually-exclusive import funnel. Lifecycle expiry is
+  // counted first, then Articles, Uncategorized, retired stores, and final.
   const summaryLines: string[] = [
     [
       "kind",
-      "total_published",
+      "total_publish_future",
+      "expired_deleted",
       "articles_deleted",
+      "uncategorized_deleted",
       "retired_store_deleted",
-      "other_not_importable",
       "final_imported",
     ].join(","),
   ];
@@ -333,9 +344,10 @@ async function main(): Promise<void> {
       [
         kind,
         stats.totalPublished,
+        stats.expiredExcluded,
         stats.articleExcluded,
+        stats.uncategorizedExcluded,
         stats.storeExcluded,
-        stats.withdrawn,
         stats.valid,
       ].join(","),
     );
@@ -344,9 +356,10 @@ async function main(): Promise<void> {
     [
       "total",
       couponStats.totalPublished + dealStats.totalPublished,
+      couponStats.expiredExcluded + dealStats.expiredExcluded,
       couponStats.articleExcluded + dealStats.articleExcluded,
+      couponStats.uncategorizedExcluded + dealStats.uncategorizedExcluded,
       couponStats.storeExcluded + dealStats.storeExcluded,
-      couponStats.withdrawn + dealStats.withdrawn,
       couponStats.valid + dealStats.valid,
     ].join(","),
   );
@@ -368,18 +381,23 @@ async function main(): Promise<void> {
   logger.info("Funnel (published+future → final):");
   logger.info(
     `  Coupons: ${couponStats.totalPublished} total − ` +
+      `${couponStats.expiredExcluded} expired − ` +
       `${couponStats.articleExcluded} articles − ` +
-      `${couponStats.storeExcluded} retired-store − ` +
-      `${couponStats.withdrawn} other = ${couponStats.valid}`,
+      `${couponStats.uncategorizedExcluded} Uncategorized − ` +
+      `${couponStats.storeExcluded} retired-store = ${couponStats.valid}`,
   );
   logger.info(
     `  Deals:   ${dealStats.totalPublished} total − ` +
+      `${dealStats.expiredExcluded} expired − ` +
       `${dealStats.articleExcluded} articles − ` +
-      `${dealStats.storeExcluded} retired-store − ` +
-      `${dealStats.withdrawn} other = ${dealStats.valid}`,
+      `${dealStats.uncategorizedExcluded} Uncategorized − ` +
+      `${dealStats.storeExcluded} retired-store = ${dealStats.valid}`,
   );
   logger.info(
     `  Article terms (Articles category + descendants): ${exclusions.articleTermIds.size}`,
+  );
+  logger.info(
+    `  Uncategorized terms: ${exclusions.uncategorizedTermIds.size}`,
   );
   logger.info(
     `  Retired stores matched from excluded-stores.csv: ${exclusions.excludedStoreTermIds.size} ` +

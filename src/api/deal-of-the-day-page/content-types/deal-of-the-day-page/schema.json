@@ -5,7 +5,7 @@
     "singularName": "deal-of-the-day-page",
     "pluralName": "deal-of-the-day-pages",
     "displayName": "Deal of the Day Page",
-    "description": "Curated sections for the deal-of-the-day category landing page"
+    "description": "Curated content for entities using the dealTemplate page design"
   },
   "options": {
     "draftAndPublish": false

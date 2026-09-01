@@ -171,6 +171,7 @@ async function ensureCountryComponent(
 
 async function ensureGooglePreferredComponent(
   footerId: number,
+  card: { label: string; url: string },
 ): Promise<{ id: number; created: boolean }> {
   const existing = await linkedComponent(
     footerId,
@@ -183,7 +184,7 @@ async function ensureGooglePreferredComponent(
           SET label = COALESCE(NULLIF(BTRIM(label), ''), $2),
               url = COALESCE(NULLIF(BTRIM(url), ''), $3)
         WHERE id = $1`,
-      [existing.id, GOOGLE_PREFERRED_DEFAULT.label, GOOGLE_PREFERRED_DEFAULT.url],
+      [existing.id, card.label, card.url],
     );
     return { id: existing.id, created: false };
   }
@@ -192,7 +193,7 @@ async function ensureGooglePreferredComponent(
     `INSERT INTO "components_footer_google_preferred_cards" ("label", "url")
      VALUES ($1, $2)
      RETURNING id`,
-    [GOOGLE_PREFERRED_DEFAULT.label, GOOGLE_PREFERRED_DEFAULT.url],
+    [card.label, card.url],
   );
   await pgQuery(
     `INSERT INTO "footers_cmps"
@@ -241,11 +242,16 @@ export async function runFooterMediaBackfill(): Promise<void> {
       ),
     );
   }
-  const googleFileId = await uploadAsset(
-    GOOGLE_PREFERRED_DEFAULT.assetPath,
-    "couponzguru-google-preferred-source.png",
-    GOOGLE_PREFERRED_DEFAULT.label,
-  );
+  // Country links come from the shared registry with this deployment removed.
+  // The Google Preferred card remains optional per-site content.
+  const googleCard = GOOGLE_PREFERRED_DEFAULT;
+  const googleFileId = googleCard
+    ? await uploadAsset(
+        googleCard.assetPath,
+        "couponzguru-google-preferred-source.png",
+        googleCard.label,
+      )
+    : null;
 
   let countriesCreated = 0;
   let flagsAttached = 0;
@@ -274,17 +280,19 @@ export async function runFooterMediaBackfill(): Promise<void> {
         }
       }
 
-      const card = await ensureGooglePreferredComponent(footer.id);
-      if (card.created) cardsCreated++;
-      if (
-        await attachMediaIfMissing(
-          googleFileId,
-          card.id,
-          "footer.google-preferred-card",
-          "icon",
-        )
-      ) {
-        iconsAttached++;
+      if (googleCard && googleFileId !== null) {
+        const card = await ensureGooglePreferredComponent(footer.id, googleCard);
+        if (card.created) cardsCreated++;
+        if (
+          await attachMediaIfMissing(
+            googleFileId,
+            card.id,
+            "footer.google-preferred-card",
+            "icon",
+          )
+        ) {
+          iconsAttached++;
+        }
       }
     }
   });

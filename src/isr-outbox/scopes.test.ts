@@ -9,7 +9,25 @@ function strapiWithFindOne(
   return {
     documents: (uid: string) => ({
       findOne,
-      findMany: (args: any) => findMany(uid, args),
+      findMany: (args: any) => {
+        if (args?.filters?.pageTemplate === 'dealTemplate') {
+          return Promise.resolve([
+            {
+              documentId: 'deal-template-owner',
+              slug: 'deal-of-the-day',
+            },
+          ]);
+        }
+        if (args?.filters?.pageTemplate === 'independenceDayTemplate') {
+          return Promise.resolve([
+            {
+              documentId: 'independence-template-owner',
+              slug: 'independence-day-sale-coupons',
+            },
+          ]);
+        }
+        return findMany(uid, args);
+      },
     }),
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   } as any;
@@ -97,6 +115,7 @@ describe('deal-of-the-day landing page scope', () => {
     ).resolves.toEqual({
       slugs: ['deal-of-the-day'],
       sitemap: true,
+      refreshScopes: ['routes'],
     });
   });
 
@@ -632,6 +651,25 @@ describe('touchesFestiveOffer', () => {
 });
 
 describe('managed page SEO scopes', () => {
+  it('fully refreshes route membership and site chrome after country setup changes', async () => {
+    const { computeScope } = await import('./scopes');
+    const strapi = strapiWithFindOne(async () => {
+      throw new Error('must not be called');
+    });
+
+    await expect(
+      computeScope(
+        strapi,
+        'api::site-configuration.site-configuration',
+        'update',
+        'country-setup-1',
+      ),
+    ).resolves.toEqual({
+      full: true,
+      refreshScopes: ['routes', 'chrome'],
+    });
+  });
+
   it('refreshes sitemap metadata for homepage and every static editorial page edit', async () => {
     const { computeScope } = await import('./scopes');
     const strapi = strapiWithFindOne(async () => {

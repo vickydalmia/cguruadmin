@@ -12,6 +12,7 @@ const OVERRIDE_FILLS: Array<{
   relationLabel: string;
 }> = [
   { componentUid: 'home.hero-product', overrideField: 'titleOverride', relationField: 'deal', relationLabel: 'title' },
+  { componentUid: 'home.hero-product', overrideField: 'titleOverride', relationField: 'coupon', relationLabel: 'title' },
   { componentUid: 'home.top-offer-item', overrideField: 'offerTextOverride', relationField: 'coupon', relationLabel: 'title' },
   { componentUid: 'home.exclusive-item', overrideField: 'titleOverride', relationField: 'coupon', relationLabel: 'title' },
   { componentUid: 'home.coupon-card-item', overrideField: 'titleOverride', relationField: 'coupon', relationLabel: 'title' },

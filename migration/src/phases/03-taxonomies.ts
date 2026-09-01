@@ -1,8 +1,14 @@
 import { wpQuery } from "../db/wp-client.js";
-import { pgQuery } from "../db/pg-client.js";
+import { pgQuery, pgTransaction } from "../db/pg-client.js";
+import { config } from "../config.js";
 import { setTermMapping } from "../utils/id-maps.js";
 import { resolveMediaRef } from "../utils/media-resolver.js";
-import { uploadMediaOnDemand } from "./02-media-upload.js";
+import {
+  getS3KeyIndex,
+  preloadFileRecordCache,
+  refreshFileRecordCache,
+  uploadMediaOnDemand,
+} from "./02-media-upload.js";
 import { parseFaqRepeater } from "../utils/acf-repeater.js";
 import {
   loadYoastSiteConfig,
@@ -15,7 +21,6 @@ import {
 } from "../utils/slug-dedup.js";
 import {
   generateDocumentId,
-  getEntityIdByDocumentId,
   replaceComponents,
   replaceMedia,
   replaceContentMedia,
@@ -26,7 +31,16 @@ import { parseDecimal, parseInteger } from "../utils/price.js";
 import { rewriteContentMedia } from "../utils/content-media.js";
 import { logger } from "../utils/logger.js";
 import { parseResumeFromTermFlag } from "../utils/cli.js";
-import { getImportExclusions } from "../utils/import-exclusions.js";
+import {
+  loadExcludedStoreNames,
+  resolveImportExclusions,
+} from "../utils/import-exclusions.js";
+import { restoreManifestFileRows } from "../utils/manifest-file-restore.js";
+import { runBoundedWork } from "../utils/bounded-work.js";
+import {
+  classifyTaxonomyTerms,
+  formatTaxonomyClassificationReport,
+} from "../utils/taxonomy-classification.js";
 
 interface WpTerm {
   term_id: number;
@@ -50,6 +64,20 @@ interface TermDates {
   lastModified: string | null;
 }
 
+interface TaxonomyTargetState {
+  hasDescriptionMedia: boolean;
+  hasFaq: boolean;
+}
+
+interface PreparedTaxonomy {
+  term: WpTerm;
+  table: string;
+  strapiType: string;
+  slug: string;
+  termDates?: TermDates;
+  targetState?: TaxonomyTargetState;
+}
+
 const TYPE_TO_TABLE: Record<string, string> = {
   Store: "stores",
   Brand: "brands",
@@ -63,6 +91,58 @@ const TYPE_TO_STRAPI_TYPE: Record<string, string> = {
   Category: "api::category.category",
   Bank: "api::bank.bank",
 };
+
+function targetStateKey(table: string, documentId: string): string {
+  return `${table}:${documentId}`;
+}
+
+/**
+ * One query per taxonomy table replaces thousands of empty reconciliation
+ * transactions. We only skip an empty source field when the target snapshot
+ * proves there is nothing stale to remove.
+ */
+async function loadTaxonomyTargetState(): Promise<
+  Map<string, TaxonomyTargetState>
+> {
+  const state = new Map<string, TaxonomyTargetState>();
+  await Promise.all(
+    Object.keys(TYPE_TO_TABLE).map(async (type) => {
+      const table = TYPE_TO_TABLE[type];
+      const strapiType = TYPE_TO_STRAPI_TYPE[type];
+      const rows = await pgQuery<{
+        document_id: string;
+        has_description_media: boolean;
+        has_faq: boolean;
+      }>(
+        `SELECT t.document_id,
+                EXISTS (
+                  SELECT 1
+                    FROM files_related_mph media
+                   WHERE media.related_id = t.id
+                     AND media.related_type = $1
+                     AND media.field = 'description'
+                ) AS has_description_media,
+                EXISTS (
+                  SELECT 1
+                    FROM "${table}_cmps" cmp
+                   WHERE cmp.entity_id = t.id
+                     AND cmp.field = 'faqs'
+                     AND cmp.component_type = 'shared.faq-item'
+                ) AS has_faq
+           FROM "${table}" t`,
+        [strapiType],
+      );
+      for (const row of rows) {
+        state.set(targetStateKey(table, row.document_id), {
+          hasDescriptionMedia: row.has_description_media,
+          hasFaq: row.has_faq,
+        });
+      }
+    }),
+  );
+  logger.info(`Preloaded target state for ${state.size} taxonomy row(s)`);
+  return state;
+}
 
 export async function runTaxonomies(): Promise<void> {
   const resumeFlag = parseResumeFromTermFlag(process.argv.slice(2));
@@ -78,7 +158,7 @@ export async function runTaxonomies(): Promise<void> {
   logger.info("=== Phase 3: Taxonomy Migration ===");
 
   // Get all category terms with their metadata
-  const terms = await wpQuery<WpTerm>(`
+  const sourceTerms = await wpQuery<WpTerm>(`
     SELECT
       t.term_id,
       t.name,
@@ -102,14 +182,34 @@ export async function runTaxonomies(): Promise<void> {
     GROUP BY t.term_id, t.name, t.slug, tt.parent, tt.description, tt.count
     ORDER BY t.term_id
   `);
+  const classification = await classifyTaxonomyTerms(sourceTerms);
+  const terms = classification.terms;
 
   logger.info(`Found ${terms.length} category terms`);
+  logger.info(formatTaxonomyClassificationReport(classification.report));
+  if (classification.report.fallbackTerms.length > 0) {
+    const sample = classification.report.fallbackTerms
+      .slice(0, 12)
+      .map((term) => `${term.name} (${term.slug})`)
+      .join("; ");
+    logger.warn(
+      `${classification.report.fallbackTerms.length} SQL term(s) have no Excel ` +
+        `classification and default to Store: ${sample}` +
+        (classification.report.fallbackTerms.length > 12 ? "; ..." : ""),
+    );
+  }
 
-  // Articles category (+descendants) and retired stores from
+  // Articles (+descendants), Uncategorized, and retired stores from
   // excluded-stores.csv are never imported; phases 07/08 skip their posts.
-  const exclusions = await getImportExclusions();
+  // Resolved over the RAW rows so the Article(s) choose_type signal survives
+  // the Excel classification's Store canonicalization.
+  const exclusions = resolveImportExclusions(
+    sourceTerms,
+    loadExcludedStoreNames(),
+  );
   logger.info(
     `Import exclusions: ${exclusions.articleTermIds.size} article term(s), ` +
+      `${exclusions.uncategorizedTermIds.size} Uncategorized term(s), ` +
       `${exclusions.excludedStoreTermIds.size} listed store term(s) matched`,
   );
   if (exclusions.unmatchedStoreNames.length > 0) {
@@ -287,17 +387,27 @@ export async function runTaxonomies(): Promise<void> {
     Category: 0,
     Bank: 0,
     Articles: 0,
+    Uncategorized: 0,
     ExcludedStore: 0,
-    Unknown: 0,
   };
 
-  for (const [termIndex, term] of termsToProcess.entries()) {
-    // Excluded terms (Articles category tree, retired stores) never import;
-    // phases 07/08 also skip every post filed under them.
+  // Claim slugs in the source's stable term-id order BEFORE concurrent work
+  // starts. Completion order can then vary without changing collision suffixes.
+  const prepared: PreparedTaxonomy[] = [];
+  for (const term of termsToProcess) {
+    // Excluded terms never import; phases 07/08 also skip every post filed
+    // under them.
     if (exclusions.articleTermIds.has(term.term_id)) {
       counts.Articles++;
       logger.info(
         `Skipping article term ${term.term_id} (${term.name}) — not a catalog entity`,
+      );
+      continue;
+    }
+    if (exclusions.uncategorizedTermIds.has(term.term_id)) {
+      counts.Uncategorized++;
+      logger.info(
+        `Skipping Uncategorized term ${term.term_id} (${term.name}) — not a catalog entity`,
       );
       continue;
     }
@@ -308,46 +418,79 @@ export async function runTaxonomies(): Promise<void> {
       );
       continue;
     }
-    const chooseType = term.choose_type || "Store"; // Default to Store if missing
+    // classifyTaxonomyTerms guarantees one of the four canonical types
+    // (Excel/legacy value, Store fallback); if that invariant ever breaks,
+    // default to Store so the migration still completes.
+    const chooseType = TYPE_TO_TABLE[term.choose_type]
+      ? term.choose_type
+      : "Store";
+    if (chooseType !== term.choose_type) {
+      logger.warn(
+        `Unknown choose_type '${term.choose_type}' for term ${term.term_id} (${term.name}). Defaulting to Store.`,
+      );
+    }
     const table = TYPE_TO_TABLE[chooseType];
     const strapiType = TYPE_TO_STRAPI_TYPE[chooseType];
 
-    if (!table) {
-      logger.warn(
-        `Unknown choose_type '${chooseType}' for term ${term.term_id} (${term.name}). Defaulting to Store.`
-      );
-      counts.Unknown++;
-      // Default to stores
-      await insertTerm(
-        term,
-        "stores",
-        "api::store.store",
-        faqMetaByTerm,
-        termDatesByTermId.get(term.term_id)
-      );
-      const completed = termIndex + 1;
-      if (completed % 100 === 0 || completed === termsToProcess.length) {
-        logger.info(
-          `Taxonomy progress: ${completed}/${termsToProcess.length} resumed terms`,
-        );
-      }
-      continue;
-    }
-
     counts[chooseType]++;
-    await insertTerm(
+    prepared.push({
       term,
       table,
       strapiType,
-      faqMetaByTerm,
-      termDatesByTermId.get(term.term_id)
+      slug: deduplicateSlug(cleanSlug(term.slug) || term.slug, table),
+      termDates: termDatesByTermId.get(term.term_id),
+    });
+  }
+
+  // A fresh target has no files rows even when every immutable object already
+  // exists in S3. Restore reusable manifest rows in bulk, then preload the
+  // complete record cache once so workers never perform per-image DB reads.
+  if (config.s3.bucket && config.s3.accessKeyId) {
+    const s3KeyIndex = await getS3KeyIndex();
+    const restored = await restoreManifestFileRows(s3KeyIndex);
+    const cachedFiles = restored.inserted > 0
+      ? await refreshFileRecordCache()
+      : await preloadFileRecordCache();
+    logger.info(`Preloaded ${cachedFiles} media file record(s)`);
+  }
+
+  const targetState = await loadTaxonomyTargetState();
+  for (const item of prepared) {
+    const documentId = generateDocumentId(
+      `term:${item.table}:${item.term.term_id}`,
     );
-    const completed = termIndex + 1;
-    if (completed % 100 === 0 || completed === termsToProcess.length) {
-      logger.info(
-        `Taxonomy progress: ${completed}/${termsToProcess.length} resumed terms`,
-      );
-    }
+    item.targetState = targetState.get(
+      targetStateKey(item.table, documentId),
+    );
+  }
+
+  const concurrency = Math.max(1, config.taxonomyConcurrency);
+  const startedAt = Date.now();
+  let completed = 0;
+  logger.info(
+    `Importing ${prepared.length} taxonomy row(s) with concurrency=${concurrency}`,
+  );
+  await runBoundedWork({
+    items: prepared,
+    concurrency,
+    label: "Taxonomy migration",
+    worker: async (item) => {
+      await insertTerm(item, faqMetaByTerm);
+      completed++;
+      if (completed % 10 === 0 || completed === prepared.length) {
+        const elapsedSeconds = Math.max(0.001, (Date.now() - startedAt) / 1000);
+        const perSecond = completed / elapsedSeconds;
+        logger.info(
+          `Taxonomy progress: ${completed}/${prepared.length} ` +
+            `(${perSecond.toFixed(1)}/s, concurrency=${concurrency})`,
+        );
+      }
+    },
+  });
+
+  // Keep an explicit completion line when every source row was excluded.
+  if (prepared.length === 0) {
+    logger.info("Taxonomy progress: 0/0 (nothing importable)");
   }
 
   logger.info(`Taxonomy migration complete:`);
@@ -357,28 +500,24 @@ export async function runTaxonomies(): Promise<void> {
 }
 
 async function insertTerm(
-  term: WpTerm,
-  table: string,
-  strapiType: string,
+  prepared: PreparedTaxonomy,
   faqMetaByTerm: Map<number, Array<{ meta_key: string; meta_value: string }>>,
-  termDates?: TermDates
 ): Promise<void> {
+  const { term, table, strapiType, slug, termDates, targetState } = prepared;
   const documentId = generateDocumentId(`term:${table}:${term.term_id}`);
-  // WP term slugs are flat and unique per taxonomy — import them VERBATIM
-  // (myntra-coupons stays myntra-coupons). No parent-chain joining: the old
-  // site's URLs never carried hierarchy, so a compound slug would change
-  // every nested term's URL. cleanSlug only sanitizes characters.
-  const slug = deduplicateSlug(cleanSlug(term.slug) || term.slug, table);
   const faqEnabled = term.faq_enabled === "1";
   const ratingAverage = parseDecimal(term.rating_avg);
   const ratingCount = parseInteger(term.rating_count) ?? 0;
+  const sourceSlug = cleanSlug(term.slug) || term.slug;
+  const pageTemplate =
+    sourceSlug === "deal-of-the-day"
+      ? "dealTemplate"
+      : sourceSlug === "independence-day-sale-coupons"
+        ? "independenceDayTemplate"
+        : "default";
 
   // Build column list based on table type
   const isCategory = table === "categories";
-
-  // Upload + rewrite images embedded in the term description so none are
-  // left pointing at the old WordPress uploads URL.
-  const descriptionMedia = await rewriteContentMedia(cleanHtml(term.description));
 
   // Alt text is REQUIRED on every entity now (categories carry `icon_alt`, the
   // rest `logo_alt`), and WordPress only sometimes supplies `image_alt` — 205
@@ -397,12 +536,14 @@ async function insertTerm(
     "document_id",
     "name",
     "slug",
+    "page_template",
     "description",
     "short_description",
     altColumn,
     "rating_average",
     "rating_count",
     "is_verified",
+    ...(table === "brands" ? ["is_affiliate_store"] : []),
     "faq_enabled",
     "show_trending_deals",
     ...(table === "stores" ? ["is_cj_enabled"] : []),
@@ -413,6 +554,56 @@ async function insertTerm(
   ];
 
   const entityName = clean(term.name) || term.name;
+
+  // Resolve every local/S3 asset before opening the term transaction. A slow
+  // disk hash or S3 repair must never hold one of the ten PostgreSQL pool
+  // connections while the other bounded workers are waiting.
+  const plainTermDescription = clean(
+    term.description?.replace(/<[^>]*>/gu, " "),
+  );
+  const yoastSeo = resolveTermSeo(await loadYoastSiteConfig(), {
+    termId: term.term_id,
+    taxonomy: "category",
+    termName: entityName,
+    termDescription: plainTermDescription || undefined,
+  });
+  const ogFilePromise = yoastSeo.ogImageAttachmentId
+    ? uploadMediaOnDemand(yoastSeo.ogImageAttachmentId).catch((err: any) => {
+        logger.warn(
+          `  OG image for ${term.name} failed: ${err?.message ?? err}`,
+        );
+        return undefined;
+      })
+    : Promise.resolve(undefined);
+  const [descriptionMedia, fileId, ogFileId] = await Promise.all([
+    // Upload + rewrite images embedded in the term description so none are
+    // left pointing at the old WordPress uploads URL.
+    rewriteContentMedia(cleanHtml(term.description)),
+    resolveMediaRef(term.image_ref),
+    ogFilePromise,
+  ]);
+
+  const termFaqMeta = faqMetaByTerm.get(term.term_id);
+  const faqItems =
+    termFaqMeta && faqEnabled ? parseFaqRepeater(termFaqMeta) : [];
+
+  // Deliberately NOT falling back to the term's content description — a
+  // page-body blurb is not a meta description. Yoast → short description →
+  // generic line only.
+  const descriptionFallback =
+    clean(term.short_desc) || `${entityName} coupons, offers and deals.`;
+  const metaTitle = (clean(yoastSeo.metaTitle) || entityName).slice(0, 70);
+  const metaDescription = (
+    clean(yoastSeo.metaDescription) || descriptionFallback
+  ).slice(0, 170);
+  const seoRows = [{
+    meta_title: metaTitle,
+    meta_description: metaDescription,
+    canonical_url: yoastSeo.canonicalUrl,
+    no_index: yoastSeo.noIndex,
+    og_title: yoastSeo.ogTitle,
+    og_description: yoastSeo.ogDescription,
+  }];
 
   // Import wall-clock is the LAST resort, used only for a term with no
   // published posts at all. Anything else would republish the whole catalogue's
@@ -425,12 +616,14 @@ async function insertTerm(
     documentId,
     entityName,
     slug,
+    pageTemplate,
     descriptionMedia.html,
     clean(term.short_desc),
     clean(term.image_alt) || entityName,
     ratingAverage,
     ratingCount,
     table === "stores",
+    ...(table === "brands" ? [true] : []),
     faqEnabled,
     true, // show_trending_deals (schema default)
     ...(table === "stores" ? [false] : []), // is_cj_enabled (schema default)
@@ -443,12 +636,17 @@ async function insertTerm(
   const placeholders = values.map((_, i) => `$${i + 1}`);
 
   try {
-    const result = await pgQuery<{ id: number }>(
-      `INSERT INTO "${table}" (${columns.map((c) => `"${c}"`).join(", ")})
+    // One transaction per term: nested replaceMedia/replaceComponents calls
+    // join this AsyncLocalStorage transaction instead of paying their own
+    // BEGIN/COMMIT round trips.
+    const entityId = await pgTransaction(async () => {
+      const result = await pgQuery<{ id: number }>(
+        `INSERT INTO "${table}" (${columns.map((c) => `"${c}"`).join(", ")})
        VALUES (${placeholders.join(", ")})
        ON CONFLICT ("document_id") DO UPDATE SET
          "name" = EXCLUDED."name",
          "slug" = EXCLUDED."slug",
+         "page_template" = COALESCE("${table}"."page_template", EXCLUDED."page_template"),
          "description" = EXCLUDED."description",
          "short_description" = EXCLUDED."short_description",
          "${altColumn}" = EXCLUDED."${altColumn}",
@@ -460,118 +658,93 @@ async function insertTerm(
              ? `,
          "is_cj_enabled" = COALESCE("stores"."is_cj_enabled", EXCLUDED."is_cj_enabled")`
              : ""
+         }${
+           table === "brands"
+             ? `,
+         "is_affiliate_store" = COALESCE("brands"."is_affiliate_store", EXCLUDED."is_affiliate_store")`
+             : ""
          }
-       RETURNING id`,
-      values
-    );
+         RETURNING id`,
+        values,
+      );
+      const id = result[0]?.id;
+      if (!id) {
+        throw new Error(
+          `upsert returned no id for term ${term.term_id} (${term.name})`,
+        );
+      }
 
-    const entityId =
-      result[0]?.id ?? (await getEntityIdByDocumentId(table, documentId));
-    if (!entityId) {
-      logger.warn(`Could not resolve entity id for term ${term.term_id} (${term.name}) in ${table}`);
-      return;
-    }
+      // Link media (logo/icon).
+      const field = isCategory ? "icon" : "logo";
+      await replaceMedia(fileId ?? null, id, strapiType, field);
 
-    // Store mapping
+      // Empty imported fields still clear stale target relations on reruns,
+      // but a preloaded empty target avoids opening thousands of no-op nested
+      // transactions/queries on fresh country deployments.
+      if (
+        descriptionMedia.fileIds.length > 0 ||
+        targetState?.hasDescriptionMedia
+      ) {
+        await replaceContentMedia(
+          descriptionMedia.fileIds,
+          id,
+          strapiType,
+          "description",
+        );
+      }
+
+      if (faqItems.length > 0 || targetState?.hasFaq) {
+        await replaceComponents(
+          "components_shared_faq_items",
+          faqItems.map((item) => ({
+            question: item.question,
+            answer: item.answer,
+          })),
+          table,
+          id,
+          "faqs",
+          "shared.faq-item",
+        );
+      }
+
+      // Reconcile the imported SEO component exactly, the way Yoast renders
+      // it: per-term override → taxonomy template → import fallback.
+      await replaceComponents(
+        "components_shared_seos",
+        seoRows,
+        table,
+        id,
+        "seo",
+        "shared.seo",
+      );
+
+      if (ogFileId) {
+        const [seoLink] = await pgQuery<{ cmp_id: number }>(
+          `SELECT cmp_id FROM "${table}_cmps"
+             WHERE entity_id = $1 AND field = 'seo' AND component_type = 'shared.seo'
+             ORDER BY "order" LIMIT 1`,
+          [id],
+        );
+        if (seoLink) {
+          await replaceMedia(ogFileId, seoLink.cmp_id, "shared.seo", "ogImage");
+        }
+      }
+
+      return id;
+    });
+
+    // Persist the in-memory mapping only after COMMIT. A later write failure
+    // must not leave a mapping to a rolled-back row.
     setTermMapping(term.term_id, {
       id: entityId,
       documentId,
       type: strapiType,
       table,
     });
-
-    // Link media (logo/icon)
-    const fileId = await resolveMediaRef(term.image_ref);
-    const field = isCategory ? "icon" : "logo";
-    await replaceMedia(fileId ?? null, entityId, strapiType, field);
-
-    await replaceContentMedia(
-      descriptionMedia.fileIds,
-      entityId,
-      strapiType,
-      "description"
-    );
-
-    // Insert FAQ components
-    const termFaqMeta = faqMetaByTerm.get(term.term_id);
-    const faqItems =
-      termFaqMeta && faqEnabled ? parseFaqRepeater(termFaqMeta) : [];
-    await replaceComponents(
-      "components_shared_faq_items",
-      faqItems.map((item) => ({
-        question: item.question,
-        answer: item.answer,
-      })),
-      table,
-      entityId,
-      "faqs",
-      "shared.faq-item"
-    );
     if (faqItems.length > 0) {
       logger.debug(
-        `  Reconciled ${faqItems.length} FAQ items for ${term.name}`
+        `  Reconciled ${faqItems.length} FAQ items for ${term.name}`,
       );
-    }
-
-    // Reconcile the imported SEO component exactly, the way Yoast renders it:
-    // per-term override → taxonomy template → import fallback, with
-    // %%variables%% resolved against the real separator/site name, plus
-    // canonical and index/noindex.
-    const plainTermDescription = clean(
-      term.description?.replace(/<[^>]*>/gu, " "),
-    );
-    const yoastSeo = resolveTermSeo(await loadYoastSiteConfig(), {
-      termId: term.term_id,
-      taxonomy: "category",
-      termName: entityName,
-      termDescription: plainTermDescription || undefined,
-    });
-    // Deliberately NOT falling back to the term's content description — a
-    // page-body blurb is not a meta description. Yoast → short description →
-    // generic line only.
-    const descriptionFallback =
-      clean(term.short_desc) || `${entityName} coupons, offers and deals.`;
-    const metaTitle = (clean(yoastSeo.metaTitle) || entityName).slice(0, 70);
-    const metaDescription = (
-      clean(yoastSeo.metaDescription) || descriptionFallback
-    ).slice(0, 170);
-    const seoRows = [{
-      meta_title: metaTitle,
-      meta_description: metaDescription,
-      canonical_url: yoastSeo.canonicalUrl,
-      no_index: yoastSeo.noIndex,
-      og_title: yoastSeo.ogTitle,
-      og_description: yoastSeo.ogDescription,
-    }];
-    await replaceComponents(
-      "components_shared_seos",
-      seoRows,
-      table,
-      entityId,
-      "seo",
-      "shared.seo"
-    );
-    // Per-term OG image (Yoast media-library pick) → normal media pipeline
-    // (manifest-reused), linked onto the SEO component.
-    if (yoastSeo.ogImageAttachmentId) {
-      try {
-        const ogFileId = await uploadMediaOnDemand(
-          yoastSeo.ogImageAttachmentId,
-        );
-        const [seoLink] = await pgQuery<{ cmp_id: number }>(
-          `SELECT cmp_id FROM "${table}_cmps"
-           WHERE entity_id = $1 AND field = 'seo' AND component_type = 'shared.seo'
-           ORDER BY "order" LIMIT 1`,
-          [entityId],
-        );
-        if (ogFileId && seoLink) {
-          await replaceMedia(ogFileId, seoLink.cmp_id, "shared.seo", "ogImage");
-        }
-      } catch (err: any) {
-        logger.warn(
-          `  OG image for ${term.name} failed: ${err?.message ?? err}`,
-        );
-      }
     }
   } catch (err: any) {
     logger.error(

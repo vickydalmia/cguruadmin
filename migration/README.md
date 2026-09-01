@@ -1,6 +1,10 @@
 # CouponzGuru Migration: WordPress + ACF Pro to Strapi 5
 
-Migrates the full CouponzGuru WordPress site (posts, taxonomies, media, SEO, unique coupon codes) into a Strapi 5 PostgreSQL backend with S3-hosted media.
+Migrates a profiled CouponzGuru WordPress site (posts, taxonomies, media, SEO,
+unique coupon codes and Site Configuration) into one Strapi 5 PostgreSQL
+backend with S3-hosted media. See
+[Country Setup and Multi-Country Sites](../docs/country-setup.md) for the
+owner/operator explanation and India compatibility guarantees.
 
 > **Running a migration into a new environment?** Follow the operator checklist in [FRESH-MIGRATION.md](./FRESH-MIGRATION.md) — this README is the reference for what each phase does internally.
 
@@ -13,7 +17,7 @@ Migrates the full CouponzGuru WordPress site (posts, taxonomies, media, SEO, uni
   - [00 Preflight](#phase-00--preflight) · [01 Media Inventory](#phase-01--media-inventory) · [02 Media Upload to S3](#phase-02--media-upload-to-s3) · [03 Taxonomies](#phase-03--taxonomies)
   - [05 Unique Coupon Pools](#phase-05--unique-coupon-pools) · [06 Unique Codes](#phase-06--unique-codes) · [06a Users](#phase-06a--users) · [07 Coupons](#phase-07--coupons) · [08 Deals](#phase-08--deals)
   - [09 SEO Backfill](#phase-09--seo-backfill) · [10 Verification](#phase-10--verification) · [11 Copy Used Media](#phase-11--copy-used-media) · [12 Offer Backfill](#phase-12--offer-backfill)
-  - [13 Site Content](#phase-13--site-content) · [13a Homepage Coupon Offer Sections](#phase-13a--homepage-coupon-offer-sections)
+  - [13 Site Content](#phase-13--site-content)
   - [14 Media Optimize](#phase-14--media-optimize-backfill) · [15 Media Formats Backfill](#phase-15--media-formats-backfill)
 - [Data Mapping](#data-mapping)
 - [Media / S3 Pipeline](#media--s3-pipeline)
@@ -30,7 +34,7 @@ Migrates the full CouponzGuru WordPress site (posts, taxonomies, media, SEO, uni
 | Dependency | Details |
 |------------|---------|
 | **Node.js** | v18+ with `tsx` available (used to run TypeScript directly) |
-| **MySQL** | WordPress database dump loaded (tables: `wp_posts`, `wp_postmeta`, `wp_terms`, `wp_term_taxonomy`, `wp_term_relationships`, `wp_termmeta`) |
+| **MySQL** | WordPress database dump loaded; core table names are resolved through the validated `WP_TABLE_PREFIX` |
 | **PostgreSQL** | Strapi 5 database with tables already created by Strapi (stores, brands, categories, banks, coupons, deals, unique_coupon_pools, unique_codes, files, component tables, link tables) |
 | **AWS S3** | Bucket + credentials for media uploads (optional — falls back to local provider records) |
 | **WordPress uploads** | Local copy of `wp-content/uploads/` for image file access |
@@ -41,16 +45,28 @@ Optional WordPress tables: `wp_uc_coupons`, `wp_uc_codes` (unique coupon plugin)
 
 ## Setup & Configuration
 
-1. Copy the environment template and fill in your values:
+1. Copy the environment template and fill in your values. For USA, overlay
+   `.env.migration.usa.example`; it pins the source prefix, localization,
+   expected inventory and the isolated `.state/usa` directory:
 
 ```bash
 cp .env.migration.example .env.migration
+# USA only: merge the values from .env.migration.usa.example into .env.migration
 ```
 
 2. Configure the following variables in `.env.migration`:
 
 ```ini
 # WordPress MySQL
+MIGRATION_PROFILE=india       # india or usa
+MIGRATION_STATE_DIR=.state/india
+MIGRATION_SITE_CONFIGURATION_FILE=profiles/india/site-configuration.json
+# MIGRATION_EXCLUSIONS_FILE=profiles/india/excluded-stores.csv  # optional
+WP_TABLE_PREFIX=wp_           # validated before any source query
+SOURCE_COUNTRY_CODE=IN
+SOURCE_LOCALE=en-IN
+SOURCE_CURRENCY_CODE=INR
+SOURCE_TIMEZONE=Asia/Kolkata
 WP_DB_HOST=127.0.0.1
 WP_DB_PORT=3306
 WP_DB_USER=root
@@ -72,6 +88,15 @@ PG_CONNECTION_STRING=postgres://strapi:strapi@127.0.0.1:5432/strapi
 # Remote DBs use TLS by default; set a CA path to also verify the chain.
 PG_CA_CERT_PATH=
 PG_SSL_REJECT_UNAUTHORIZED=true
+PG_POOL_MAX=10               # Shared pool; clamped to 4..50
+# Phase 03 workers; clamped to 1..8 and the shared pool budget.
+TAXONOMY_CONCURRENCY=8
+# Phase 07 source/content preparation workers; clamped to 1..8.
+COUPON_CONCURRENCY=8
+# Rows per PostgreSQL Coupon transaction; clamped to 1..500.
+COUPON_BATCH_SIZE=250
+# Concurrent Coupon batch transactions; clamped to 1..4.
+COUPON_BATCH_CONCURRENCY=4
 
 # AWS S3 (leave S3_BUCKET empty to use local file records)
 S3_BUCKET=
@@ -96,6 +121,24 @@ BATCH_SIZE=5000                # Rows per batch for bulk inserts
 MEDIA_CONCURRENCY=10           # Parallel S3 uploads
 LOG_LEVEL=info                 # winston level (debug, info, warn, error)
 ```
+
+Every checkpoint, ID map, manifest, report, temporary-media path, exclusion
+list and log is profile-scoped. Do not point two country profiles at the same
+`MIGRATION_STATE_DIR`. Table prefixes may contain only letters, numbers and
+underscores and must end in `_`; an unsafe prefix fails before MySQL executes
+a query.
+
+The India profile keeps using the legacy `.checkpoints/` directory when it is
+the only location containing real JSON state. Resolving configuration never
+renames or deletes a directory. Move `.checkpoints` to `.state/india` manually
+only while no migration command is running. If both locations contain
+checkpoints or maps, the run fails and asks the operator to reconcile them. A
+target Site Configuration whose country disagrees with the active profile is
+also refused before data is mutated.
+
+For USA, copy values from `.env.migration.usa.example` only after explicitly
+setting the USA `PG_CONNECTION_STRING`, WordPress host/database/uploads and S3
+destination. Do not append the overlay blindly to an India environment.
 
 3. Install dependencies:
 
@@ -134,7 +177,6 @@ npm run migrate -- --allow-partial-deals
 # Phase 08 or making another background-removal API attempt.
 npm run migrate -- --phase 12-offer-backfill --allow-partial-deals
 npm run migrate -- --phase 13-site-content
-npm run migrate -- --phase 13a-homepage-offer-sections
 npm run migrate -- --phase 13b-footer-media
 npm run migrate -- --phase 13c-footer-country-links
 npm run migrate -- --phase 13d-site-selection-backfill
@@ -225,15 +267,23 @@ Logs are written to:
 
 ## Migration Phases
 
-The migration runs sequential phases (00–15, including phases 06a, 12a, 12b,
-and 13a) in the order declared in [`src/index.ts`](./src/index.ts). Each phase
+The migration runs sequential phases (00–16, including compatibility phases)
+in the order declared in [`src/index.ts`](./src/index.ts). Each phase
 checkpoints on completion so the process can resume after interruption —
-except `00-preflight`, `10-verify` and `15-media-formats-backfill`, which are
+except the explicitly re-runnable validation/backfill/cleanup phases, which are
 marked `skipCheckpoint` and therefore always run.
 
 ### Phase 00 — Preflight
 
-Validates both database connections and checks for required tables. Prints a data summary: term counts by type, post counts (deals vs coupons), attachment count, and optional pool/code counts. Never checkpointed — always runs.
+Validates the profile name and JSON, ISO country/locale/currency/timezone,
+WordPress table prefix, both database connections, required prefixed tables,
+optional pool/code/Yoast tables, exclusions, expected source inventory and the
+target Site Configuration country. These checks happen before target mutation.
+It then verifies Strapi infrastructure, creates and validates every unique
+index used by entity, media and Coupon/Deal relation `ON CONFLICT` clauses, and
+prints the source summary. A drifted Logo Store or taxonomy link table therefore
+fails here instead of halfway through a batch. Never checkpointed — always
+runs.
 
 ### Phase 01 — Media Inventory
 
@@ -243,9 +293,40 @@ Queries all WordPress image attachments. Builds an in-memory catalog with file p
 
 Uploads inventoried images to S3 with configurable concurrency. Deduplicates by SHA-256 hash. Before upload, supported raster images (jpeg/png/webp/avif/tiff) are optimized: EXIF orientation baked in, downscaled to fit 1920×1920, jpeg/png converted to webp, and webp/avif/tiff re-compressed at quality 80. Strapi-style responsive variants (`thumbnail`/`xsmall`/`small`/`medium`/`large`) are generated and uploaded alongside the original, and recorded in the `files.formats` JSON column. For webp originals, AVIF "twin" variants (`original_avif`/`xsmall_avif`/`small_avif`/`medium_avif`/`large_avif`, quality 50, effort 4) are also encoded — from the pre-optimization source bytes for best quality — and merged into `formats`; a twin that comes out no smaller than its webp counterpart is dropped. All breakpoint/quality knobs live in [`src/constants/image.ts`](../src/constants/image.ts), the single source of truth shared with admin uploads. gif/svg/other formats pass through untouched (`formats` stays NULL). Creates corresponding records in the Strapi `files` table with CloudFront URLs, dimensions, and provider metadata. See [Media / S3 Pipeline](#media--s3-pipeline) for details.
 
+The complete existing `files` rows are preloaded once, not queried once per
+logo. Concurrent references to the same path or the same source-byte hash share
+one promise, so they cannot transform or upload the same image twice.
+
 ### Phase 03 — Taxonomies
 
-Migrates WordPress category terms into **four** Strapi collections — `stores`, `brands`, `categories`, `banks` — based on the ACF `choose_type` termmeta field (defaults to "Store"). Also migrates FAQ items and SEO components for each entity, and links logo/icon media. Images embedded in term descriptions are rewritten through the content-media pipeline (see below).
+Migrates WordPress category terms into **four** Strapi collections — `stores`, `brands`, `categories`, `banks`. USA uses the approved Excel classification workbook matched by slug; SQL terms absent from the workbook default to Store. Profiles without a workbook use ACF `choose_type` with the same Store fallback. Also migrates FAQ items and SEO components for each entity, and links logo/icon media. Images embedded in term descriptions are rewritten through the content-media pipeline (see below).
+
+Before starting the workers, the phase validates manifest entries against the
+objects that still exist in S3 and restores all reusable missing Strapi `files`
+rows with a few bulk inserts. It does **not** download, transform, or upload
+those images again. Slugs are claimed serially first, then taxonomy rows run
+with bounded concurrency (`TAXONOMY_CONCURRENCY`, default/max `8`, also clamped
+to `PG_POOL_MAX - 2`). All database
+writes for one taxonomy are committed in one transaction; media resolution is
+completed before that transaction opens. Empty FAQ and description-media
+reconciliation is skipped only when a one-time target snapshot proves there is
+nothing stale to remove, so reruns still converge correctly. Progress is logged
+after every 10 completed rows and at completion. If one term fails, the phase
+waits for every already-started worker to settle before reporting the combined
+failure, so no background transaction survives the phase boundary.
+
+Bulk restore intentionally makes manifest media available to later phases as
+well as taxonomies. After every migration phase succeeds, Phase 16 identifies
+unused rows specifically by the deterministic `manifest-file:<hash>` document
+identity. It excludes those rows from the S3 reference set and prunes them only
+after the normal dry-run and 40% mass-deletion fuse pass. Unlinked media created
+by Strapi or an editor is never selected by this ownership boundary.
+
+On a fresh target, a large manifest can legitimately leave more than 40% of
+its restored objects unreferenced, so the Phase 16 fuse may stop cleanup. Do
+not immediately add `--force-orphan-cleanup`: first verify the active profile,
+Postgres target, bucket/root path, linked-media counts and the reported sample.
+Use the force flag only when that reviewed deletion set is expected.
 
 ### Phase 05 — Unique Coupon Pools
 
@@ -274,19 +355,46 @@ modified post.
 ### Phase 07 — Coupons
 
 Migrates WordPress posts where `is_deal` is not `'yes'` into the `coupons`
-table. Only `publish` and `future` rows are included (a published row whose
-expiry meta has elapsed imports as `expired`); `draft`/`trash` rows never
-import — the old withdrawn-by-expiry retention was deliberately dropped. On
+table. Only non-expired `publish` and `future` rows are included;
+`draft`/`trash` rows never import. On
 re-import, migration-owned Coupon rows no longer in that source inventory are
 removed, so deletion, withdrawal, and Coupon → Product Deal changes converge.
 For each coupon:
 
 - Strips WordPress shortcodes from content
+- Extracts locale-aware offer and benefit amounts. USA currency cashback such
+  as `USD 15 Cashback`, `usd 15 cashback`, `$15 Cashback`, or `Cashback: $15`
+  is stored as the bare `$15` value; the public API adds the `Cashback` suffix
+  when rendering.
 - Resolves `coupon_type` ("static" or "unique") from ACF meta
 - Wires taxonomy relationships (store, brand, category, bank) from WordPress `wp_term_relationships`
 - Links the unique coupon pool and SEO component; Coupon records do not own a
   featured image
 - Rewrites content-embedded images (see **Content-embedded images** below)
+
+Phase 07 preloads whether existing Coupons have content-media or unique-pool
+links. Source/content preparation runs with bounded concurrency
+(`COUPON_CONCURRENCY`, default/max `8`) before PostgreSQL writes. Prepared rows
+are grouped into batches (`COUPON_BATCH_SIZE`, default `250`, max `500`) and up
+to four batches write concurrently (`COUPON_BATCH_CONCURRENCY`, default/max
+`4`). `PG_POOL_MAX` defaults to `10`; preparation plus batch concurrency is
+automatically reduced when necessary so two connections remain available.
+This keeps the importer plus two live five-connection Strapi pools at 20,
+below the current managed-Postgres limit of 22. Raise the migration pool only
+when Strapi is stopped or the database has independently verified headroom.
+Each batch atomically bulk-upserts Coupon rows, migration ownership,
+taxonomy/Logo Store links, content media and pool links. Empty content-media or
+pool cleanup is skipped only when the target snapshot proves no stale row
+exists. A data or constraint error recursively splits only its affected batch,
+so one corrupt source record can be reported without discarding valid records;
+connection and SQL errors still abort the phase. Progress and throughput are
+logged after every completed batch. This preserves idempotency while reducing
+the normal remote path to a handful of round trips per 250 Coupons.
+
+For Coupons-only profiles, Phase 08 and the Deal-reconciliation portion of
+Phase 12 are valid no-ops. Phase 12 still runs the Coupon recommendation
+backfill. Its empty-target continuity guard fails only when importable source
+Deals exist but the target `deals` table is unexpectedly empty.
 
 #### Content-embedded images
 
@@ -301,12 +409,14 @@ Rich-text HTML (`coupons.content`, `deals.content`, taxonomy `description`) can 
 ### Phase 08 — Deals
 
 Migrates deal posts (`is_deal='yes'`) into the `deals` table using the same
-publish/future-only lifecycle rule as Coupons. Re-import
+non-expired publish/future lifecycle rule as Coupons. Re-import
 removes migration-owned Deal rows that were withdrawn, deleted, or changed back
 to Coupons. Relationship wiring is the same as Coupons, plus deal-specific
 fields: `mrp`, `sale_price`, `discount`, and `dealImage`. The `deal_store` meta
 is merged into the `stores` relation (deduplicated against taxonomy-linked
-stores).
+stores). Brand-linked Deals follow the same affiliate rule as Coupons:
+`is_for_affiliate_brand` is `true` and the mutually-exclusive Store/Logo Store
+relations are cleared (phase 12's reconciliation applies the identical rule).
 
 ### Phase 09 — SEO Backfill
 
@@ -361,28 +471,36 @@ begin using Strapi's explicit bump action.
 
 ### Phase 13 — Site Content
 
-Seeds the four Strapi single types the frontend needs:
+Seeds the Strapi single types the frontend needs:
 
 - `global` — header/footer codes from WP ACF option keys (`options_header_code`, `options_footer_code`).
-- `homepage` — created as a **single published row** (draftAndPublish is disabled on all four singles — homepage, menu, footer, global — they are publish-only), with the full component tree built once. Also seeds `title: "Homepage"` for the admin entry header. Curated sections: hero banners from the `options_slider_features` ACF repeater; hero products and Top Deals from migrated Deal entities; CG Exclusive, Fresh Drops, Explore Offers, and Offers By Brand from Coupon entities; Popular Stores from `options_featured_stores` (fallback: top stores by published-coupon count); bank offers ranked by published-coupon count; plus How It Works and FAQ copy mirrored from the frontend. Per-section item counts live in `src/utils/homepage-limits.ts` (each holds a +4 buffer over what the site renders; a parity test pins them to the component schema `max` values).
+- `homepage` — created as a **single published row** (draftAndPublish is disabled on the publish-only homepage, menu, footer, and global single types), with the full component tree built once. Also seeds `title: "Homepage"` for the admin entry header. Curated sections: hero banners from the `options_slider_features` ACF repeater; hero offers prefer migrated Deal entities and fall back to the newest renderable Coupon entities (named Store/Brand owner, routable slug, and real logo) only when no published Deals exist; an existing homepage is editor-owned, except that an empty Hero Offer list is filled without replacing existing selections. Top Deals remain Deal-only; CG Exclusive, Fresh Drops, Explore Offers, and Offers By Brand use Coupon entities; Popular Stores come from `options_featured_stores` (fallback: top stores by published-coupon count); bank offers are ranked by published-coupon count; plus How It Works and FAQ copy mirrored from the frontend. Per-section item counts live in `src/utils/homepage-limits.ts` (each holds a +4 buffer over what the site renders; a parity test pins them to the component schema `max` values).
 - `menu` — topStores relation (same curated store list), one shared responsive hierarchy made from explore Categories and their immediate child Categories, and the fixed extra nav items. Desktop renders those sections as mega-menu columns; mobile renders the same ordered groups as icon rows with a child-link drill-down plus the first four configured Top Stores as Popular Stores pills. Section and child-link icons uploaded in Menu override their related Category icons; seeded rows intentionally leave overrides empty so Category icons remain the fallback.
 - `footer` — link sections, social links, countries, and partner card mirrored from the frontend `footer-data.ts`; Popular Stores labels are resolved to real store relations where a matching store name exists. Country flag media is attached by Phase 13b.
+- `site_configuration` — identity, localization, onboarding state and
+  catalog/editorial/legal feature flags loaded from the active profile JSON.
+  Campaign activation is never seeded as a boolean; it follows entity
+  `pageTemplate` ownership.
+
+The retired Deal-backed Homepage fields `exploreDeals` and `dealsByBrand` are
+not seeded, queried, or retained as compatibility fallbacks. Explore Offers
+and Offers By Brand use their Coupon-backed fields only.
+
+The USA profile imports five hero banners and resolves all eight curated
+featured Store URLs to Store slugs. The four old eight-store grids are reported
+and intentionally ignored. Recommended/Exclusive/Newly Added Coupon sections
+use their WordPress popularity and offer-type values, while sections requiring
+a disabled or unavailable catalog type are disabled. Header/footer tracking
+scripts are not copied unless `IMPORT_WP_TRACKING_SCRIPTS=true` is explicitly
+approved.
 
 All component and relation link table names are verified against `information_schema` before writing; anything missing (schema not migrated yet) is skipped with a clear warning. Each single type is skipped entirely if its table already has a row, so re-runs are safe.
 
-### Phase 13a — Homepage Coupon Offer Sections
-
-Backfills existing homepages created before the Coupon-backed `exploreOffers` and `offersByBrand` components existed. It preserves the legacy section/category/brand criteria, selects real Coupons whose migration `contentStatus` is `published`, clones safe View All copy, and writes the new component trees transactionally. It never converts a Deal ID into a Coupon ID and is idempotent: populated new sections are skipped. Concurrent runs serialize on the homepage row. Missing Strapi component or relation infrastructure fails the phase so it is not checkpointed; apply the Strapi schemas first and rerun. The legacy Deal-backed fields remain available for one frontend compatibility release.
-
-Run only this compatibility phase after deploying the new Strapi component schemas:
-
-```bash
-npm run migrate -- --phase 13a-homepage-offer-sections
-```
-
 ### Phase 13b — Footer Media
 
-Backfills the footer's five country flags and Google Preferred Source card.
+Backfills every other site from the shared `profiles/footer-countries.json`
+registry, automatically excluding `SOURCE_COUNTRY_CODE`. Google Preferred is
+optional per deployment in `profiles/<profile>/footer-settings.json`.
 The exact source PNGs live in `assets/footer/` and pass through the same
 hash-deduplicated media pipeline as other migration uploads. In S3
 environments that means PNG masters are converted to optimized WebP and the
@@ -428,7 +546,7 @@ Runs two passes over already-migrated S3 images.
 
 **Pass 1 — full optimize backfill.** Candidates are `files` rows with `provider='aws-s3'`, `formats IS NULL`, and an optimizable MIME type (jpeg/png/webp/avif/tiff). For each candidate (5 in parallel):
 
-1. **Source bytes** — resolved from the local `WP_UPLOADS_DIR` tree via a `sha256(file)[0:16] → path` map (cached in `.checkpoints/mediaHashMap.json` keyed by mtime + size so re-runs don't rehash; survives `--clean` like every `*Map.json`), falling back to downloading the current S3 object.
+1. **Source bytes** — resolved from the local `WP_UPLOADS_DIR` tree via a `sha256(file)[0:16] → path` map (cached as `mediaHashMap.json` in the active profile state directory, keyed by mtime + size so re-runs don't rehash; survives `--clean` like every `*Map.json`), falling back to downloading the current S3 object.
 2. **Optimize** — same pipeline as Phase 02: orientation baked, max 1920px, jpeg/png → webp, quality 80. AVIF twins are encoded from the raw source bytes for webp results.
 3. **Upload** — the optimized original (new `.webp` key when converted) plus all responsive variants (including AVIF twins).
 4. **Update** — a single `UPDATE files SET formats, ext, mime, url, width, height, size, provider_metadata, updated_at` as the **last** step, so a crash leaves the row eligible for the next run (row-level resume via the `formats IS NULL` predicate).
@@ -475,27 +593,40 @@ Content HTML srcsets are frozen at migration time, so rich-text `<img>` tags don
 
 ### Taxonomies (Phase 03)
 
-WordPress stores all taxonomy terms in `wp_terms` with `taxonomy='category'`. The ACF `choose_type` termmeta determines which Strapi collection each term maps to:
+WordPress stores all taxonomy terms in `wp_terms` with `taxonomy='category'`.
+For USA, `MIGRATION_CLASSIFICATION_FILE` points to the approved Excel workbook;
+its `Classification` value is matched to the SQL term by exact normalized
+slug. Excel is authoritative, and SQL slugs absent from the workbook default
+to Store. Other profiles use ACF `choose_type` with the same fallback.
 
-| `choose_type` value | Strapi table |
-|---------------------|-------------|
+| Classification / `choose_type` | Strapi table |
+|--------------------------------|-------------|
 | `Store` (default)   | `stores`    |
 | `Brand`             | `brands`    |
 | `Category`          | `categories`|
 | `Bank`              | `banks`     |
 | `Article`/`Articles` | **not imported** — editorial content, skipped entirely |
 
-**Import exclusions** (`src/utils/import-exclusions.ts`) — two rules, both
+The approved USA workbook contains 7,169 unique classified slugs (542 Store,
+6,552 Brand, 68 Category, 7 Bank). Against the 2026-08-30 SQL, 7,119 match;
+50 obsolete workbook rows are reported, while 10 new SQL terms default to
+Store. `Uncategorized` is then excluded, producing 549 Stores, 6,504 Brands,
+68 Categories, and 7 Banks.
+
+**Import exclusions** (`src/utils/import-exclusions.ts`) — three rules, all
 applied in phases 03/07/08 and mirrored by phase 10's expected counts:
 
 1. **Articles category**: the term with slug `articles` / name `Articles`
    (case-insensitive; an `Article(s)` choose_type also counts) plus every
    descendant term under it.
-2. **Retired stores**: `migration/excluded-stores.csv` — one store name per
-   line, `#` comments, matched case/whitespace-insensitively against terms
-   whose `choose_type` is `Store` or missing (a Brand/Bank/Category sharing
-   a name is never swallowed). Names that match no WP term are logged for
-   review. This file is deliberately un-gitignored — it is import config.
+2. **Uncategorized**: the exact WordPress fallback category (name or slug,
+   case-insensitive). The term and every post filed under it are excluded.
+3. **Optional retired stores**: when `MIGRATION_EXCLUSIONS_FILE` points to an
+   operator-supplied CSV, its store names are matched case/whitespace-
+   insensitively against terms whose `choose_type` is `Store` or missing (a
+   Brand/Bank/Category sharing a name is never swallowed). The repo
+   intentionally ships no historical retired-store CSV for India or USA; an
+   unset or missing file means zero listed-store exclusions.
 
 An excluded term is never imported, and every post filed under one is
 excluded from phases 07/08 — *before* the inventory reconciliation, so a
@@ -505,12 +636,13 @@ objects as orphans.
 
 **Dry run**: `yarn migrate:report` (read-only, WordPress only) prints how
 many stores/brands/categories/banks and how many coupons/deals would import
-after all exclusions, plus the withdrawn/excluded breakdown — and writes two
+after all exclusions, plus the expired/excluded breakdown — and writes three
 CSVs: `migration/dry-run-report.csv` (one row per imported term: type,
-associated coupon/deal counts, dropped counts, valid remainder) and
+associated coupon/deal counts, dropped counts, valid remainder),
 `migration/dry-run-excluded.csv` (one row per EXCLUDED term — articles /
-retired stores — with the coupon/deal counts its exclusion deletes, plus a
-row per listed name that matched no WP term).
+Uncategorized / retired stores — with the coupon/deal counts its exclusion
+deletes, plus a row per listed name that matched no WP term), and
+`migration/dry-run-summary.csv` (the expired and taxonomy-exclusion funnel).
 
 **Field mapping:**
 
@@ -523,12 +655,14 @@ row per listed name that matched no WP term).
 | `store_cat_image` (termmeta) | `logo` / `icon` | Media link via `files_related_mph` |
 | `store_image_alt` (termmeta) | `logo_alt` | Stores, brands, banks only |
 | `enable_faq_schema` (termmeta) | `faq_enabled` | Boolean (`'1'` → true) |
+| Excel `Brand` classification | `is_affiliate_store` | Seeded `true` on the imported Brand; fill-only on re-import so an editor's panel toggle wins |
 
 ### Posts: Coupons vs Deals (Phases 07–08)
 
 WordPress posts with `post_type='post'` are first filtered by lifecycle:
-only `publish`/`future` are included — `draft`/`trash` never import. They are
-then split:
+only non-expired `publish`/`future` rows are included — `draft`/`trash` and
+rows whose valid expiry is at or before the migration time never import. They
+are then split:
 
 - **Deal** — `is_deal` postmeta = `'yes'` → `deals` table
 - **Coupon** — everything else → `coupons` table
@@ -547,6 +681,7 @@ then split:
 | `unique_coupon_name` (postmeta) | `uniqueCouponPool` relation | Resolved by pool name for unique coupons |
 | Expiration meta* | `expires_at` | Unix timestamp or ISO date |
 | `post_date` | `published_at` | |
+| Related Excel-classified Brand | `is_for_affiliate_brand` + `brands` | Coupon flag is `true`, Brand relation is retained, and mutually-exclusive Store/Logo Store relations are cleared; Coupons without Brands are explicitly `false` |
 
 *Expiration checked in order: `_action_manager_date`, `_expiration-date`, `expiration-date`.
 
@@ -722,13 +857,14 @@ The migration is designed to be safely re-run after interruption or failure.
 
 ### Checkpointing
 
-- Each phase writes a checkpoint file to `.checkpoints/{phase}.json` on completion
+- Each phase writes a checkpoint file to `<state-dir>/{phase}.json` on completion (`.state/<profile>` by default)
 - On restart, completed phases are skipped automatically
 - `--clean` deletes the checkpoint files **and every ID map file**, then wipes the target — see the warning under [How to Run](#how-to-run). It is not a resume aid.
 
 ### ID Map Persistence
 
-Six maps are serialized to `.checkpoints/` as JSON by `saveMaps()` in [`src/utils/id-maps.ts`](./src/utils/id-maps.ts):
+Six maps are serialized to the active profile state directory as JSON by
+`saveMaps()` in [`src/utils/id-maps.ts`](./src/utils/id-maps.ts):
 
 | Map | File | Key → Value | What it unlocks |
 |-----|------|-------------|-----------------|
@@ -772,3 +908,9 @@ Phase 10 runs a comprehensive validation suite (always runs, never checkpointed)
 5. **Spot checks** — samples random stores and coupons with full detail output
 
 All checks log results but are non-fatal — the phase runs to completion regardless of failures.
+
+The report is profile-scoped and uses the same exclusions and quarantine
+decisions as the import. For the USA profile, also reconcile 7,162 Stores,
+10,360 attachments, zero Product Deals, five hero banners and eight featured
+Stores, with every remaining source WordPress ID accounted for as imported,
+normalized, excluded or quarantined.

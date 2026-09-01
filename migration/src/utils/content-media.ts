@@ -241,7 +241,7 @@ async function resolveRelPath(
 
 const __contentMediaDir = path.dirname(fileURLToPath(import.meta.url));
 /** Downloaded remote originals are kept here so re-runs don't re-fetch. */
-const REMOTE_MEDIA_DIR = path.resolve(__contentMediaDir, "../../.checkpoints/remote-media");
+const REMOTE_MEDIA_DIR = path.resolve(config.stateDir, "remote-media");
 
 async function fetchRemoteAndUpload(
   sourceUrl: string,

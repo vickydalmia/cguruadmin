@@ -28,6 +28,11 @@ test("orphan cleanup carries every safety guard", () => {
   assert.match(source, /startsWith\(bookkeepingPrefix\)/);
   // Dry-run really is report-only.
   assert.match(source, /--dry-run: nothing deleted/);
+  // Only deterministic manifest-owned rows may be pruned from the Media
+  // Library; ordinary unlinked uploads remain outside this cleanup.
+  assert.match(source, /findUnreferencedManifestFiles/);
+  assert.match(source, /deleteUnreferencedManifestFiles/);
+  assert.match(source, /restoredCandidateIds/);
   // Referenced set uses the SAME derivation as manifest reuse.
   assert.match(source, /referencedKeysFromRow/);
 });

@@ -2,7 +2,6 @@ import type { SectionLabel } from './homepage-sections';
 
 export const INDEPENDENCE_DAY_SALE_UID =
   'api::independence-day-sale-page.independence-day-sale-page';
-export const INDEPENDENCE_DAY_SALE_SLUG = 'independence-day-sale-coupons';
 
 export const INDEPENDENCE_DAY_SALE_CAPS = {
   topPicks: 4,

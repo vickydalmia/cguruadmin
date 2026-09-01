@@ -18,6 +18,10 @@ const userSource = readFileSync(
   new URL("../src/phases/06a-users.ts", import.meta.url),
   "utf8",
 );
+const offerBackfillSource = readFileSync(
+  new URL("../src/phases/12-offer-backfill.ts", import.meta.url),
+  "utf8",
+);
 
 test("offer source queries read only statuses the lifecycle predicate can import", () => {
   // publish + future ONLY: drafts and trash never import (the old
@@ -31,6 +35,12 @@ test("offer source queries read only statuses the lifecycle predicate can import
   for (const source of [couponSource, dealSource, verificationSource]) {
     assert.doesNotMatch(source, /'draft', 'trash'/);
   }
+});
+
+test("offer backfill applies the same expiry lifecycle as import and verify", () => {
+  assert.match(offerBackfillSource, /shouldImportMigrationOffer/);
+  assert.match(offerBackfillSource, /getWpOfferExpiryRaw/);
+  assert.match(offerBackfillSource, /const lifecycleRows = rows\.filter/);
 });
 
 test("code verification uses the same resolved-pool ownership as Phase 6", () => {

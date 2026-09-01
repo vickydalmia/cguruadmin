@@ -16,15 +16,18 @@ test("imports published and scheduled WordPress offers", () => {
     true,
   );
   assert.equal(
-    shouldImportMigrationOffer({ postStatus: "future", now: NOW }),
+    shouldImportMigrationOffer({
+      postStatus: "future",
+      expiresAt: FUTURE,
+      now: NOW,
+    }),
     true,
   );
 });
 
 // Drafts and trash NEVER import — including the old special case that
 // retained a draft/trash row when an expiry plugin withdrew it. The fresh
-// catalog carries publish/future posts only; expired-by-meta PUBLISHED posts
-// still import (as contentStatus "expired").
+// catalog carries non-expired publish/future posts only.
 test("excludes draft and trash offers regardless of expiry", () => {
   for (const postStatus of ["draft", "trash"]) {
     assert.equal(
@@ -50,15 +53,35 @@ test("excludes draft and trash offers regardless of expiry", () => {
   );
 });
 
-test("published offers with an elapsed expiry import as expired entries", () => {
+test("excludes every offer whose valid expiry has elapsed", () => {
+  for (const postStatus of ["publish", "future"]) {
+    assert.equal(
+      shouldImportMigrationOffer({ postStatus, expiresAt: PAST, now: NOW }),
+      false,
+    );
+    assert.equal(
+      shouldImportMigrationOffer({
+        postStatus,
+        expiresAt: NOW.toISOString(),
+        now: NOW,
+      }),
+      false,
+    );
+  }
+});
+
+test("invalid expiry metadata does not silently delete an offer", () => {
   assert.equal(
     shouldImportMigrationOffer({
       postStatus: "publish",
-      expiresAt: PAST,
+      expiresAt: "not-a-date",
       now: NOW,
     }),
     true,
   );
+});
+
+test("status calculation still represents expired content for runtime callers", () => {
   assert.equal(
     computeMigrationStatus({
       postStatus: "publish",

@@ -4,14 +4,7 @@
 
 export const CHROME_UIDS = new Set(['api::menu.menu', 'api::footer.footer', 'api::global.global']);
 
-// The deal-of-the-day category page renders curated Deal sections (its
-// single type may reference deals NOT tagged with the category), so every
-// Deal change rebuilds it — the same stance as `homepage: true` on offer
-// changes. One constant slug, deduped by the queue; coupons never render
-// there and do not carry it.
-export const DEAL_OF_THE_DAY_SLUG = 'deal-of-the-day';
 export const DOTD_PAGE_UID = 'api::deal-of-the-day-page.deal-of-the-day-page';
-export const INDEPENDENCE_DAY_SALE_SLUG = 'independence-day-sale-coupons';
 export const INDEPENDENCE_DAY_SALE_PAGE_UID =
   'api::independence-day-sale-page.independence-day-sale-page';
 // The About page is a standalone editorial route with no entity relations, so
@@ -58,13 +51,3 @@ export const ERROR_DOCUMENT_SLUGS = [
   'error-pages/504',
   'error-pages/template',
 ] as const;
-
-export function withOfferLandingSlugs(uid: string, slugs: string[]): string[] {
-  return [
-    ...new Set([
-      ...slugs,
-      INDEPENDENCE_DAY_SALE_SLUG,
-      ...(uid === 'api::deal.deal' ? [DEAL_OF_THE_DAY_SLUG] : []),
-    ]),
-  ];
-}

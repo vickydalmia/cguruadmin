@@ -1,0 +1,49 @@
+{
+  "kind": "singleType",
+  "collectionName": "site_configurations",
+  "info": {
+    "singularName": "site-configuration",
+    "pluralName": "site-configurations",
+    "displayName": "Site Configuration",
+    "description": "Country identity, localization, onboarding and admin/public feature availability"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {
+    "content-manager": {
+      "visible": false
+    }
+  },
+  "attributes": {
+    "siteName": { "type": "string", "required": true, "default": "CouponzGuru", "maxLength": 80 },
+    "countryName": { "type": "string", "required": true, "default": "India", "maxLength": 80 },
+    "countryCode": { "type": "string", "required": true, "default": "IN", "minLength": 2, "maxLength": 2, "regex": "^[A-Z]{2}$" },
+    "locale": { "type": "string", "required": true, "default": "en-IN", "maxLength": 35 },
+    "timezone": { "type": "string", "required": true, "default": "Asia/Kolkata", "maxLength": 80 },
+    "currencyCode": { "type": "string", "required": true, "default": "INR", "minLength": 3, "maxLength": 3, "regex": "^[A-Z]{3}$" },
+    "onboardingComplete": { "type": "boolean", "required": true, "default": false },
+
+    "storesEnabled": { "type": "boolean", "required": true, "default": true },
+    "couponsEnabled": { "type": "boolean", "required": true, "default": true },
+    "brandsEnabled": { "type": "boolean", "required": true, "default": true },
+    "categoriesEnabled": { "type": "boolean", "required": true, "default": true },
+    "banksEnabled": { "type": "boolean", "required": true, "default": true },
+    "productDealsEnabled": { "type": "boolean", "required": true, "default": true },
+
+    "aboutEnabled": { "type": "boolean", "required": true, "default": true },
+    "careersEnabled": { "type": "boolean", "required": true, "default": true },
+    "contactEnabled": { "type": "boolean", "required": true, "default": true },
+    "faqsEnabled": { "type": "boolean", "required": true, "default": true },
+    "testimonialsEnabled": { "type": "boolean", "required": true, "default": true },
+    "partnerWithUsEnabled": { "type": "boolean", "required": true, "default": true },
+    "cultureEnabled": { "type": "boolean", "required": true, "default": true },
+
+    "privacyPolicyEnabled": { "type": "boolean", "required": true, "default": true },
+    "termsAndConditionsEnabled": { "type": "boolean", "required": true, "default": true },
+    "affiliateDisclosureEnabled": { "type": "boolean", "required": true, "default": true },
+
+    "dealOfTheDayEnabled": { "type": "boolean", "required": true, "default": true, "private": true },
+    "independenceDaySaleEnabled": { "type": "boolean", "required": true, "default": true, "private": true }
+  }
+}

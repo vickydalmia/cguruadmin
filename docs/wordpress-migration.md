@@ -17,18 +17,18 @@ guarantees they hold.
 
 ### What it does
 
-The migration ingests a large WordPress 5.x site (coupons and deals plus
+The migration ingests a profiled WordPress 5.x site (coupons and deals plus
 supporting taxonomies, media, SEO, and unique coupon codes) and writes the
-equivalent Strapi v5 content into PostgreSQL, with media in S3 (or a local
-filesystem fallback).
+equivalent Strapi v5 content into one country's PostgreSQL database, with media
+in S3 (or a local filesystem fallback). The profile also seeds that
+deployment's Site Configuration.
 
 **Sources**
 
-- **MySQL** — WordPress core tables (`wp_posts`, `wp_postmeta`, `wp_terms`,
-  `wp_term_taxonomy`, `wp_term_relationships`, `wp_termmeta`, `wp_users`,
-  `wp_usermeta`), plus optional `wp_uc_coupons` / `wp_uc_codes` (Unique Coupons
-  plugin) and `wp_yoast_indexable` / `wp_yoast_primary_term` when Yoast is
-  installed.
+- **MySQL** — WordPress core tables selected through the validated
+  `WP_TABLE_PREFIX` (for example `wp_posts` or
+  `wp_dda10ab629_posts`), plus optional prefixed Unique Coupons and Yoast
+  tables when those plugins are installed.
 - **Filesystem** — `wp-content/uploads/` on disk, for the actual image bytes.
 
 **Targets**
@@ -42,7 +42,7 @@ filesystem fallback).
 
 ```
 config ─► connections ─► phase loop ─► checkpoints ─► verification
-           (MySQL + PG)   (00 → 15)     (per phase)     (non-fatal)
+           (MySQL + PG)   (00 → 16)     (per phase)     (non-fatal)
                              │
                              ├── Media inventoried (01)
                              ├── Media uploads happen on demand (02)
@@ -52,8 +52,8 @@ config ─► connections ─► phase loop ─► checkpoints ─► verificati
                              ├── SEO backfill (09)
                              ├── Verify (10)
                              ├── Copy used local media (11)
-                             ├── Offer + site-content backfills (12, 13, 13a)
-                             └── Media optimize + formats backfill (14, 15)
+                             ├── Offer backfill + site content (12, 13)
+                             └── Media optimize, formats + safe cleanup (14–16)
 ```
 
 ### Resumable by design
@@ -62,8 +62,9 @@ Three mechanisms cooperate:
 
 - **Deterministic `document_id`** derived from WordPress primary keys, so every
   insert can use an `ON CONFLICT ("document_id")` clause and be safely repeated.
-- **Per-phase checkpoint files** under `migration/.checkpoints/`, which cause
-  completed phases to be skipped on a rerun.
+- **Per-phase checkpoint files** under the active profile state directory
+  (normally `migration/.state/<profile>/`), which cause completed phases to be
+  skipped on a rerun.
 - **Persisted id maps**, which let a later phase run standalone without redoing
   its prerequisites.
 
@@ -80,6 +81,8 @@ Three mechanisms cooperate:
 | [`src/config.ts`](../migration/src/config.ts) | `.env.migration` → typed config; nothing else |
 | [`src/db/wp-client.ts`](../migration/src/db/wp-client.ts) | MySQL pool + optional SSH tunnel |
 | [`src/db/pg-client.ts`](../migration/src/db/pg-client.ts) | Postgres pool + optional CA-cert SSL |
+| [`src/utils/profile-state.ts`](../migration/src/utils/profile-state.ts) | Validated profile names, isolated state paths, profile files and legacy India state adoption |
+| [`src/utils/wp-table.ts`](../migration/src/utils/wp-table.ts) | Validates the WordPress prefix and rewrites table identifiers before a query executes |
 
 **Utilities** — [`src/utils/`](../migration/src/utils)
 
@@ -97,10 +100,13 @@ Three mechanisms cooperate:
 | [`image-optimizer.ts`](../migration/src/utils/image-optimizer.ts) | Optimize originals, build the variant matrix and AVIF twins; re-exports the knobs from [`src/constants/image.ts`](../src/constants/image.ts) |
 | [`format-gaps.ts`](../migration/src/utils/format-gaps.ts) | `expectedFormatKeys` / `buildGapWhere` / AVIF tombstone reading — the gap model phase 15 is built on |
 | [`content-media.ts`](../migration/src/utils/content-media.ts) | Rewrites content-embedded `wp-content/uploads` images through the upload pipeline |
+| [`manifest-file-restore.ts`](../migration/src/utils/manifest-file-restore.ts) | Bulk-restores reusable Strapi `files` rows from the profile manifest after confirming their immutable objects still exist in S3 |
 | [`img-rewrite.ts`](../migration/src/utils/img-rewrite.ts) | Pure `<img>`-tag helpers shared by the content rewrite and `fix:content-srcsets` |
 | [`richtext-targets.ts`](../migration/src/utils/richtext-targets.ts) | Shared richtext table/column registry for the fix scripts; throws at import on an unmapped UID |
 | [`deal-content.ts`](../migration/src/utils/deal-content.ts) | Rejects legacy scratch values in `post_content` so deals get no empty Show Details block |
 | [`offer-extract.ts`](../migration/src/utils/offer-extract.ts) | Heuristic `offerText` / `cashbackText` / `bankOfferText` extraction from title and content |
+| [`offer-relations.ts`](../migration/src/utils/offer-relations.ts) | Resolves source taxonomy membership before a write transaction and reconciles all offer taxonomy/Logo Store links for one or many offers in one compound SQL statement |
+| [`coupon-batch.ts`](../migration/src/utils/coupon-batch.ts) | Builds parameterized bulk Coupon, migration-registry, content-media and unique-pool reconciliation statements |
 | [`price.ts`](../migration/src/utils/price.ts) | Parses display-formatted Indian prices (`₹17,499.00`, `Rs. 2,899/-`) safely |
 | [`homepage-limits.ts`](../migration/src/utils/homepage-limits.ts) | Per-section homepage seed counts (each with a buffer over what the site renders) |
 | [`homepage-bank-offers.ts`](../migration/src/utils/homepage-bank-offers.ts) | Enforces the bank-offers repeatable-component cardinality for direct-SQL writes |
@@ -117,19 +123,18 @@ Three mechanisms cooperate:
 | [`00-preflight.ts`](../migration/src/phases/00-preflight.ts) | Connection probes, schema sanity checks, unique indexes |
 | [`01-media-inventory.ts`](../migration/src/phases/01-media-inventory.ts) | WP attachment scan + plugin-dir blacklist |
 | [`02-media-upload.ts`](../migration/src/phases/02-media-upload.ts) | On-demand S3/local upload, optimization, hash dedup |
-| [`03-taxonomies.ts`](../migration/src/phases/03-taxonomies.ts) | Stores / brands / categories / banks + FAQ + SEO. Seeds `created_at`/`updated_at` from the date range of the posts filed under each term — WP terms carry no dates of their own, and stamping import wall-clock reset every sitemap `<lastmod>` on each run |
+| [`03-taxonomies.ts`](../migration/src/phases/03-taxonomies.ts) | Bounded-concurrency Stores / brands / categories / banks + FAQ + SEO, with one transaction per taxonomy. Seeds `created_at`/`updated_at` from the date range of the posts filed under each term — WP terms carry no dates of their own, and stamping import wall-clock reset every sitemap `<lastmod>` on each run |
 | [`05-pools.ts`](../migration/src/phases/05-pools.ts) | `wp_uc_coupons` → `unique_coupon_pools` |
 | [`06-codes.ts`](../migration/src/phases/06-codes.ts) | `wp_uc_codes` → `unique_codes` + pool links |
 | [`06a-users.ts`](../migration/src/phases/06a-users.ts) | WP authors → `admin_users` + creator backfill |
-| [`07-coupons.ts`](../migration/src/phases/07-coupons.ts) | Non-deal posts → `coupons` + all relations |
+| [`07-coupons.ts`](../migration/src/phases/07-coupons.ts) | Bounded-concurrency non-deal posts → `coupons` + atomic source-owned relation reconciliation |
 | [`08-deals.ts`](../migration/src/phases/08-deals.ts) | `is_deal='yes'` posts → `deals` + relations (with the `deal_store` merge) |
 | [`09-seo-backfill.ts`](../migration/src/phases/09-seo-backfill.ts) | Fill SEO components from `wp_yoast_indexable` |
 | [`10-verify.ts`](../migration/src/phases/10-verify.ts) | Count + integrity + spot checks |
 | [`11-copy-used-media.ts`](../migration/src/phases/11-copy-used-media.ts) | Copy locally-provisioned files into Strapi's `public/uploads` |
 | [`12-offer-backfill.ts`](../migration/src/phases/12-offer-backfill.ts) | Exact ordered Deal taxonomy reconciliation, with ACF `deal_store` first |
 | [`12a-entity-updated-at`](../migration/src/backfill-entity-updated-at.ts) | Re-derive store/brand/category/bank `created_at`/`updated_at` from the offers now linked to them. Runs after 12 so the relations are final; entities with no offers keep their phase-03 value |
-| [`13-site-content.ts`](../migration/src/phases/13-site-content.ts) | Seed the global / homepage / menu / footer single types |
-| [`13a-homepage-offer-sections.ts`](../migration/src/phases/13a-homepage-offer-sections.ts) | Coupon-backed homepage section backfill for pre-existing homepages |
+| [`13-site-content.ts`](../migration/src/phases/13-site-content.ts) | Seed the global / homepage / menu / footer single types; Homepage Explore Offers and Offers By Brand are Coupon-backed only |
 | [`14-media-optimize.ts`](../migration/src/phases/14-media-optimize.ts) | Optimize + AVIF-twin backfill for already-migrated media |
 | [`15-media-formats-backfill.ts`](../migration/src/phases/15-media-formats-backfill.ts) | Variant-matrix gap backfill (xsmall / thumbnail / AVIF twins) |
 
@@ -164,7 +169,7 @@ Order is a dependency chain, not a preference:
 - **01 before 03–08** so inventoried attachments are resolvable.
 - **03–06 before 07–08** so taxonomies and pools are in the id maps.
 - **06a before 07–08** so author ids are available for `created_by_id`.
-- **12–15 last**, because they operate on already-migrated rows rather than
+- **12–16 last**, because they operate on already-migrated rows rather than
   reading fresh WordPress data.
 
 Two phases are worth calling out. **Phase 02 is special**: its entry point only
@@ -244,12 +249,24 @@ tunnel and its local server.
 ### Config
 
 [`src/config.ts`](../migration/src/config.ts) reads `.env.migration` and exposes
-a single typed `config` object grouped into `ssh`, `wp`, `pg`, `s3`, plus
-`wpUploadsDir`, `batchSize`, `mediaConcurrency`, and `logLevel`. Only
-`WP_DB_NAME` and `PG_CONNECTION_STRING` are required; everything else has a
-default or may be omitted. `~` is expanded in both the SSH key path and the
-Postgres CA cert path. `wpUploadsDir` resolves relative to the `migration/`
-package directory, not the working directory.
+a single typed `config` object grouped into the active profile, source/target
+identity, `ssh`, `wp`, `pg`, `s3`, plus `wpUploadsDir`, `batchSize`,
+`mediaConcurrency`, PostgreSQL pool/concurrency budgets, and `logLevel`. Only `WP_DB_NAME` and
+`PG_CONNECTION_STRING` are required at module load; Phase 00 validates the
+profile file and all country-specific invariants before mutation. `~` is
+expanded in both the SSH key path and the Postgres CA cert path.
+`wpUploadsDir` resolves relative to the `migration/` package directory, not the
+working directory.
+
+`MIGRATION_PROFILE` defaults to `india`. It selects `.state/<profile>`,
+`profiles/<profile>/site-configuration.json`, and the profile exclusion file
+unless those paths are explicitly supplied. Checkpoints, ID maps, manifests,
+logs and reports follow the same state root. When the pre-profile
+`.checkpoints/` directory remains authoritative for India, configuration keeps
+using it without moving anything. Operators may rename it to `.state/india`
+explicitly while no migration command is running. If both old and new
+locations contain real JSON state, configuration fails closed and requires an
+operator to reconcile them.
 
 `migration/README.md` is the catalogue of what each variable does. Two are worth
 knowing here: `SSH_HOST_FINGERPRINT` pins the tunnel's expected server host key
@@ -290,7 +307,8 @@ first query fires, not at process start.
 
 ### `id-maps.ts` — the spine
 
-Six maps, each persisted as its own JSON file under `migration/.checkpoints/`:
+Six maps, each persisted as its own JSON file under the active profile state
+directory (`migration/.state/<profile>/` by default):
 
 | Map | Key → value |
 |---|---|
@@ -398,7 +416,8 @@ The other exports:
 ### Logging and checkpoints
 
 [`logger.ts`](../migration/src/utils/logger.ts) is Winston with three transports:
-a colorized console, `migration.log`, and an errors-only `migration-errors.log`.
+a colorized console and profile-scoped `migration.log` and
+`migration-errors.log` files.
 [`checkpoint.ts`](../migration/src/utils/checkpoint.ts) exposes
 "is this phase complete", "mark it complete", and "clear the markers" — where
 clearing deliberately spares the `*Map.json` id-map files, which `--clean`
@@ -413,14 +432,23 @@ Each phase's own file is the authoritative description of its SQL;
 
 ### 00 — Preflight
 
-Read-only safety checks; throws if anything is wrong, and always runs. Probes
-both databases, asserts the required WordPress tables exist (logging presence of
-the optional plugin and Yoast tables), asserts the required Strapi tables exist,
-and then **creates the unique indexes the rest of the migration depends on**: one
-on `document_id` per entity table, a partial one on `files.hash`, and a composite
-one on `files_related_mph`. Without those, `ON CONFLICT` clauses would error
-rather than resolve. It finishes by logging discovered link/component tables and
-a summary of WordPress row counts.
+Safety checks always run. Before target mutation they validate the profile name
+and JSON, country/locale/currency/timezone agreement, WordPress prefix, required
+prefixed source tables, optional plugin tables, profile exclusions, hard Store
+and Deal counts, the target database, and any existing target Site
+Configuration country. A country mismatch is refused instead of importing into
+the wrong deployment. Attachment-count drift is a warning because a live source
+can add media after the paired database/files snapshot; Phase 01 reports any
+actual files missing from the configured uploads tree.
+
+It then asserts the required Strapi tables exist and **creates the unique
+indexes the rest of the migration depends on**: one on `document_id` per entity
+table, a partial one on `files.hash`, a composite one on
+`files_related_mph`, and every Coupon/Deal taxonomy, Logo Store and unique-pool
+conflict pair. It validates the actual unique column pair after creation, so a
+same-named but incompatible index fails preflight rather than Phase 07/08. It
+finishes by logging discovered link/component tables and a summary of
+WordPress row counts.
 
 ### 01 — Media inventory
 
@@ -438,16 +466,19 @@ so phases 07/08 can resolve media even when run standalone without phase 01.
 
 ### 02 — Media upload (on demand)
 
-The phase entry point only preloads the hash cache from existing `files` rows, so
-a re-run never re-uploads an image already in Strapi. Real uploads happen when a
-content phase resolves a media reference.
+The phase entry point preloads complete existing `files` rows — ids, hashes,
+URLs, formats, dimensions and provider metadata — so later phases do not issue
+one `files` lookup per logo. A re-run never re-uploads an image already in
+Strapi. Real uploads happen when a content phase resolves a media reference.
 
 An upload proceeds as: check the media map, resolve the inventory item, read the
 bytes once and hash them, and check the hash cache — a hit records the mapping
 and returns the existing file id. The hash is always taken from the
 **pre-optimization source bytes**, so dedup and idempotency are unaffected by
-re-encoding. Concurrent posts referencing the same image share one upload through
-an in-flight map keyed by resolved path.
+re-encoding. Concurrent records referencing the same image share one upload
+through in-flight maps keyed by both resolved path and source-byte hash. The
+second key matters when WordPress has two attachment paths containing identical
+bytes.
 
 On the S3 path, supported raster types are optimized first: EXIF orientation
 baked in, downscaled to fit a maximum box, JPEG and PNG converted to WebP, and
@@ -486,6 +517,28 @@ categories), inserts FAQ components when FAQs are enabled, and inserts an SEO
 component when Yoast term meta supplies a title or description. The entity insert
 upserts: on a `document_id` conflict it refreshes the `description` column rather
 than doing nothing, so re-runs pick up edited WordPress descriptions.
+
+The high-volume path is deliberately front-loaded before workers begin:
+
+1. Slugs are claimed in source order, keeping collision suffixes deterministic.
+2. The S3 key inventory is compared with the profile file manifest. Reusable
+   manifest entries missing only their Strapi `files` row are restored in
+   parameter-safe bulk inserts; the immutable S3 objects are not downloaded or
+   transformed.
+3. Full media rows and the presence of existing FAQ/content-media relations are
+   preloaded once.
+4. Terms run through bounded workers. `TAXONOMY_CONCURRENCY` defaults to `8`
+   and is clamped to `1..8` and `PG_POOL_MAX - 2`.
+5. Media is resolved before a term opens its transaction. The entity, logo,
+   content-media links, FAQs and SEO are then reconciled in that one transaction.
+
+An empty imported FAQ or description-media set skips its reconciliation queries
+only if the preloaded target snapshot also says the relation is empty. If an old
+target relation exists, the normal replacement path still runs and removes it.
+This is the difference between a safe no-op optimization and an idempotency bug.
+The phase reports throughput after every 10 completed terms, plus the final
+row. A failed term does not reject the phase until every already-started worker
+has settled, preventing late commits after the orchestrator begins shutdown.
 
 ### 05 — Coupon pools, 06 — Unique codes
 
@@ -557,6 +610,13 @@ Shared behavior:
   [`offer-extract.ts`](../migration/src/utils/offer-extract.ts) derives these
   best-effort defaults from title/content. Product Deal promotion copy comes
   only from its WordPress `deal_discount` value mapped to `discount`.
+- **Locale-aware quality** recognizes phrases such as Free Shipping, Buy One
+  Get One, Starting At, Under, dollar-value discounts, and case-insensitive
+  dollar cashback such as `USD 15 Cashback`, `$15 cashback`, or
+  `Cashback: $15`. `SPECIAL OFFER`
+  is a reported last fallback. Invalid affiliate destinations are quarantined, and
+  URL/image values found in Coupon code fields are normalized to no-code and
+  reported rather than imported as literal codes.
 - **`badge`** is set to `Recommended` when the WordPress popular-coupon meta is
   set. (There is no `is_popular` column; that mapping moved to the badge.)
 - **Author** resolves through the user id map, or stays null when the author was
@@ -570,6 +630,28 @@ Shared behavior:
   longer in the expected source partition. This makes re-import converge when a
   source post is deleted/withdrawn or changes between Coupon and Product Deal,
   while preserving hand-created Strapi offers.
+
+Coupon write performance is optimized for a remote target database. Before
+workers start, Phase 07 snapshots whether each existing Coupon has content-media
+or unique-pool links. Content rewriting and taxonomy-id resolution happen with
+bounded preparation concurrency before any write transaction. Prepared Coupons
+are grouped into batches of `250` by default, with up to four batch transactions
+running concurrently. One transaction bulk-upserts the Coupon rows and source
+registry, then bulk-reconciles taxonomy/Logo Store links, content media and pool
+links. Empty media/pool reconciliation runs only when the source has rows or the
+snapshot proves stale target rows may need removal. `COUPON_CONCURRENCY`
+(default/max `8`) controls preparation, `COUPON_BATCH_SIZE` (default `250`, max
+`500`) controls rows per transaction, and `COUPON_BATCH_CONCURRENCY`
+(default/max `4`) controls PostgreSQL pressure. `PG_POOL_MAX` defaults to `10`;
+the two Coupon worker settings are reduced together when needed so their
+maximum acquisitions plus two reserved connections never exceed the pool.
+Together with the two live Strapi pools capped at five connections each, the
+default uses at most 20 of the current managed database's 22 backends. Raise
+the migration pool only while Strapi is stopped or after verifying additional
+database capacity.
+Data/constraint failures are
+recursively split to isolate a bad source row; infrastructure or SQL failures
+abort normally. Progress and records-per-second are logged per completed batch.
 
 Deal-specific: prices go through [`price.ts`](../migration/src/utils/price.ts),
 which handles display-formatted Indian prices that a naive parse would silently
@@ -615,9 +697,15 @@ unused files — and copies each from its recorded source path into Strapi's
 `public/uploads`, skipping targets that already exist and counting sources that
 have vanished as failures.
 
-### 12–15 — Backfills
+### 12–16 — Backfills and cleanup
 
 These run against already-migrated rows rather than fresh WordPress data.
+Phase 13 additionally creates or updates the active profile's Site
+Configuration. The USA
+profile imports five hero banners, resolves eight featured Store URLs to Store
+slugs, ignores the four intentionally retired legacy grids, and disables
+homepage sections whose required catalog source is unavailable. WordPress
+header/footer tracking scripts remain excluded unless explicitly approved.
 
 - **12 — Offer backfill.** Rebuilds each Deal's four taxonomy link sets from
   current WordPress data. The ACF `deal_store` term is ordered first in
@@ -632,12 +720,6 @@ These run against already-migrated rows rather than fresh WordPress data.
   and a parity test pins those counts to the component schemas' `max`. Every
   component and relation table name is verified against `information_schema`
   first, and each single type is skipped when its table already has a row.
-- **13a — Homepage coupon offer sections.** Backfills the coupon-backed
-  `exploreOffers` / `offersByBrand` component trees onto homepages created before
-  those components existed, preserving the legacy criteria. Idempotent
-  (populated sections are skipped), transactional, and serialized on the homepage
-  row. Missing component infrastructure fails the phase — apply the schemas
-  first, then rerun it standalone.
 - **14 — Media optimize.** Two passes over already-migrated S3 images. Pass 1
   takes rows with no `formats` and an optimizable MIME type, optimizes the
   original and generates the full variant matrix including AVIF twins, writing
@@ -728,6 +810,17 @@ The pipeline is deliberately lazy and dedup-first:
 5. **Orphan-safe.** When a reference cannot be resolved — missing local file,
    non-image, a URL instead of an id — the caller skips the link and the entity
    is still inserted without media. No throw, no retry, a debug log.
+6. **Manifest-owned cleanup.** Bulk-restored rows use a deterministic
+   `manifest-file:<hash>` document identity. After a completely successful run,
+   Phase 16 can exclude only unreferenced rows with that identity from the live
+   S3 reference set. It prunes them after the cleanup dry-run/mass-deletion
+   guards; ordinary unlinked Media Library rows remain untouched.
+
+   A fresh target can legitimately leave more than 40% of a large restored
+   manifest unused. If the Phase 16 ratio fuse stops cleanup, verify the active
+   profile, Postgres target, S3 bucket/root, linked-media counts and reported
+   orphan sample before using `--force-orphan-cleanup`; the flag is approval of
+   that reviewed deletion set, not the normal first response to the warning.
 
 ---
 
@@ -741,11 +834,13 @@ Shutdown always runs from the orchestrator's `finally` block, and **order
 matters**: end the MySQL pool first (closing the pooled connections piping
 through the tunnel), then the local tunnel server, then the SSH client.
 
-On the MySQL side everything is read-only and parameterized. On the Postgres side
-most work is single-statement autocommit rather than explicit transactions — safe
-because idempotency comes from deterministic document ids and conflict clauses,
-so a process that dies mid-phase leaves nothing to unwind. Phase 13a is the
-exception: it is transactional and serialized on the homepage row.
+On the MySQL side everything is read-only and parameterized. On the Postgres
+side most work is single-statement autocommit, with idempotency coming from
+deterministic document ids and conflict clauses. Phase 03 uses one transaction
+per taxonomy so its entity, media links, FAQ and SEO changes commit together;
+slow disk/S3 work is completed before that transaction opens. Phase 07 uses one
+transaction per prepared Coupon batch so every row and its owned relations
+commit atomically.
 
 ---
 
@@ -853,7 +948,13 @@ diff, then re-run with `--apply --yes-i-mean-<host-or-bucket>`, where the target
 is the exact host or bucket printed in the log line. The mismatch is the point:
 it is what stops a script aimed at local from running against production.
 
-**Partial progress after a crash** — just re-run the migration; checkpoints pick
-up where it stopped. Only if you suspect corrupted state should you reach for
-`--clean`, and only after reading its contract in §2 — it destroys the seeded
-homepage, menu, and footer along with everything else.
+**Partial progress after a crash** — just re-run the migration; the active
+profile's checkpoints pick up where it stopped. Confirm the log names the
+expected profile and `.state/<profile>` path first. Only if you suspect
+corrupted state should you reach for `--clean`, and only after reading its
+contract in §2 — it destroys the seeded homepage, menu, footer and global
+content along with migrated catalog rows. The target Site Configuration row is
+preserved as a country guard and Phase 13 updates it from the active profile.
+
+For the owner/operator explanation and India compatibility checklist, see
+[Country Setup and Multi-Country Sites](./country-setup.md).

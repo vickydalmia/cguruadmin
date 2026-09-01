@@ -117,28 +117,77 @@ function parseFormats(value: unknown): Record<string, any> | null {
   return value as Record<string, any>;
 }
 
+type FileCacheRow = {
+  id: number;
+  name: string;
+  hash: string;
+  ext: string;
+  url: string;
+  formats: unknown;
+  width: number | null;
+  height: number | null;
+  provider: string;
+  provider_metadata: unknown;
+};
+
 // Cache of hash → strapi file id (to avoid duplicate uploads)
 const existingHashes = new Map<string, number>();
-// Cache of file id → record (url/formats/dimensions), filled lazily by
-// getFileRecordById and by fresh inserts — eagerly loading formats jsonb for
-// the whole files table would waste memory on records never referenced.
+// Cache of file id → record (url/formats/dimensions). Phase 03 reads most
+// taxonomy logos, so one bulk preload is much cheaper than thousands of
+// remote `SELECT ... WHERE id = ?` round trips.
 const fileRecords = new Map<number, UploadedFileRecord>();
-let hashCacheLoaded = false;
+let fileCachePromise: Promise<void> | null = null;
 
-async function loadHashCache(): Promise<void> {
-  if (hashCacheLoaded) return;
-  const rows = await pgQuery<{ hash: string; id: number }>(
-    `SELECT hash, id FROM files WHERE hash IS NOT NULL`
-  );
-  for (const row of rows) {
-    existingHashes.set(row.hash, row.id);
+function cacheFileRow(row: FileCacheRow): void {
+  existingHashes.set(row.hash, row.id);
+  fileRecords.set(row.id, {
+    id: row.id,
+    name: row.name,
+    hash: row.hash,
+    ext: row.ext,
+    url: row.url,
+    formats: parseFormats(row.formats),
+    width: row.width,
+    height: row.height,
+    provider: row.provider,
+    providerMetadata: row.provider_metadata,
+  });
+}
+
+async function loadFileCache(): Promise<void> {
+  if (!fileCachePromise) {
+    fileCachePromise = (async () => {
+      const rows = await pgQuery<FileCacheRow>(
+        `SELECT id, name, hash, ext, url, formats, width, height,
+                provider, provider_metadata
+           FROM files
+          WHERE hash IS NOT NULL`,
+      );
+      for (const row of rows) cacheFileRow(row);
+    })();
   }
-  hashCacheLoaded = true;
+  await fileCachePromise;
+}
+
+export async function preloadFileRecordCache(): Promise<number> {
+  await loadFileCache();
+  return existingHashes.size;
+}
+
+/** Reload after a bulk manifest restore performed between migration phases. */
+export async function refreshFileRecordCache(): Promise<number> {
+  existingHashes.clear();
+  fileRecords.clear();
+  availabilityByFileId.clear();
+  fileCachePromise = null;
+  await preloadFileRecordCache();
+  return existingHashes.size;
 }
 
 export async function getFileRecordById(
   fileId: number
 ): Promise<UploadedFileRecord | undefined> {
+  await loadFileCache();
   const cached = fileRecords.get(fileId);
   if (cached) return cached;
   const rows = await pgQuery<{
@@ -159,20 +208,8 @@ export async function getFileRecordById(
     [fileId]
   );
   if (!rows[0]) return undefined;
-  const record: UploadedFileRecord = {
-    id: rows[0].id,
-    name: rows[0].name,
-    hash: rows[0].hash,
-    ext: rows[0].ext,
-    url: rows[0].url,
-    formats: parseFormats(rows[0].formats),
-    width: rows[0].width,
-    height: rows[0].height,
-    provider: rows[0].provider,
-    providerMetadata: rows[0].provider_metadata,
-  };
-  fileRecords.set(record.id, record);
-  return record;
+  cacheFileRow(rows[0]);
+  return fileRecords.get(rows[0].id);
 }
 
 let uploadStats = { uploaded: 0, reused: 0, skipped: 0, failed: 0 };
@@ -286,7 +323,7 @@ export async function isStoredFileAvailable(
 }
 
 /**
- * Phase 2 — Preload hash cache only. Actual uploads happen on-demand
+ * Phase 2 — Preload complete file records. Actual uploads happen on-demand
  * via uploadMediaOnDemand() when media is referenced by content.
  */
 export async function runMediaUpload(): Promise<void> {
@@ -298,9 +335,10 @@ export async function runMediaUpload(): Promise<void> {
     return;
   }
 
-  // Preload existing file hashes so on-demand uploads can skip duplicates
-  await loadHashCache();
-  logger.info(`Loaded ${existingHashes.size} existing file hashes`);
+  // Preload complete records so on-demand taxonomy media reuse needs no
+  // per-file PostgreSQL reads.
+  await preloadFileRecordCache();
+  logger.info(`Loaded ${existingHashes.size} existing file record(s)`);
   logger.info(`Media inventory has ${inventory.size} items — uploads will happen on-demand when referenced`);
 }
 
@@ -323,6 +361,13 @@ export interface DiskUploadSource {
 // In-flight uploads keyed by resolved local path, so concurrent posts
 // referencing the same image share one upload instead of racing to duplicate.
 const inFlightUploads = new Map<string, Promise<UploadedFileRecord | undefined>>();
+// Different WordPress attachment paths can contain identical bytes. Bounded
+// taxonomy concurrency must share one hash-level write as well as one
+// path-level write, otherwise two workers can recreate duplicate files rows.
+const inFlightContentHashes = new Map<
+  string,
+  Promise<UploadedFileRecord | undefined>
+>();
 
 /**
  * Called by resolveMediaRef when a media attachment is actually needed.
@@ -440,13 +485,37 @@ async function insertFilesRowFromManifest(
 async function doUploadFileFromDisk(
   source: DiskUploadSource
 ): Promise<UploadedFileRecord | undefined> {
-  await loadHashCache();
+  await loadFileCache();
 
+  let sourceBytes: Buffer;
+  let hash: string;
+  try {
+    sourceBytes = fs.readFileSync(source.localPath);
+    hash = hashBuffer(sourceBytes);
+  } catch (err: any) {
+    logger.error(`Failed to read media ${source.fileName}: ${err.message}`);
+    uploadStats.failed++;
+    if (source.throwOnFailure) throw err;
+    return undefined;
+  }
+
+  const contentPending = inFlightContentHashes.get(hash);
+  if (contentPending) return contentPending;
+
+  const task = processFileFromDisk(source, sourceBytes, hash).finally(() => {
+    inFlightContentHashes.delete(hash);
+  });
+  inFlightContentHashes.set(hash, task);
+  return task;
+}
+
+async function processFileFromDisk(
+  source: DiskUploadSource,
+  sourceBytes: Buffer,
+  hash: string,
+): Promise<UploadedFileRecord | undefined> {
   try {
     const filePath = source.localPath;
-    // One read serves both the hash and the upload body.
-    const sourceBytes = fs.readFileSync(filePath);
-    const hash = hashBuffer(sourceBytes);
     let repairExistingId: number | null = null;
 
     if (source.backgroundRemoval) {

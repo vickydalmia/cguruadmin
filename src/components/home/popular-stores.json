@@ -1,7 +1,7 @@
 {
   "collectionName": "components_home_popular_stores",
   "info": {
-    "displayName": "Popular Stores Section",
+    "displayName": "Popular Stores & Brands Section",
     "icon": "store"
   },
   "attributes": {
@@ -17,15 +17,51 @@
       "repeatable": false,
       "component": "shared.cta"
     },
+    "featuredEntityType": {
+      "type": "enumeration",
+      "enum": ["store", "brand"],
+      "default": "store",
+      "required": true
+    },
     "featuredStore": {
       "type": "relation",
       "relation": "oneToOne",
-      "target": "api::store.store"
+      "target": "api::store.store",
+      "conditions": {
+        "visible": {
+          "==": [
+            {
+              "var": "featuredEntityType"
+            },
+            "store"
+          ]
+        }
+      }
+    },
+    "featuredBrand": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::brand.brand",
+      "conditions": {
+        "visible": {
+          "==": [
+            {
+              "var": "featuredEntityType"
+            },
+            "brand"
+          ]
+        }
+      }
     },
     "stores": {
       "type": "relation",
       "relation": "oneToMany",
       "target": "api::store.store"
+    },
+    "brands": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::brand.brand"
     }
   }
 }

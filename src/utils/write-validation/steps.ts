@@ -35,6 +35,9 @@ import {
   validateEntityOrderedCoupons,
 } from '../entity-ordered-coupon-validation';
 import { validateHomepageImages } from '../homepage-image-validation';
+import { normaliseHomepageHeroOfferFields } from '../homepage-hero-offer';
+import { validateHomepageHeroOffers } from '../homepage-hero-offer-validation';
+import { validateHomepagePopularStores } from '../homepage-popular-stores-validation';
 import { validateHomepagePopularSearches } from '../homepage-popular-searches-validation';
 import { validateIndependenceDaySale } from '../independence-day-sale-validation';
 import { validateIdentity } from '../identity-validation';
@@ -50,6 +53,12 @@ import { validateRedirect } from '../redirect-validation';
 import { warnUndersizedSeoOgImage } from '../seo-og-image-validation';
 import { sanitizeRichtextData } from '../sanitize-richtext';
 import { normaliseTextFields, validateTextFieldsForWrite } from '../text-field-validation';
+import { SITE_CONFIGURATION_UID } from '../../api/site-configuration/services/country-registry';
+import { validateSiteConfigurationForWrite } from '../../api/site-configuration/services/site-configuration';
+import {
+  isEntityTemplateUid,
+  validateUniqueEntityPageTemplate,
+} from '../entity-page-template-validation';
 
 import { DOTD_UID } from '../../constants/deal-of-the-day-sections';
 import { HOMEPAGE_UID } from '../../constants/homepage-sections';
@@ -163,6 +172,13 @@ export const MUTATOR_STEPS: readonly ValidationStep[] = [
     applies: isAffiliateOfferUid,
     run: ({ data }) => normaliseAffiliateOfferFields(data),
   },
+  {
+    // Hero Offer relation fields are conditional. Switching the discriminator
+    // hides and omits the previous relation, so clear it before validation.
+    name: 'normaliseHomepageHeroOfferFields',
+    applies: (uid) => uid === HOMEPAGE_UID,
+    run: ({ data }) => normaliseHomepageHeroOfferFields(data),
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -178,6 +194,13 @@ export const MUTATOR_STEPS: readonly ValidationStep[] = [
  * having run, which they always do.
  */
 export const COLLECTED_STEPS: readonly ValidationStep[] = [
+  {
+    name: 'validateSiteConfigurationForWrite',
+    actions: CREATE_UPDATE,
+    applies: (uid) => uid === SITE_CONFIGURATION_UID,
+    run: ({ strapi, data, documentId }) =>
+      validateSiteConfigurationForWrite(strapi, data, documentId),
+  },
   {
     name: 'validateCouponTypeFields',
     applies: isCouponUid,
@@ -207,6 +230,19 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     actions: CREATE_UPDATE,
     applies: (uid) => uid === HOMEPAGE_UID,
     run: ({ strapi, data }) => validateHomepageImages(strapi, data),
+  },
+  {
+    name: 'validateHomepageHeroOffers',
+    actions: CREATE_UPDATE,
+    applies: (uid) => uid === HOMEPAGE_UID,
+    run: ({ strapi, data }) => validateHomepageHeroOffers(strapi, data),
+  },
+  {
+    name: 'validateHomepagePopularStores',
+    actions: CREATE_UPDATE,
+    applies: (uid) => uid === HOMEPAGE_UID,
+    run: ({ strapi, data, documentId }) =>
+      validateHomepagePopularStores(strapi, data, documentId),
   },
   {
     name: 'validateHomepagePopularSearches',
@@ -353,7 +389,7 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
 // ---------------------------------------------------------------------------
 
 /**
- * Slug and redirect invariants are validated with plain reads and committed by
+ * Slug, template-owner and redirect invariants are validated with plain reads and committed by
  * an INDEPENDENT write, so two concurrent saves can both pass on the same
  * snapshot and both commit. The middleware serializes them under one advisory
  * lock per domain (see write-serialization.ts).
@@ -372,6 +408,15 @@ export const LOCKED_STEPS: readonly ValidationStep[] = [
     name: 'validateIdentity',
     run: ({ strapi, uid, action, data, documentId, strict }) =>
       validateIdentity(strapi, uid, action, data, documentId, strict),
+  },
+  {
+    // Singleton campaign templates can have exactly one entity owner. This
+    // read-then-write check shares the entity identity lock so concurrent
+    // creates/updates/clones cannot both claim the same template.
+    name: 'validateUniqueEntityPageTemplate',
+    applies: isEntityTemplateUid,
+    run: ({ strapi, uid, action, data, documentId }) =>
+      validateUniqueEntityPageTemplate(strapi, data, documentId, action, uid),
   },
   {
     // Redirects are evaluated by the storefront middleware on EVERY request,

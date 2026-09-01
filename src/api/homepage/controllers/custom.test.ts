@@ -1,6 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import heroProductSchema from '../../../components/home/hero-product.json';
+import popularStoresSchema from '../../../components/home/popular-stores.json';
+import { COMPONENT_FIELD_LABELS } from '../../../bootstrap/field-hints';
+import homepageSchema from '../content-types/homepage/schema.json';
 import createHomepageController from './custom';
+
+const ALL_FEATURES_LIVE = Object.fromEntries(
+  [
+    'stores', 'coupons', 'brands', 'categories', 'banks', 'productDeals',
+    'about', 'careers', 'contact', 'faqs', 'testimonials', 'partnerWithUs',
+    'culture', 'privacyPolicy', 'termsAndConditions', 'affiliateDisclosure',
+    'dealOfTheDay', 'independenceDaySale',
+  ].map((key) => [key, { enabled: true, ready: true, live: true }]),
+);
+
+const siteSettingsService = () => ({
+  publicSettings: vi.fn(async () => ({ countryCode: 'IN', features: ALL_FEATURES_LIVE })),
+});
 
 function createHarness(homepage: any, fallbackDeals: any[] = []) {
   const findFirst = vi.fn().mockResolvedValue(homepage);
@@ -12,8 +29,10 @@ function createHarness(homepage: any, fallbackDeals: any[] = []) {
     return { count };
   });
   const sanitizeOutput = vi.fn(async (data: any) => data);
+  const { publicSettings } = siteSettingsService();
   const strapi = {
     documents,
+    service: vi.fn(() => ({ publicSettings })),
     contentType: vi.fn(() => ({})),
     contentAPI: {
       sanitize: {
@@ -32,7 +51,9 @@ function createHarness(homepage: any, fallbackDeals: any[] = []) {
     ctx,
     findFirst,
     findManyDeals,
+    count,
     sanitizeOutput,
+    publicSettings,
   };
 }
 
@@ -55,6 +76,34 @@ function actionableDeal(index: number, overrides: Record<string, any> = {}) {
 }
 
 describe('homepage aggregate offer population', () => {
+  it('exposes only the Coupon-backed Explore Offers and Offers by Brand fields', () => {
+    const attributes = homepageSchema.attributes as Record<string, unknown>;
+
+    expect(heroProductSchema.info.displayName).toBe('Product/Offer');
+    expect(COMPONENT_FIELD_LABELS['home.hero-section']?.products).toBe(
+      'Product/Offer',
+    );
+    expect(attributes).toHaveProperty('exploreOffers');
+    expect(attributes).toHaveProperty('offersByBrand');
+    expect(attributes).not.toHaveProperty('exploreDeals');
+    expect(attributes).not.toHaveProperty('dealsByBrand');
+    expect(popularStoresSchema.attributes.brands).toMatchObject({
+      type: 'relation',
+      relation: 'oneToMany',
+      target: 'api::brand.brand',
+    });
+    expect(popularStoresSchema.attributes.featuredEntityType).toMatchObject({
+      type: 'enumeration',
+      enum: ['store', 'brand'],
+      default: 'store',
+    });
+    expect(popularStoresSchema.attributes.featuredBrand).toMatchObject({
+      type: 'relation',
+      relation: 'oneToOne',
+      target: 'api::brand.brand',
+    });
+  });
+
   it('ships full offer card content on every deal surface, hero included', async () => {
     const harness = createHarness({});
 
@@ -62,6 +111,7 @@ describe('homepage aggregate offer population', () => {
 
     const populate = harness.findFirst.mock.calls[0]?.[0].populate;
     const couponRefs = [
+      populate.hero.populate.products.populate.coupon,
       populate.topOffers.populate.items.populate.coupon,
       populate.cgExclusive.populate.items.populate.coupon,
       populate.newlyAdded.populate.items.populate.coupon,
@@ -70,8 +120,6 @@ describe('homepage aggregate offer population', () => {
     ];
     const fullDealRefs = [
       populate.topDeals.populate.deals,
-      populate.dealsByBrand.populate.deals,
-      populate.exploreDeals.populate.tabs.populate.deals,
     ];
 
     for (const ref of [...couponRefs, ...fullDealRefs]) {
@@ -79,13 +127,22 @@ describe('homepage aggregate offer population', () => {
       expect(ref.fields).not.toContain('excerpt');
     }
 
-    // The hero CTA opens the shared redeem modal, whose "Deal Details" is
-    // composed from written `content` — the hero projection must ship it.
+    // The hero CTA opens the shared redeem modal for either schema, so both
+    // projections must ship full written content.
     const heroDeal = populate.hero.populate.products.populate.deal;
+    const heroCoupon = populate.hero.populate.products.populate.coupon;
     expect(heroDeal.fields).toContain('content');
     expect(heroDeal.fields).not.toContain('excerpt');
+    expect(heroCoupon.fields).toContain('content');
+    expect(heroCoupon.fields).not.toContain('excerpt');
 
     expect(populate.popularStores.populate.featuredStore.fields).not.toContain(
+      'shortDescription',
+    );
+    expect(populate.popularStores.populate.featuredBrand.fields).not.toContain(
+      'shortDescription',
+    );
+    expect(populate.popularStores.populate.brands.fields).not.toContain(
       'shortDescription',
     );
     expect(
@@ -116,8 +173,6 @@ describe('homepage aggregate offer population', () => {
 
     for (const ref of [
       populate.topDeals.populate.deals,
-      populate.dealsByBrand.populate.deals,
-      populate.exploreDeals.populate.tabs.populate.deals,
       populate.offersByBrand.populate.offers,
       populate.exploreOffers.populate.tabs.populate.offers,
     ]) {
@@ -131,6 +186,7 @@ describe('homepage aggregate offer population', () => {
     // offer-status filter, but their saved relation order must remain intact.
     for (const ref of [
       populate.popularStores.populate.stores,
+      populate.popularStores.populate.brands,
       populate.popularSearches.populate.stores,
       populate.popularSearches.populate.brands,
       populate.popularSearches.populate.categories,
@@ -146,7 +202,6 @@ describe('homepage aggregate offer population', () => {
       populate.hero.populate.products,
       populate.topOffers.populate.items,
       populate.cgExclusive.populate.items,
-      populate.exploreDeals.populate.tabs,
       populate.exploreOffers.populate.tabs,
       populate.newlyAdded.populate.items,
       populate.bankOffers.populate.items,
@@ -160,34 +215,131 @@ describe('homepage aggregate offer population', () => {
     expect(populate.hero.populate.products.populate.deal.filters).toEqual(
       publishedFilter,
     );
+    expect(populate.hero.populate.products.populate.coupon.filters).toEqual(
+      publishedFilter,
+    );
     expect(populate.topOffers.populate.items.populate.coupon.filters).toEqual(
       publishedFilter,
     );
   });
 
-  it('removes unpublished rows and caps each list at its own +4 buffer', async () => {
+  it('caps stores plus brands into the existing stores response field', async () => {
     const published = Array.from({ length: 30 }, (_, index) => publishedOffer(index));
     const expired = { documentId: 'expired', contentStatus: 'expired' };
     const harness = createHarness({
       popularStores: {
-        stores: Array.from({ length: 40 }, (_, i) => ({ documentId: `store-${i}` })),
+        stores: Array.from({ length: 20 }, (_, i) => ({ documentId: `store-${i}` })),
+        brands: Array.from({ length: 20 }, (_, i) => ({ documentId: `brand-${i}` })),
       },
       // enabled:false pins the raw drop/cap path — backfill (tested separately)
       // would replace these bare curated records as non-actionable.
       topDeals: { enabled: false, deals: [expired, ...published] },
       offersByBrand: { offers: [expired, ...published] },
-      exploreDeals: { tabs: [{ deals: [expired, ...published] }] },
       exploreOffers: { tabs: [{ offers: [expired, ...published] }] },
     });
 
     const response = await harness.controller.homepageFull(harness.ctx as any);
 
-    expect(response.data.popularStores.stores).toHaveLength(31);
+    expect(response.data.popularStores.stores).toHaveLength(30);
+    expect(response.data.popularStores.stores.map((entity: any) => entity.documentId)).toEqual([
+      ...Array.from({ length: 20 }, (_, i) => `store-${i}`),
+      ...Array.from({ length: 10 }, (_, i) => `brand-${i}`),
+    ]);
+    expect(response.data.popularStores).not.toHaveProperty('brands');
     expect(response.data.topDeals.deals).toHaveLength(10);
     expect(response.data.offersByBrand.offers).toHaveLength(10);
-    expect(response.data.exploreDeals.tabs[0].deals).toHaveLength(10);
     expect(response.data.exploreOffers.tabs[0].offers).toHaveLength(10);
     expect(JSON.stringify(response.data)).not.toContain('expired');
+  });
+
+  it('computes offer counts through the matching Store or Brand relation', async () => {
+    const store = { documentId: 'store-1' };
+    const brand = { documentId: 'brand-1' };
+    const harness = createHarness({
+      popularStores: { stores: [store], brands: [brand] },
+    });
+
+    const response = await harness.controller.homepageFull(harness.ctx as any);
+
+    expect(response.data.popularStores.stores[0].offerCount).toBe(0);
+    expect(response.data.popularStores.stores[1]).toMatchObject({
+      documentId: 'brand-1',
+      offerCount: 0,
+    });
+    expect(response.data.popularStores).not.toHaveProperty('brands');
+    expect(harness.count).toHaveBeenCalledTimes(4);
+    const filters = harness.count.mock.calls.map(([options]) => options.filters);
+    expect(filters).toContainEqual({
+      stores: { documentId: 'store-1' },
+      contentStatus: { $eq: 'published' },
+    });
+    expect(filters).toContainEqual({
+      brands: { documentId: 'brand-1' },
+      contentStatus: { $eq: 'published' },
+    });
+  });
+
+  it('normalizes a featured Brand into the existing featuredStore response contract', async () => {
+    const staleStore = { documentId: 'store-1', name: 'Old Store' };
+    const brand = {
+      documentId: 'brand-1',
+      name: 'Featured Brand',
+      slug: 'brands/featured-brand',
+    };
+    const harness = createHarness({
+      popularStores: {
+        featuredEntityType: 'brand',
+        featuredStore: staleStore,
+        featuredBrand: brand,
+        stores: [],
+        brands: [brand],
+      },
+    });
+
+    const response = await harness.controller.homepageFull(harness.ctx as any);
+
+    expect(response.data.popularStores.featuredStore).toMatchObject({
+      documentId: 'brand-1',
+      entityType: 'brand',
+    });
+    expect(response.data.popularStores.stores[0]).toMatchObject({
+      documentId: 'brand-1',
+      entityType: 'brand',
+    });
+    expect(response.data.popularStores).not.toHaveProperty('featuredBrand');
+    expect(response.data.popularStores).not.toHaveProperty('featuredEntityType');
+    const filters = harness.count.mock.calls.map(([options]) => options.filters);
+    expect(filters).not.toContainEqual({
+      stores: { documentId: 'store-1' },
+      contentStatus: { $eq: 'published' },
+    });
+    expect(filters).toContainEqual({
+      brands: { documentId: 'brand-1' },
+      contentStatus: { $eq: 'published' },
+    });
+  });
+
+  it('filters disabled stores before brands consume the combined cap', async () => {
+    const harness = createHarness({
+      popularStores: {
+        stores: Array.from({ length: 40 }, (_, i) => ({ documentId: `store-${i}` })),
+        brands: Array.from({ length: 40 }, (_, i) => ({ documentId: `brand-${i}` })),
+      },
+    });
+    harness.publicSettings.mockResolvedValueOnce({
+      countryCode: 'US',
+      features: {
+        ...ALL_FEATURES_LIVE,
+        stores: { enabled: false, ready: false, live: false },
+      },
+    });
+
+    const response = await harness.controller.homepageFull(harness.ctx as any);
+
+    expect(response.data.popularStores.enabled).not.toBe(false);
+    expect(response.data.popularStores.stores).toHaveLength(30);
+    expect(response.data.popularStores.stores[0].documentId).toBe('brand-0');
+    expect(response.data.popularStores).not.toHaveProperty('brands');
   });
 
   it('drops card-wrapper items whose relation is missing (deleted/expired coupon or deal)', async () => {
@@ -196,7 +348,14 @@ describe('homepage aggregate offer population', () => {
     const staleItem = { banner: { url: '/stale.png' }, coupon: null };
     const liveItem = { banner: { url: '/live.png' }, coupon: publishedOffer(1) };
     const harness = createHarness({
-      hero: { products: [{ deal: null }, { deal: publishedOffer(2) }] },
+      hero: {
+        products: [
+          { entityType: 'deal', deal: null },
+          { entityType: 'deal', deal: publishedOffer(2) },
+          { entityType: 'coupon', coupon: null },
+          { entityType: 'coupon', coupon: publishedOffer(3) },
+        ],
+      },
       topOffers: { items: [staleItem, liveItem] },
       cgExclusive: { items: [staleItem, liveItem] },
       newlyAdded: { items: [staleItem, liveItem] },
@@ -205,7 +364,11 @@ describe('homepage aggregate offer population', () => {
 
     const response = await harness.controller.homepageFull(harness.ctx as any);
 
-    expect(response.data.hero.products).toHaveLength(1);
+    expect(response.data.hero.products).toHaveLength(2);
+    expect(response.data.hero.products.map((item: any) => item.entityType)).toEqual([
+      'deal',
+      'coupon',
+    ]);
     expect(response.data.topOffers.items).toHaveLength(1);
     expect(response.data.cgExclusive.items).toHaveLength(1);
     expect(response.data.newlyAdded.items).toHaveLength(1);
@@ -322,6 +485,9 @@ describe('site chrome aggregate population', () => {
         topStores: Array.from({ length: 20 }, (_, index) => ({
           documentId: `top-store-${index}`,
         })),
+        topBrands: Array.from({ length: 20 }, (_, index) => ({
+          documentId: `top-brand-${index}`,
+        })),
         searchTopStores: Array.from({ length: 10 }, (_, index) => ({
           store: { documentId: `store-${index}` },
         })),
@@ -352,6 +518,7 @@ describe('site chrome aggregate population', () => {
     const controller = createHomepageController({
       strapi: {
         documents,
+        service: vi.fn(siteSettingsService),
         contentType: vi.fn(() => ({})),
         contentAPI: { sanitize: { output: sanitizeOutput } },
       } as any,
@@ -372,6 +539,7 @@ describe('site chrome aggregate population', () => {
     expect(menuCall.populate.searchTopStores).toEqual({
       populate: { store: expect.any(Object) },
     });
+    expect(menuCall.populate.topBrands).toEqual(expect.any(Object));
     expect(menuCall.populate.searchSuggestions).toBe(true);
     expect(menuCall.populate.categorySections.populate.icon).toBe(true);
     expect(
@@ -382,6 +550,7 @@ describe('site chrome aggregate population', () => {
     ).toBe(true);
     expect(response.menu.searchTopStores).toHaveLength(8);
     expect(response.menu.topStores).toHaveLength(18);
+    expect(response.menu.topBrands).toHaveLength(18);
     expect(footerCall.populate.countries).toEqual({
       populate: { flag: true },
     });
@@ -620,6 +789,29 @@ describe('public route metadata aggregate', () => {
     ]);
     const documents = vi.fn((uid: string) => {
       if (uid === 'api::job.job') return { findMany: findManyJobs };
+      if (
+        [
+          'api::store.store',
+          'api::brand.brand',
+          'api::category.category',
+          'api::bank.bank',
+        ].includes(uid)
+      ) {
+        return {
+          findMany: vi.fn(async ({ filters }: any) =>
+            uid === 'api::category.category' &&
+            filters?.pageTemplate === 'dealTemplate'
+              ? [
+                  {
+                    documentId: 'daily-specials',
+                    slug: 'daily-specials',
+                    updatedAt: '2026-07-28T10:00:00.000Z',
+                  },
+                ]
+              : [],
+          ),
+        };
+      }
       const findFirst =
         findFirstByUid.get(uid) ??
         vi.fn().mockResolvedValue(rows[uid] ?? null);
@@ -627,7 +819,7 @@ describe('public route metadata aggregate', () => {
       return { findFirst };
     });
     const controller = createHomepageController({
-      strapi: { documents } as any,
+      strapi: { documents, service: vi.fn(siteSettingsService) } as any,
     });
     const ctx = { send: vi.fn((payload: any) => payload) };
 
@@ -675,12 +867,13 @@ describe('public route metadata aggregate', () => {
         noIndex: true,
       },
       {
-        path: '/deal-of-the-day/',
+        path: '/careers/seo-editor/',
+        updatedAt: '2026-07-21T10:00:00.000Z',
         noIndex: true,
       },
       {
-        path: '/careers/seo-editor/',
-        updatedAt: '2026-07-21T10:00:00.000Z',
+        path: '/daily-specials/',
+        updatedAt: '2026-07-28T10:00:00.000Z',
         noIndex: true,
       },
     ]);

@@ -1,6 +1,5 @@
 import type { Core } from '@strapi/strapi';
 import { publishedOnlyFilters } from '../../../utils/content-status';
-import { toRouteSlug } from '../../../utils/route-normalization';
 import type { EntityPageType } from './entity-page';
 
 export const ENTITY_POPULAR_SEARCH_ORDER = [
@@ -169,16 +168,6 @@ async function readAllLiveOffers(
   return result;
 }
 
-function isEligible(
-  kind: EntityPageType,
-  item: PopularSearchIdentity,
-): boolean {
-  return !(
-    kind === 'category' &&
-    toRouteSlug(item.slug, 'category') === 'deal-of-the-day'
-  );
-}
-
 function increment(
   ranked: Map<string, RankedEntry>,
   item: PopularSearchIdentity,
@@ -219,7 +208,7 @@ function buildCatalog(
   for (const offer of inventory) {
     for (const kind of ENTITY_POPULAR_SEARCH_ORDER) {
       for (const item of offer.relations[kind]) {
-        if (isEligible(kind, item)) increment(globalCounts[kind], item);
+        increment(globalCounts[kind], item);
       }
     }
 
@@ -236,7 +225,7 @@ function buildCatalog(
             relatedCounts.get(key) ?? new Map<string, RankedEntry>();
           relatedCounts.set(key, ranked);
           for (const target of offer.relations[targetKind]) {
-            if (isEligible(targetKind, target)) increment(ranked, target);
+            increment(ranked, target);
           }
         }
       }

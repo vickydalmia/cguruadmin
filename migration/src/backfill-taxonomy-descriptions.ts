@@ -31,6 +31,7 @@ import {
   type TaxonomyDescriptionGap,
   type WpTaxonomyDescriptionRow,
 } from "./utils/taxonomy-description-backfill.js";
+import { classifyTaxonomyTerms } from "./utils/taxonomy-classification.js";
 
 const TABLES = Object.values(TAXONOMY_DESCRIPTION_TARGETS).map(
   ({ table }) => table,
@@ -134,9 +135,12 @@ async function fillDescription(gap: TaxonomyDescriptionGap): Promise<boolean> {
 export async function runTaxonomyDescriptionBackfill(
   apply: boolean,
 ): Promise<void> {
-  const sourceRows = await loadWordPressTerms();
+  const rawRows = await loadWordPressTerms();
+  const { terms: sourceRows } = await classifyTaxonomyTerms(rawRows);
+  // RAW rows for exclusions (phase 03 parity): classification would erase
+  // the Article(s) choose_type signal.
   const exclusions = resolveImportExclusions(
-    sourceRows,
+    rawRows,
     loadExcludedStoreNames(),
   );
   const initial = auditTaxonomyDescriptionCoverage(

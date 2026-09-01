@@ -9,7 +9,13 @@
 // template exists) becomes the extra "Any Other Condition" section — the UI
 // composes the two, so both are sent separately. Attached to every public deal
 // payload by the response walker in offer-text.ts; never stored, and the admin
-// never sees it.
+// never sees it. Currency symbol, number grouping and the MRP wording follow
+// the site-configuration localization so every country domain reads correctly.
+
+import {
+  currentOfferContentLocalization,
+  type OfferContentLocalization,
+} from './offer-content-localization';
 
 function escapeHtml(value: string): string {
   return value
@@ -19,12 +25,18 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-/** "1299.00" / 1299 → "₹1,299"; null for absent/zero/malformed amounts. */
-function rupees(value: unknown): string | null {
+/** "1299.00" / 1299 → "₹1,299" (per site localization); null for absent/zero/malformed amounts. */
+function formatAmount(
+  value: unknown,
+  localization: OfferContentLocalization,
+): string | null {
   if (value === null || value === undefined || value === '') return null;
   const amount = Number(value);
   if (!Number.isFinite(amount) || amount <= 0) return null;
-  return `₹${new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(amount)}`;
+  return `${localization.currencySymbol}${new Intl.NumberFormat(
+    localization.locale,
+    { maximumFractionDigits: 2 },
+  ).format(amount)}`;
 }
 
 export function buildDealComputedContent(deal: {
@@ -32,8 +44,11 @@ export function buildDealComputedContent(deal: {
   mrp?: unknown;
   discount?: unknown;
 }): string | null {
-  const price = rupees(deal.salePrice);
-  const mrp = rupees(deal.mrp);
+  const localization = currentOfferContentLocalization();
+  const price = formatAmount(deal.salePrice, localization);
+  const mrp = formatAmount(deal.mrp, localization);
+  // "MRP" is India's statutory retail term; other countries say "List Price".
+  const mrpLabel = localization.countryCode === 'IN' ? 'MRP' : 'List Price';
   const discount =
     typeof deal.discount === 'string' && deal.discount.trim()
       ? deal.discount.trim()
@@ -41,7 +56,7 @@ export function buildDealComputedContent(deal: {
 
   const lines = [
     price ? `<p><strong>Deal Price - ${price}</strong></p>` : null,
-    mrp ? `<p>MRP - ${mrp}</p>` : null,
+    mrp ? `<p>${mrpLabel} - ${mrp}</p>` : null,
     discount ? `<p>Discount - ${escapeHtml(discount)}</p>` : null,
   ].filter(Boolean);
 

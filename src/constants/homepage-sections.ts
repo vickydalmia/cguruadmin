@@ -5,6 +5,8 @@
 // content-manager view config) and the admin bundle (src/admin/app.tsx uses
 // the labels in the validation-problems side panel) — keep it dependency-free.
 export const HOMEPAGE_UID = 'api::homepage.homepage';
+export const HOMEPAGE_POPULAR_REGULAR_LIMIT = 30;
+export const HOMEPAGE_POPULAR_TOTAL_LIMIT = 31;
 
 export type SectionLabel = {
   attr: string;
@@ -23,15 +25,15 @@ export const HOMEPAGE_SECTION_LABELS: SectionLabel[] = [
   },
   {
     attr: 'hero',
-    label: '1 · Hero — banner slider & products',
+    label: '1 · Hero — banner slider & offers',
     description:
-      'Top of the page: banner slider (1882×781 images) plus up to 4 product cards beside it.',
+      'Top of the page: banner slider (1882×781 images) plus up to 4 Product Deal or Coupon cards beside it.',
   },
   {
     attr: 'popularStores',
-    label: '2 · Popular Stores',
+    label: '2 · Popular Stores & Brands',
     description:
-      'Store row directly under the hero: one featured store plus up to 24 popular stores.',
+      'Combined entity row directly under the hero: one featured Store or Brand plus at most 30 regular selections across Stores and Brands (31 cards total).',
   },
   {
     attr: 'topOffers',
@@ -113,18 +115,6 @@ export const HOMEPAGE_SECTION_LABELS: SectionLabel[] = [
     description:
       'Switch the section on, then select Stores, Brands, Categories, or Banks. ' +
       'Selected entities become canonical Popular Searches links at the bottom of the page.',
-  },
-  {
-    attr: 'exploreDeals',
-    label: 'Legacy · Explore Deals (temporary fallback)',
-    description:
-      'Deprecated Deal-schema content retained for one compatibility release. Populate Explore Offers instead.',
-  },
-  {
-    attr: 'dealsByBrand',
-    label: 'Legacy · Deals by Brand (temporary fallback)',
-    description:
-      'Deprecated Deal-schema content retained for one compatibility release. Populate Offers by Brand instead.',
   },
   {
     attr: 'seo',

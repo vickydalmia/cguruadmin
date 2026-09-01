@@ -36,5 +36,5 @@ test("relation-list seed limits match the API's per-section response caps", () =
   assert.equal(HOMEPAGE_SEED_LIMITS.topDeals, 10);
   assert.equal(HOMEPAGE_SEED_LIMITS.exploreOffersPerTab, 10);
   assert.equal(HOMEPAGE_SEED_LIMITS.offersByBrand, 7);
-  assert.equal(HOMEPAGE_SEED_LIMITS.popularStores, 31);
+  assert.equal(HOMEPAGE_SEED_LIMITS.popularStores, 30);
 });

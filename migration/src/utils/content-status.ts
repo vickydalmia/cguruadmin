@@ -9,16 +9,22 @@ type MigrationLifecycleInput = {
 /**
  * Decide whether a WordPress offer belongs in Strapi.
  *
- * Only `publish` (including rows whose expiry meta has passed — they import
- * as `expired` entries) and `future` (WP scheduled posts → `scheduled`)
- * import. Drafts and trash NEVER import — this deliberately dropped the old
- * "retain a draft/trash row when an expiry plugin withdrew it" special case:
- * the fresh catalog should not carry withdrawn posts at all.
+ * Only non-expired `publish` and `future` posts import. Drafts, trash, and
+ * rows with a valid expiry at or before the migration time NEVER import.
+ * Invalid/missing expiry metadata is treated as no expiry so a malformed
+ * optional field cannot silently delete an otherwise valid offer.
  */
 export function shouldImportMigrationOffer(
   input: MigrationLifecycleInput,
 ): boolean {
-  return input.postStatus === "publish" || input.postStatus === "future";
+  if (input.postStatus !== "publish" && input.postStatus !== "future") {
+    return false;
+  }
+
+  if (!input.expiresAt) return true;
+  const expiresAt = new Date(input.expiresAt);
+  if (Number.isNaN(expiresAt.getTime())) return true;
+  return expiresAt > (input.now ?? new Date());
 }
 
 export function computeMigrationStatus(input: {

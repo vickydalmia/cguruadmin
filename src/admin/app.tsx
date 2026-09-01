@@ -149,6 +149,21 @@ export default {
     }
   },
   bootstrap(app: StrapiApp) {
+    app.addSettingsLink('global', {
+      id: 'country-setup',
+      to: '/settings/country-setup',
+      permissions: [],
+      intlLabel: {
+        id: 'country-setup.settings.label',
+        defaultMessage: 'Country Setup',
+      },
+      Component: async () => {
+        const page = await import(
+          './features/country-setup/components/country-setup-page'
+        );
+        return { default: page.default };
+      },
+    });
     installRecordLockLeaseInterceptor();
     const contentManager = app.getPlugin('content-manager') as any;
     const apis = contentManager.apis;

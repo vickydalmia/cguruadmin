@@ -8,6 +8,10 @@ It does three jobs:
 
 1. **CMS** — editors manage stores, brands, categories, banks, coupons, deals
    and the curated homepage/menu/footer through a customized admin panel.
+   Super Admins also manage the deployment's identity, localization, feature
+   readiness and country-specific Content Manager visibility through
+   **Settings → Country Setup**. Campaign templates are selected on their
+   Store, Brand, Category, or Bank owner.
 2. **Public API** — a hand-written read surface (`/api/search`,
    `/api/directories/:kind`, `/api/homepage-full`, offer listings, ratings,
    redeem) consumed by the ISR gateway and the Astro frontend. Core Strapi
@@ -43,6 +47,8 @@ lifecycle state.
 | **Footer** | single | Footer link sections, socials, countries, partner card |
 | **Global Settings** | single | Site-wide header/footer code injection |
 | **Deal of the Day Page** | single | The curated Deal of the Day page |
+| **Independence Day Sale Page** | single | The curated Independence Day campaign content |
+| **Site Configuration** | hidden single | One deployment's country, locale, timezone, currency, onboarding state and catalog/editorial/legal feature switches; edited through Country Setup |
 
 Schemas live at `src/api/*/content-types/*/schema.json`; reusable components at
 [`src/components/`](./src/components).
@@ -86,9 +92,11 @@ recovery procedure remains in the UI repository's
 ## Migrating from WordPress
 
 The `migration/` directory is a **self-contained package** (its own
-`package.json`, its own `.env.migration`) that moves the legacy WordPress + ACF
-site into this Strapi instance — taxonomies, posts, media to S3, unique coupon
-codes, SEO.
+`package.json`, its own `.env.migration`) that moves a profiled WordPress + ACF
+site into one Strapi instance — taxonomies, posts, media to S3, unique coupon
+codes, SEO, and Site Configuration. Country profiles isolate checkpoints, ID
+maps, manifests, exclusions and reports; see the Country Setup guide before
+running a second country's import.
 
 - [migration/FRESH-MIGRATION.md](./migration/FRESH-MIGRATION.md) — the operator
   runbook: what to type, in order, plus the maintenance/repair script catalog.
@@ -107,6 +115,7 @@ before running it against anything you care about.
 
 | Document | What it covers |
 |---|---|
+| [docs/country-setup.md](./docs/country-setup.md) | Plain-language Country Setup, feature readiness, campaign templates, localization, India compatibility, USA initialization and migration safety |
 | [docs/deployment.md](./docs/deployment.md) | Strapi production environment, legacy-variable removal, immutable-image deployment, verification, outbox checks, and rollback |
 | [docs/public-api.md](./docs/public-api.md) | The public read contract: search params/groups/envelope, directory, page aggregates, offer listings, ratings, redeem and unique-coupon endpoints, with each route's auth, rate limit and cache |
 | [docs/search-operations.md](./docs/search-operations.md) | Operator reference for search: execution modes, the 11 expected trigram indexes, `/api/search/status`, and automatic migration/bootstrap reconciliation |

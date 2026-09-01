@@ -35,7 +35,7 @@ function routeSlug(value) {
   if (!value) return null;
   let pathname;
   try {
-    pathname = new URL(value, "https://www.couponzguru.com").pathname;
+    pathname = new URL(value, "https://path.invalid").pathname;
   } catch {
     return null;
   }

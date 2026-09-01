@@ -9,8 +9,17 @@ import {
   PUBLISHED_OFFER_FILTER,
   storeRef,
 } from '../../../utils/offer-visibility';
+import { HOMEPAGE_POPULAR_REGULAR_LIMIT } from '../../../constants/homepage-sections';
 
 const BANK_FIELDS = ['name', 'slug', 'shortDescription', 'logoAlt'];
+const menuStoreRef = {
+  ...storeRef,
+  fields: [...storeRef.fields, 'pageTemplate'],
+};
+const menuCategoryRef = {
+  ...categoryRef,
+  fields: [...categoryRef.fields, 'pageTemplate'],
+};
 
 // Relations in homepage components are curator-managed and therefore have no
 // database-level cardinality bound. Constrain visibility in the query while
@@ -21,16 +30,15 @@ const BANK_FIELDS = ['name', 'slug', 'shortDescription', 'logoAlt'];
 export const MAX_LIST_ITEMS = 16;
 
 export const MAX_TOP_STORES = 18;
+export const MAX_TOP_BRANDS = 18;
 
 export const TOP_DEALS_RENDER_COUNT = 6;
 
 export const SECTION_LIST_CAPS = {
-  popularStores: 31, // site shows 31
+  popularStores: HOMEPAGE_POPULAR_REGULAR_LIMIT,
   topDeals: 10, // site shows 6
-  dealsByBrand: 10, // legacy fallback, mirrors topDeals
   offersByBrand: 10, // site shows 6
   exploreOffersPerTab: 10, // site shows 6 per tab
-  exploreDealsPerTab: 10, // legacy fallback, mirrors exploreOffers
 } as const;
 
 export const COUPON_FIELDS = [
@@ -87,6 +95,11 @@ const publishedHeroDealRef = {
   filters: PUBLISHED_OFFER_FILTER,
 };
 
+const publishedHeroCouponRef = {
+  ...couponRef,
+  filters: PUBLISHED_OFFER_FILTER,
+};
+
 // Strapi's Document Service accepts nested ordering here, but adding `sort`
 // would override the relation order editors set by drag-and-drop. It rejects
 // nested `limit`/pagination keys, so the response-level cap below remains the
@@ -108,7 +121,13 @@ export const HOMEPAGE_POPULATE = {
   hero: {
     populate: {
       banners: bannerSlides,
-      products: { populate: { deal: publishedHeroDealRef, imageOverride: true } },
+      products: {
+        populate: {
+          deal: publishedHeroDealRef,
+          coupon: publishedHeroCouponRef,
+          imageOverride: true,
+        },
+      },
     },
   },
   topOffers: {
@@ -118,25 +137,19 @@ export const HOMEPAGE_POPULATE = {
     },
   },
   popularStores: {
-    populate: { viewAllCta: true, featuredStore: storeRef, stores: storeRef },
+    populate: {
+      viewAllCta: true,
+      featuredBrand: brandRef,
+      featuredStore: storeRef,
+      stores: storeRef,
+      brands: brandRef,
+    },
   },
   topDeals: { populate: { viewAllCta: true, deals: publishedDealListRef } },
   cgExclusive: {
     populate: {
       viewAllCta: true,
       items: { populate: { coupon: publishedCouponRef, bannerOverride: true } },
-    },
-  },
-  exploreDeals: {
-    populate: {
-      viewAllCta: true,
-      tabs: {
-        populate: {
-          viewAllCta: true,
-          category: categoryRef,
-          deals: publishedDealListRef,
-        },
-      },
     },
   },
   exploreOffers: {
@@ -157,7 +170,6 @@ export const HOMEPAGE_POPULATE = {
       items: { populate: { coupon: publishedCouponRef, cardImage: true } },
     },
   },
-  dealsByBrand: { populate: { viewAllCta: true, deals: publishedDealListRef } },
   offersByBrand: { populate: { viewAllCta: true, offers: publishedCouponListRef } },
   bankOffers: { populate: { viewAllCta: true, items: { populate: { bank: bankRef } } } },
   howItWorks: { populate: { steps: true, features: true } },
@@ -174,22 +186,23 @@ export const HOMEPAGE_POPULATE = {
 } as const;
 
 export const MENU_POPULATE = {
-  topStores: storeRef,
-  searchTopStores: { populate: { store: storeRef } },
+  topStores: menuStoreRef,
+  topBrands: brandRef,
+  searchTopStores: { populate: { store: menuStoreRef } },
   searchSuggestions: true,
   categorySections: {
     populate: {
       icon: true,
-      category: categoryRef,
-      links: { populate: { icon: true, store: storeRef, category: categoryRef } },
+      category: menuCategoryRef,
+      links: { populate: { icon: true, store: menuStoreRef, category: menuCategoryRef } },
     },
   },
-  extraItems: { populate: { store: storeRef, category: categoryRef } },
+  extraItems: { populate: { store: menuStoreRef, category: menuCategoryRef } },
 } as const;
 
 export const FOOTER_POPULATE = {
   sections: {
-    populate: { links: { populate: { store: storeRef, category: categoryRef } } },
+    populate: { links: { populate: { store: menuStoreRef, category: menuCategoryRef } } },
   },
   socialLinks: true,
   countries: { populate: { flag: true } },
@@ -241,17 +254,14 @@ export const MANAGED_SINGLE_ROUTES = [
   ['api::faq-page.faq-page', '/faqs/'],
   ['api::testimonials-page.testimonials-page', '/testimonials/'],
   ['api::partner-with-us-page.partner-with-us-page', '/partner-with-us/'],
+  ['api::culture-page.culture-page', '/culture/'],
   ['api::privacy-policy-page.privacy-policy-page', '/privacy-policy/'],
   [
     'api::terms-and-conditions-page.terms-and-conditions-page',
     '/terms-and-conditions/',
   ],
   [
-    'api::deal-of-the-day-page.deal-of-the-day-page',
-    '/deal-of-the-day/',
-  ],
-  [
-    'api::independence-day-sale-page.independence-day-sale-page',
-    '/independence-day-sale-coupons/',
+    'api::affiliate-disclosure-page.affiliate-disclosure-page',
+    '/affiliate-disclosure/',
   ],
 ] as const;

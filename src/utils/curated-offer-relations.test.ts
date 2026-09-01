@@ -70,6 +70,7 @@ describe('curated offer relation derivation', () => {
     expect(derived).toEqual(
       [
         { sourceUid: 'home.hero-product', field: 'deal', targetUid: 'api::deal.deal' },
+        { sourceUid: 'home.hero-product', field: 'coupon', targetUid: 'api::coupon.coupon' },
         { sourceUid: 'home.top-offer-item', field: 'coupon', targetUid: 'api::coupon.coupon' },
         { sourceUid: 'home.exclusive-item', field: 'coupon', targetUid: 'api::coupon.coupon' },
         { sourceUid: 'home.coupon-card-item', field: 'coupon', targetUid: 'api::coupon.coupon' },

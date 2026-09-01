@@ -21,6 +21,7 @@ import {
 
 import {
   COUPON_FIELDS,
+  MAX_TOP_BRANDS,
   MAX_TOP_STORES,
   FOOTER_POPULATE,
   GLOBAL_POPULATE,
@@ -35,15 +36,23 @@ import {
   dropDeadOffers,
   fillTopDeals,
   headerNotificationPayload,
+  mergePopularBrandsIntoStores,
   routeMetadata,
 } from './homepage-transforms';
+import { featureByPath } from '../../site-configuration/services/country-registry';
+import { filterSiteChrome } from '../../site-configuration/services/site-chrome-filter';
+import { filterHomepage } from '../../site-configuration/services/homepage-filter';
+import { findEntityTemplateOwners } from '../../site-configuration/services/entity-template-owners';
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   async homepageFull(ctx) {
     // Homepage has draftAndPublish disabled — every entry is live; no status filter.
-    const homepage = await strapi.documents('api::homepage.homepage').findFirst({
-      populate: HOMEPAGE_POPULATE as any,
-    });
+    const [homepage, siteSettings] = await Promise.all([
+      strapi.documents('api::homepage.homepage').findFirst({
+        populate: HOMEPAGE_POPULATE as any,
+      }),
+      (strapi.service('api::site-configuration.site-configuration') as any).publicSettings(),
+    ]);
 
     if (!homepage) {
       return ctx.notFound('Homepage not found');
@@ -52,8 +61,13 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const sanitized = await sanitizeOutput(strapi, ctx, 'api::homepage.homepage', homepage);
     dropDeadOffers(sanitized);
     await fillTopDeals(strapi, ctx, sanitized);
+    // Remove catalog-disabled entities before applying combined list caps or
+    // running per-entity count queries. Otherwise disabled stores could consume
+    // every Popular Stores & Brands slot before the live brands are retained.
+    filterHomepage(sanitized, siteSettings.features);
     capCuratedLists(sanitized);
     await attachOfferCounts(strapi, sanitized);
+    mergePopularBrandsIntoStores(sanitized);
     // Nested Coupon cards emit offerText as words; Deal benefit labels and
     // computed pricing content are normalized by the same response walker.
     arrayizeOfferText(sanitized);
@@ -62,14 +76,15 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     // the same nested section tree.
     await attachFestiveOffers(strapi, sanitized);
 
-    return ctx.send({ data: sanitized });
+    return ctx.send({ data: sanitized, siteSettings });
   },
 
   async siteChrome(ctx) {
-    const [menu, footer, global] = await Promise.all([
+    const [menu, footer, global, siteSettings] = await Promise.all([
       strapi.documents('api::menu.menu').findFirst({ populate: MENU_POPULATE as any }),
       strapi.documents('api::footer.footer').findFirst({ populate: FOOTER_POPULATE as any }),
       strapi.documents('api::global.global').findFirst({ populate: GLOBAL_POPULATE as any }),
+      (strapi.service('api::site-configuration.site-configuration') as any).publicSettings(),
     ]);
 
     const [sanitizedMenu, sanitizedFooter, sanitizedGlobal] = await Promise.all([
@@ -81,14 +96,24 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     if (sanitizedMenu?.topStores) {
       sanitizedMenu.topStores = cap(sanitizedMenu.topStores, MAX_TOP_STORES);
     }
+    if (sanitizedMenu?.topBrands) {
+      sanitizedMenu.topBrands = cap(sanitizedMenu.topBrands, MAX_TOP_BRANDS);
+    }
     if (sanitizedMenu?.searchTopStores) {
       sanitizedMenu.searchTopStores = cap(sanitizedMenu.searchTopStores, 8);
     }
 
+    const filtered = filterSiteChrome(
+      sanitizedMenu,
+      sanitizedFooter,
+      siteSettings.features,
+    );
+
     return ctx.send({
-      menu: sanitizedMenu,
-      footer: sanitizedFooter,
+      menu: filtered.menu,
+      footer: filtered.footer,
       global: sanitizedGlobal,
+      siteSettings,
     });
   },
 
@@ -109,9 +134,18 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   async publicRouteMetadata(ctx) {
-    const [singleRows, jobs] = await Promise.all([
+    const siteSettings = await (
+      strapi.service('api::site-configuration.site-configuration') as any
+    ).publicSettings();
+    const liveManagedRoutes = MANAGED_SINGLE_ROUTES.filter(([, path]) => {
+      if (path === '/') return true;
+      const feature = featureByPath(path);
+      return feature ? siteSettings.features[feature.key]?.live === true : true;
+    });
+    const careersLive = siteSettings.features.careers?.live === true;
+    const [singleRows, jobs, campaignPages] = await Promise.all([
       Promise.all(
-        MANAGED_SINGLE_ROUTES.map(([uid]) =>
+        liveManagedRoutes.map(([uid]) =>
           strapi.documents(uid as any).findFirst({
             fields: ['documentId', 'updatedAt'] as any,
             populate: {
@@ -120,17 +154,46 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
           }),
         ),
       ),
-      strapi.documents('api::job.job' as any).findMany({
+      careersLive ? strapi.documents('api::job.job' as any).findMany({
         filters: { isActive: true } as any,
         fields: ['documentId', 'slug', 'updatedAt'] as any,
         populate: {
           seo: { fields: ['noIndex'] },
         } as any,
-      }),
+      }) : Promise.resolve([]),
+      Promise.all([
+        ['dealOfTheDay', 'dealTemplate', 'api::deal-of-the-day-page.deal-of-the-day-page'],
+        ['independenceDaySale', 'independenceDayTemplate', 'api::independence-day-sale-page.independence-day-sale-page'],
+      ].map(async ([featureKey, pageTemplate, uid]) => {
+        if (siteSettings.features[featureKey]?.live !== true) return [];
+        const [owners, singleton]: [any[], any] = await Promise.all([
+          findEntityTemplateOwners(strapi, pageTemplate as any),
+          strapi.documents(uid as any).findFirst({
+            fields: ['documentId', 'updatedAt'] as any,
+            populate: { seo: { fields: ['noIndex'] } } as any,
+          }),
+        ]);
+        if (!singleton) return [];
+        // Only the first (authoritative) owner renders the campaign template —
+        // any accidental duplicate falls back to its generic entity page, so
+        // it must not inherit the singleton's route metadata.
+        return owners.slice(0, 1).map((owner) => {
+          const timestamps = [owner.updatedAt, singleton.updatedAt]
+            .map((value) => new Date(value ?? 0))
+            .filter((value) => Number.isFinite(value.getTime()));
+          const updatedAt = timestamps.length > 0
+            ? new Date(Math.max(...timestamps.map((value) => value.getTime()))).toISOString()
+            : undefined;
+          return routeMetadata(`/${owner.slug}/`, {
+            ...singleton,
+            updatedAt,
+          });
+        });
+      })),
     ]);
 
     const pages = singleRows.flatMap((row, index) =>
-      row ? [routeMetadata(MANAGED_SINGLE_ROUTES[index]![1], row)] : [],
+      row ? [routeMetadata(liveManagedRoutes[index]![1], row)] : [],
     );
     const jobRoutes = (Array.isArray(jobs) ? jobs : []).flatMap((job: any) => {
       const slug = typeof job?.slug === 'string' ? job.slug.trim() : '';
@@ -138,6 +201,6 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       return [routeMetadata(`/careers/${slug}/`, job)];
     });
 
-    return ctx.send({ data: [...pages, ...jobRoutes] });
+    return ctx.send({ data: [...pages, ...jobRoutes, ...campaignPages.flat()] });
   },
 });

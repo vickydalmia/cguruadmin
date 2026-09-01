@@ -26,7 +26,7 @@ describe('header search configuration schema', () => {
     expect(urlPattern.test(url)).toBe(false);
   });
 
-  it('limits Search Top Stores independently to eight selections', () => {
+  it('applies independent limits to header Store and Brand selections', () => {
     expect(menuSchema.attributes.searchTopStores).toMatchObject({
       type: 'component',
       repeatable: true,
@@ -36,6 +36,11 @@ describe('header search configuration schema', () => {
     expect(menuSchema.attributes.topStores).toMatchObject({
       type: 'relation',
       target: 'api::store.store',
+      max: 18,
+    });
+    expect(menuSchema.attributes.topBrands).toMatchObject({
+      type: 'relation',
+      target: 'api::brand.brand',
       max: 18,
     });
   });

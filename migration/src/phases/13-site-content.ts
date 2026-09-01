@@ -1,11 +1,20 @@
 import { unserialize } from "php-serialize";
+import fs from "node:fs";
+import { config } from "../config.js";
 import { wpQuery } from "../db/wp-client.js";
 import { pgQuery, pgTransaction } from "../db/pg-client.js";
 import {
   limitHomepageBankOffers,
   MAX_HOMEPAGE_BANK_OFFERS,
 } from "../utils/homepage-bank-offers.js";
+import { FOOTER_COUNTRY_ASSETS } from "../utils/footer-media-assets.js";
 import { HOMEPAGE_SEED_LIMITS } from "../utils/homepage-limits.js";
+import {
+  homepageCouponOwnerEligibilitySql,
+  selectHomepageHeroOffers,
+  type HomepageCouponOwnerLink,
+  type HomepageHeroSeedOffer,
+} from "../utils/homepage-hero.js";
 import { ensureTermMapping } from "../utils/id-maps.js";
 import { resolveMediaRef } from "../utils/media-resolver.js";
 import {
@@ -17,6 +26,7 @@ import { clean } from "../utils/sanitize.js";
 import { logger } from "../utils/logger.js";
 import { HEADER_SEARCH_SUGGESTIONS } from "../utils/site-selection-defaults.js";
 import { migrationRegistryRows } from "../utils/migration-registry.js";
+import { isAcfTrue } from "../utils/acf.js";
 
 /**
  * Phase 13 — Site Content
@@ -30,8 +40,9 @@ import { migrationRegistryRows } from "../utils/migration-registry.js";
  * All component/link table names are verified against information_schema
  * before writing; missing tables (Strapi schema not migrated yet) are
  * skipped gracefully with a clear log line. Each single type is seeded
- * inside one transaction and skipped entirely when its table already has
- * a row, so re-runs are safe and a crash never leaves a half-built tree.
+ * inside one transaction. Existing singles remain editor-owned; the homepage
+ * gets one fill-only exception for an empty Hero Offer list so a Coupons-only
+ * site can adopt the schema fallback without replacing curated selections.
  */
 
 // ─────────────────────────────────────────────────────────────────────
@@ -158,13 +169,10 @@ const SOCIAL_PLATFORMS: ReadonlyArray<string> = [
   "youtube",
 ];
 
-const FOOTER_COUNTRIES: ReadonlyArray<{ code: string; name: string; url: string }> = [
-  { code: "us", name: "USA", url: "https://www.couponzguruusa.com/" },
-  { code: "sg", name: "Singapore", url: "https://www.couponzguru.sg/" },
-  { code: "ph", name: "Philippines", url: "https://www.couponzguru.ph/" },
-  { code: "ae", name: "UAE", url: "https://www.couponzguru.ae/" },
-  { code: "my", name: "Malaysia", url: "https://www.couponzguru.my/" },
-];
+// Shared country registry filtered for this deployment; phases 13b/13c use
+// the same list so every footer links to all other known country sites.
+const FOOTER_COUNTRIES: ReadonlyArray<{ code: string; name: string; url: string }> =
+  FOOTER_COUNTRY_ASSETS;
 
 const PARTNER_CARD = {
   title: "Partner With Us",
@@ -197,6 +205,30 @@ const MENU_EXTRA_ITEMS: ReadonlyArray<{
   { label: "Today's Deals", url: "/todays-deals/" },
   { label: "End of the Months Sale", url: "/sale/end-of-month/", featured: true },
 ];
+
+const homepageSourceReview: {
+  ignoredLegacyStoreGrids: string[];
+  heroBannersResolved?: number;
+  featuredStoresResolved?: number;
+} = { ignoredLegacyStoreGrids: [] };
+
+async function reportIgnoredLegacyStoreGrids(): Promise<void> {
+  if (config.profile !== "usa") return;
+  const options = await fetchOptionsLike("options_%store%");
+  const roots = [...options.entries()]
+    .filter(([name, value]) =>
+      name !== "options_featured_stores" &&
+      /^\d+$/u.test(value.trim()) &&
+      Number(value) === 8 &&
+      [...options.keys()].some((candidate) => candidate.startsWith(`${name}_0`)),
+    )
+    .map(([name]) => name);
+  homepageSourceReview.ignoredLegacyStoreGrids = roots;
+  logger.info(
+    `USA homepage: intentionally ignoring ${roots.length} legacy eight-Store grid(s)` +
+      (roots.length ? ` (${roots.join(", ")})` : ""),
+  );
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // Schema detection helpers (information_schema)
@@ -422,6 +454,9 @@ export async function runSiteContent(): Promise<void> {
 
   const summary: string[] = [];
 
+  await pgTransaction(() => seedSiteConfiguration(summary));
+  await reportIgnoredLegacyStoreGrids();
+
   // Seed source for independently editable homepage, navigation, and search
   // store selections.
   const curatedStores = await getCuratedStores();
@@ -436,426 +471,99 @@ export async function runSiteContent(): Promise<void> {
   await pgTransaction(() => seedMenu(summary, curatedStores, exploreCategories));
   await pgTransaction(() => seedFooter(summary));
 
+  fs.mkdirSync(config.stateDir, { recursive: true });
+  fs.writeFileSync(
+    `${config.stateDir}/homepage-source-review.json`,
+    JSON.stringify({ profile: config.profile, ...homepageSourceReview }, null, 2),
+  );
+
   logger.info("Site content summary:");
   for (const line of summary) logger.info(`  ${line}`);
 }
 
-type ComponentLink = {
-  cmp_id: number;
-  order: number;
-};
+const SITE_CONFIGURATION_FIELDS = [
+  "siteName", "countryName", "countryCode", "locale", "timezone",
+  "currencyCode", "onboardingComplete", "storesEnabled", "couponsEnabled",
+  "brandsEnabled", "categoriesEnabled", "banksEnabled", "productDealsEnabled",
+  "aboutEnabled", "careersEnabled", "contactEnabled", "faqsEnabled",
+  "testimonialsEnabled", "partnerWithUsEnabled", "cultureEnabled",
+  "privacyPolicyEnabled", "termsAndConditionsEnabled",
+  "affiliateDisclosureEnabled",
+] as const;
 
-type LegacySectionRow = {
-  enabled: boolean | null;
-  heading: string | null;
-};
-
-type LegacyExploreTabRow = {
-  id: number;
-  label_override: string | null;
-  order: number;
-};
-
-function phase13aInfrastructureError(context: string, missing: string[]): Error {
-  return new Error(
-    `Phase 13a cannot safely backfill ${context}: missing required infrastructure ` +
-      `(${missing.join(", ")}). Apply the Strapi schemas before rerunning this phase.`
-  );
+function snakeCase(value: string): string {
+  return value.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 }
 
-function requirePhase13aTables(context: string, ...tables: string[]): void {
-  const missing = missingTables(...tables);
-  if (missing.length > 0) throw phase13aInfrastructureError(context, missing);
-}
-
-async function componentLink(
-  table: string,
-  entityId: number,
-  field: string
-): Promise<ComponentLink | null> {
-  if (!hasTable(table)) return null;
-  const rows = await pgQuery<ComponentLink>(
-    `SELECT cmp_id, "order" FROM "${table}"
-     WHERE entity_id = $1 AND field = $2
-     ORDER BY "order" ASC LIMIT 1`,
-    [entityId, field]
-  );
-  return rows[0] ?? null;
-}
-
-function migratedOfferHeading(
-  heading: string | null,
-  fallback: string
-): string {
-  const value = clean(heading);
-  if (!value) return fallback;
-  return value.replace(/\bDeals\b/gi, "Offers").replace(/\bDeal\b/gi, "Offer");
-}
-
-async function cloneViewAllCta(
-  sourceCmpsTable: string,
-  sourceEntityId: number,
-  targetCmpsTable: string,
-  targetEntityId: number
-): Promise<void> {
-  requirePhase13aTables(
-    "View All CTA components",
-    sourceCmpsTable,
-    targetCmpsTable,
-    "components_shared_ctas"
-  );
-  const source = await componentLink(sourceCmpsTable, sourceEntityId, "viewAllCta");
-  if (!source) return;
-  const rows = await pgQuery<{ label: string | null; url: string | null }>(
-    `SELECT label, url FROM "components_shared_ctas" WHERE id = $1 LIMIT 1`,
-    [source.cmp_id]
-  );
-  const cta = rows[0];
-  if (!cta) return;
-  const label = migratedOfferHeading(cta.label, "View All Offers");
-  const url = cta.url === "/deals/" ? "/offers/" : cta.url;
-  const ctaId = await insertRow("components_shared_ctas", { label, url });
-  await addCmp(
-    targetCmpsTable,
-    targetEntityId,
-    ctaId,
-    "shared.cta",
-    "viewAllCta",
-    1
-  );
-}
-
-async function relationTargetId(
-  relation: Lnk,
-  sourceId: number
-): Promise<number | null> {
-  return (await relatedIds(relation, sourceId))[0] ?? null;
-}
-
-async function relatedIds(relation: Lnk, sourceId: number): Promise<number[]> {
-  const orderSql = relation.ordCols[0] ? `"${relation.ordCols[0]}" ASC, ` : "";
-  const rows = await pgQuery<{ target_id: number }>(
-    `SELECT "${relation.targetCol}" AS target_id
-     FROM "${relation.table}"
-     WHERE "${relation.sourceCol}" = $1
-     ORDER BY ${orderSql}"${relation.targetCol}" ASC`,
-    [sourceId]
-  );
-  return rows.map((row) => row.target_id);
-}
-
-async function publishedCouponsForCategory(
-  categoryId: number,
-  couponsCategoriesLnk: Lnk
-): Promise<number[]> {
-  const rows = await pgQuery<{ id: number }>(
-    `SELECT DISTINCT c.id FROM "coupons" c
-     JOIN "${couponsCategoriesLnk.table}" l
-       ON l."${couponsCategoriesLnk.sourceCol}" = c.id
-      AND l."${couponsCategoriesLnk.targetCol}" = $1
-     WHERE c.published_at IS NOT NULL
-       AND c.content_status = 'published'
-     ORDER BY c.id DESC
-     LIMIT ${HOMEPAGE_SEED_LIMITS.exploreOffersPerTab}`,
-    [categoryId]
-  );
-  return rows.map((row) => row.id);
-}
-
-async function backfillExploreOffers(homepageId: number): Promise<string> {
-  if (await componentLink("homepages_cmps", homepageId, "exploreOffers")) {
-    return "exploreOffers(skipped: already populated)";
-  }
-
-  const legacy = await componentLink("homepages_cmps", homepageId, "exploreDeals");
-  if (!legacy) return "exploreOffers(skipped: no legacy section)";
-
-  requirePhase13aTables(
-    "Explore Offers",
-    "components_home_explore_deals",
-    "components_home_explore_tabs",
-    "components_home_explore_deals_cmps",
-    "components_home_explore_tabs_cmps",
-    "components_home_explore_offers",
-    "components_home_explore_offer_tabs",
-    "components_home_explore_offers_cmps",
-    "components_home_explore_offer_tabs_cmps",
-    "components_shared_ctas",
-    "coupons"
-  );
-
-  const legacySection = (
-    await pgQuery<LegacySectionRow>(
-      `SELECT enabled, heading FROM "components_home_explore_deals" WHERE id = $1 LIMIT 1`,
-      [legacy.cmp_id]
-    )
-  )[0];
-  if (!legacySection) {
+async function seedSiteConfiguration(summary: string[]): Promise<void> {
+  if (!hasTable("site_configurations")) {
     throw new Error(
-      `Phase 13a found a dangling Explore Deals component link for homepage ${homepageId}`
+      "site_configurations table is missing. Apply the Site Configuration Strapi schema before Phase 13.",
     );
   }
-
-  const legacyTabs = await pgQuery<LegacyExploreTabRow>(
-    `SELECT t.id, t.label_override, c."order"
-     FROM "components_home_explore_deals_cmps" c
-     JOIN "components_home_explore_tabs" t ON t.id = c.cmp_id
-     WHERE c.entity_id = $1 AND c.field = 'tabs'
-     ORDER BY c."order" ASC`,
-    [legacy.cmp_id]
-  );
-  const legacyCategoryLnk = await detectLnk(
-    "components_home_explore_tabs",
-    "category",
-    "category"
-  );
-  const newCategoryLnk = await detectLnk(
-    "components_home_explore_offer_tabs",
-    "category",
-    "category"
-  );
-  const newOffersLnk = await detectLnk(
-    "components_home_explore_offer_tabs",
-    "offers",
-    "coupon"
-  );
-  const couponsCategoriesLnk = await detectLnk("coupons", "categories", "category");
-  if (!legacyCategoryLnk || !newCategoryLnk || !newOffersLnk || !couponsCategoriesLnk) {
-    const missingRelations = [
-      !legacyCategoryLnk && "legacy Explore Deals category relation",
-      !newCategoryLnk && "Explore Offers category relation",
-      !newOffersLnk && "Explore Offers Coupon relation",
-      !couponsCategoriesLnk && "Coupon categories relation",
-    ].filter((value): value is string => Boolean(value));
-    throw phase13aInfrastructureError("Explore Offers relations", missingRelations);
-  }
-
-  const tabs: Array<{
-    source: LegacyExploreTabRow;
-    categoryId: number;
-    couponIds: number[];
-  }> = [];
-  for (const source of legacyTabs) {
-    const categoryId = await relationTargetId(legacyCategoryLnk, source.id);
-    if (!categoryId) continue;
-    const couponIds = await publishedCouponsForCategory(categoryId, couponsCategoriesLnk);
-    if (couponIds.length > 0) tabs.push({ source, categoryId, couponIds });
-  }
-  if (tabs.length === 0) return "exploreOffers(skipped: no matching coupons)";
-
-  const sectionId = await insertRow("components_home_explore_offers", {
-    enabled: legacySection.enabled ?? true,
-    heading: migratedOfferHeading(legacySection.heading, "Explore Offers"),
-  });
-  await addCmp(
-    "homepages_cmps",
-    homepageId,
-    sectionId,
-    "home.explore-offers",
-    "exploreOffers",
-    legacy.order
-  );
-  await cloneViewAllCta(
-    "components_home_explore_deals_cmps",
-    legacy.cmp_id,
-    "components_home_explore_offers_cmps",
-    sectionId
-  );
-
-  for (let index = 0; index < tabs.length; index++) {
-    const tab = tabs[index];
-    const tabId = await insertRow("components_home_explore_offer_tabs", {
-      label_override: tab.source.label_override,
-    });
-    await addCmp(
-      "components_home_explore_offers_cmps",
-      sectionId,
-      tabId,
-      "home.explore-offer-tab",
-      "tabs",
-      index + 1
-    );
-    await linkRel(newCategoryLnk, tabId, tab.categoryId);
-    for (let offerIndex = 0; offerIndex < tab.couponIds.length; offerIndex++) {
-      await linkRel(newOffersLnk, tabId, tab.couponIds[offerIndex], offerIndex + 1);
-    }
-    await cloneViewAllCta(
-      "components_home_explore_tabs_cmps",
-      tab.source.id,
-      "components_home_explore_offer_tabs_cmps",
-      tabId
-    );
-  }
-  return `exploreOffers(${tabs.length} tabs)`;
-}
-
-async function backfillOffersByBrand(homepageId: number): Promise<string> {
-  if (await componentLink("homepages_cmps", homepageId, "offersByBrand")) {
-    return "offersByBrand(skipped: already populated)";
-  }
-  const legacy = await componentLink("homepages_cmps", homepageId, "dealsByBrand");
-  if (!legacy) return "offersByBrand(skipped: no legacy section)";
-
-  requirePhase13aTables(
-    "Offers By Brand",
-    "components_home_deal_lists",
-    "components_home_deal_lists_cmps",
-    "components_home_offer_lists",
-    "components_home_offer_lists_cmps",
-    "components_shared_ctas",
-    "coupons",
-    "deals"
-  );
-
-  const legacySection = (
-    await pgQuery<LegacySectionRow>(
-      `SELECT enabled, heading FROM "components_home_deal_lists" WHERE id = $1 LIMIT 1`,
-      [legacy.cmp_id]
-    )
-  )[0];
-  const legacyDealsLnk = await detectLnk("components_home_deal_lists", "deals", "deal");
-  const dealsBrandsLnk = await detectLnk("deals", "brands", "brand");
-  const couponsBrandsLnk = await detectLnk("coupons", "brands", "brand");
-  const newOffersLnk = await detectLnk("components_home_offer_lists", "offers", "coupon");
-  if (!legacySection) {
+  if (!fs.existsSync(config.siteConfigurationFile)) {
     throw new Error(
-      `Phase 13a found a dangling Deals By Brand component link for homepage ${homepageId}`
+      `Site configuration profile is missing: ${config.siteConfigurationFile}`,
     );
   }
-  if (!legacyDealsLnk || !dealsBrandsLnk || !couponsBrandsLnk || !newOffersLnk) {
-    const missingRelations = [
-      !legacyDealsLnk && "legacy Deals By Brand Deal relation",
-      !dealsBrandsLnk && "Deal brands relation",
-      !couponsBrandsLnk && "Coupon brands relation",
-      !newOffersLnk && "Offers By Brand Coupon relation",
-    ].filter((value): value is string => Boolean(value));
-    throw phase13aInfrastructureError("Offers By Brand relations", missingRelations);
+  const profile = JSON.parse(
+    fs.readFileSync(config.siteConfigurationFile, "utf8"),
+  ) as Record<string, unknown>;
+  const values: Record<string, unknown> = {
+    ...profile,
+    countryCode: config.source.countryCode.toUpperCase(),
+    locale: config.source.locale,
+    currencyCode: config.source.currencyCode.toUpperCase(),
+    timezone: config.source.timezone,
+  };
+  const columns = await getColumns("site_configurations");
+  const row: Record<string, unknown> = {};
+  for (const field of SITE_CONFIGURATION_FIELDS) {
+    const column = snakeCase(field);
+    if (columns.includes(column)) row[column] = values[field];
   }
-
-  const dealIds = await relatedIds(legacyDealsLnk, legacy.cmp_id);
-  const brandRows = dealIds.length
-    ? await pgQuery<{ target_id: number }>(
-        `SELECT DISTINCT "${dealsBrandsLnk.targetCol}" AS target_id
-         FROM "${dealsBrandsLnk.table}"
-         WHERE "${dealsBrandsLnk.sourceCol}" = ANY($1::int[])`,
-        [dealIds]
-      )
-    : [];
-  const brandIds = new Set<number>(brandRows.map((row) => row.target_id));
-  if (brandIds.size === 0) return "offersByBrand(skipped: no legacy brands)";
-
-  const couponRows = await pgQuery<{ id: number }>(
-    `SELECT DISTINCT c.id FROM "coupons" c
-     JOIN "${couponsBrandsLnk.table}" l
-       ON l."${couponsBrandsLnk.sourceCol}" = c.id
-     WHERE c.published_at IS NOT NULL
-       AND c.content_status = 'published'
-       AND l."${couponsBrandsLnk.targetCol}" = ANY($1::int[])
-     ORDER BY c.id DESC
-     LIMIT ${HOMEPAGE_SEED_LIMITS.offersByBrand}`,
-    [[...brandIds]]
+  const now = new Date().toISOString();
+  const existing = await pgQuery<{ id: number; country_code: string | null }>(
+    `SELECT id, country_code FROM "site_configurations" ORDER BY id ASC LIMIT 1 FOR UPDATE`,
   );
-  if (couponRows.length === 0) return "offersByBrand(skipped: no matching coupons)";
-
-  const sectionId = await insertRow("components_home_offer_lists", {
-    enabled: legacySection.enabled ?? true,
-    heading: migratedOfferHeading(legacySection.heading, "Offers By Brand"),
+  // Destination guard: silently flipping an existing site's country means the
+  // operator pointed this run at the WRONG database (e.g. a usa overlay merged
+  // into the india env without repointing PG_CONNECTION_STRING). Refuse
+  // instead of repurposing a live country's data.
+  const existingCountry = existing[0]?.country_code?.trim().toUpperCase();
+  const targetCountry = String(values.countryCode ?? "").toUpperCase();
+  if (
+    existingCountry &&
+    targetCountry &&
+    existingCountry !== targetCountry &&
+    process.env.MIGRATION_ALLOW_COUNTRY_SWITCH !== "true"
+  ) {
+    throw new Error(
+      `Target database is configured for country "${existingCountry}" but this run imports "${targetCountry}". ` +
+        "This usually means the destination connection still points at another country's database. " +
+        "Fix the destination env vars, or set MIGRATION_ALLOW_COUNTRY_SWITCH=true to deliberately repurpose this database.",
+    );
+  }
+  if (existing[0]) {
+    const names = Object.keys(row);
+    await pgQuery(
+      `UPDATE "site_configurations" SET ${names
+        .map((column, index) => `"${column}" = $${index + 1}`)
+        .join(", ")}, "updated_at" = $${names.length + 1} WHERE id = $${names.length + 2}`,
+      [...names.map((column) => row[column]), now, existing[0].id],
+    );
+    summary.push(`site configuration: updated (${config.profile})`);
+    return;
+  }
+  await insertRow("site_configurations", {
+    document_id: generateDocumentId(`site-configuration:${config.profile}`),
+    ...row,
+    created_at: now,
+    updated_at: now,
   });
-  await addCmp(
-    "homepages_cmps",
-    homepageId,
-    sectionId,
-    "home.offer-list",
-    "offersByBrand",
-    legacy.order
-  );
-  for (let index = 0; index < couponRows.length; index++) {
-    await linkRel(newOffersLnk, sectionId, couponRows[index].id, index + 1);
-  }
-  await cloneViewAllCta(
-    "components_home_deal_lists_cmps",
-    legacy.cmp_id,
-    "components_home_offer_lists_cmps",
-    sectionId
-  );
-  return `offersByBrand(${couponRows.length} coupons)`;
+  summary.push(`site configuration: seeded (${config.profile})`);
 }
 
-async function assertPhase13aSchema(): Promise<void> {
-  requirePhase13aTables(
-    "homepage Coupon offer sections",
-    "homepages",
-    "homepages_cmps",
-    "components_home_explore_offers",
-    "components_home_explore_offer_tabs",
-    "components_home_explore_offers_cmps",
-    "components_home_explore_offer_tabs_cmps",
-    "components_home_offer_lists",
-    "components_home_offer_lists_cmps",
-    "components_shared_ctas",
-    "coupons"
-  );
-
-  const exploreCategoryLnk = await detectLnk(
-    "components_home_explore_offer_tabs",
-    "category",
-    "category"
-  );
-  const exploreOffersLnk = await detectLnk(
-    "components_home_explore_offer_tabs",
-    "offers",
-    "coupon"
-  );
-  const offersByBrandLnk = await detectLnk(
-    "components_home_offer_lists",
-    "offers",
-    "coupon"
-  );
-  const missingRelations = [
-    !exploreCategoryLnk && "Explore Offers category relation",
-    !exploreOffersLnk && "Explore Offers Coupon relation",
-    !offersByBrandLnk && "Offers By Brand Coupon relation",
-  ].filter((value): value is string => Boolean(value));
-  if (missingRelations.length > 0) {
-    throw phase13aInfrastructureError("homepage Coupon offer relations", missingRelations);
-  }
-}
-
-async function lockHomepageForOfferBackfill(homepageId: number): Promise<void> {
-  const rows = await pgQuery<{ id: number }>(
-    `SELECT id FROM "homepages" WHERE id = $1 FOR UPDATE`,
-    [homepageId]
-  );
-  if (rows.length === 0) {
-    throw new Error(`Homepage ${homepageId} disappeared before Phase 13a could lock it`);
-  }
-}
-
-// Compatibility backfill for databases whose homepage already contains the
-// legacy Deal-backed sections. It has its own checkpoint so existing installs
-// run it even if Phase 13 completed before these component schemas existed.
-export async function runHomepageOfferBackfill(): Promise<void> {
-  logger.info("=== Phase 13a: Homepage Coupon Offer Sections ===");
-  await loadExistingTables();
-  await assertPhase13aSchema();
-
-  const homepages = await pgQuery<{ id: number }>(
-    `SELECT id FROM "homepages" ORDER BY id ASC`
-  );
-  for (const homepage of homepages) {
-    const results = await pgTransaction(async () => {
-      // Serialize check-then-insert across concurrent deploy jobs. Without the
-      // row lock, two Phase 13a processes can both observe an absent component
-      // and attach duplicate sections before either transaction commits.
-      await lockHomepageForOfferBackfill(homepage.id);
-      return [
-        await backfillExploreOffers(homepage.id),
-        await backfillOffersByBrand(homepage.id),
-      ];
-    });
-    logger.info(`homepage ${homepage.id}: ${results.join(", ")}`);
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────
 // global
@@ -875,12 +583,13 @@ async function seedGlobal(summary: string[]): Promise<void> {
     return;
   }
 
-  const opts = await fetchOptionsIn([
-    "options_header_code",
-    "options_footer_code",
-  ]);
+  const opts = config.importWpTrackingScripts
+    ? await fetchOptionsIn(["options_header_code", "options_footer_code"])
+    : new Map<string, string>();
   logger.info(
-    `global: found ${opts.size}/2 WP option keys (${Array.from(opts.keys()).join(", ") || "none"})`
+    config.importWpTrackingScripts
+      ? `global: found ${opts.size}/2 WP tracking option keys (${Array.from(opts.keys()).join(", ") || "none"})`
+      : "global: WordPress header/footer scripts intentionally not imported"
   );
 
   const now = new Date().toISOString();
@@ -939,8 +648,9 @@ type CouponWithPresentationImage = { couponId: number; imageFileId: number };
 
 interface HomepageData {
   banners: Banner[];
-  heroDealIds: number[];
+  heroOffers: HomepageHeroSeedOffer[];
   heroDealLnk: Lnk | null;
+  heroCouponLnk: Lnk | null;
   popularFeatured: StoreRow | null;
   popularStores: StoreRow[];
   popularFeaturedLnk: Lnk | null;
@@ -960,6 +670,90 @@ interface HomepageData {
   offerListOffersLnk: Lnk | null;
   bankOffers: Array<{ bankId: number; subtitle: string | null }>;
   bankItemBankLnk: Lnk | null;
+}
+
+type HomepageHeroData = Pick<
+  HomepageData,
+  "heroOffers" | "heroDealLnk" | "heroCouponLnk"
+>;
+
+function homepageCouponOwnerLink(
+  relation: Lnk | null,
+  entityTable: HomepageCouponOwnerLink["entityTable"],
+  entityType: HomepageCouponOwnerLink["entityType"],
+): HomepageCouponOwnerLink | null {
+  return relation
+    ? {
+        table: relation.table,
+        sourceCol: relation.sourceCol,
+        targetCol: relation.targetCol,
+        entityTable,
+        entityType,
+      }
+    : null;
+}
+
+async function gatherHomepageHeroData(): Promise<HomepageHeroData> {
+  const [heroDealLnk, heroCouponLnk] = await Promise.all([
+    detectLnk("components_home_hero_products", "deal", "deal"),
+    detectLnk("components_home_hero_products", "coupon", "coupon"),
+  ]);
+
+  // Preserve the existing Product Deal preference, but do not select records
+  // the component schema cannot link.
+  const heroDeals = heroDealLnk && hasTable("deals")
+    ? await pgQuery<{ id: number }>(
+        `SELECT id FROM "deals"
+         WHERE published_at IS NOT NULL
+           AND content_status = 'published'
+           AND (expires_at IS NULL OR expires_at > NOW())
+         ORDER BY published_at DESC
+         LIMIT $1`,
+        [HOMEPAGE_SEED_LIMITS.heroProducts],
+      )
+    : [];
+  let heroOffers = selectHomepageHeroOffers(
+    heroDeals.map(({ id }) => id),
+    [],
+  );
+
+  if (heroOffers.length === 0 && hasTable("coupons") && heroCouponLnk) {
+    const [storesLnk, brandsLnk] = await Promise.all([
+      detectLnk("coupons", "stores", "store"),
+      detectLnk("coupons", "brands", "brand"),
+    ]);
+    const ownerLinks = [
+      homepageCouponOwnerLink(storesLnk, "stores", "api::store.store"),
+      homepageCouponOwnerLink(brandsLnk, "brands", "api::brand.brand"),
+    ].filter((link): link is HomepageCouponOwnerLink => link !== null);
+
+    if (ownerLinks.length === 0) {
+      logger.warn(
+        "Coupon hero fallback has no Store/Brand relation tables — no Hero Offers seeded",
+      );
+    } else {
+      const ownerEligibility = homepageCouponOwnerEligibilitySql(ownerLinks);
+      const heroCoupons = await pgQuery<{ id: number }>(
+        `SELECT c.id FROM "coupons" c
+         WHERE c.published_at IS NOT NULL
+           AND c.content_status = 'published'
+           AND (c.expires_at IS NULL OR c.expires_at > NOW())
+           AND NULLIF(BTRIM(c.title), '') IS NOT NULL
+           AND (
+             ${ownerEligibility}
+           )
+         ORDER BY c.published_at DESC
+         LIMIT $1`,
+        [HOMEPAGE_SEED_LIMITS.heroProducts],
+      );
+      heroOffers = selectHomepageHeroOffers(
+        [],
+        heroCoupons.map(({ id }) => id),
+      );
+    }
+  }
+
+  return { heroOffers, heroDealLnk, heroCouponLnk };
 }
 
 function couponSourcePostId(sourceKey: string): number | null {
@@ -993,6 +787,45 @@ async function wordpressCouponImageRefs(
   return refs;
 }
 
+type HomepageCouponSelection = "recommended" | "exclusive" | "newly-added";
+
+async function wordpressHomepageCouponMeta(
+  postIds: readonly number[],
+): Promise<Map<number, { popular: boolean; offerType: string }>> {
+  const result = new Map<number, { popular: boolean; offerType: string }>();
+  const batchSize = 500;
+  for (let start = 0; start < postIds.length; start += batchSize) {
+    const batch = postIds.slice(start, start + batchSize);
+    if (batch.length === 0) continue;
+    const placeholders = batch.map(() => "?").join(",");
+    const rows = await wpQuery<{ post_id: number; meta_key: string; meta_value: string }>(
+      `SELECT post_id, meta_key, meta_value FROM wp_postmeta
+       WHERE post_id IN (${placeholders})
+         AND meta_key IN ('popular_coupon', 'offer_type')`,
+      [...batch],
+    );
+    for (const row of rows) {
+      const current = result.get(row.post_id) ?? { popular: false, offerType: "" };
+      if (row.meta_key === "popular_coupon") current.popular = isAcfTrue(row.meta_value);
+      if (row.meta_key === "offer_type") current.offerType = row.meta_value.trim().toLowerCase();
+      result.set(row.post_id, current);
+    }
+  }
+  return result;
+}
+
+function matchesHomepageSelection(
+  value: { popular: boolean; offerType: string } | undefined,
+  selection: HomepageCouponSelection,
+): boolean {
+  const offerType = value?.offerType ?? "";
+  if (selection === "recommended") {
+    return value?.popular === true || /recommended|popular/u.test(offerType);
+  }
+  if (selection === "exclusive") return /exclusive/u.test(offerType);
+  return /new(?:ly)?[ _-]*(?:added)?|latest/u.test(offerType);
+}
+
 /** Newest published migrated Coupons with legacy WordPress art. The art is
  *  resolved directly into the required homepage component field; it is never
  *  attached to the Coupon record. extraJoin/extraWhere refine the pool. */
@@ -1000,7 +833,8 @@ async function newestCouponsWithPresentationImage(
   limit: number,
   extraJoin = "",
   extraWhere = "",
-  params: unknown[] = []
+  params: unknown[] = [],
+  selection?: HomepageCouponSelection,
 ): Promise<CouponWithPresentationImage[]> {
   const rows = await pgQuery<{ id: number; document_id: string }>(
     `SELECT c.id, c.document_id
@@ -1026,9 +860,15 @@ async function newestCouponsWithPresentationImage(
     return postId ? [postId] : [];
   });
   const refs = await wordpressCouponImageRefs(postIds);
+  const homepageMeta = selection
+    ? await wordpressHomepageCouponMeta(postIds)
+    : new Map<number, { popular: boolean; offerType: string }>();
   const resolved: CouponWithPresentationImage[] = [];
   for (const row of rows) {
     const postId = postIdByDocumentId.get(row.document_id);
+    if (selection && (!postId || !matchesHomepageSelection(homepageMeta.get(postId), selection))) {
+      continue;
+    }
     const ref = postId ? refs.get(postId) : undefined;
     if (!ref) continue;
     const imageFileId = await resolveMediaRef(ref);
@@ -1060,9 +900,17 @@ async function seedHomepage(
     summary.push("homepage: skipped (table missing)");
     return;
   }
-  if (await singleTypeHasRow("homepages")) {
-    logger.info("homepages already seeded, skipping homepage");
-    summary.push("homepage: skipped (already seeded)");
+  const existingHomepage = await pgQuery<{ id: number }>(
+    `SELECT id FROM "homepages" ORDER BY id DESC LIMIT 1`,
+  );
+  if (existingHomepage[0]) {
+    const heroData = await gatherHomepageHeroData();
+    const result = await backfillExistingHomepageHeroOffers(
+      existingHomepage[0].id,
+      heroData,
+    );
+    logger.info(result);
+    summary.push(result);
     return;
   }
 
@@ -1094,15 +942,7 @@ async function gatherHomepageData(
 ): Promise<HomepageData> {
   // ── hero banners from WP ACF options repeater ──
   const banners = await parseSliderBanners();
-
-  // ── hero products: newest published deals ──
-  const heroDeals = await pgQuery<{ id: number }>(
-    `SELECT id FROM "deals"
-     WHERE published_at IS NOT NULL
-       AND content_status = 'published'
-     ORDER BY published_at DESC
-     LIMIT ${HOMEPAGE_SEED_LIMITS.heroProducts}`
-  );
+  const heroData = await gatherHomepageHeroData();
 
   // ── topOffers: newest published migrated Coupons with legacy art for the
   //    component's required presentation banner. ──
@@ -1110,6 +950,10 @@ async function gatherHomepageData(
   if (hasTable("coupons")) {
     topOfferCoupons = await newestCouponsWithPresentationImage(
       HOMEPAGE_SEED_LIMITS.topOffers,
+      "",
+      "",
+      [],
+      config.profile === "usa" ? "recommended" : undefined,
     );
   } else {
     logger.warn("coupons table not found — topOffers section will be empty");
@@ -1154,6 +998,22 @@ async function gatherHomepageData(
   let exclusiveCoupons: CouponWithPresentationImage[] = [];
   let newlyAddedCoupons: CouponWithPresentationImage[] = [];
   if (hasTable("coupons")) {
+    if (config.profile === "usa") {
+      exclusiveCoupons = await newestCouponsWithPresentationImage(
+        HOMEPAGE_SEED_LIMITS.cgExclusive,
+        "",
+        "",
+        [],
+        "exclusive",
+      );
+      newlyAddedCoupons = await newestCouponsWithPresentationImage(
+        HOMEPAGE_SEED_LIMITS.newlyAdded,
+        "",
+        "",
+        [],
+        "newly-added",
+      );
+    } else {
     const couponsCategoriesLnkForExclusive = await detectLnk(
       "coupons",
       "categories",
@@ -1179,6 +1039,7 @@ async function gatherHomepageData(
     newlyAddedCoupons = await newestCouponsWithPresentationImage(
       HOMEPAGE_SEED_LIMITS.newlyAdded,
     );
+    }
   } else {
     logger.warn(
       "coupons table not found — cgExclusive/newlyAdded sections will be skipped"
@@ -1268,8 +1129,7 @@ async function gatherHomepageData(
 
   return {
     banners,
-    heroDealIds: heroDeals.map((r) => r.id),
-    heroDealLnk: await detectLnk("components_home_hero_products", "deal", "deal"),
+    ...heroData,
     popularFeatured: curatedStores[0] ?? null,
     popularStores: curatedStores.slice(1, 1 + HOMEPAGE_SEED_LIMITS.popularStores),
     popularFeaturedLnk: await detectLnk(
@@ -1328,6 +1188,103 @@ async function gatherHomepageData(
   };
 }
 
+async function insertHomepageHeroOffers(
+  heroId: number,
+  data: HomepageHeroData,
+  skip: (message: string) => void,
+): Promise<number> {
+  if (
+    missingTables(
+      "components_home_hero_products",
+      "components_home_hero_sections_cmps",
+    ).length > 0
+  ) {
+    skip("hero-product tables/link not found — hero products skipped");
+    return 0;
+  }
+
+  let productCount = 0;
+  for (let i = 0; i < data.heroOffers.length; i++) {
+    const offer = data.heroOffers[i];
+    const relation = offer.entityType === "deal"
+      ? data.heroDealLnk
+      : data.heroCouponLnk;
+    if (!relation) {
+      skip(`hero ${offer.entityType} relation link not found — offer skipped`);
+      continue;
+    }
+    const prodId = await insertRow("components_home_hero_products", {
+      entity_type: offer.entityType,
+    });
+    await addCmp(
+      "components_home_hero_sections_cmps",
+      heroId,
+      prodId,
+      "home.hero-product",
+      "products",
+      i + 1,
+    );
+    await linkRel(relation, prodId, offer.id);
+    productCount++;
+  }
+  return productCount;
+}
+
+async function backfillExistingHomepageHeroOffers(
+  homepageId: number,
+  data: HomepageHeroData,
+): Promise<string> {
+  const missing = missingTables(
+    "homepages_cmps",
+    "components_home_hero_sections",
+    "components_home_hero_sections_cmps",
+    "components_home_hero_products",
+  );
+  if (missing.length > 0) {
+    return `homepage: existing Hero Offers skipped (${missing.join(", ")} missing)`;
+  }
+
+  const heroRows = await pgQuery<{ hero_id: number }>(
+    `SELECT cmp_id AS hero_id
+     FROM "homepages_cmps"
+     WHERE entity_id = $1
+       AND component_type = 'home.hero-section'
+       AND field = 'hero'
+     ORDER BY "order", cmp_id
+     LIMIT 1`,
+    [homepageId],
+  );
+  const heroId = heroRows[0]?.hero_id;
+  if (!heroId) {
+    return "homepage: existing row preserved (no Hero section to fill)";
+  }
+
+  const existingProducts = await pgQuery<{ count: string }>(
+    `SELECT COUNT(*)::text AS count
+     FROM "components_home_hero_sections_cmps"
+     WHERE entity_id = $1
+       AND component_type = 'home.hero-product'
+       AND field = 'products'`,
+    [heroId],
+  );
+  if (Number(existingProducts[0]?.count ?? 0) > 0) {
+    return "homepage: existing Hero Offers preserved";
+  }
+
+  const inserted = await insertHomepageHeroOffers(heroId, data, (message) =>
+    logger.warn(message),
+  );
+  if (inserted > 0) {
+    await pgQuery(
+      `UPDATE "homepages" SET updated_at = NOW() WHERE id = $1`,
+      [homepageId],
+    );
+  }
+  return inserted > 0
+    ? `homepage: filled empty Hero Offers (${inserted} ${data.heroOffers[0]?.entityType ?? "offer"})`
+    : "homepage: Hero Offers remain empty (no eligible Deal or Coupon)";
+}
+
 /**
  * Builds the full component tree for one homepage row (draft or published).
  * Returns per-section summary strings (only meaningful on the first call;
@@ -1384,31 +1341,8 @@ async function buildHomepageTree(
       );
     }
 
-    // products (nested home.hero-product + deal relation)
-    let productCount = 0;
-    if (
-      missingTables(
-        "components_home_hero_products",
-        "components_home_hero_sections_cmps"
-      ).length === 0 &&
-      data.heroDealLnk
-    ) {
-      for (let i = 0; i < data.heroDealIds.length; i++) {
-        const prodId = await insertRow("components_home_hero_products", {});
-        await addCmp(
-          "components_home_hero_sections_cmps",
-          heroId,
-          prodId,
-          "home.hero-product",
-          "products",
-          i + 1
-        );
-        await linkRel(data.heroDealLnk, prodId, data.heroDealIds[i]);
-        productCount++;
-      }
-    } else {
-      skip("hero-product tables/link not found — hero products skipped");
-    }
+    // offers (nested home.hero-product + explicit Deal/Coupon relation)
+    const productCount = await insertHomepageHeroOffers(heroId, data, skip);
 
     counts.push(`hero(${bannerCount} banners, ${productCount} products)`);
   } else {
@@ -1660,6 +1594,7 @@ async function buildHomepageTree(
 
   // ── howItWorks (exact frontend copy) ──
   if (
+    config.profile === "india" &&
     missingTables(
       "components_home_how_it_works",
       "components_home_steps",
@@ -1710,6 +1645,7 @@ async function buildHomepageTree(
 
   // ── faq (exact frontend copy) ──
   if (
+    config.profile === "india" &&
     missingTables(
       "components_home_faq_blocks",
       "components_shared_faq_items",
@@ -1863,6 +1799,15 @@ async function parseSliderBanners(): Promise<Banner[]> {
       alt: clean(alt ?? null),
     });
   }
+  if (
+    config.source.expectedHeroBanners > 0 &&
+    banners.length !== config.source.expectedHeroBanners
+  ) {
+    throw new Error(
+      `Hero banner exception: expected ${config.source.expectedHeroBanners}, resolved ${banners.length}`,
+    );
+  }
+  homepageSourceReview.heroBannersResolved = banners.length;
   return banners;
 }
 
@@ -1876,6 +1821,7 @@ async function getCuratedStores(): Promise<StoreRow[]> {
 
   const opts = await fetchOptionsLike("options_featured_stores%");
   const termIds: number[] = [];
+  const authoredUrls: string[] = [];
 
   const direct = opts.get("options_featured_stores");
   if (direct && !/^\d+$/.test(direct.trim())) {
@@ -1899,6 +1845,7 @@ async function getCuratedStores(): Promise<StoreRow[]> {
           termIds.push(ids[0]);
           break;
         }
+        if (/^https?:\/\//iu.test(value.trim())) authoredUrls.push(value.trim());
       }
     }
   }
@@ -1919,6 +1866,45 @@ async function getCuratedStores(): Promise<StoreRow[]> {
     );
     if (row[0]) stores.push(row[0]);
   }
+
+  for (const authoredUrl of authoredUrls) {
+    let pathname: string;
+    try {
+      pathname = new URL(authoredUrl).pathname;
+    } catch {
+      logger.warn(`featured store URL is invalid: ${authoredUrl}`);
+      continue;
+    }
+    const leaf = decodeURIComponent(pathname).split("/").filter(Boolean).at(-1)?.toLowerCase();
+    if (!leaf) continue;
+    const candidates = [
+      leaf,
+      leaf.replace(/-(?:coupon-codes?|coupons?|promo-codes?|offers?)$/u, ""),
+    ];
+    const row = await pgQuery<{ id: number; name: string }>(
+      `SELECT id, name FROM "stores" WHERE lower(slug) = ANY($1::text[]) ORDER BY id LIMIT 1`,
+      [[...new Set(candidates)]],
+    );
+    if (!row[0]) {
+      logger.warn(`featured store URL did not resolve to a migrated Store: ${authoredUrl}`);
+      continue;
+    }
+    if (!seen.has(row[0].id)) {
+      seen.add(row[0].id);
+      stores.push(row[0]);
+    }
+  }
+
+  if (
+    config.source.expectedFeaturedStores > 0 &&
+    stores.length !== config.source.expectedFeaturedStores
+  ) {
+    throw new Error(
+      `Featured Store exception: expected ${config.source.expectedFeaturedStores}, resolved ${stores.length}`,
+    );
+  }
+
+  homepageSourceReview.featuredStoresResolved = stores.length;
 
   if (stores.length > 0) {
     logger.info(`curated stores: ${stores.length} from options_featured_stores`);
@@ -2203,8 +2189,9 @@ async function seedMenu(
 
   // ── extraItems ──
   let extraCount = 0;
-  for (let i = 0; i < MENU_EXTRA_ITEMS.length; i++) {
-    const item = MENU_EXTRA_ITEMS[i];
+  const menuExtraItems = config.profile === "india" ? MENU_EXTRA_ITEMS : [];
+  for (let i = 0; i < menuExtraItems.length; i++) {
+    const item = menuExtraItems[i];
     const linkId = await insertRow("components_nav_links", {
       label: item.label,
       url: item.url,
@@ -2263,8 +2250,16 @@ async function seedFooter(summary: string[]): Promise<void> {
   // ── sections ──
   let sectionCount = 0;
   let storeLinksResolved = 0;
-  for (let i = 0; i < FOOTER_SECTIONS.length; i++) {
-    const section = FOOTER_SECTIONS[i];
+  const footerSections = config.profile === "india"
+    ? FOOTER_SECTIONS
+    : FOOTER_SECTIONS.map((section) => ({
+        ...section,
+        links: section.links.filter(
+          (link) => link.href === "/stores/" || link.href === "/sitemap.xml",
+        ),
+      })).filter((section) => section.links.length > 0);
+  for (let i = 0; i < footerSections.length; i++) {
+    const section = footerSections[i];
     const sectionId = await insertRow("components_footer_link_sections", {
       title: section.title,
     });

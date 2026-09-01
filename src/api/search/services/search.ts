@@ -1,6 +1,8 @@
 import type { Core } from "@strapi/strapi";
 import { parseRequest, type SearchRequest } from "./search-request";
 import { group, preview } from "./search-results";
+import { cachedSiteConfiguration } from "../../site-configuration/services/cached-configuration";
+import type { FeatureField } from "../../site-configuration/services/country-registry";
 import {
   SEARCH_SLOW_LOG_MS,
   searchPhaseStorage,
@@ -16,6 +18,27 @@ import { searchRuntimeStatus } from "./search-runtime";
 // ./search-results. This file exposes exactly parseRequest, status and
 // search.
 
+// Search only covers catalog kinds, whose feature readiness is "records
+// exist" — so the configured flag alone decides visibility here: a disabled
+// kind's records must not surface as results that link into 404 routes.
+const SEARCH_KEY_FLAGS: Readonly<Record<string, FeatureField>> = {
+  stores: 'storesEnabled',
+  brands: 'brandsEnabled',
+  categories: 'categoriesEnabled',
+  banks: 'banksEnabled',
+  coupons: 'couponsEnabled',
+  deals: 'productDealsEnabled',
+};
+
+async function liveSearchKeys(strapi: Core.Strapi): Promise<ReadonlySet<string>> {
+  const config = await cachedSiteConfiguration(strapi);
+  return new Set(
+    Object.entries(SEARCH_KEY_FLAGS)
+      .filter(([, flag]) => config[flag] === true)
+      .map(([key]) => key),
+  );
+}
+
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   parseRequest,
   status() {
@@ -23,6 +46,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
   },
   async search(request: SearchRequest) {
     const nowIso = new Date().toISOString();
+    const liveKeys = await liveSearchKeys(strapi);
     const stats: SearchPhaseStats = {
       sql: 0,
       sqlCalls: 0,
@@ -33,8 +57,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     try {
       return await searchPhaseStorage.run(stats, () =>
         request.mode === "group"
-          ? group(strapi, request, nowIso)
-          : preview(strapi, request, nowIso),
+          ? group(strapi, request, nowIso, liveKeys)
+          : preview(strapi, request, nowIso, liveKeys),
       );
     } finally {
       const totalMs = Date.now() - startedAt;

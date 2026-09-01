@@ -6,11 +6,13 @@ import {
   hasExcludedTerm,
   isArticleChooseType,
   isArticleRootTerm,
+  isUncategorizedTerm,
   normalizeStoreName,
   parseExcludedStoreNames,
   resolveImportExclusions,
   type TermRowLike,
 } from "../src/utils/import-exclusions.js";
+import { applyTaxonomyClassification } from "../src/utils/taxonomy-classification.js";
 
 const read = (rel: string) =>
   readFileSync(new URL(rel, import.meta.url), "utf8");
@@ -55,6 +57,21 @@ test("article descendants are collected transitively", () => {
   assert.deepEqual([...collectArticleTermIds(terms)].sort(), [10, 11, 12]);
 });
 
+test("Uncategorized matches the exact fallback category only", () => {
+  assert.equal(
+    isUncategorizedTerm(term({ name: "Anything", slug: "Uncategorized " })),
+    true,
+  );
+  assert.equal(
+    isUncategorizedTerm(term({ name: " uncategorized", slug: "anything" })),
+    true,
+  );
+  assert.equal(
+    isUncategorizedTerm(term({ name: "Uncategorized Offers", slug: "offers" })),
+    false,
+  );
+});
+
 test("excluded-store CSV parsing normalizes and skips comments", () => {
   const names = parseExcludedStoreNames(
     "# comment\nJet  Airways \n\nYepme Shopping\njet airways\n",
@@ -85,6 +102,7 @@ test("resolveImportExclusions matches stores by name, store-typed terms only", (
     term({ term_id: 3, name: "Jet Airways", choose_type: "Bank" }), // NOT swallowed
     term({ term_id: 4, name: "Articles", slug: "articles", choose_type: null }),
     term({ term_id: 5, name: "Amazon", choose_type: "Store" }),
+    term({ term_id: 6, name: "Uncategorized", slug: "uncategorized", choose_type: null }),
   ];
   const exclusions = resolveImportExclusions(
     terms,
@@ -92,7 +110,8 @@ test("resolveImportExclusions matches stores by name, store-typed terms only", (
   );
   assert.deepEqual([...exclusions.excludedStoreTermIds].sort(), [1, 2]);
   assert.deepEqual([...exclusions.articleTermIds], [4]);
-  assert.deepEqual([...exclusions.termIds].sort(), [1, 2, 4]);
+  assert.deepEqual([...exclusions.uncategorizedTermIds], [6]);
+  assert.deepEqual([...exclusions.termIds].sort(), [1, 2, 4, 6]);
   // Names with no WP match are surfaced for review, not silently dropped.
   assert.deepEqual(exclusions.unmatchedStoreNames, ["ghost store"]);
 });
@@ -104,11 +123,16 @@ test("hasExcludedTerm matches on any associated term", () => {
   assert.equal(hasExcludedTerm([], ids), false);
 });
 
-test("phase 03 skips excluded terms and reports both kinds", () => {
-  assert.match(taxonomiesSource, /getImportExclusions\(\)/);
+test("phase 03 skips excluded terms and reports all three kinds", () => {
+  assert.match(taxonomiesSource, /classifyTaxonomyTerms\(sourceTerms\)/);
+  // Exclusions must be resolved over the RAW rows: classification rewrites
+  // an Article(s) choose_type to Store, which would defeat isArticleRootTerm.
+  assert.match(taxonomiesSource, /resolveImportExclusions\(\s*sourceTerms,/);
   assert.match(taxonomiesSource, /exclusions\.articleTermIds\.has\(term\.term_id\)/);
+  assert.match(taxonomiesSource, /exclusions\.uncategorizedTermIds\.has\(term\.term_id\)/);
   assert.match(taxonomiesSource, /exclusions\.excludedStoreTermIds\.has\(term\.term_id\)/);
   assert.match(taxonomiesSource, /counts\.Articles\+\+/);
+  assert.match(taxonomiesSource, /counts\.Uncategorized\+\+/);
   assert.match(taxonomiesSource, /counts\.ExcludedStore\+\+/);
   assert.match(taxonomiesSource, /unmatchedStoreNames/);
   // Resume slug priming must mirror the skip or resumed runs drift.
@@ -134,4 +158,27 @@ test("phases 07/08 exclude posts BEFORE inventory reconciliation", () => {
 test("phase 10 verify applies the same exclusion to expected counts", () => {
   assert.match(verifySource, /getImportExclusions\(\)/);
   assert.match(verifySource, /excludedTermIds/);
+  // Same raw-rows rule as phase 03.
+  assert.match(verifySource, /resolveImportExclusions\(\s*sourceTermRows,/);
+});
+
+// Regression: classification canonicalizes every choose_type to a catalog
+// type, so exclusions computed AFTER it would import an Article-typed term
+// (outside the articles slug tree) as a Store. Raw rows must feed exclusions.
+test("an Article choose_type term stays excluded despite classification", () => {
+  const rawTerms: TermRowLike[] = [
+    term({ term_id: 1, name: "Buying Guides", slug: "buying-guides", choose_type: "Articles" }),
+    term({ term_id: 2, name: "Amazon", slug: "amazon", choose_type: null }),
+  ];
+  const exclusions = resolveImportExclusions(rawTerms, new Set());
+  assert.deepEqual([...exclusions.articleTermIds], [1]);
+  // The same raw rows classified without a workbook would rewrite the
+  // Article term to Store — which is exactly why exclusions must not read
+  // the classified list.
+  const { terms: classified } = applyTaxonomyClassification(rawTerms, null);
+  assert.equal(classified[0].choose_type, "Store");
+  assert.deepEqual(
+    [...resolveImportExclusions(classified, new Set()).articleTermIds],
+    [],
+  );
 });

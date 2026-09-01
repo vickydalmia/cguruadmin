@@ -44,7 +44,7 @@ export function getPgPool(): pg.Pool {
     pool = new Pool({
       connectionString: config.pg.connectionString,
       ssl: buildSslConfig(),
-      max: 10,
+      max: config.pg.poolMax,
       // Fail fast instead of hanging when the host is unreachable.
       connectionTimeoutMillis: 10_000,
     });

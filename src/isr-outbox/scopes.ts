@@ -16,14 +16,12 @@ import {
   CONTACT_PAGE_UID,
   CULTURE_PAGE_SLUG,
   CULTURE_PAGE_UID,
-  DEAL_OF_THE_DAY_SLUG,
   DOTD_PAGE_UID,
   ERROR_DOCUMENT_SLUGS,
   ERROR_PAGE_UID,
   FAQ_PAGE_SLUG,
   FAQ_PAGE_UID,
   INDEPENDENCE_DAY_SALE_PAGE_UID,
-  INDEPENDENCE_DAY_SALE_SLUG,
   JOB_UID,
   PARTNER_WITH_US_PAGE_SLUG,
   PARTNER_WITH_US_PAGE_UID,
@@ -33,7 +31,6 @@ import {
   TERMS_PAGE_UID,
   TESTIMONIALS_PAGE_SLUG,
   TESTIMONIALS_PAGE_UID,
-  withOfferLandingSlugs,
 } from './scope-static-pages';
 import {
   ENTITY_UIDS,
@@ -47,6 +44,11 @@ import {
   touchesFestiveOffer,
   type FestiveOfferSnapshot,
 } from './festive-offer-scopes';
+import { SITE_CONFIGURATION_UID } from '../api/site-configuration/services/country-registry';
+import {
+  entityTemplateOwnerSlugs,
+  withOfferTemplateOwnerSlugs,
+} from '../api/site-configuration/services/entity-template-owners';
 
 // Maps a Strapi document change to every rendered page that consumes it.
 // Static-page mapping lives in ./scope-static-pages, offer relation scopes
@@ -98,15 +100,29 @@ export async function computeScope(
 ): Promise<ScopeRequest | null> {
   if (!DOCUMENT_WRITE_ACTIONS.has(action)) return null;
 
+  if (uid === SITE_CONFIGURATION_UID) {
+    return {
+      full: true,
+      refreshScopes: ['routes', 'chrome'],
+    };
+  }
+
   if (uid === 'api::homepage.homepage') {
     return { homepage: true, sitemap: true };
   }
   if (uid === DOTD_PAGE_UID) {
-    return { slugs: [DEAL_OF_THE_DAY_SLUG], sitemap: true };
+    return {
+      slugs: await entityTemplateOwnerSlugs(strapi, 'dealTemplate'),
+      sitemap: true,
+      refreshScopes: ['routes'],
+    };
   }
   if (uid === INDEPENDENCE_DAY_SALE_PAGE_UID) {
     return {
-      slugs: [INDEPENDENCE_DAY_SALE_SLUG],
+      slugs: await entityTemplateOwnerSlugs(
+        strapi,
+        'independenceDayTemplate',
+      ),
       sitemap: true,
       refreshScopes: ['routes'],
     };
@@ -230,7 +246,11 @@ export async function computeScope(
     }
     // An offer with no entity relations only shows via curation surfaces.
     return {
-      slugs: withOfferLandingSlugs(uid, relationScope.slugs),
+      slugs: await withOfferTemplateOwnerSlugs(
+        strapi,
+        uid,
+        relationScope.slugs,
+      ),
       ...(relationScope.optionalSlugs.length > 0
         ? { optionalSlugs: relationScope.optionalSlugs }
         : {}),
@@ -288,29 +308,30 @@ export async function computeScope(
 
     // The deal landing page bakes store pill labels/logos and category tab
     // names/icons into its HTML — same reason entity edits carry homepage.
-    const slugs =
+    const campaignOwnerSlugs =
       kind === 'store' || kind === 'category'
-        ? [
-            ...new Set([
-              slug,
-              DEAL_OF_THE_DAY_SLUG,
-              INDEPENDENCE_DAY_SALE_SLUG,
-            ]),
-          ]
-        : [slug];
-    const identityChanged =
+        ? (
+            await Promise.all([
+              entityTemplateOwnerSlugs(strapi, 'dealTemplate'),
+              entityTemplateOwnerSlugs(strapi, 'independenceDayTemplate'),
+            ])
+          ).flat()
+        : [];
+    const slugs = [...new Set([slug, ...campaignOwnerSlugs])];
+    const routeMetadataChanged =
       data
       && typeof data === 'object'
       && (
         Object.prototype.hasOwnProperty.call(data, 'name')
         || Object.prototype.hasOwnProperty.call(data, 'slug')
+        || Object.prototype.hasOwnProperty.call(data, 'pageTemplate')
       );
     const narrow: ScopeRequest = {
       slugs,
       optionalSlugs: [dealSlug],
       homepage: true,
       sitemap: true,
-      ...(identityChanged ? { refreshScopes: ['routes'] } : {}),
+      ...(routeMetadataChanged ? { refreshScopes: ['routes'] } : {}),
     };
     return festiveScope ? mergeScope(narrow, festiveScope) : narrow;
   }

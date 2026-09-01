@@ -1,17 +1,20 @@
 import { wpQuery } from "../db/wp-client.js";
 import { pgQuery, pgTransaction } from "../db/pg-client.js";
 import pLimit from "p-limit";
+import fs from "node:fs";
+import path from "node:path";
 import {
   setPostMapping,
   getPoolMappingByName,
   getUserMapping,
 } from "../utils/id-maps.js";
+import { generateDocumentId } from "../utils/strapi-insert.js";
 import {
-  generateDocumentId,
-  getEntityIdByDocumentId,
-  replaceContentMedia,
-} from "../utils/strapi-insert.js";
-import { replaceOfferTaxonomyRelations } from "../utils/offer-relations.js";
+  replaceResolvedOfferTaxonomyRelationBatch,
+  resolveOfferTaxonomyRelations,
+  normaliseMigratedAffiliateBrandRelations,
+  type ResolvedOfferTaxonomyRelations,
+} from "../utils/offer-relations.js";
 import {
   computeMigrationStatus,
   shouldImportMigrationOffer,
@@ -25,6 +28,11 @@ import {
   parseExpiryDate,
 } from "../utils/wp-dates.js";
 import { logger } from "../utils/logger.js";
+import { config } from "../config.js";
+import {
+  corruptedNoCodeReason,
+  isValidAffiliateDestination,
+} from "../utils/offer-quality.js";
 import { isAcfTrue } from "../utils/acf.js";
 import { reconcileMigratedOfferInventory } from "../utils/offer-inventory.js";
 import {
@@ -32,11 +40,18 @@ import {
   hasExcludedTerm,
 } from "../utils/import-exclusions.js";
 import { getWpOfferExpiryRaw } from "../utils/wp-offer-expiry.js";
-import { registerMigratedEntity } from "../utils/migration-registry.js";
 import {
   couponLogoStoreCandidates,
   loadWpStoreLogoIndex,
 } from "../utils/offer-logo-store.js";
+import {
+  buildCouponContentMediaBatchQueries,
+  buildCouponPoolBatchQueries,
+  buildCouponRegistryBatchQuery,
+  buildCouponUpsertBatchQuery,
+} from "../utils/coupon-batch.js";
+import { persistBatchWithIsolation } from "../utils/batch-isolation.js";
+import { ensureMigrationRegistry } from "../utils/migration-registry.js";
 
 interface WpPost {
   ID: number;
@@ -55,8 +70,168 @@ interface PostMeta {
   [key: string]: string;
 }
 
+type ReviewStatus =
+  | "pending"
+  | "imported"
+  | "excluded"
+  | "quarantined"
+  | "failed";
+
+type CouponReviewRow = {
+  wpId: number;
+  title: string;
+  status: ReviewStatus;
+  notes: string[];
+};
+
+type CouponTargetState = {
+  hasContentMedia: boolean;
+  hasUniquePool: boolean;
+};
+
+type PreparedCoupon = {
+  post: WpPost;
+  documentId: string;
+  sourceKey: string;
+  values: readonly unknown[];
+  contentFileIds: readonly number[];
+  resolvedRelations: ResolvedOfferTaxonomyRelations;
+  poolId: number | null;
+  targetState?: CouponTargetState;
+};
+
+type PersistedCoupon = PreparedCoupon & { entityId: number };
+
+function writeCouponReview(rows: Iterable<CouponReviewRow>): void {
+  fs.mkdirSync(config.stateDir, { recursive: true });
+  const values = [...rows].sort((a, b) => a.wpId - b.wpId);
+  fs.writeFileSync(
+    path.join(config.stateDir, "coupon-review.json"),
+    JSON.stringify({ profile: config.profile, total: values.length, rows: values }, null, 2),
+  );
+}
+
+/**
+ * One target snapshot lets fresh/rerun imports skip empty relation cleanup
+ * without preserving stale source-owned rows. Missing entries are new Coupons
+ * and therefore have no old media or unique-pool links to remove.
+ */
+async function loadCouponTargetState(
+  documentIds: readonly string[],
+): Promise<Map<string, CouponTargetState>> {
+  if (documentIds.length === 0) return new Map();
+  const rows = await pgQuery<{
+    document_id: string;
+    has_content_media: boolean;
+    has_unique_pool: boolean;
+  }>(
+    `SELECT coupon.document_id,
+            EXISTS (
+              SELECT 1
+                FROM files_related_mph media
+               WHERE media.related_id = coupon.id
+                 AND media.related_type = 'api::coupon.coupon'
+                 AND media.field = 'content'
+            ) AS has_content_media,
+            EXISTS (
+              SELECT 1
+                FROM coupons_unique_coupon_pool_lnk pool
+               WHERE pool.coupon_id = coupon.id
+            ) AS has_unique_pool
+       FROM coupons coupon
+      WHERE coupon.document_id = ANY($1::varchar[])`,
+    [[...documentIds]],
+  );
+  const state = new Map<string, CouponTargetState>();
+  for (const row of rows) {
+    state.set(row.document_id, {
+      hasContentMedia: row.has_content_media,
+      hasUniquePool: row.has_unique_pool,
+    });
+  }
+  logger.info(`Preloaded target state for ${state.size} existing Coupon(s)`);
+  return state;
+}
+
+function chunked<T>(values: readonly T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let start = 0; start < values.length; start += size) {
+    chunks.push(values.slice(start, start + size));
+  }
+  return chunks;
+}
+
+async function persistCouponBatchOnce(
+  batch: readonly PreparedCoupon[],
+): Promise<PersistedCoupon[]> {
+  if (batch.length === 0) return [];
+  return pgTransaction(async () => {
+    const upsert = buildCouponUpsertBatchQuery(
+      batch.map((coupon) => coupon.values),
+    );
+    const insertedRows = await pgQuery<{ id: number; document_id: string }>(
+      upsert.sql,
+      upsert.params,
+    );
+    const idByDocumentId = new Map(
+      insertedRows.map((row) => [row.document_id, row.id]),
+    );
+    const persisted = batch.map((coupon) => {
+      const entityId = idByDocumentId.get(coupon.documentId);
+      if (!entityId) {
+        throw new Error(
+          `Coupon batch upsert returned no id for WordPress ${coupon.post.ID}`,
+        );
+      }
+      return { ...coupon, entityId };
+    });
+
+    const registry = buildCouponRegistryBatchQuery(batch);
+    await pgQuery(registry.sql, registry.params);
+
+    await replaceResolvedOfferTaxonomyRelationBatch(
+      "coupons",
+      persisted.map((coupon) => ({
+        entityId: coupon.entityId,
+        resolved: coupon.resolvedRelations,
+      })),
+    );
+
+    for (const query of buildCouponContentMediaBatchQueries(
+      persisted.map((coupon) => ({
+        entityId: coupon.entityId,
+        fileIds: coupon.contentFileIds,
+        reconcile:
+          coupon.contentFileIds.length > 0 ||
+          Boolean(coupon.targetState?.hasContentMedia),
+      })),
+    )) {
+      await pgQuery(query.sql, query.params);
+    }
+
+    for (const query of buildCouponPoolBatchQueries(
+      persisted.map((coupon) => ({
+        entityId: coupon.entityId,
+        poolId: coupon.poolId,
+        reconcile:
+          coupon.poolId !== null ||
+          Boolean(coupon.targetState?.hasUniquePool),
+      })),
+    )) {
+      await pgQuery(query.sql, query.params);
+    }
+
+    return persisted;
+  });
+}
+
 export async function runCoupons(): Promise<void> {
   logger.info("=== Phase 7: Coupons Migration ===");
+
+  // Phase 07 supports standalone execution. Do not rely on --clean or an
+  // earlier phase having created the ownership registry before the batched
+  // raw upsert below runs.
+  await ensureMigrationRegistry();
 
   const sourcePosts = await wpQuery<WpPost>(`
     SELECT p.ID, p.post_title, p.post_name, p.post_content,
@@ -79,6 +254,12 @@ export async function runCoupons(): Promise<void> {
 
   const sourcePostIds = sourcePosts.map((post) => post.ID);
   const allMeta = await getPostMetaBulk(sourcePostIds);
+  const review = new Map<number, CouponReviewRow>(
+    sourcePosts.map((post) => [
+      post.ID,
+      { wpId: post.ID, title: post.post_title, status: "pending", notes: [] },
+    ]),
+  );
   const migrationNow = new Date();
   const lifecyclePosts = sourcePosts.filter((post) => {
     const expiresAt = parseExpiryDate(
@@ -90,8 +271,16 @@ export async function runCoupons(): Promise<void> {
       now: migrationNow,
     });
   });
+  const lifecyclePostIds = new Set(lifecyclePosts.map((post) => post.ID));
+  for (const post of sourcePosts) {
+    if (lifecyclePostIds.has(post.ID)) continue;
+    const row = review.get(post.ID)!;
+    row.status = "excluded";
+    row.notes.push("excluded by the shared offer lifecycle policy");
+  }
 
-  // Posts filed under an excluded term (Articles tree, retired stores)
+  // Posts filed under an excluded term (Articles tree, Uncategorized,
+  // retired stores)
   // are not coupons to import. Excluding them BEFORE expectedDocumentIds means the inventory
   // reconciliation also converges previously imported excluded posts away on
   // a re-import, instead of keeping them alive.
@@ -107,13 +296,29 @@ export async function runCoupons(): Promise<void> {
       .slice(0, 10)
       .map((post) => `${post.ID} (${post.post_title})`);
     logger.info(
-      `Skipping ${excludedPosts.length} excluded post(s) (articles/retired ` +
-        `stores): ${sample.join("; ")}` +
+      `Skipping ${excludedPosts.length} excluded post(s) ` +
+        `(articles/Uncategorized/retired stores): ${sample.join("; ")}` +
         (excludedPosts.length > sample.length ? "; ..." : ""),
     );
   }
   const excludedPostIds = new Set(excludedPosts.map((post) => post.ID));
-  const posts = lifecyclePosts.filter((post) => !excludedPostIds.has(post.ID));
+  for (const post of excludedPosts) review.get(post.ID)!.status = "excluded";
+  const includedPosts = lifecyclePosts.filter((post) => !excludedPostIds.has(post.ID));
+  const quarantinedPosts = includedPosts.filter(
+    (post) => !isValidAffiliateDestination(clean(allMeta.get(post.ID)?.link)),
+  );
+  const quarantinedIds = new Set(quarantinedPosts.map((post) => post.ID));
+  for (const post of quarantinedPosts) {
+    const row = review.get(post.ID)!;
+    row.status = "quarantined";
+    row.notes.push("missing or invalid affiliate destination");
+  }
+  if (quarantinedPosts.length > 0) {
+    logger.warn(
+      `Quarantined ${quarantinedPosts.length} Coupon(s) without a valid affiliate destination`,
+    );
+  }
+  const posts = includedPosts.filter((post) => !quarantinedIds.has(post.ID));
 
   const expectedDocumentIds = new Set(
     posts.map((post) => generateDocumentId(`coupon:${post.ID}`)),
@@ -123,242 +328,238 @@ export async function runCoupons(): Promise<void> {
   logger.info(
     `Found ${posts.length} importable coupon posts ` +
       `(${sourcePosts.length - lifecyclePosts.length} non-importable post(s) ` +
-      `dropped, ${excludedPosts.length} excluded post(s))`,
+      `dropped, ${excludedPosts.length} excluded post(s), ` +
+      `${quarantinedPosts.length} quarantined post(s))`,
   );
-  if (posts.length === 0) return;
+  if (posts.length === 0) {
+    writeCouponReview(review.values());
+    return;
+  }
 
   // Coupon `image` was a standalone URL in WordPress. It duplicates a Store
   // logo in most records, so map that path to the image-only logoStore
   // relation instead of uploading tens of thousands of duplicate files.
-  const storeLogoIndex = await loadWpStoreLogoIndex();
-
-  // Saved migration maps can outlive a dev database reset. Never trust a
-  // mapped Strapi admin ID until it is confirmed in the active target DB;
-  // content authorship is optional, while a stale ID rejects the whole coupon.
-  const adminUsers = await pgQuery<{ id: number }>(
-    `SELECT "id" FROM "admin_users"`,
-  );
+  // Load it alongside the two target snapshots; these sources are independent.
+  const [storeLogoIndex, adminUsers, couponTargetState] = await Promise.all([
+    loadWpStoreLogoIndex(),
+    // Saved migration maps can outlive a dev database reset. Never trust a
+    // mapped Strapi admin ID until confirmed in the active target DB.
+    pgQuery<{ id: number }>(`SELECT "id" FROM "admin_users"`),
+    loadCouponTargetState([...expectedDocumentIds]),
+  ]);
   const validAdminUserIds = new Set(adminUsers.map((user) => user.id));
 
   let inserted = 0;
   let failed = 0;
-  const limit = pLimit(20);
+  let completed = 0;
+  const preparationConcurrency = config.couponConcurrency;
+  const batchConcurrency = config.couponBatchConcurrency;
+  const batchSize = config.couponBatchSize;
+  const prepareLimit = pLimit(preparationConcurrency);
+  const batchLimit = pLimit(batchConcurrency);
+  const startedAt = Date.now();
+  logger.info(
+    `Importing ${posts.length} Coupon(s) in batches of ${batchSize} ` +
+      `(batch concurrency=${batchConcurrency}, ` +
+      `preparation concurrency=${preparationConcurrency})`,
+  );
 
-  const tasks = posts.map((post) =>
-    limit(async () => {
-      const meta = allMeta.get(post.ID) || {};
-      const relations = allRelations.get(post.ID) || [];
+  const markFailure = (post: WpPost, error: unknown): void => {
+    failed++;
+    const row = review.get(post.ID)!;
+    row.status = "failed";
+    row.notes.push(String((error as { message?: unknown })?.message ?? error));
+    logger.error(
+      `Failed to insert coupon ${post.ID} (${post.post_title}): ` +
+        `${String((error as { message?: unknown })?.message ?? error)}`,
+    );
+  };
 
-      try {
-        const sourceKey = `coupon:${post.ID}`;
-        const documentId = generateDocumentId(sourceKey);
-        const isUnique = meta.unique_coupon === "1" || meta.unique_coupon === "true";
-        const uniqueCouponPoolName = clean(meta.unique_coupon_name);
-        // Upload + rewrite images embedded in the post body so no content
-        // image is left pointing at the old WordPress uploads URL.
-        const contentMedia = await rewriteContentMedia(
-          cleanHtml(stripShortcodes(post.post_content))
-        );
-        const content = contentMedia.html;
-        const title = clean(post.post_title) || post.post_title;
-        // Best-effort badge + cashback/bank/prepaid texts parsed from the title
-        // (falling back to content); editors can correct these in the admin.
-        const offerText = extractOfferText(title, content);
-        const { cashbackText, bankOfferText, prepaidText } = extractCashbackFields(title, content);
-        const affiliateLink = clean(meta.link);
-        const missingRequired = [
-          !title.trim() ? "title" : null,
-          !offerText?.trim() ? "offerText" : null,
-          !content?.trim() ? "content" : null,
-          !affiliateLink?.trim() ? "affiliateLink" : null,
-        ].filter(Boolean);
-        if (missingRequired.length > 0) {
-          logger.warn(
-            `Coupon ${post.ID} (${post.post_title}) has required field gap(s): ${missingRequired.join(", ")}. Importing it so the record can be corrected editorially.`,
-          );
-        }
-        const createdAt =
-          normalizeWpDate(post.post_date_gmt) ||
-          normalizeWpLocalDate(post.post_date) ||
-          new Date().toISOString();
-        const updatedAt =
-          normalizeWpDate(post.post_modified_gmt) ||
-          normalizeWpLocalDate(post.post_modified) ||
-          createdAt;
+  const prepareCoupon = async (post: WpPost): Promise<PreparedCoupon> => {
+    const meta = allMeta.get(post.ID) || {};
+    const relations = allRelations.get(post.ID) || [];
+    const sourceKey = `coupon:${post.ID}`;
+    const documentId = generateDocumentId(sourceKey);
+    const isUnique = meta.unique_coupon === "1" || meta.unique_coupon === "true";
+    const uniqueCouponPoolName = clean(meta.unique_coupon_name);
+    const [contentMedia, sourceResolvedRelations] = await Promise.all([
+      rewriteContentMedia(cleanHtml(stripShortcodes(post.post_content))),
+      resolveOfferTaxonomyRelations({
+        termIds: relations,
+        logoStoreTermIds: couponLogoStoreCandidates(
+          meta.image,
+          relations,
+          storeLogoIndex,
+        ),
+        logoStoreOnlyWithoutStore: true,
+      }),
+    ]);
+    const { isForAffiliateBrand, resolved: resolvedRelations } =
+      normaliseMigratedAffiliateBrandRelations(sourceResolvedRelations);
+    const content = contentMedia.html;
+    const title = clean(post.post_title) || post.post_title;
+    const extractedOfferText = extractOfferText(title, content, {
+      currencyCode: config.source.currencyCode,
+    });
+    const offerText = extractedOfferText ?? "SPECIAL OFFER";
+    if (!extractedOfferText) {
+      review.get(post.ID)!.notes.push(
+        "offerText used final SPECIAL OFFER fallback",
+      );
+    }
+    const { cashbackText, bankOfferText, prepaidText } = extractCashbackFields(
+      title,
+      content,
+      { currencyCode: config.source.currencyCode },
+    );
+    const affiliateLink = clean(meta.link);
+    const corruptedCode = corruptedNoCodeReason(meta.code);
+    const normalizedCode = corruptedCode ? null : cleanCode(meta.code);
+    if (corruptedCode) review.get(post.ID)!.notes.push(corruptedCode);
+    const missingRequired = [
+      !title.trim() ? "title" : null,
+      !offerText.trim() ? "offerText" : null,
+      !content?.trim() ? "content" : null,
+      !affiliateLink?.trim() ? "affiliateLink" : null,
+    ].filter(Boolean);
+    if (missingRequired.length > 0) {
+      logger.warn(
+        `Coupon ${post.ID} (${post.post_title}) has required field gap(s): ` +
+          `${missingRequired.join(", ")}. Importing it for editorial repair.`,
+      );
+    }
+    const createdAt =
+      normalizeWpDate(post.post_date_gmt) ||
+      normalizeWpLocalDate(post.post_date) ||
+      new Date().toISOString();
+    const updatedAt =
+      normalizeWpDate(post.post_modified_gmt) ||
+      normalizeWpLocalDate(post.post_modified) ||
+      createdAt;
+    const expiresAt = parseExpiryDate(getWpOfferExpiryRaw(meta));
+    const contentStatus = computeMigrationStatus({
+      postDate: createdAt,
+      postStatus: post.post_status,
+      expiresAt,
+      now: migrationNow,
+    });
+    const mappedAuthorId = getUserMapping(post.post_author);
+    const authorId =
+      mappedAuthorId !== undefined && validAdminUserIds.has(mappedAuthorId)
+        ? mappedAuthorId
+        : null;
+    const mappedEditorId = meta._edit_last
+      ? getUserMapping(parseInt(meta._edit_last, 10))
+      : undefined;
+    const editorId =
+      mappedEditorId !== undefined && validAdminUserIds.has(mappedEditorId)
+        ? mappedEditorId
+        : authorId;
+    const poolRef =
+      isUnique && uniqueCouponPoolName
+        ? getPoolMappingByName(uniqueCouponPoolName)
+        : undefined;
+    if (isUnique && uniqueCouponPoolName && !poolRef) {
+      logger.warn(
+        `Unique coupon pool not found for coupon ${post.ID} ` +
+          `(${post.post_title}): ${uniqueCouponPoolName}`,
+      );
+    } else if (isUnique && !uniqueCouponPoolName) {
+      logger.warn(
+        `Unique coupon missing unique_coupon_name for coupon ${post.ID} ` +
+          `(${post.post_title})`,
+      );
+    }
 
-        const expiryRaw = getWpOfferExpiryRaw(meta);
-        const expiresAt = parseExpiryDate(expiryRaw);
+    return {
+      post,
+      documentId,
+      sourceKey,
+      values: [
+        documentId,
+        title,
+        offerText,
+        cashbackText,
+        bankOfferText,
+        prepaidText,
+        content,
+        normalizedCode,
+        isUnique ? "unique" : "static",
+        isAcfTrue(meta.popular_coupon) ? "Recommended" : null,
+        affiliateLink,
+        expiresAt,
+        contentStatus.scheduledAt,
+        contentStatus.contentStatus,
+        isForAffiliateBrand,
+        contentStatus.publishedAt,
+        contentStatus.publishedAt ? createdAt : null,
+        createdAt,
+        updatedAt,
+        null,
+        authorId,
+        editorId,
+      ],
+      contentFileIds: contentMedia.fileIds,
+      resolvedRelations,
+      poolId: poolRef?.id ?? null,
+      targetState: couponTargetState.get(documentId),
+    };
+  };
 
-        const contentStatus = computeMigrationStatus({
-          postDate: createdAt,
-          postStatus: post.post_status,
-          expiresAt,
-          now: migrationNow,
-        });
+  const reportProgress = (): void => {
+    const elapsedSeconds = Math.max(0.001, (Date.now() - startedAt) / 1000);
+    logger.info(
+      `Coupon batch progress: ${completed}/${posts.length} ` +
+        `(${(completed / elapsedSeconds).toFixed(1)}/s, inserted=${inserted}, ` +
+        `failed=${failed}, batchSize=${batchSize}, ` +
+        `batchConcurrency=${batchConcurrency})`,
+    );
+  };
 
-        const mappedAuthorId = getUserMapping(post.post_author);
-        const authorId =
-          mappedAuthorId !== undefined && validAdminUserIds.has(mappedAuthorId)
-            ? mappedAuthorId
-            : null;
-        // WP records the last editor in _edit_last; fall back to the author
-        // when the editor was deleted from wp_users or never mapped.
-        const mappedEditorId = meta._edit_last
-          ? getUserMapping(parseInt(meta._edit_last, 10))
-          : undefined;
-        const editorId =
-          mappedEditorId !== undefined && validAdminUserIds.has(mappedEditorId)
-            ? mappedEditorId
-            : authorId;
-
-        // `published_on` is the EDITOR-CONTROLLED relevance/"newest first"
-        // sort key (src/utils/offer-visibility.ts). Seeded from the WordPress
-        // PUBLISH date (post_date via createdAt) so the imported ordering
-        // matches the old site exactly; editors bump offers by re-dating
-        // them after migration.
-        // It MUST be written at insert time: Postgres orders NULLs FIRST in a
-        // DESC sort, so a row with no published_on outranks every row an editor
-        // has actually dated — "Bump to top" would push an offer to the BOTTOM.
-        // The bug hides while the column is uniformly NULL (everything ties and
-        // falls through to the published_at tiebreaker) and only surfaces on the
-        // first bump, so it must not be left to a backfill.
-        const result = await pgQuery<{ id: number }>(
-          `INSERT INTO "coupons" (
-            "document_id", "title", "offer_text", "cashback_text", "bank_offer_text", "prepaid_text", "content",
-            "code", "coupon_type", "badge",
-            "affiliate_link", "expires_at", "scheduled_at", "content_status",
-            "published_at", "published_on", "created_at", "updated_at", "locale",
-            "created_by_id", "updated_by_id"
-          ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
-          )
-          ON CONFLICT ("document_id") DO UPDATE SET
-            "title" = EXCLUDED."title",
-            "offer_text" = EXCLUDED."offer_text",
-            "cashback_text" = EXCLUDED."cashback_text",
-            "bank_offer_text" = EXCLUDED."bank_offer_text",
-            "prepaid_text" = EXCLUDED."prepaid_text",
-            "content" = EXCLUDED."content",
-            "code" = EXCLUDED."code",
-            "coupon_type" = EXCLUDED."coupon_type",
-            "badge" = COALESCE(EXCLUDED."badge", "coupons"."badge"),
-            "affiliate_link" = EXCLUDED."affiliate_link",
-            "expires_at" = EXCLUDED."expires_at",
-            "scheduled_at" = EXCLUDED."scheduled_at",
-            "content_status" = EXCLUDED."content_status",
-            "published_at" = EXCLUDED."published_at",
-            "published_on" = EXCLUDED."published_on",
-            "updated_at" = EXCLUDED."updated_at",
-            "updated_by_id" = EXCLUDED."updated_by_id"
-          RETURNING id`,
-          [
-            documentId,
-            title,
-            offerText,
-            cashbackText,
-            bankOfferText,
-            prepaidText,
-            content,
-            cleanCode(meta.code),
-            isUnique ? "unique" : "static",
-            isAcfTrue(meta.popular_coupon) ? "Recommended" : null,
-            affiliateLink,
-            expiresAt,
-            contentStatus.scheduledAt,
-            contentStatus.contentStatus,
-            contentStatus.publishedAt,
-            contentStatus.publishedAt ? createdAt : null,
-            createdAt,
-            updatedAt,
-            null,
-            authorId,
-            editorId,
-          ]
-        );
-
-        const entityId =
-          result[0]?.id ?? (await getEntityIdByDocumentId("coupons", documentId));
-        if (!entityId) {
-          logger.warn(`Could not resolve entity id for coupon ${post.ID} (${post.post_title})`);
-          return;
-        }
-        setPostMapping(post.ID, {
-          id: entityId,
-          documentId,
+  const tasks = chunked(posts, batchSize).map((postBatch) =>
+    batchLimit(async () => {
+      const preparedResults = await Promise.all(
+        postBatch.map((post) =>
+          prepareLimit(async () => {
+            try {
+              return await prepareCoupon(post);
+            } catch (error) {
+              markFailure(post, error);
+              return null;
+            }
+          }),
+        ),
+      );
+      const prepared = preparedResults.filter(
+        (coupon): coupon is PreparedCoupon => coupon !== null,
+      );
+      const persisted = await persistBatchWithIsolation({
+        batch: prepared,
+        persist: persistCouponBatchOnce,
+        onRecordFailure: (coupon, error) =>
+          markFailure(coupon.post, error),
+      });
+      for (const coupon of persisted) {
+        setPostMapping(coupon.post.ID, {
+          id: coupon.entityId,
+          documentId: coupon.documentId,
           type: "api::coupon.coupon",
           table: "coupons",
         });
-        await registerMigratedEntity({
-          documentId,
-          sourceKey,
-          targetTable: "coupons",
-        });
-
-        // Wire taxonomy relations. The WordPress Coupon image supplies an
-        // image-only Logo Store only when the resulting Coupon has no real
-        // Store membership; a real Store logo always remains authoritative.
-        await replaceOfferTaxonomyRelations("coupons", entityId, {
-          termIds: relations,
-          logoStoreTermIds: couponLogoStoreCandidates(
-            meta.image,
-            relations,
-            storeLogoIndex,
-          ),
-          logoStoreOnlyWithoutStore: true,
-        });
-
-        await replaceContentMedia(
-          contentMedia.fileIds,
-          entityId,
-          "api::coupon.coupon",
-          "content"
-        );
-
-        // This relation is source-owned too: switching pools or changing a
-        // Coupon back to static must remove the previous link.
-        const poolRef =
-          isUnique && uniqueCouponPoolName
-            ? getPoolMappingByName(uniqueCouponPoolName)
-            : undefined;
-        await pgTransaction(async () => {
-          await pgQuery(
-            `DELETE FROM "coupons_unique_coupon_pool_lnk"
-             WHERE "coupon_id" = $1`,
-            [entityId],
-          );
-          if (poolRef) {
-            await pgQuery(
-              `INSERT INTO "coupons_unique_coupon_pool_lnk"
-                 ("coupon_id", "unique_coupon_pool_id", "coupon_ord")
-               VALUES ($1, $2, 1)`,
-              [entityId, poolRef.id],
-            );
-          }
-        });
-        if (isUnique && uniqueCouponPoolName && !poolRef) {
-          logger.warn(
-            `Unique coupon pool not found for coupon ${post.ID} (${post.post_title}): ${uniqueCouponPoolName}`
-          );
-        } else if (isUnique && !uniqueCouponPoolName) {
-          logger.warn(
-            `Unique coupon missing unique_coupon_name for coupon ${post.ID} (${post.post_title})`
-          );
-        }
-
-        inserted++;
-        if (inserted % 200 === 0) {
-          logger.info(`  Processed ${inserted}/${posts.length} coupons`);
-        }
-      } catch (err: any) {
-        failed++;
-        logger.error(
-          `Failed to insert coupon ${post.ID} (${post.post_title}): ${err.message}`
-        );
+        review.get(coupon.post.ID)!.status = "imported";
       }
-    })
+      inserted += persisted.length;
+      completed += postBatch.length;
+      reportProgress();
+    }),
   );
 
-  await Promise.all(tasks);
+  const outcomes = await Promise.allSettled(tasks);
+  writeCouponReview(review.values());
+  const fatal = outcomes.find(
+    (outcome): outcome is PromiseRejectedResult => outcome.status === "rejected",
+  );
+  if (fatal) throw fatal.reason;
   logger.info(`Coupons migration complete: ${inserted} inserted, ${failed} failed`);
   if (failed > 0) {
     throw new Error(

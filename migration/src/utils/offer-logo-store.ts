@@ -6,7 +6,7 @@ export type StoreLogoIndex = ReadonlyMap<string, readonly number[]>;
 export function normalizeWpMediaPath(value: unknown): string | null {
   if (typeof value !== "string" || !value.trim()) return null;
   try {
-    const path = new URL(value.trim(), "https://www.couponzguru.com").pathname;
+    const path = new URL(value.trim(), "https://path.invalid").pathname;
     return decodeURIComponent(path).replace(/\/{2,}/gu, "/").toLowerCase();
   } catch {
     return null;

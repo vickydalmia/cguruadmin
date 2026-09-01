@@ -11,10 +11,11 @@
  * badge.
  *
  * Tuned against the real catalog: recognises UPTO/FLAT/EXTRA/MIN qualifiers,
- * ₹ and $ amounts, and "save X%"; requires an off/discount/save/qualifier
+ * ₹ and $ amounts, currency cashback, and "save X%"; requires an
+ * off/discount/save/qualifier
  * context so a bare "100% Match/Free/Whey" or a stray body-text "%" never
- * becomes a badge. Bank offers must carry a number (percent or ₹) — no bare
- * "Bank OFF".
+ * becomes a badge. Bank offers must carry a number (percent or currency
+ * amount) — no bare "Bank OFF".
  */
 
 /** Collapse HTML + whitespace to a single plain-text line for scanning. */
@@ -34,7 +35,7 @@ function digits(raw: string): string {
 }
 
 // Currency and qualifier fragments, shared across patterns.
-const CUR = String.raw`(?:rs\.?|₹|inr|\$)`;
+const CUR = String.raw`(?:rs\.?|₹|inr|usd|\$)`;
 const QUAL = String.raw`up\s?to|flat|extra|additional|min(?:imum)?\.?`;
 const PCT = String.raw`\d{1,3}(?:\.\d+)?`; // allow decimals: 19.2%
 // Optional "-Y" / "to Y" tail so a range ("40-60%", "30 To 80%") keeps the
@@ -50,7 +51,7 @@ const OFF_CTX = String.raw`[^%]{0,20}?\b(?:off|discount|save|saving)`;
 
 /** "$" for dollar amounts, "₹" for everything else (rs/inr/₹). */
 function money(symbol: string, amount: string): string {
-  return (/\$/.test(symbol) ? "$" : "₹") + digits(amount);
+  return (/\$|usd/i.test(symbol) ? "$" : "₹") + digits(amount);
 }
 
 /** Normalise a qualifier word to its canonical uppercase badge form. */
@@ -70,7 +71,24 @@ function normQualifier(raw: string | undefined): string {
 const BANK_TAIL = String.raw`(?:[A-Za-z][A-Za-z.&]{1,9}\s+)?bank\s*(?:off|discount|offer)`;
 const CASHBACK_ONE = new RegExp(String.raw`(${PCT})\s*%\s*cash\s?back`, "i");
 // "Cashback of 13%" / "Cashback Of 10 %" — the percent trails the word.
-const CASHBACK_TWO = new RegExp(String.raw`cash\s?back\s+of\s+(${PCT})\s*%`, "i");
+const CASHBACK_TWO = new RegExp(
+  String.raw`cash\s?back(?:\s+of)?\s*[:\-–]?\s*(${PCT})\s*%`,
+  "i",
+);
+// Currency cashback is common in the USA source: "$10 Cashback",
+// "Cashback of $10", and "Cashback USD 10". Keep the explicit source
+// currency marker so a mixed-source anomaly is represented honestly rather
+// than silently converted through the active profile.
+const CASHBACK_MONEY_ONE = new RegExp(
+  String.raw`(${CUR})\s*([\d,]+)\s*cash\s?back`,
+  // Currency words and Cashback are intentionally case-insensitive, including
+  // source variants such as "USD 15 Cashback" and "usd 15 cashback".
+  "i",
+);
+const CASHBACK_MONEY_TWO = new RegExp(
+  String.raw`cash\s?back(?:\s+of)?\s*[:\-–]?\s*(${CUR})\s*([\d,]+)`,
+  "i",
+);
 const BANK_PCT_ONE = new RegExp(String.raw`(${PCT})\s*%\s*${BANK_TAIL}`, "i");
 const BANK_RUPEE_ONE = new RegExp(String.raw`${CUR}\s*([\d,]+)\s*${BANK_TAIL}`, "i");
 // Prepaid must be confirmed by off/discount/offer immediately after the word,
@@ -86,7 +104,7 @@ const PREPAID_RUPEE_ONE = new RegExp(String.raw`${CUR}\s*([\d,]+)\s*${PREPAID_TA
 // anything but an amount. An amountless perk ("Free Shipping On Prepaid
 // Orders") therefore cannot be represented and is not extracted.
 export interface CashbackFields {
-  /** e.g. "15%", or null when none found. */
+  /** e.g. "15%" / "$10", or null when none found. */
   cashbackText: string | null;
   /** e.g. "12%" / "₹2000", or null when none found. */
   bankOfferText: string | null;
@@ -97,12 +115,13 @@ export interface CashbackFields {
 /**
  * Extract the cashback, bank-offer and prepaid amounts, scanning title then
  * content. Each is the first confident match, or null. All three require a
- * number (percent or rupee amount) — a bare "Bank Offer" or "prepaid" is
+ * number (percent or currency amount) — a bare "Bank Offer" or "prepaid" is
  * intentionally ignored.
  */
 export function extractCashbackFields(
   title: string | null | undefined,
   content?: string | null | undefined,
+  options: OfferExtractionOptions = {},
 ): CashbackFields {
   let cashbackText: string | null = null;
   let bankOfferText: string | null = null;
@@ -111,8 +130,14 @@ export function extractCashbackFields(
   for (const text of [toPlain(title), toPlain(content)]) {
     if (!text) continue;
     if (!cashbackText) {
-      const m = text.match(CASHBACK_ONE) ?? text.match(CASHBACK_TWO);
-      if (m) cashbackText = `${m[1]}%`;
+      const pct = text.match(CASHBACK_ONE) ?? text.match(CASHBACK_TWO);
+      if (pct) {
+        cashbackText = `${pct[1]}%`;
+      } else {
+        const currency =
+          text.match(CASHBACK_MONEY_ONE) ?? text.match(CASHBACK_MONEY_TWO);
+        if (currency) cashbackText = money(currency[1], currency[2]);
+      }
     }
     if (!bankOfferText) {
       const pct = text.match(BANK_PCT_ONE);
@@ -120,7 +145,12 @@ export function extractCashbackFields(
         bankOfferText = `${pct[1]}%`;
       } else {
         const rupee = text.match(BANK_RUPEE_ONE);
-        if (rupee) bankOfferText = `₹${digits(rupee[1])}`;
+        if (rupee) {
+          const symbolMatch = text.match(BANK_RUPEE_ONE);
+          bankOfferText = symbolMatch
+            ? money(symbolMatch[0].match(new RegExp(CUR, "i"))?.[0] ?? defaultCurrencySymbol(options), rupee[1])
+            : `${defaultCurrencySymbol(options)}${digits(rupee[1])}`;
+        }
       }
     }
     if (!prepaidText) {
@@ -129,7 +159,12 @@ export function extractCashbackFields(
         prepaidText = `${pct[1]}%`;
       } else {
         const rupee = text.match(PREPAID_RUPEE_ONE);
-        if (rupee) prepaidText = `₹${digits(rupee[1])}`;
+        if (rupee) {
+          const symbolMatch = text.match(PREPAID_RUPEE_ONE);
+          prepaidText = symbolMatch
+            ? money(symbolMatch[0].match(new RegExp(CUR, "i"))?.[0] ?? defaultCurrencySymbol(options), rupee[1])
+            : `${defaultCurrencySymbol(options)}${digits(rupee[1])}`;
+        }
       }
     }
   }
@@ -143,6 +178,8 @@ function stripCashbackSpans(text: string): string {
   return text
     .replace(new RegExp(CASHBACK_ONE.source, "gi"), " ")
     .replace(new RegExp(CASHBACK_TWO.source, "gi"), " ")
+    .replace(new RegExp(CASHBACK_MONEY_ONE.source, "gi"), " ")
+    .replace(new RegExp(CASHBACK_MONEY_TWO.source, "gi"), " ")
     .replace(new RegExp(BANK_PCT_ONE.source, "gi"), " ")
     .replace(new RegExp(BANK_RUPEE_ONE.source, "gi"), " ")
     .replace(new RegExp(PREPAID_PCT_ONE.source, "gi"), " ")
@@ -156,8 +193,27 @@ function stripCashbackSpans(text: string): string {
 export type OfferParts = [string, string, string];
 
 /** First-match-wins badge patterns, highest priority first. */
-function matchOffer(text: string): OfferParts | null {
+export type OfferExtractionOptions = {
+  currencyCode?: string;
+};
+
+function defaultCurrencySymbol(options: OfferExtractionOptions): "$" | "₹" {
+  return options.currencyCode?.trim().toUpperCase() === "USD" ? "$" : "₹";
+}
+
+function matchOffer(text: string, options: OfferExtractionOptions): OfferParts | null {
   let m: RegExpMatchArray | null;
+
+  if (/\bfree\s+shipping\b/iu.test(text)) return ["FREE", "SHIPPING", ""];
+  if (/\b(?:buy\s+one\s+get\s+one|buy\s*1\s+get\s*1|bogo)\b/iu.test(text)) {
+    return ["BOGO", "", ""];
+  }
+  if ((m = text.match(new RegExp(String.raw`\bstarting\s+(?:at|from)\s+(${CUR})\s*([\d,]+)`, "i")))) {
+    return ["STARTING", money(m[1], m[2]), ""];
+  }
+  if ((m = text.match(new RegExp(String.raw`\bunder\s+(${CUR})\s*([\d,]+)`, "i")))) {
+    return ["UNDER", money(m[1], m[2]), ""];
+  }
 
   // Qualifier (UPTO/FLAT/EXTRA/MIN) immediately before a percentage. For a
   // range ("Min 30% To 80%", "Flat 40-60%") this captures the first number.
@@ -189,7 +245,7 @@ function matchOffer(text: string): OfferParts | null {
   // this India-first catalog ("Flat 250 Off" -> "FLAT ₹250 OFF"). Requiring a
   // qualifier + "off" (and the scale guard) keeps stray numbers out.
   if ((m = text.match(new RegExp(String.raw`\b(${QUAL})\s+([\d,]+)${NOT_SCALED}\s*(?:instant\s+)?off\b`, "i"))))
-    return [normQualifier(m[1]), `₹${digits(m[2])}`, "OFF"];
+    return [normQualifier(m[1]), `${defaultCurrencySymbol(options)}${digits(m[2])}`, "OFF"];
 
   return null;
 }
@@ -204,11 +260,12 @@ function matchOffer(text: string): OfferParts | null {
 export function extractOfferText(
   title: string | null | undefined,
   content?: string | null | undefined,
+  options: OfferExtractionOptions = {},
 ): string | null {
   for (const raw of [title, content]) {
     const text = stripCashbackSpans(toPlain(raw));
     if (!text) continue;
-    const parts = matchOffer(text);
+    const parts = matchOffer(text, options);
     if (parts) return parts.filter(Boolean).join(" ");
   }
   return null;
