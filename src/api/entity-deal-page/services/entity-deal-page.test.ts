@@ -49,6 +49,7 @@ describe('resolveEntityDealPageSeo', () => {
     const seo = resolveEntityDealPageSeo({
       entity: { name: 'Mobile' },
       publicSlug: 'mobile',
+      dealSlug: 'mobile-deals',
       liveDealCount: 4,
     });
 
@@ -75,6 +76,7 @@ describe('resolveEntityDealPageSeo', () => {
         },
       },
       publicSlug: 'mobile',
+      dealSlug: 'mobile-deals',
       liveDealCount: 1,
     });
 
@@ -94,6 +96,7 @@ describe('resolveEntityDealPageSeo', () => {
         },
       },
       publicSlug: 'mobile',
+      dealSlug: 'mobile-deals',
       liveDealCount: 0,
       routeConflict: true,
     });
@@ -181,7 +184,11 @@ describe('entity Deal-page settings write', () => {
 });
 
 describe('entity Deal-page public read', () => {
-  function harness(dealRows: any[], matchedTotal: number) {
+  function harness(
+    dealRows: any[],
+    matchedTotal: number,
+    localizedEntity?: Record<string, unknown>,
+  ) {
     const dealFindMany = vi.fn().mockResolvedValue(dealRows);
     const dealCount = vi.fn().mockResolvedValue(matchedTotal);
 
@@ -200,7 +207,7 @@ describe('entity Deal-page public read', () => {
       };
       return {
         findOne: vi.fn().mockResolvedValue(
-          uid === 'api::store.store' ? entity : null,
+          uid === 'api::store.store' ? (localizedEntity ?? entity) : null,
         ),
         findMany: vi.fn(async (options: any) => {
           if (uid !== 'api::store.store') return [];
@@ -273,6 +280,22 @@ describe('entity Deal-page public read', () => {
       start: 10,
       limit: 10,
     });
+  });
+
+  it('keeps the English-generated route while returning a localized entity name', async () => {
+    const { strapi } = harness([], 0, {
+      id: 8,
+      documentId: 'store-1',
+      slug: 'amazon-coupons',
+      name: 'أمازون الهند',
+    });
+    const service = createEntityDealPageService({ strapi });
+
+    const result = await service.getPublicPage('amazon-india-deals', {});
+
+    expect(result?.data.entity.name).toBe('أمازون الهند');
+    expect(result?.data.route.permalink).toBe('/amazon-india-deals/');
+    expect(result?.data.seo.canonical).toBe('/amazon-india-deals/');
   });
 
   // The SQL filter is a superset of isActionableProductDeal, so a non-zero

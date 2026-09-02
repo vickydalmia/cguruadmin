@@ -41,6 +41,7 @@ import {
   classifyTaxonomyTerms,
   formatTaxonomyClassificationReport,
 } from "../utils/taxonomy-classification.js";
+import { DEFAULT_CONTENT_LOCALE } from "../utils/content-locale.js";
 
 interface WpTerm {
   term_id: number;
@@ -630,7 +631,7 @@ async function insertTerm(
     createdAt, // published_at
     createdAt, // created_at
     updatedAt, // updated_at
-    null,
+    DEFAULT_CONTENT_LOCALE,
   ];
 
   const placeholders = values.map((_, i) => `$${i + 1}`);
@@ -643,7 +644,7 @@ async function insertTerm(
       const result = await pgQuery<{ id: number }>(
         `INSERT INTO "${table}" (${columns.map((c) => `"${c}"`).join(", ")})
        VALUES (${placeholders.join(", ")})
-       ON CONFLICT ("document_id") DO UPDATE SET
+       ON CONFLICT ("document_id", "locale") DO UPDATE SET
          "name" = EXCLUDED."name",
          "slug" = EXCLUDED."slug",
          "page_template" = COALESCE("${table}"."page_template", EXCLUDED."page_template"),

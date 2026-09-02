@@ -22,6 +22,9 @@ const MODELS: Record<string, any> = {
         pluginOptions: { i18n: { localized: true } },
       },
       slug: { type: 'string' },
+      websiteUrl: { type: 'text' },
+      code: { type: 'string' },
+      affiliateLink: { type: 'text' },
       shortDescription: {
         type: 'text',
         maxLength: 200,
@@ -104,6 +107,9 @@ const ENTRY = {
   documentId: 'store-1',
   name: 'Amazon',
   slug: 'amazon',
+  websiteUrl: 'https://www.amazon.ae/',
+  code: 'SAVE20',
+  affiliateLink: 'https://tracking.example/amazon?campaign=ae',
   shortDescription: 'Top online store',
   description: '<p>Shop <strong>everything</strong></p>',
   isVerified: true,
@@ -145,6 +151,9 @@ describe('collectTranslatableLeaves', () => {
     ]);
     // Non-localized scalars, the shared slug, URLs and media never leak in.
     expect(byPath.has('slug')).toBe(false);
+    expect(byPath.has('websiteUrl')).toBe(false);
+    expect(byPath.has('code')).toBe(false);
+    expect(byPath.has('affiliateLink')).toBe(false);
     expect(byPath.has('seo.canonicalUrl')).toBe(false);
     // Budgets derive from schema maxLength × 0.95.
     expect(byPath.get('seo.metaTitle')?.maxLength).toBe(66);
@@ -227,6 +236,9 @@ describe('buildLocalizedData', () => {
     // Non-localized top-level attributes are NOT in the payload — Strapi's
     // own i18n sync owns them, and echoing them back risks loops.
     expect('slug' in plan.data).toBe(false);
+    expect('websiteUrl' in plan.data).toBe(false);
+    expect('code' in plan.data).toBe(false);
+    expect('affiliateLink' in plan.data).toBe(false);
     expect('isVerified' in plan.data).toBe(false);
     expect('logo' in plan.data).toBe(false);
     // Inverse relations are never written; owner side becomes an ordered

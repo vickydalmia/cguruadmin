@@ -52,6 +52,7 @@ import {
   allowsPartialDeals,
   type PhaseOutcome,
 } from "../utils/phase-outcome.js";
+import { DEFAULT_CONTENT_LOCALE } from "../utils/content-locale.js";
 // The application owns the discount parser; imported dynamically because
 // cguruadmin is CommonJS while this package runs as ESM under tsx — a static
 // named import from the CJS scope loses its exports (visible on Node 24).
@@ -369,7 +370,7 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
           ) VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
           )
-          ON CONFLICT ("document_id") DO UPDATE SET
+          ON CONFLICT ("document_id", "locale") DO UPDATE SET
             "title" = EXCLUDED."title",
             "cashback_text" = EXCLUDED."cashback_text",
             "bank_offer_text" = EXCLUDED."bank_offer_text",
@@ -425,7 +426,7 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
             contentStatus.publishedAt ? createdAt : null,
             createdAt,
             updatedAt,
-            null,
+            DEFAULT_CONTENT_LOCALE,
             authorId,
             editorId,
           ]

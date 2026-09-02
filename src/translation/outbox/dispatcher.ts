@@ -29,6 +29,34 @@ import { DEFAULT_CONTENT_LOCALE } from '../../constants/content-locales';
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1_000;
 const RELATION_RETRY_DELAY_MS = 5 * 60 * 1_000;
 
+/**
+ * Validation and SQL-integrity failures are deterministic publication
+ * failures, not provider failures. Retrying them would buy the same
+ * translation repeatedly while the target row continues to reject it.
+ */
+export function isPermanentTranslationWriteError(cause: unknown): boolean {
+  let current: unknown = cause;
+  const seen = new Set<unknown>();
+  for (let depth = 0; depth < 5 && current && !seen.has(current); depth += 1) {
+    seen.add(current);
+    if (typeof current !== 'object') return false;
+    const error = current as Record<string, unknown>;
+    const code = String(error.code ?? '');
+    const status = Number(error.status ?? error.statusCode);
+    if (
+      error.name === 'ValidationError'
+      || /^23\d{3}$/u.test(code)
+      || status === 400
+      || status === 409
+      || status === 422
+    ) {
+      return true;
+    }
+    current = error.cause;
+  }
+  return false;
+}
+
 function msUntilNextUtcMidnight(now = new Date()): number {
   const next = new Date(now);
   next.setUTCHours(24, 0, 0, 0);
@@ -478,14 +506,23 @@ export class TranslationDispatcher {
 
     // 5. Persist the locale version through the document pipeline.
     await assertLease();
-    const skippedRelations = await writeLocaleVersion(
-      this.strapi,
-      job.uid,
-      job.documentId,
-      job.targetLocale,
-      latestSource,
-      translations,
-    );
+    let skippedRelations: Awaited<ReturnType<typeof writeLocaleVersion>>;
+    try {
+      skippedRelations = await writeLocaleVersion(
+        this.strapi,
+        job.uid,
+        job.documentId,
+        job.targetLocale,
+        latestSource,
+        translations,
+      );
+    } catch (cause) {
+      if (!isPermanentTranslationWriteError(cause)) throw cause;
+      throw new TranslationError('TRANSLATION_WRITE_REJECTED', {
+        cause,
+        detail: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
     await assertLease();
 
     // 6. Bookkeeping — including the translation memory the next rebuild

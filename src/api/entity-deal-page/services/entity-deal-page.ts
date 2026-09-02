@@ -111,6 +111,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const resolvedSeo = resolveEntityDealPageSeo({
       entity,
       publicSlug: resolved.publicSlug,
+      dealSlug: resolved.dealSlug,
       liveDealCount: total,
       routeConflict,
     });

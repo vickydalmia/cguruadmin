@@ -31,6 +31,7 @@ import {
   routeConflictFor,
 } from './entity-deal-page-route-owners';
 import { resolveEntityDealPageSeo } from './entity-deal-page-seo';
+import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
 
 export function mapSettingItem(input: {
   config: EntityConfig;
@@ -189,6 +190,7 @@ export async function loadSettingItems(
           strapi,
           config.uid,
           {
+            locale: DEFAULT_CONTENT_LOCALE,
             fields: entityFields(config) as any,
             populate: entityPopulate(config) as any,
             sort: [{ id: 'asc' }],
@@ -244,6 +246,7 @@ export async function loadSettingItems(
     strapi,
     'api::deal.deal',
     {
+      locale: DEFAULT_CONTENT_LOCALE,
       filters: {
         contentStatus,
         $and: publishedAnd,

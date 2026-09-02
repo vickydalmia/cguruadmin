@@ -12,6 +12,7 @@ import {
   entityDealPageSlug,
   parseEntityDealPageSlug,
 } from '../api/entity-deal-page/services/entity-deal-route';
+import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
 import { foldPathKey, normalizeRedirectPath } from './redirect-paths';
 import { readString } from './row-fields';
 
@@ -138,6 +139,7 @@ export async function findLiveEntity(
       const candidates = routeSlugCandidates(candidateRoute, kind);
 
       const rows: unknown = await strapi.documents(targetUid).findMany({
+        locale: DEFAULT_CONTENT_LOCALE,
         filters: { $or: candidates.map((candidate) => ({ slug: { $eqi: candidate } })) } as any,
         fields: ['name', 'slug'],
         limit: ENTITY_CANDIDATE_LIMIT,
@@ -166,6 +168,7 @@ export async function findLiveEntity(
     let start = 0;
     while (true) {
       const rows: unknown = await strapi.documents(targetUid).findMany({
+        locale: DEFAULT_CONTENT_LOCALE,
         fields: ['name', 'slug'],
         sort: [{ id: 'asc' }],
         start,

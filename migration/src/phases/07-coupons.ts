@@ -56,6 +56,7 @@ import {
   extractOfferCountries,
   loadProfileOfferCountries,
 } from "../utils/offer-country-extract.js";
+import { DEFAULT_CONTENT_LOCALE } from "../utils/content-locale.js";
 
 interface WpPost {
   ID: number;
@@ -508,7 +509,7 @@ export async function runCoupons(): Promise<void> {
         contentStatus.publishedAt ? createdAt : null,
         createdAt,
         updatedAt,
-        null,
+        DEFAULT_CONTENT_LOCALE,
         authorId,
         editorId,
       ],

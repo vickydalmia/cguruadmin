@@ -18,7 +18,6 @@ import {
   type EntityDealPageIndexBlocker,
   type SeoInput,
 } from './entity-deal-page-config';
-import { entityDealPagePath } from './entity-deal-route';
 
 // Shared with the write-time validator so the read path can never accept a
 // value the validator would have rejected, or vice versa.
@@ -27,17 +26,16 @@ const canonicalPath = normalizeCanonicalPath;
 export function resolveEntityDealPageSeo(input: {
   entity: any;
   publicSlug: string;
+  /** Stable route derived from the default-locale entity name. */
+  dealSlug: string;
   liveDealCount: number;
   routeConflict?: boolean;
 }) {
-  const { entity, publicSlug, liveDealCount } = input;
+  const { entity, publicSlug, dealSlug, liveDealCount } = input;
   const seo = entity?.entityDealPageSeo ?? {};
   const displayName =
     collapseText(entity?.name) ?? collapseText(publicSlug) ?? publicSlug;
-  const selfCanonical = entityDealPagePath(entity?.name);
-  if (!selfCanonical) {
-    throw new Error('Entity name cannot produce a Product Deal page route.');
-  }
+  const selfCanonical = `/${dealSlug}/`;
   const authoredCanonical = canonicalPath(seo?.canonicalUrl);
   const canonical = authoredCanonical ?? selfCanonical;
   const blockers: EntityDealPageIndexBlocker[] = [];

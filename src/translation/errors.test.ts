@@ -13,4 +13,10 @@ describe('translation retry policy', () => {
       true,
     );
   });
+
+  it('does not repeat a paid call after deterministic locale-write rejection', () => {
+    expect(new TranslationError('TRANSLATION_WRITE_REJECTED').retryable).toBe(
+      false,
+    );
+  });
 });

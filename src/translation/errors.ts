@@ -12,6 +12,7 @@ export type TranslationErrorCode =
   | 'TRANSLATION_REJECTED'
   | 'TRANSLATION_MALFORMED_OUTPUT'
   | 'TRANSLATION_QUALITY_GATE_FAILED'
+  | 'TRANSLATION_WRITE_REJECTED'
   | 'TRANSLATION_BUDGET_EXCEEDED'
   | 'TRANSLATION_LEASE_LOST'
   | 'TRANSLATION_UNAVAILABLE';
@@ -33,6 +34,10 @@ const RETRYABLE: Record<TranslationErrorCode, boolean> = {
   // writer/editor attempt can succeed, so let the durable queue retry with
   // backoff without waiting for a human language reviewer.
   TRANSLATION_QUALITY_GATE_FAILED: true,
+  // The provider already returned billable output, but the locale row was
+  // rejected by a deterministic validation/integrity rule. Repeating the same
+  // paid call cannot repair the database or content contract.
+  TRANSLATION_WRITE_REJECTED: false,
   TRANSLATION_BUDGET_EXCEEDED: true,
   TRANSLATION_LEASE_LOST: true,
   TRANSLATION_UNAVAILABLE: true,

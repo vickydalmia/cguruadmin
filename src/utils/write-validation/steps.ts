@@ -443,8 +443,16 @@ export const LOCKED_STEPS: readonly ValidationStep[] = [
     // Name unique per type, slug unique across all four taxonomies (the public
     // URL space is flat), and no collision with a reserved Astro route.
     name: 'validateIdentity',
-    run: ({ strapi, uid, action, data, documentId, strict }) =>
-      validateIdentity(strapi, uid, action, data, documentId, strict),
+    run: ({ strapi, uid, action, data, documentId, strict, locale }) =>
+      validateIdentity(
+        strapi,
+        uid,
+        action,
+        data,
+        documentId,
+        strict,
+        locale,
+      ),
   },
   {
     // Singleton campaign templates can have exactly one entity owner. This

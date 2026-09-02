@@ -23,6 +23,7 @@ import {
   entityPopulate,
   findAllDocuments,
 } from './entity-deal-page-loaders';
+import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
 
 type EntityRouteOwner = {
   config: EntityConfig;
@@ -51,6 +52,7 @@ export async function entityRouteOwners(
         strapi,
         config.uid,
         {
+          locale: DEFAULT_CONTENT_LOCALE,
           fields: ['documentId', 'name', 'slug'],
           sort: [{ id: 'asc' }],
         },
@@ -113,6 +115,7 @@ export async function hasRouteConflict(
       ENTITY_DEAL_PAGE_CONFIGS.map(async (config) => {
         const candidates = routeSlugCandidates(dealSlug, config.kind);
         const rows: any[] = await strapi.documents(config.uid).findMany({
+          locale: DEFAULT_CONTENT_LOCALE,
           filters: {
             $or: candidates.map((candidate) => ({ slug: { $eqi: candidate } })),
           } as any,
@@ -130,6 +133,7 @@ export async function hasRouteConflict(
           strapi,
           config.uid,
           {
+            locale: DEFAULT_CONTENT_LOCALE,
             fields: ['documentId', 'name'],
             sort: [{ id: 'asc' }],
           },
@@ -176,9 +180,13 @@ export async function resolveEntityByDealSlug(
     populate: entityPopulate(owner.config) as any,
   } as any);
   const publicSlug = toRouteSlug(entity?.slug, owner.config.kind);
-  const dealSlug = entityDealPageSlug(entity?.name);
-  if (!entity || publicSlug !== owner.publicSlug || dealSlug !== requestedDealSlug) {
+  if (!entity || publicSlug !== owner.publicSlug) {
     return null;
   }
-  return { config: owner.config, entity, publicSlug, dealSlug };
+  return {
+    config: owner.config,
+    entity,
+    publicSlug,
+    dealSlug: owner.dealSlug,
+  };
 }

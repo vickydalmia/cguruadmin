@@ -38,7 +38,10 @@ vi.mock('./store', () => ({
   },
 }));
 
-import { TranslationDispatcher } from './dispatcher';
+import {
+  TranslationDispatcher,
+  isPermanentTranslationWriteError,
+} from './dispatcher';
 
 const CONFIG: TranslationConfig = {
   provider: 'openai-compatible',
@@ -165,5 +168,31 @@ describe('TranslationDispatcher — ui-dictionary hand-off', () => {
     expect(mocks.processUiDictionaryJob).not.toHaveBeenCalled();
     expect(strapi.getModel).not.toHaveBeenCalled();
     expect(mocks.store.markDelivered).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('translation locale-write retry policy', () => {
+  it('stops on validation and PostgreSQL integrity failures', () => {
+    expect(
+      isPermanentTranslationWriteError({
+        name: 'ValidationError',
+        message: 'name cannot produce a stable route',
+      }),
+    ).toBe(true);
+    expect(
+      isPermanentTranslationWriteError({
+        message: 'insert failed',
+        cause: { code: '23505', constraint: 'stores_document_id_uq' },
+      }),
+    ).toBe(true);
+  });
+
+  it('keeps transient connection failures retryable', () => {
+    expect(
+      isPermanentTranslationWriteError({
+        code: 'ECONNRESET',
+        message: 'connection reset by peer',
+      }),
+    ).toBe(false);
   });
 });

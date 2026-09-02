@@ -13,6 +13,8 @@ edits made there.
   (text/richtext/components); slugs, coupon codes, affiliate links, enums,
   media, prices, counters and datetimes stay shared, and Strapi's own i18n
   sync keeps those aligned across locale rows on every documents-API write.
+  Physical content rows are unique by `(document_id, locale)`, never by
+  `document_id` alone: every locale version shares the logical document ID.
 - **Languages** — Country Setup stores the target languages as a CSV
   (`translationLocales`) picked from a multi-select of every ISO 639-1 code
   the runtime's ICU data can name (`src/translation/locales/resolve.ts`).
@@ -27,7 +29,9 @@ edits made there.
   LLM call), rebuilds the locale version through
   `strapi.documents().update({ locale })` so sanitization/validation/ISR all
   run, and re-mirrors relations (owner side, ordered, missing targets
-  retried then accepted with a note).
+  retried then accepted with a note). A deterministic locale-write validation
+  or SQL-integrity rejection becomes a terminal failed job after that paid
+  result; it is never sent back to the provider in a cost-increasing loop.
 - **Quality pipeline** — two independent LLM roles per entry: a writer pass
   in the target language, then a native copy-editor pass, each structurally
   validated (exact HTML structure, protected numbers/prices/URLs/placeholders,
@@ -81,7 +85,10 @@ edits made there.
   site-level switch (`translationEnabled`) and the language multi-select;
   **Settings → UI Text** (`ui-dictionary.manage` permission) edits English
   overrides and every language's UI strings, imports/exports JSON and
-  triggers dictionary translation.
+  triggers dictionary translation. The Strapi administration chrome itself
+  remains English (`src/admin/app.tsx` declares only the `en` admin locale);
+  content locale versions and storefront UI-dictionary values are what get
+  translated.
 - **Frontend** — the storefront serves each extra language under its path
   prefix (`/ar/…`, matching the URL shape the live couponzguru.ae Arabic
   pages already have indexed — same English slugs, so the migration keeps

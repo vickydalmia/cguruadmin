@@ -724,6 +724,29 @@ describe('validateIdentity — non-Latin name yields no slug (row 102)', () => {
       validateIdentity(strapi, 'api::store.store', 'update', { name: 'Old Renamed' }, 's1')
     ).resolves.toBeUndefined();
   });
+
+  it('accepts a non-Latin localized display name without changing route identity', async () => {
+    const { strapi, findMany } = harness(
+      {},
+      { documentId: 's1', name: 'Al-Futtaim Automall', slug: 'al-futtaim-automall' },
+    );
+
+    await expect(
+      validateIdentity(
+        strapi,
+        'api::store.store',
+        'update',
+        { name: 'الفطيم أوتومول' },
+        's1',
+        false,
+        'ar',
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ locale: 'ar' }),
+    );
+  });
 });
 
 describe('validateIdentity — STRICT (clean as you touch)', () => {

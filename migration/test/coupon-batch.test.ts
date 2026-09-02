@@ -18,7 +18,10 @@ test("Coupon upserts combine multiple records into one parameterized query", () 
   assert.equal(query.params.length, COUPON_INSERT_COLUMNS.length * 2);
   assert.match(query.sql, /VALUES \(\$1,/);
   assert.match(query.sql, /\(\$24,/);
-  assert.match(query.sql, /ON CONFLICT \("document_id"\) DO UPDATE/);
+  assert.match(
+    query.sql,
+    /ON CONFLICT \("document_id", "locale"\) DO UPDATE/,
+  );
   assert.match(query.sql, /RETURNING id, document_id/);
 });
 

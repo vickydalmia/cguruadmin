@@ -52,7 +52,7 @@ export function buildCouponUpsertBatchQuery(
     sql: `INSERT INTO "coupons" (
             ${COUPON_INSERT_COLUMNS.map((column) => `"${column}"`).join(", ")}
           ) VALUES ${tuples.join(",\n")}
-          ON CONFLICT ("document_id") DO UPDATE SET
+          ON CONFLICT ("document_id", "locale") DO UPDATE SET
             "title" = EXCLUDED."title",
             "offer_text" = EXCLUDED."offer_text",
             "cashback_text" = EXCLUDED."cashback_text",

@@ -890,7 +890,11 @@ Maps are loaded at startup (`loadMaps()`, each file independently optional) and 
 
 ### Database-Level Idempotency
 
-- All main entity inserts use `ON CONFLICT (document_id) DO NOTHING`
+- Localized taxonomy, Coupon and Deal source rows are written with
+  `locale = 'en'` and upsert with `ON CONFLICT (document_id, locale)`. Their
+  database uniqueness is locale-aware because every translated row shares the
+  same logical `document_id`. Non-localized pools, unique codes and files keep
+  `ON CONFLICT (document_id)`.
 - `document_id` for migrated WordPress entities is deterministic and derived from stable source keys:
   - terms: `term:{table}:{wp_term_id}`
   - pools: `pool:{wp_pool_id}`
