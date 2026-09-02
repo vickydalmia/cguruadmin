@@ -15,8 +15,10 @@ import {
 } from './provider';
 import type { TranslationProvider } from './provider/types';
 import {
+  maskProtectedValues,
   validateTranslatedBatch,
   type LeafVerdict,
+  type ProtectedValueMask,
 } from './validate';
 
 export type EntryTranslation = {
@@ -191,6 +193,35 @@ function chunkLeaves(
   return chunks;
 }
 
+function pickBatchKeys(
+  batch: Record<string, unknown>,
+  leaves: readonly TranslatableLeaf[],
+): Record<string, unknown> {
+  return Object.fromEntries(
+    leaves
+      .filter((leaf) => Object.prototype.hasOwnProperty.call(batch, leaf.path))
+      .map((leaf) => [leaf.path, batch[leaf.path]]),
+  );
+}
+
+function restoredBatch(
+  batch: Record<string, unknown>,
+  masks: ReadonlyMap<string, ProtectedValueMask>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(batch).map(([path, value]) => [
+      path,
+      typeof value === 'string' ? masks.get(path)?.restore(value) ?? value : value,
+    ]),
+  );
+}
+
+function expectedVerdicts(verdicts: readonly LeafVerdict[]): LeafVerdict[] {
+  return verdicts.filter(
+    (verdict) => !verdict.problems.includes('unexpected-key'),
+  );
+}
+
 export async function translateEntryLeaves(
   strapi: Core.Strapi,
   provider: TranslationProvider,
@@ -245,55 +276,89 @@ export async function translateEntryLeaves(
   };
 
   for (const chunk of chunkLeaves(leaves, config.chunkChars)) {
+    const masks = new Map(
+      chunk.map((leaf) => [leaf.path, maskProtectedValues(leaf.value)] as const),
+    );
+    const modelChunk = chunk.map((leaf) => ({
+      ...leaf,
+      value: masks.get(leaf.path)!.masked,
+    }));
+    const validateModelBatch = (batch: Record<string, unknown>) =>
+      validateTranslatedBatch(chunk, restoredBatch(batch, masks), targetScript);
+
     const first = await completeWithRetry(provider, config, {
       system: writerSystem,
-      user: writerMessage(locale, chunk, context),
+      user: writerMessage(locale, modelChunk, context),
     }, attemptHooks?.('writer'));
     addUsage(first);
-    let writerBatch = parseOrEmpty(first.text);
-    let writerVerdicts = validateTranslatedBatch(chunk, writerBatch, targetScript);
+    let writerBatch = pickBatchKeys(parseOrEmpty(first.text), modelChunk);
+    let writerVerdicts = validateModelBatch(writerBatch);
     if (writerVerdicts.length) {
-      const correction = await completeWithRetry(provider, config, {
-        system: writerSystem,
-        user: correctiveMessage(
-          'writer',
-          locale,
-          chunk,
-          writerVerdicts,
-          context,
-        ),
-      }, attemptHooks?.('writer-correction'));
-      addUsage(correction);
-      writerBatch = parseOrEmpty(correction.text);
+      const repairVerdicts = expectedVerdicts(writerVerdicts);
+      const repairPaths = new Set(repairVerdicts.map((verdict) => verdict.path));
+      const repairLeaves = modelChunk.filter((leaf) => repairPaths.has(leaf.path));
+      if (repairLeaves.length > 0) {
+        const correction = await completeWithRetry(provider, config, {
+          system: writerSystem,
+          user: correctiveMessage(
+            'writer',
+            locale,
+            repairLeaves,
+            repairVerdicts,
+            context,
+          ),
+        }, attemptHooks?.('writer-correction'));
+        addUsage(correction);
+        Object.assign(
+          writerBatch,
+          pickBatchKeys(parseOrEmpty(correction.text), repairLeaves),
+        );
+      }
     }
-    requireClean('writer', chunk, writerBatch);
+    requireClean(
+      'writer',
+      chunk,
+      restoredBatch(writerBatch, masks),
+    );
 
     const edited = await completeWithRetry(provider, config, {
       system: editorSystem,
-      user: editorMessage(locale, chunk, writerBatch, context),
+      user: editorMessage(locale, modelChunk, writerBatch, context),
     }, attemptHooks?.('editor'));
     addUsage(edited);
-    let editorBatch = parseOrEmpty(edited.text);
-    let editorVerdicts = validateTranslatedBatch(chunk, editorBatch, targetScript);
+    let editorBatch = pickBatchKeys(parseOrEmpty(edited.text), modelChunk);
+    let editorVerdicts = validateModelBatch(editorBatch);
     if (editorVerdicts.length) {
-      const correction = await completeWithRetry(provider, config, {
-        system: editorSystem,
-        user: correctiveMessage(
-          'editor',
-          locale,
-          chunk,
-          editorVerdicts,
-          context,
-          writerBatch,
-        ),
-      }, attemptHooks?.('editor-correction'));
-      addUsage(correction);
-      editorBatch = parseOrEmpty(correction.text);
+      const repairVerdicts = expectedVerdicts(editorVerdicts);
+      const repairPaths = new Set(repairVerdicts.map((verdict) => verdict.path));
+      const repairLeaves = modelChunk.filter((leaf) => repairPaths.has(leaf.path));
+      if (repairLeaves.length > 0) {
+        const correction = await completeWithRetry(provider, config, {
+          system: editorSystem,
+          user: correctiveMessage(
+            'editor',
+            locale,
+            repairLeaves,
+            repairVerdicts,
+            context,
+            pickBatchKeys(writerBatch, repairLeaves),
+          ),
+        }, attemptHooks?.('editor-correction'));
+        addUsage(correction);
+        Object.assign(
+          editorBatch,
+          pickBatchKeys(parseOrEmpty(correction.text), repairLeaves),
+        );
+      }
     }
-    requireClean('editor', chunk, editorBatch);
+    const cleanEditorBatch = requireClean(
+      'editor',
+      chunk,
+      restoredBatch(editorBatch, masks),
+    );
 
     for (const leaf of chunk) {
-      translations.set(leaf.path, editorBatch[leaf.path] as string);
+      translations.set(leaf.path, cleanEditorBatch[leaf.path] as string);
     }
   }
 

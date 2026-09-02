@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { TranslationConfig } from '../config';
+import { TranslationError } from '../errors';
 import type { TranslationOutboxConfig } from './config';
 import type { TranslationJob } from './store';
 
@@ -41,6 +42,7 @@ vi.mock('./store', () => ({
 import {
   TranslationDispatcher,
   isPermanentTranslationWriteError,
+  shouldRetryTranslationFailure,
 } from './dispatcher';
 
 const CONFIG: TranslationConfig = {
@@ -60,6 +62,7 @@ const CONFIG: TranslationConfig = {
 };
 
 const OUTBOX: TranslationOutboxConfig = {
+  enabled: true,
   pollMs: 60_000,
   batchSize: 1,
   leaseMs: 60_000,
@@ -67,6 +70,7 @@ const OUTBOX: TranslationOutboxConfig = {
   retentionDays: 7,
   alertAfterAttempts: 5,
   backlogAlertMs: 60_000,
+  qualityRetryMax: 1,
   relationRetryMax: 3,
 };
 
@@ -79,6 +83,7 @@ const JOB: TranslationJob = {
   kind: 'translate',
   force: false,
   attemptCount: 0,
+  lastError: null,
   lockToken: 'token',
   reason: 'catalogue sync',
 };
@@ -172,6 +177,40 @@ describe('TranslationDispatcher — ui-dictionary hand-off', () => {
 });
 
 describe('translation locale-write retry policy', () => {
+  it('allows one durable quality retry, then stops buying identical attempts', () => {
+    const failure = new TranslationError('TRANSLATION_QUALITY_GATE_FAILED');
+    expect(shouldRetryTranslationFailure(failure, 0, 1)).toBe(true);
+    expect(shouldRetryTranslationFailure(failure, 1, 1)).toBe(false);
+    expect(
+      shouldRetryTranslationFailure(
+        new TranslationError('TRANSLATION_TIMED_OUT'),
+        20,
+        1,
+      ),
+    ).toBe(true);
+  });
+
+  it('terminalizes legacy over-limit quality jobs without another provider call', async () => {
+    const legacyJob = {
+      ...JOB,
+      attemptCount: 9,
+      lastError:
+        'TRANSLATION_QUALITY_GATE_FAILED: writer output failed validation',
+    };
+    mocks.store.claim.mockResolvedValueOnce(legacyJob);
+    mocks.processUiDictionaryJob.mockClear();
+    mocks.store.markFailed.mockClear();
+    const { dispatchOne } = dispatcher();
+
+    await expect(dispatchOne()).resolves.toBe(true);
+
+    expect(mocks.processUiDictionaryJob).not.toHaveBeenCalled();
+    expect(mocks.store.markFailed).toHaveBeenCalledWith(
+      legacyJob,
+      expect.stringContaining('quality retry limit reached after 9 retries'),
+    );
+  });
+
   it('stops on validation and PostgreSQL integrity failures', () => {
     expect(
       isPermanentTranslationWriteError({

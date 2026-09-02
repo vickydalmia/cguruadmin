@@ -42,8 +42,8 @@ function sameHtmlStructure(source: string, translated: string): boolean {
  * `code` fields are non-localized — so codes inside prose are the LLM's
  * brief, not a hard gate: too many false positives on ALL-CAPS words.)
  */
-export function protectedValues(value: string): string[] {
-  const patterns = [
+function protectedPatterns(): RegExp[] {
+  return [
     /https?:\/\/[^\s"'<>]+/gu,
     /[\w.+-]+@[\w-]+\.[\w.]+/gu,
     /\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[a-zA-Z_][\w.-]*\}|%[a-z]/gu,
@@ -51,7 +51,67 @@ export function protectedValues(value: string): string[] {
     /\d[\d,.]*\s*(?:%|٪)/gu,
     /\b\d[\d,.]*(?:st|nd|rd|th)?\b/giu,
   ];
+}
+
+export function protectedValues(value: string): string[] {
+  const patterns = protectedPatterns();
   return patterns.flatMap((pattern) => value.match(pattern) ?? []);
+}
+
+export type ProtectedValueMask = {
+  masked: string;
+  restore: (translated: string) => string;
+};
+
+/**
+ * Replace protected facts before they reach the model. Asking a model to copy
+ * `AED 150`, `20%`, a URL, or a placeholder verbatim is weaker than making
+ * the value unavailable to change. Tokens remain in the surrounding sentence
+ * so the model can translate its grammar; the exact source bytes are restored
+ * before output validation and persistence.
+ */
+export function maskProtectedValues(value: string): ProtectedValueMask {
+  const spans: Array<{ start: number; end: number; value: string }> = [];
+  for (const pattern of protectedPatterns()) {
+    const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
+    const matcher = new RegExp(pattern.source, flags);
+    for (let match = matcher.exec(value); match; match = matcher.exec(value)) {
+      const matched = match[0];
+      if (!matched) {
+        matcher.lastIndex += 1;
+        continue;
+      }
+      const start = match.index;
+      const end = start + matched.length;
+      if (spans.some((span) => start < span.end && end > span.start)) continue;
+      spans.push({ start, end, value: matched });
+    }
+  }
+  spans.sort((left, right) => left.start - right.start || left.end - right.end);
+  if (spans.length === 0) return { masked: value, restore: (text) => text };
+
+  const replacements = spans.map((span, index) => ({
+    ...span,
+    token: `{{CG_PROTECTED_${index}}}`,
+  }));
+  let masked = '';
+  let cursor = 0;
+  for (const replacement of replacements) {
+    masked += value.slice(cursor, replacement.start) + replacement.token;
+    cursor = replacement.end;
+  }
+  masked += value.slice(cursor);
+
+  return {
+    masked,
+    restore(translated: string) {
+      return replacements.reduce(
+        (current, replacement) =>
+          current.split(replacement.token).join(replacement.value),
+        translated,
+      );
+    },
+  };
 }
 
 /**
@@ -138,10 +198,15 @@ export function validateTranslatedBatch(
       if (!keepsProtectedValues(leaf.value, value)) {
         problems.push('protected-value-changed');
       }
-      if (isEnglishProse(leaf.value) && sameVisibleText(leaf.value, value)) {
+      // Root taxonomy names are often proper brand names ("Golden Scent",
+      // "American Eagle") that Arabic editorial convention may legitimately
+      // retain in Latin script. They are still offered to the translator; we
+      // simply do not misclassify an unchanged brand identity as prose.
+      const enforceTranslatedProse = leaf.path !== 'name' && isEnglishProse(leaf.value);
+      if (enforceTranslatedProse && sameVisibleText(leaf.value, value)) {
         problems.push('untranslated-source');
       }
-      if (targetScript && isEnglishProse(leaf.value) && !targetScript.test(value)) {
+      if (targetScript && enforceTranslatedProse && !targetScript.test(value)) {
         problems.push('target-language-missing');
       }
     }

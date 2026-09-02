@@ -56,6 +56,7 @@ const JOB: TranslationJob = {
   kind: 'translate',
   force: false,
   attemptCount: 0,
+  lastError: null,
   lockToken: 'token',
   reason: 'test',
 };
@@ -85,7 +86,10 @@ function sourceJson(user: string): Record<string, string> {
 }
 
 const arabicFor = (source: string) =>
-  ['نص', ...(source.match(/\{[a-zA-Z_][\w.-]*\}/gu) ?? [])].join(' ');
+  [
+    'نص',
+    ...(source.match(/\{\{CG_PROTECTED_\d+\}\}|\{[a-zA-Z_][\w.-]*\}/gu) ?? []),
+  ].join(' ');
 
 /** Echo provider: translates every key it is asked for unless `failWhen` says otherwise. */
 function fakeProvider(failWhen?: (keys: string[]) => Error | undefined) {

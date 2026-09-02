@@ -63,6 +63,24 @@ function msUntilNextUtcMidnight(now = new Date()): number {
   return Math.max(60_000, next.getTime() - now.getTime());
 }
 
+function isQualityGateFailure(error: unknown): boolean {
+  return (
+    error instanceof TranslationError &&
+    error.code === 'TRANSLATION_QUALITY_GATE_FAILED'
+  );
+}
+
+export function shouldRetryTranslationFailure(
+  error: unknown,
+  priorRetries: number,
+  qualityRetryMax: number,
+): boolean {
+  if (!(error instanceof TranslationError)) return true;
+  if (!error.retryable) return false;
+  if (isQualityGateFailure(error)) return priorRetries < qualityRetryMax;
+  return true;
+}
+
 export type JobOutcome =
   | { state: 'delivered'; notes?: string }
   | { state: 'skipped'; reason: string }
@@ -235,13 +253,31 @@ export class TranslationDispatcher {
     let outcome: JobOutcome;
     let usage = { tokensIn: 0, tokensOut: 0, costUsd: 0 };
     try {
-      const result = await this.processJob(job, assertLease);
-      outcome = result.outcome;
-      usage = result.usage;
+      // Older deployments retried quality failures without a ceiling. Stop
+      // those already-over-limit rows immediately after upgrade, before they
+      // can buy another identical writer/editor attempt.
+      if (
+        job.attemptCount > this.outboxConfig.qualityRetryMax &&
+        job.lastError?.startsWith('TRANSLATION_QUALITY_GATE_FAILED')
+      ) {
+        outcome = {
+          state: 'failed',
+          reason:
+            `quality retry limit reached after ${job.attemptCount} retries: ` +
+            job.lastError,
+        };
+      } else {
+        const result = await this.processJob(job, assertLease);
+        outcome = result.outcome;
+        usage = result.usage;
+      }
     } catch (cause) {
       const error = cause instanceof Error ? cause : new Error(String(cause));
-      const retryable =
-        !(error instanceof TranslationError) || error.retryable;
+      const retryable = shouldRetryTranslationFailure(
+        error,
+        job.attemptCount,
+        this.outboxConfig.qualityRetryMax,
+      );
       outcome = retryable
         ? {
             state: 'deferred',

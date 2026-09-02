@@ -56,6 +56,7 @@ import {
   type PageWindow,
 } from "./search-postgres";
 import { withSearchMode } from "./search-runtime";
+import { attachStablePublicOfferIds } from "../../coupon/services/public-offer-ids";
 
 const PREVIEW_ENTITY_LIMIT = 7;
 const PREVIEW_OFFER_LIMIT = 3;
@@ -199,6 +200,7 @@ export async function offerPage(
               locale,
             },
       );
+      await attachStablePublicOfferIds(strapi, documents, locale, [kind]);
       return documents
         .map((item) => mapOffer(item, kind))
         .filter(Boolean)
@@ -213,6 +215,7 @@ export async function offerPage(
         nowIso,
         locale,
       );
+      await attachStablePublicOfferIds(strapi, documents, locale, [kind]);
       const ranked = rankOfferDocuments(documents, kind, query);
       if (window.lookahead !== undefined) {
         return ranked

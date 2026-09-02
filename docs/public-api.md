@@ -52,6 +52,15 @@ listener also strips this reserved header before proxying anything to Strapi.
 | `GET /unique-coupon/stats/:poolDocumentId` | **admin session** | — | none |
 | `POST /unique-coupon/upload` | **admin session** | — | none |
 
+Offer identity has two intentional forms. Public Coupon/Product Deal detail
+routes use the numeric id of the default-locale row; localized API responses
+rewrite the physical locale-row id back to that stable value, so the same
+offer is `/coupon/123/` and `/ar/coupon/123/`. Redeem routes use the shared
+`documentId` instead. The private redeem resolver always reads the default
+locale and returns shared code mode, static code or unique-pool reference, and
+affiliate destination; a request locale can never select different activation
+data.
+
 The catalogue POST is deployment-only: the immutable storefront image invokes
 it once through its blocking deployment step with a dedicated token. Visitor
 requests and long-running storefront containers do not receive that token and

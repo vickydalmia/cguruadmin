@@ -36,13 +36,17 @@ edits made there.
   in the target language, then a native copy-editor pass, each structurally
   validated (exact HTML structure, protected numbers/prices/URLs/placeholders,
   target-script presence for non-Latin scripts, no untranslated English) with
-  one corrective retry. Output that still fails is NEVER published: the
-  current locale version is retained and the job automatically retries with
-  queue backoff under `TRANSLATION_QUALITY_GATE_FAILED`. No human
-  language-review or manual requeue step blocks publication. The source hash
-  includes a prompt fingerprint, so editing a prompt file deliberately
-  re-translates affected content on the next sweep (mind the daily budget
-  when you tune prompts).
+  one focused corrective retry for only the failed fields. Protected facts are
+  replaced with opaque tokens before either model sees them and restored from
+  the source before validation, so a model cannot localize or alter them.
+  Output that still fails is NEVER published: the current locale version is
+  retained and the complete job receives at most
+  `TRANSLATION_QUALITY_RETRY_MAX` durable retries (default one), then becomes a
+  visible terminal failure instead of spending indefinitely. Root taxonomy
+  names may legitimately retain a registered Latin brand name; prose fields
+  still require the target script. The source hash includes a prompt
+  fingerprint, so editing a prompt file deliberately re-translates affected
+  content on the next sweep (mind the daily budget when you tune prompts).
 - **Prompts** — `src/translation/locales/prompts/default.md` and
   `default-editor.md` are generic templates rendered with the locale's facts
   (`{{languageName}} {{nativeName}} {{countryName}} {{countryCode}} {{script}}
@@ -99,6 +103,13 @@ edits made there.
   localized path, and rendered documents get their internal links/form
   actions re-prefixed (`src/lib/language-links.ts`) so a visitor browsing
   `/ar/…` stays in Arabic — including links inside translated rich text.
+  Coupon and Product Deal detail URLs retain the default-locale row's numeric
+  id in every language (`/coupon/123/` and `/ar/coupon/123/`); aggregate,
+  listing, campaign, entity-page and search responses normalize translated
+  row ids to that public id before they leave the CMS. The separate redeem
+  handoff uses the shared logical identity and is deliberately unprefixed
+  (`/redeem/coupon/<documentId>`): code mode, static code, unique pool and
+  affiliate destination are shared machine data, not translated content.
   The list of languages, their direction and `og:locale` come from
   `languages[]` in `GET /api/site-settings`, never from a hardcoded list.
 
@@ -117,6 +128,10 @@ edits made there.
    `TRANSLATION_OUTPUT_COST_PER_MTOK` to the model's current official prices
    before enabling a positive daily budget—model pricing can change, so verify
    it at deployment time rather than copying an old estimate.
+   Keep `TRANSLATION_OUTBOX_DISPATCHER_ENABLED=true` only on the admin
+   `strapi` service and `false` on `strapi-render`. The shared database lease
+   is safe with multiple workers, but per-process provider concurrency would
+   otherwise multiply paid throughput and make the intended limit misleading.
 2. In **Settings → Country Setup** turn **Translation enabled** on and pick
    the target languages in the multi-select (it lists every language ICU can
    name, with native name, `RTL` badge, script and the `/xx/` prefix). Save.
@@ -125,7 +140,8 @@ edits made there.
    re-primed and the dispatcher starts (only if the env block parses — an
    incomplete block is logged as `translation.hot_apply … env-missing` and
    nothing starts). **Restart every other CMS container** — the mirror and
-   the dispatcher are per process. A hot-apply failure never fails the save;
+   locale mirrors are per process; only the designated admin process starts
+   the dispatcher. A hot-apply failure never fails the save;
    it is logged as `translation.hot_apply_failed` and a restart retries it.
 4. Grant editor roles the new locale (Settings → Roles → Content Manager →
    locales) and, if editors may trigger paid translations, the
@@ -138,6 +154,16 @@ edits made there.
    `GET /translation/outbox-status`.
 7. Watch failures/retries in the Translation panel, UI Text's sync card or
    `GET /translation/outbox-status`. Successful results publish automatically.
+
+For a temporary initial backfill while the site has no visitor traffic, keep
+the single admin-owned dispatcher and begin with
+`TRANSLATION_CONCURRENCY=5`, `TRANSLATION_OUTBOX_BATCH_SIZE=10` and
+`TRANSLATION_OUTBOX_POLL_MS=1000`. If ten minutes of status and logs show no
+provider rate limits, timeouts, database pressure or rising failures, increase
+to `8` / `16`; provider quotas still apply even when the storefront is idle.
+Recreate the `strapi` container after changing env values (`restart` does not
+reload them). Return to the conservative `2` / `5` / `5000` defaults when the
+backfill is complete.
 
 India/USA: nothing to do — with the Country Setup switch off the subsystem
 never writes a row, never starts, and the CM stays single-locale.

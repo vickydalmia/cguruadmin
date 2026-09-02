@@ -36,6 +36,15 @@ export function translationOutboxRunning(): boolean {
 }
 
 export async function startTranslationOutbox(strapi: Core.Strapi): Promise<void> {
+  const outboxConfig = readTranslationOutboxConfig();
+  if (!outboxConfig.enabled) {
+    logTranslation(strapi, 'info', 'translation.dispatcher_disabled', {
+      reason: process.env.TRANSLATION_OUTBOX_DISPATCHER_ENABLED?.trim()
+        ? 'TRANSLATION_OUTBOX_DISPATCHER_ENABLED=false'
+        : 'CRON_ENABLED=false fallback',
+    });
+    return;
+  }
   const locales = await enabledContentLocales(strapi);
   const config = translationConfigFromEnv();
   if (locales.length === 0) {
@@ -62,7 +71,7 @@ export async function startTranslationOutbox(strapi: Core.Strapi): Promise<void>
   dispatcher = new TranslationDispatcher(
     strapi,
     config,
-    readTranslationOutboxConfig(),
+    outboxConfig,
   );
   dispatcher.start();
 }

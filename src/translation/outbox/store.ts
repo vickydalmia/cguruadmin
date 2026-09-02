@@ -30,6 +30,7 @@ export type TranslationJob = {
   kind: TranslationJobKind;
   force: boolean;
   attemptCount: number;
+  lastError: string | null;
   lockToken: string;
   reason: string;
 };
@@ -151,6 +152,7 @@ function toJob(row: any, lockToken: string): TranslationJob {
     kind: row.kind === 'relation-sync' ? 'relation-sync' : 'translate',
     force: row.force === true || row.force === 1,
     attemptCount: Number(row.attempt_count),
+    lastError: row.last_error ?? null,
     lockToken,
     reason: String(row.reason ?? ''),
   };

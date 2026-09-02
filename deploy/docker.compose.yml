@@ -11,8 +11,10 @@ services:
     environment:
       NODE_ENV: production
       # Exactly one process owns durable delivery. The render sibling below is
-      # read-heavy only and explicitly disables its dispatcher.
+      # read-heavy only and explicitly disables both paid translation work and
+      # ISR delivery.
       ISR_OUTBOX_DISPATCHER_ENABLED: "true"
+      TRANSLATION_OUTBOX_DISPATCHER_ENABLED: "true"
     ports:
       # Always publish on loopback so host-local consumers (admin nginx, an
       # SSH tunnel, the deploy health check) keep working.
@@ -72,6 +74,10 @@ services:
       # work. Keep exactly one dispatcher on the admin service so render-time
       # traffic cannot amplify retries into overlapping route-inventory scans.
       ISR_OUTBOX_DISPATCHER_ENABLED: "false"
+      # Translation jobs are also a shared-Postgres queue. One admin-owned
+      # dispatcher keeps provider concurrency and daily-spend controls global
+      # instead of multiplying them by the number of Strapi processes.
+      TRANSLATION_OUTBOX_DISPATCHER_ENABLED: "false"
       # Every socket that can reach this container is internal by construction
       # (ports are published on loopback and the VPC private IP, firewalled),
       # so trust private sources without per-host IP allowlisting. On a

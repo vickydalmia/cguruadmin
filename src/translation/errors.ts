@@ -33,6 +33,8 @@ const RETRYABLE: Record<TranslationErrorCode, boolean> = {
   // Never publish a partial or structurally unsafe locale. A completely new
   // writer/editor attempt can succeed, so let the durable queue retry with
   // backoff without waiting for a human language reviewer.
+  // Retryable so transient/model variance gets another chance; the outbox
+  // dispatcher applies TRANSLATION_QUALITY_RETRY_MAX to prevent paid loops.
   TRANSLATION_QUALITY_GATE_FAILED: true,
   // The provider already returned billable output, but the locale row was
   // rejected by a deterministic validation/integrity rule. Repeating the same

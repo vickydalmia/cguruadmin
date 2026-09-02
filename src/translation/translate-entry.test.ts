@@ -121,6 +121,82 @@ describe('translateEntryLeaves', () => {
     expect(result.model).toBe('editor-m');
   });
 
+  it('repairs only failed fields so a correction cannot damage valid translations', async () => {
+    const complete = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          title: 'عنوان صالح',
+          description: 'Save more with this offer',
+        }),
+        inputTokens: 10,
+        outputTokens: 5,
+        model: 'writer',
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({ description: 'وفّر أكثر مع هذا العرض' }),
+        inputTokens: 4,
+        outputTokens: 2,
+        model: 'writer-correction',
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          title: 'عنوان محرر',
+          description: 'وفّر أكثر مع العرض',
+        }),
+        inputTokens: 8,
+        outputTokens: 4,
+        model: 'editor',
+      });
+
+    const result = await translateEntryLeaves(
+      strapi,
+      { name: 'fake', complete },
+      CONFIG,
+      LOCALE,
+      [
+        leaf('title', 'A valid title'),
+        leaf('description', 'Save more with this offer'),
+      ],
+    );
+
+    const correction = complete.mock.calls[1][0].user as string;
+    expect(correction).toContain('"description"');
+    expect(correction).not.toContain('"title"');
+    expect(result.translations.get('title')).toBe('عنوان محرر');
+    expect(result.translations.get('description')).toBe('وفّر أكثر مع العرض');
+  });
+
+  it('never gives protected values to either model role and restores them after editing', async () => {
+    const complete = vi.fn(async ({ user }: any) => {
+      expect(user).not.toContain('AED 150');
+      expect(user).not.toContain('20%');
+      expect(user).toContain('{{CG_PROTECTED_0}}');
+      expect(user).toContain('{{CG_PROTECTED_1}}');
+      return {
+        text: JSON.stringify({
+          description: 'وفّر {{CG_PROTECTED_0}} على {{CG_PROTECTED_1}} اليوم',
+        }),
+        inputTokens: 3,
+        outputTokens: 2,
+        model: 'm',
+      };
+    });
+
+    const result = await translateEntryLeaves(
+      strapi,
+      { name: 'fake', complete },
+      CONFIG,
+      LOCALE,
+      [leaf('description', 'Save 20% on AED 150 today')],
+    );
+
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(result.translations.get('description')).toBe(
+      'وفّر 20% على AED 150 اليوم',
+    );
+  });
+
   it('does not return a writeable result when correction remains broken', async () => {
     const complete = vi.fn(async () => ({
       text: JSON.stringify({ body: '<div>changed</div>' }),

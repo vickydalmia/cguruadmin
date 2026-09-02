@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { attachStablePublicOfferIdsForRequest } from '../../coupon/services/public-offer-ids';
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   async publicFind(ctx: any) {
@@ -7,6 +8,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     ) as any;
     const result = await service.getPublicPage(ctx.params?.dealSlug, ctx.query);
     if (!result) return ctx.notFound('Entity Deal page not found');
+    await attachStablePublicOfferIdsForRequest(strapi, ctx, result, ['deal']);
     return ctx.send(result);
   },
 

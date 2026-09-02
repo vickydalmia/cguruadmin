@@ -87,6 +87,21 @@ function searchService({
   };
 
   const strapi = {
+    db: {
+      query(uid: string) {
+        return {
+          async findMany() {
+            if (uid === "api::coupon.coupon") {
+              return [{ id: 123, documentId: coupon.documentId }];
+            }
+            if (uid === "api::deal.deal") {
+              return [{ id: 321, documentId: deal.documentId }];
+            }
+            return [];
+          },
+        };
+      },
+    },
     documents(uid: string) {
       return {
         async findMany(options: any) {
@@ -343,6 +358,39 @@ describe("public search entity boundaries", () => {
     expect(JSON.stringify(couponFind?.options.filters)).not.toContain("couponType");
     expect(couponFind?.options.populate).not.toHaveProperty("image");
     expect(couponFind?.options.fields).toContain("offerCountries");
+  });
+
+  it("keeps translated search hits on the default-locale numeric detail routes", async () => {
+    const { service } = searchService();
+    const [couponResponse, dealResponse] = await Promise.all([
+      service.search({
+        query: "fashion",
+        mode: "group",
+        group: "coupons",
+        page: 1,
+        pageSize: 20,
+        locale: "ar",
+      }),
+      service.search({
+        query: "shoes",
+        mode: "group",
+        group: "deals",
+        page: 1,
+        pageSize: 20,
+        locale: "ar",
+      }),
+    ]);
+
+    expect(couponResponse.coupons[0]).toMatchObject({
+      couponId: 123,
+      documentId: "coupon-no-code",
+      link: "https://track.example.com/coupon",
+    });
+    expect(dealResponse.deals[0]).toMatchObject({
+      dealId: 321,
+      documentId: "product-deal",
+      link: "https://track.example.com/shoes",
+    });
   });
 
   it("returns a product Deal without requiring MRP and includes owner metadata", async () => {

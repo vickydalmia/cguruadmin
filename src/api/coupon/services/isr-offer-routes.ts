@@ -2,6 +2,7 @@
 // prerender route list. One of the modules split out of the coupon
 // controller (see ../controllers/custom.ts).
 import type { Core } from '@strapi/strapi';
+import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
 import { visibilityFilters } from './offer-projections';
 
 // Route inventory is an internal deployment feed, not a public listing page.
@@ -21,6 +22,10 @@ export async function listIsrOfferRoutes(
 
   while (true) {
     const items: any[] = await strapi.documents(uid).findMany({
+      // Public numeric detail URLs belong to the default-locale row. Locale
+      // twins reuse this id under their path prefix; their physical row ids
+      // must never leak into route inventory.
+      locale: DEFAULT_CONTENT_LOCALE,
       status: 'published',
       filters: visibilityFilters(),
       fields: ['updatedAt'] as any,

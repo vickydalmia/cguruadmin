@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { TranslatableLeaf } from './field-map';
-import { protectedValues, validateTranslatedBatch } from './validate';
+import {
+  maskProtectedValues,
+  protectedValues,
+  validateTranslatedBatch,
+} from './validate';
 import { parseBatchJson } from './translate-entry';
 
 const ARABIC = /\p{Script=Arabic}/u;
@@ -124,6 +128,25 @@ describe('validateTranslatedBatch', () => {
     expect(duplicateLost[0]?.problems).toContain('protected-value-changed');
   });
 
+  it('masks protected facts before the model and restores their exact source bytes', () => {
+    const mask = maskProtectedValues(
+      'Save 20% on AED 150 at https://shop.example/x for {customerName}',
+    );
+
+    expect(mask.masked).not.toContain('20%');
+    expect(mask.masked).not.toContain('AED 150');
+    expect(mask.masked).not.toContain('https://shop.example/x');
+    expect(mask.masked).not.toContain('{customerName}');
+    expect(
+      mask.restore(
+        'وفّر {{CG_PROTECTED_0}} على {{CG_PROTECTED_1}} لدى ' +
+          '{{CG_PROTECTED_2}} للعميل {{CG_PROTECTED_3}}',
+      ),
+    ).toBe(
+      'وفّر 20% على AED 150 لدى https://shop.example/x للعميل {customerName}',
+    );
+  });
+
   it('rejects unchanged English prose for an Arabic target', () => {
     expect(
       validateTranslatedBatch(
@@ -152,6 +175,16 @@ describe('validateTranslatedBatch', () => {
         [leaf('summary', 'Save more with this offer')],
         { summary: 'इस ऑफ़र के साथ और बचाएँ' },
         /\p{Script=Devanagari}/u,
+      ),
+    ).toEqual([]);
+  });
+
+  it('allows a root taxonomy name to retain its registered Latin brand identity', () => {
+    expect(
+      validateTranslatedBatch(
+        [leaf('name', 'Golden Scent')],
+        { name: 'Golden Scent' },
+        ARABIC,
       ),
     ).toEqual([]);
   });

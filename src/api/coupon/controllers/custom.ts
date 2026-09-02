@@ -41,6 +41,9 @@ import {
   REDEEM_UIDS,
   isRedeemResolverAuthorized,
 } from '../services/redeem-resolution';
+import { resolveOfferDetailIdentity } from '../services/offer-detail-resolution';
+import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
+import { attachStablePublicOfferIdsForRequest } from '../services/public-offer-ids';
 
 // The thin coupon controller action map: projections live in
 // ../services/offer-projections, detail-page builders in
@@ -66,12 +69,20 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const couponId = Number(rawId);
     if (!Number.isSafeInteger(couponId)) return ctx.notFound('Coupon not found');
 
+    const detailIdentity = await resolveOfferDetailIdentity(
+      strapi,
+      ctx,
+      'api::coupon.coupon',
+      couponId,
+    );
+    if (!detailIdentity) return ctx.notFound('Coupon not found');
+
     const couponQuery = await sanitizeDocumentQuery(
       strapi,
       ctx,
       'api::coupon.coupon',
       {
-        filters: { id: couponId, ...visibilityFilters() },
+        ...detailIdentity,
         fields: COUPON_PAGE_FIELDS,
         populate: COUPON_PUBLIC_POPULATE,
         limit: 1,
@@ -169,6 +180,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     // One pass over the whole body: the main coupon, its related coupons and
     // its related deals are all offers and all need their merchant resolved.
     await attachFestiveOffers(strapi, body);
+    await attachStablePublicOfferIdsForRequest(strapi, ctx, body);
 
     return ctx.send(body);
   },
@@ -179,12 +191,20 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const dealId = Number(rawId);
     if (!Number.isSafeInteger(dealId)) return ctx.notFound('Deal not found');
 
+    const detailIdentity = await resolveOfferDetailIdentity(
+      strapi,
+      ctx,
+      'api::deal.deal',
+      dealId,
+    );
+    if (!detailIdentity) return ctx.notFound('Deal not found');
+
     const dealQuery = await sanitizeDocumentQuery(
       strapi,
       ctx,
       'api::deal.deal',
       {
-        filters: { id: dealId, ...visibilityFilters() },
+        ...detailIdentity,
         fields: DEAL_PAGE_FIELDS,
         populate: DEAL_PUBLIC_POPULATE,
         limit: 1,
@@ -252,6 +272,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       similarStores,
     };
     await attachFestiveOffers(strapi, body);
+    await attachStablePublicOfferIdsForRequest(strapi, ctx, body, ['deal']);
 
     return ctx.send(body);
   },
@@ -291,6 +312,10 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
 
     const offer = await strapi.documents(uid as any).findOne({
       documentId,
+      // Redemption data is shared machine state (code, pool and affiliate
+      // URL). Pin its resolver to the route-owning English row so a caller's
+      // `?locale=` can never change which code or destination is activated.
+      locale: DEFAULT_CONTENT_LOCALE,
       status: 'published',
       fields,
       populate,
@@ -328,7 +353,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     );
     await attachFestiveOffers(strapi, coupons);
 
-    return ctx.send({
+    const body = {
       ...(page === 1 ? { [entityType]: result.sanitizedEntity } : {}),
       coupons,
       pagination: {
@@ -337,7 +362,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         total: result.total,
         pageCount: Math.ceil(result.total / pageSize),
       },
-    });
+    };
+    await attachStablePublicOfferIdsForRequest(strapi, ctx, body, ['coupon']);
+    return ctx.send(body);
   },
 
   async getDealsByEntity(ctx) {
@@ -365,7 +392,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     );
     await attachFestiveOffers(strapi, deals);
 
-    return ctx.send({
+    const body = {
       ...(page === 1 ? { [entityType]: result.sanitizedEntity } : {}),
       deals,
       pagination: {
@@ -374,7 +401,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         total: result.total,
         pageCount: Math.ceil(result.total / pageSize),
       },
-    });
+    };
+    await attachStablePublicOfferIdsForRequest(strapi, ctx, body, ['deal']);
+    return ctx.send(body);
   },
 
   // GET /api/offers — paginated list of ALL published coupons across the site.

@@ -307,6 +307,7 @@ TRANSLATION_CHUNK_CHARS=12000
 TRANSLATION_DAILY_BUDGET_USD=0
 TRANSLATION_INPUT_COST_PER_MTOK=0
 TRANSLATION_OUTPUT_COST_PER_MTOK=0
+TRANSLATION_OUTBOX_DISPATCHER_ENABLED=true
 TRANSLATION_OUTBOX_POLL_MS=5000
 TRANSLATION_OUTBOX_BATCH_SIZE=5
 TRANSLATION_OUTBOX_LEASE_MS=900000
@@ -387,6 +388,10 @@ for a Chat-Completions gateway, or `anthropic` for native Messages;
 `none`; the setting is ignored by other providers. A positive daily budget
 requires positive input/output per-million-token prices. An incomplete block
 stays safely disabled and logs the configuration problem.
+Run the paid dispatcher on exactly one CMS process. Current Compose forces
+`TRANSLATION_OUTBOX_DISPATCHER_ENABLED=true` on `strapi` and `false` on
+`strapi-render`; when the dedicated variable is absent it inherits
+`CRON_ENABLED`, so older Compose files retain the same single-process role.
 
 For AE with Luna, the provider-specific portion is:
 

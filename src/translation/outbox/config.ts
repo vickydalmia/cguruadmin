@@ -4,6 +4,8 @@
 // hammer anyone overnight.
 
 export type TranslationOutboxConfig = {
+  /** Exactly one CMS process should lease and deliver paid translation jobs. */
+  enabled: boolean;
   pollMs: number;
   batchSize: number;
   leaseMs: number;
@@ -11,9 +13,19 @@ export type TranslationOutboxConfig = {
   retentionDays: number;
   alertAfterAttempts: number;
   backlogAlertMs: number;
+  /** Durable full-job retries after writer/editor corrective passes fail. */
+  qualityRetryMax: number;
   /** Retries granted to a job whose only failure is missing relation targets. */
   relationRetryMax: number;
 };
+
+function booleanFromEnv(name: string, fallback: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) return fallback;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  throw new Error(`${name} must be true or false`);
+}
 
 function intFromEnv(name: string, fallback: number, minimum = 1): number {
   const parsed = Number.parseInt(process.env[name] ?? '', 10);
@@ -21,7 +33,14 @@ function intFromEnv(name: string, fallback: number, minimum = 1): number {
 }
 
 export function readTranslationOutboxConfig(): TranslationOutboxConfig {
+  // CRON_ENABLED already marks the single coordination process in the
+  // two-container deployment. Inherit it for older host Compose files; the
+  // dedicated switch wins when translation work is intentionally separated.
+  const enabled = process.env.TRANSLATION_OUTBOX_DISPATCHER_ENABLED?.trim()
+    ? booleanFromEnv('TRANSLATION_OUTBOX_DISPATCHER_ENABLED', true)
+    : booleanFromEnv('CRON_ENABLED', true);
   return {
+    enabled,
     pollMs: intFromEnv('TRANSLATION_OUTBOX_POLL_MS', 5_000, 250),
     batchSize: intFromEnv('TRANSLATION_OUTBOX_BATCH_SIZE', 5),
     leaseMs: intFromEnv('TRANSLATION_OUTBOX_LEASE_MS', 15 * 60 * 1_000, 10_000),
@@ -37,6 +56,7 @@ export function readTranslationOutboxConfig(): TranslationOutboxConfig {
       60 * 60 * 1_000,
       60_000,
     ),
+    qualityRetryMax: intFromEnv('TRANSLATION_QUALITY_RETRY_MAX', 1, 0),
     relationRetryMax: intFromEnv('TRANSLATION_RELATION_RETRY_MAX', 5),
   };
 }

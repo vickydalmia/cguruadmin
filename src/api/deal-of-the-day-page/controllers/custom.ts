@@ -25,6 +25,7 @@ import {
 // editor's order for its unlimited carousel.
 
 import { DOTD_POPULATE } from './deal-of-the-day-populate';
+import { attachStablePublicOfferIdsForRequest } from '../../coupon/services/public-offer-ids';
 import {
   attachDealCounts,
   capCuratedLists,
@@ -77,6 +78,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     arrayizeOfferText(sanitized);
     // Resolves each Deal's Checkout Merchant to its festive offer.
     await attachFestiveOffers(strapi, sanitized);
+    await attachStablePublicOfferIdsForRequest(strapi, ctx, sanitized, ['deal']);
 
     return ctx.send({ data: sanitized });
   },

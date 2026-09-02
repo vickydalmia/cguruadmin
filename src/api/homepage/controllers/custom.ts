@@ -43,6 +43,7 @@ import { featureByPath } from '../../site-configuration/services/country-registr
 import { filterSiteChrome } from '../../site-configuration/services/site-chrome-filter';
 import { filterHomepage } from '../../site-configuration/services/homepage-filter';
 import { findEntityTemplateOwners } from '../../site-configuration/services/entity-template-owners';
+import { attachStablePublicOfferIdsForRequest } from '../../coupon/services/public-offer-ids';
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   async homepageFull(ctx) {
@@ -75,6 +76,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     // database read, so it cannot ride the synchronous walker above; it walks
     // the same nested section tree.
     await attachFestiveOffers(strapi, sanitized);
+    await attachStablePublicOfferIdsForRequest(strapi, ctx, sanitized);
 
     return ctx.send({ data: sanitized, siteSettings });
   },
@@ -108,6 +110,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       sanitizedFooter,
       siteSettings.features,
     );
+    await attachStablePublicOfferIdsForRequest(strapi, ctx, filtered);
 
     return ctx.send({
       menu: filtered.menu,
@@ -130,6 +133,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       'api::menu.menu',
       menu,
     );
+    await attachStablePublicOfferIdsForRequest(strapi, ctx, sanitizedMenu);
     return ctx.send({ data: headerNotificationPayload(sanitizedMenu) });
   },
 
