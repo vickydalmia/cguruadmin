@@ -50,11 +50,11 @@ Key settings (full list in README § Setup & Configuration):
 
 | Variable | Purpose |
 |---|---|
-| `MIGRATION_PROFILE` | Validated country profile name, such as `india` or `usa` |
+| `MIGRATION_PROFILE` | Validated country profile name, such as `india`, `usa`, or `ae` |
 | `MIGRATION_STATE_DIR` | Profile-only checkpoints, maps, manifests, reports and logs; normally `.state/<profile>` |
 | `MIGRATION_SITE_CONFIGURATION_FILE` | Country identity/localization and catalog/editorial/legal feature JSON created or updated in Phase 13; campaigns are entity templates |
 | `MIGRATION_EXCLUSIONS_FILE` | Optional retired-store CSV; leave unset for USA (the repo intentionally ships no historical lists) |
-| `MIGRATION_CLASSIFICATION_FILE` | USA's approved Excel taxonomy classification; matched to SQL terms by slug, with unmatched SQL terms defaulting to Store |
+| `MIGRATION_CLASSIFICATION_FILE` | USA/UAE approved Excel taxonomy classification; matched to SQL terms by slug, with unmatched SQL terms defaulting to Store |
 | `SOURCE_COUNTRY_CODE` / `SOURCE_LOCALE` / `SOURCE_CURRENCY_CODE` / `SOURCE_TIMEZONE` | Source identity asserted against the profile JSON |
 | `WP_TABLE_PREFIX` | Validated WordPress prefix; USA uses `wp_dda10ab629_` |
 | `PG_CONNECTION_STRING` + `PG_CA_CERT_PATH` | Target Strapi Postgres (TLS verified for remote DBs) |

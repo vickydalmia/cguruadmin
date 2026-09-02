@@ -5,6 +5,7 @@
   "locale": "en-AE",
   "timezone": "Asia/Dubai",
   "currencyCode": "AED",
+  "offerCountries": "AE,SA,KW,BH,OM,QA,JO,TR,EG,GCC,GLOBAL,MENA",
   "onboardingComplete": true,
   "storesEnabled": true,
   "couponsEnabled": true,

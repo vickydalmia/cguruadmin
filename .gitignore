@@ -38,6 +38,7 @@ $RECYCLE.BIN/
 
 *.7z
 *.csv
+!migration/profiles/**/excluded-stores.csv
 *.dat
 *.dmg
 *.gz

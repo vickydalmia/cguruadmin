@@ -45,6 +45,10 @@ import { registerMigratedEntity } from "../utils/migration-registry.js";
 import { isValidAffiliateDestination } from "../utils/offer-quality.js";
 import { config } from "../config.js";
 import {
+  extractOfferCountries,
+  loadProfileOfferCountries,
+} from "../utils/offer-country-extract.js";
+import {
   allowsPartialDeals,
   type PhaseOutcome,
 } from "../utils/phase-outcome.js";
@@ -86,6 +90,9 @@ function writeDealReview(rows: Iterable<DealReviewRow>): void {
 export async function runDeals(): Promise<void | PhaseOutcome> {
   logger.info("=== Phase 8: Deals Migration ===");
   const allowPartial = allowsPartialDeals();
+  const enabledOfferCountries = loadProfileOfferCountries(
+    config.siteConfigurationFile,
+  );
 
   const sourcePosts = await wpQuery<{
     ID: number;
@@ -250,6 +257,11 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
           content,
           { currencyCode: config.source.currencyCode },
         );
+        const offerCountries = extractOfferCountries(
+          title,
+          content,
+          enabledOfferCountries,
+        );
         const affiliateLink = clean(meta.link);
         const createdAt =
           normalizeWpDate(post.post_date_gmt) ||
@@ -347,7 +359,7 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
         // first bump, so it must not be left to a backfill.
         const result = await pgQuery<{ id: number }>(
           `INSERT INTO "deals" (
-            "document_id", "title", "cashback_text", "bank_offer_text", "prepaid_text", "content", "code",
+            "document_id", "title", "cashback_text", "bank_offer_text", "prepaid_text", "offer_countries", "content", "code",
             "coupon_type",
             "sale_price", "mrp", "discount", "discount_prefix",
             "badge", "affiliate_link", "expires_at", "scheduled_at", "content_status",
@@ -355,13 +367,14 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
             "published_at", "published_on", "created_at", "updated_at", "locale",
             "created_by_id", "updated_by_id"
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
           )
           ON CONFLICT ("document_id") DO UPDATE SET
             "title" = EXCLUDED."title",
             "cashback_text" = EXCLUDED."cashback_text",
             "bank_offer_text" = EXCLUDED."bank_offer_text",
             "prepaid_text" = EXCLUDED."prepaid_text",
+            "offer_countries" = EXCLUDED."offer_countries",
             "code" = EXCLUDED."code",
             "coupon_type" = COALESCE("deals"."coupon_type", EXCLUDED."coupon_type"),
             "sale_price" = EXCLUDED."sale_price",
@@ -386,6 +399,7 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
             cashbackText,
             bankOfferText,
             prepaidText,
+            offerCountries,
             content,
             cleanCode(meta.code),
             // couponType is required + load-bearing (a NULL type renders the

@@ -483,7 +483,8 @@ export async function runSiteContent(): Promise<void> {
 
 const SITE_CONFIGURATION_FIELDS = [
   "siteName", "countryName", "countryCode", "locale", "timezone",
-  "currencyCode", "onboardingComplete", "storesEnabled", "couponsEnabled",
+  "currencyCode", "offerCountries", "onboardingComplete", "storesEnabled",
+  "couponsEnabled",
   "brandsEnabled", "categoriesEnabled", "banksEnabled", "productDealsEnabled",
   "aboutEnabled", "careersEnabled", "contactEnabled", "faqsEnabled",
   "testimonialsEnabled", "partnerWithUsEnabled", "cultureEnabled",
@@ -511,6 +512,8 @@ async function seedSiteConfiguration(summary: string[]): Promise<void> {
   ) as Record<string, unknown>;
   const values: Record<string, unknown> = {
     ...profile,
+    offerCountries:
+      typeof profile.offerCountries === "string" ? profile.offerCountries : "",
     countryCode: config.source.countryCode.toUpperCase(),
     locale: config.source.locale,
     currencyCode: config.source.currencyCode.toUpperCase(),

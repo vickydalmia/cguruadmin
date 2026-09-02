@@ -45,13 +45,14 @@ Optional WordPress tables: `wp_uc_coupons`, `wp_uc_codes` (unique coupon plugin)
 
 ## Setup & Configuration
 
-1. Copy the environment template and fill in your values. For USA, overlay
-   `.env.migration.usa.example`; it pins the source prefix, localization,
-   expected inventory and the isolated `.state/usa` directory:
+1. Copy the environment template and fill in your values. For USA or UAE,
+   overlay `.env.migration.usa.example` or `.env.migration.ae.example`; each
+   pins its profile, source identity, classification workbook and isolated
+   state directory:
 
 ```bash
 cp .env.migration.example .env.migration
-# USA only: merge the values from .env.migration.usa.example into .env.migration
+# Merge the matching country overlay into .env.migration
 ```
 
 2. Configure the following variables in `.env.migration`:
@@ -366,6 +367,10 @@ For each coupon:
   as `USD 15 Cashback`, `usd 15 cashback`, `$15 Cashback`, or `Cashback: $15`
   is stored as the bare `$15` value; the public API adds the `Cashback` suffix
   when rendering.
+- For profiles with enabled Offer Countries, extracts explicit country/region
+  names from the title and content into `offer_countries`. Ambiguous bare ISO
+  codes and merchant/product wording such as Air Jordan or Global Village are
+  intentionally not treated as country validity.
 - Resolves `coupon_type` ("static" or "unique") from ACF meta
 - Wires taxonomy relationships (store, brand, category, bank) from WordPress `wp_term_relationships`
 - Links the unique coupon pool and SEO component; Coupon records do not own a
@@ -596,10 +601,13 @@ Content HTML srcsets are frozen at migration time, so rich-text `<img>` tags don
 ### Taxonomies (Phase 03)
 
 WordPress stores all taxonomy terms in `wp_terms` with `taxonomy='category'`.
-For USA, `MIGRATION_CLASSIFICATION_FILE` points to the approved Excel workbook;
+For USA and UAE, `MIGRATION_CLASSIFICATION_FILE` points to the approved Excel workbook;
 its `Classification` value is matched to the SQL term by exact normalized
 slug. Excel is authoritative, and SQL slugs absent from the workbook default
-to Store. Other profiles use ACF `choose_type` with the same fallback.
+to Store. Other profiles use ACF `choose_type` with the same fallback. The UAE
+workbook contains 1,397 importable rows: 457 Stores, 862 Brands and 78
+Categories. Its one omitted SQL term, `Expired`, is excluded through the UAE
+profile because it is a WordPress lifecycle bucket rather than a catalog entity.
 
 | Classification / `choose_type` | Strapi table |
 |--------------------------------|-------------|
@@ -627,8 +635,9 @@ applied in phases 03/07/08 and mirrored by phase 10's expected counts:
    operator-supplied CSV, its store names are matched case/whitespace-
    insensitively against terms whose `choose_type` is `Store` or missing (a
    Brand/Bank/Category sharing a name is never swallowed). The repo
-   intentionally ships no historical retired-store CSV for India or USA; an
-   unset or missing file means zero listed-store exclusions.
+   intentionally ships no historical retired-store CSV for India or USA. The
+   UAE profile uses this same exclusion seam for its non-catalog `Expired`
+   bucket; an unset or missing file means zero listed exclusions.
 
 An excluded term is never imported, and every post filed under one is
 excluded from phases 07/08 — *before* the inventory reconciliation, so a

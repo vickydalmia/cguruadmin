@@ -23,6 +23,7 @@ import {
   classifyTaxonomyTerms,
   formatTaxonomyClassificationReport,
 } from "../utils/taxonomy-classification.js";
+import { loadProfileOfferCountries } from "../utils/offer-country-extract.js";
 
 type PreflightTaxonomyTerm = {
   term_id: number;
@@ -103,6 +104,7 @@ function validateSiteConfigurationProfile(): void {
       throw new Error(`Profile site configuration requires boolean ${field}`);
     }
   }
+  loadProfileOfferCountries(config.siteConfigurationFile);
 }
 
 async function validateSourceDataExceptions(): Promise<void> {
