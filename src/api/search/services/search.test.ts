@@ -24,6 +24,7 @@ function searchService({
     code: null,
     couponType: "static",
     affiliateLink: "https://track.example.com/coupon",
+    offerCountries: "AE,SA",
     // A stale pre-migration property must never become public search media.
     image: { url: "https://cdn.example.com/legacy-coupon.webp" },
     stores: [{ name: "Fashion Store", slug: "fashion-store-coupons" }],
@@ -39,6 +40,7 @@ function searchService({
     discount: "40%",
     discountPrefix: "upTo",
     expiresAt: "2026-12-31T00:00:00.000Z",
+    offerCountries: "AE,GCC",
     dealImage: {
       url: "https://cdn.example.com/shoes.webp",
       width: 600,
@@ -330,6 +332,7 @@ describe("public search entity boundaries", () => {
       documentId: "coupon-no-code",
       couponId: 987,
       codeMode: "none",
+      offerCountries: "AE,SA",
       type: "coupon",
       name: "No-code fashion offer",
       media: null,
@@ -339,6 +342,7 @@ describe("public search entity boundaries", () => {
     );
     expect(JSON.stringify(couponFind?.options.filters)).not.toContain("couponType");
     expect(couponFind?.options.populate).not.toHaveProperty("image");
+    expect(couponFind?.options.fields).toContain("offerCountries");
   });
 
   it("returns a product Deal without requiring MRP and includes owner metadata", async () => {
@@ -362,6 +366,7 @@ describe("public search entity boundaries", () => {
       originalPrice: null,
       discount: "Up To 40% OFF",
       expiresAt: "2026-12-31T00:00:00.000Z",
+      offerCountries: "AE,GCC",
       owner: {
         name: "Shoe Store",
         logo: {
@@ -376,6 +381,7 @@ describe("public search entity boundaries", () => {
     expect(JSON.stringify(dealFind?.options.filters)).not.toContain('"mrp"');
     expect(dealFind?.options.fields).toContain("expiresAt");
     expect(dealFind?.options.fields).toContain("discountPrefix");
+    expect(dealFind?.options.fields).toContain("offerCountries");
     expect(response.deals[0]).not.toHaveProperty("discountPrefix");
   });
 

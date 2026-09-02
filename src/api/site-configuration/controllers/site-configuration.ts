@@ -22,6 +22,20 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     return ctx.send({ data: await service.selectableLanguages() });
   },
 
+  async adminOfferCountries(ctx: any) {
+    const service = strapi.service(
+      'api::site-configuration.site-configuration',
+    ) as any;
+    return ctx.send({ data: await service.selectableOfferCountries() });
+  },
+
+  async adminEnabledOfferCountries(ctx: any) {
+    const service = strapi.service(
+      'api::site-configuration.site-configuration',
+    ) as any;
+    return ctx.send({ data: await service.enabledOfferCountries() });
+  },
+
   async adminUpdate(ctx: any) {
     const service = strapi.service(
       'api::site-configuration.site-configuration',

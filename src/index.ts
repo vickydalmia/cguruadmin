@@ -24,6 +24,7 @@ import { primeOfferContentLocalization } from './utils/offer-content-localizatio
 import { configuredPublicSiteUrl } from './utils/public-site-url';
 import { ENTITY_COUPON_LAYOUT_ACTION_ATTRIBUTES } from './api/entity-coupon-layout/services/entity-coupon-layout';
 import { CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME } from './constants/checkout-merchant';
+import { OFFER_COUNTRIES_CUSTOM_FIELD_NAME } from './constants/offer-countries';
 import {
   hideFieldsFromComponentManager,
   hideRelationsFromContentManager,
@@ -65,6 +66,7 @@ import {
   registerCountrySetupRoutes,
   registerEntityCouponLayoutRoutes,
   registerEntityDealPageRoutes,
+  registerOfferCountryRoutes,
   registerRecordLockRoutes,
   registerTranslationRoutes,
   registerUiDictionaryRoutes,
@@ -96,6 +98,19 @@ export default {
     // src/admin/app.tsx.
     strapi.customFields.register({
       name: CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME,
+      type: 'string',
+      inputSize: { default: 6, isResizable: true },
+    });
+
+    // Offer Countries: the optional "valid in these countries" tag list on
+    // Coupon and Product Deal, stored as a csv of registry codes in one
+    // string column (src/constants/offer-countries.ts). A custom field for
+    // the same reason as checkoutMerchant: the option list is dynamic (the
+    // Country Setup subset), which a schema enumeration cannot express, and
+    // a custom field is the only supported seam in the main edit form. Same
+    // register-before-convertCustomFieldType rule as above.
+    strapi.customFields.register({
+      name: OFFER_COUNTRIES_CUSTOM_FIELD_NAME,
       type: 'string',
       inputSize: { default: 6, isResizable: true },
     });
@@ -133,6 +148,7 @@ export default {
     registerRecordLockRoutes(strapi);
     registerCsvExportRoutes(strapi);
     registerCountrySetupRoutes(strapi);
+    registerOfferCountryRoutes(strapi);
     registerAdminRuntimeConfigRoutes(strapi);
     registerTranslationRoutes(strapi);
     registerUiDictionaryRoutes(strapi);

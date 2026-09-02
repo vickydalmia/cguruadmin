@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   registerAdminRuntimeConfigRoutes,
   registerCountrySetupRoutes,
+  registerOfferCountryRoutes,
   registerUiDictionaryRoutes,
 } from './admin-routes';
 
@@ -53,6 +54,33 @@ describe('country setup routes', () => {
           path: '/languages',
           handler: 'api::site-configuration.site-configuration.adminLanguages',
           config: { policies },
+        },
+        {
+          method: 'GET',
+          path: '/offer-countries',
+          handler: 'api::site-configuration.site-configuration.adminOfferCountries',
+          config: { policies },
+        },
+      ],
+    });
+  });
+});
+
+describe('offer country routes', () => {
+  it('serves the enabled options to any authenticated admin', () => {
+    const routes = vi.fn();
+    registerOfferCountryRoutes({ server: { routes } } as any);
+
+    expect(routes).toHaveBeenCalledWith({
+      type: 'admin',
+      prefix: '/offer-countries',
+      routes: [
+        {
+          method: 'GET',
+          path: '/options',
+          handler:
+            'api::site-configuration.site-configuration.adminEnabledOfferCountries',
+          config: { policies: ['admin::isAuthenticatedAdmin'] },
         },
       ],
     });

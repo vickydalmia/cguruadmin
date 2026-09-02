@@ -49,6 +49,7 @@ describe('write-validation step order', () => {
       'validateAffiliateOfferForWrite',
       'validateAffiliateBrandFlip',
       'validateCheckoutMerchantForWrite',
+      'validateOfferCountriesForWrite',
       'validateEntityTopPickCoupons',
       'validateEntityOrderedCoupons',
       'validateOfferFieldsForWrite',

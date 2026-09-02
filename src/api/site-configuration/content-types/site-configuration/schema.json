@@ -47,6 +47,8 @@
     "independenceDaySaleEnabled": { "type": "boolean", "required": true, "default": true, "private": true },
 
     "translationEnabled": { "type": "boolean", "required": true, "default": false },
-    "translationLocales": { "type": "string", "required": false, "default": "", "maxLength": 80, "regex": "^$|^[a-z]{2,3}(-[a-z]{2,4})?(,[a-z]{2,3}(-[a-z]{2,4})?)*$" }
+    "translationLocales": { "type": "string", "required": false, "default": "", "maxLength": 80, "regex": "^$|^[a-z]{2,3}(-[a-z]{2,4})?(,[a-z]{2,3}(-[a-z]{2,4})?)*$" },
+
+    "offerCountries": { "type": "string", "required": false, "default": "", "maxLength": 128, "regex": "^$|^[A-Z]{2,6}(,[A-Z]{2,6})*$" }
   }
 }

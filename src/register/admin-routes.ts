@@ -175,6 +175,36 @@ export function registerCountrySetupRoutes(strapi: Core.Strapi): void {
         handler: 'api::site-configuration.site-configuration.adminLanguages',
         config: { policies },
       },
+      // The full offer-country master registry the Country Setup picker
+      // offers. The editor-facing ENABLED subset is served separately below —
+      // this whole prefix is Super-Admin-only.
+      {
+        method: 'GET',
+        path: '/offer-countries',
+        handler: 'api::site-configuration.site-configuration.adminOfferCountries',
+        config: { policies },
+      },
+    ],
+  } as any);
+}
+
+/**
+ * The enabled offer-country tags, for the Coupon/Deal edit form's picker.
+ * Any authenticated admin: editors tag offers, and the list leaks nothing —
+ * it is the same data `GET /api/site-settings` serves publicly.
+ */
+export function registerOfferCountryRoutes(strapi: Core.Strapi): void {
+  strapi.server.routes({
+    type: 'admin',
+    prefix: '/offer-countries',
+    routes: [
+      {
+        method: 'GET',
+        path: '/options',
+        handler:
+          'api::site-configuration.site-configuration.adminEnabledOfferCountries',
+        config: { policies: ['admin::isAuthenticatedAdmin'] },
+      },
     ],
   } as any);
 }

@@ -26,6 +26,7 @@ import {
   FEATURE_FORM_DEFINITIONS,
   type CountrySetup,
 } from '../types';
+import { OfferCountriesField } from './offer-countries-field';
 import { TranslationLanguagesField } from './translation-languages-field';
 
 const IDENTITY_FIELDS = [
@@ -238,6 +239,25 @@ export default function CountrySetupPage() {
                   />
                 </Box>
               </Flex>
+            </Box>
+
+            <Box padding={6} background="neutral0" shadow="filterShadow" hasRadius>
+              <Typography variant="beta">Offer countries</Typography>
+              <Box paddingTop={2}>
+                <Typography variant="pi" textColor="neutral600">
+                  Optional per-offer country tagging for multi-country markets
+                  (e.g. the GCC). Editors pick from this list on each Coupon
+                  and Product Deal; the website shows the flags on offer cards
+                  and adds a Country filter on entity pages. Leave empty for a
+                  single-country site.
+                </Typography>
+              </Box>
+              <Box paddingTop={4}>
+                <OfferCountriesField
+                  value={String(form.offerCountries ?? '')}
+                  onChange={(csv) => set('offerCountries', csv)}
+                />
+              </Box>
             </Box>
 
             {(['Catalog', 'Editorial', 'Legal'] as const).map((group) => (

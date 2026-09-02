@@ -124,6 +124,11 @@
         }
       }
     },
+    "offerCountries": {
+      "type": "customField",
+      "customField": "global::offer-countries",
+      "maxLength": 128
+    },
     "expiresAt": {
       "type": "datetime"
     },

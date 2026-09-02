@@ -44,6 +44,9 @@ export const COUPON_PUBLIC_FIELDS = [
   'checkoutMerchant',
   // Drives the per-offer store-style card on entity pages (no listing logo).
   'isForAffiliateBrand',
+  // Csv of offer-country registry codes ("AE,SA") — flag tags + the entity
+  // Country filter. Null/absent = valid everywhere.
+  'offerCountries',
   'expiresAt',
   'contentStatus',
   'scheduledAt',
@@ -72,6 +75,9 @@ export const DEAL_PUBLIC_FIELDS = [
   'checkoutMerchant',
   // Drives the per-offer store-style card on entity pages (no listing logo).
   'isForAffiliateBrand',
+  // Csv of offer-country registry codes ("AE,SA") — flag tags + the entity
+  // Country filter. Null/absent = valid everywhere.
+  'offerCountries',
   // Consumed and removed by arrayizeOfferText after it derives the final
   // Amazon Creator Connections condition.
   AMAZON_AFFILIATE_DISCLOSURE_FIELD,

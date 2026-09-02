@@ -7,6 +7,12 @@ import {
   selectableContentLocales,
 } from '../../../translation/locales/resolve';
 import {
+  OFFER_COUNTRY_REGISTRY,
+  enabledOfferCountryOptions,
+  offerCountryByCode,
+  parseOfferCountryTokens,
+} from '../../../constants/offer-countries';
+import {
   SITE_CONFIGURATION_FIELDS,
   SITE_CONFIGURATION_UID,
   normalizeSiteConfiguration,
@@ -85,6 +91,10 @@ export async function buildSiteSettings(
       config.countryCode,
     ),
     languages: siteLanguages(config),
+    // Derived from the `offerCountries` csv (which safeFields also carries,
+    // for the Country Setup form): the enabled tags with display data and
+    // their filter expansion. Empty array = the feature is off site-wide.
+    offerCountryOptions: enabledOfferCountryOptions(config.offerCountries),
     features,
   };
 }
@@ -142,6 +152,23 @@ export async function validateSiteConfigurationForWrite(
     });
   }
 
+  // Judge the RAW submitted csv, not the candidate: normalizeSiteConfiguration
+  // canonicalises `offerCountries` by dropping unknown tokens, so a typo would
+  // silently vanish from the saved value instead of failing the save.
+  if (data && Object.prototype.hasOwnProperty.call(data, 'offerCountries')) {
+    const unknownCountries = parseOfferCountryTokens(data.offerCountries).filter(
+      (code) => !offerCountryByCode(code),
+    );
+    if (unknownCountries.length > 0) {
+      problems.push({
+        path: ['offerCountries'],
+        message:
+          `Unknown offer country code(s): ${unknownCountries.join(', ')}. ` +
+          `Pick from: ${OFFER_COUNTRY_REGISTRY.map((def) => def.code).join(', ')}.`,
+      });
+    }
+  }
+
   if (problems.length > 0) throw toValidationError(problems);
   return candidate;
 }
@@ -160,10 +187,29 @@ export async function selectableSiteLanguages(strapi: Core.Strapi) {
   );
 }
 
+/**
+ * The custom-field picker on Coupon/Deal edit forms: the ENABLED tags for
+ * this deployment. Readable by any authenticated admin (editors tag offers);
+ * the full-registry Country Setup picker stays Super-Admin-only.
+ */
+export async function enabledOfferCountries(strapi: Core.Strapi) {
+  const config = await loadSiteConfiguration(strapi);
+  return enabledOfferCountryOptions(config.offerCountries);
+}
+
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   load: () => loadSiteConfiguration(strapi),
   publicSettings: () => buildSiteSettings(strapi),
   selectableLanguages: () => selectableSiteLanguages(strapi),
+  /** Country Setup's country picker: the full master registry. */
+  selectableOfferCountries: () =>
+    OFFER_COUNTRY_REGISTRY.map(({ code, displayCode, name, kind }) => ({
+      code,
+      displayCode,
+      name,
+      kind,
+    })),
+  enabledOfferCountries: () => enabledOfferCountries(strapi),
   async update(data: any) {
     const current = await strapi.documents(SITE_CONFIGURATION_UID as any).findFirst({
       fields: ['documentId', ...SITE_CONFIGURATION_FIELDS] as any,

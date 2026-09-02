@@ -1,3 +1,5 @@
+import { canonicalOfferCountries } from '../../../constants/offer-countries';
+
 export const SITE_CONFIGURATION_UID =
   'api::site-configuration.site-configuration' as const;
 
@@ -40,6 +42,13 @@ export type SiteConfiguration = {
    */
   translationEnabled: boolean;
   translationLocales: string;
+  /**
+   * Per-offer country tagging (flag pills + entity-page Country filter): a
+   * csv of OFFER_COUNTRY_REGISTRY codes editors may tag Coupons/Deals with
+   * (e.g. "AE,SA,KW,GCC"). Empty = the whole feature is off, which is the
+   * India/USA state. Codes, not names — the registry owns display data.
+   */
+  offerCountries: string;
 } & Record<FeatureField, boolean>;
 
 export type FeatureKey =
@@ -122,6 +131,7 @@ export const INDIA_DEFAULT_CONFIGURATION: SiteConfiguration = {
   affiliateDisclosureEnabled: true,
   translationEnabled: false,
   translationLocales: '',
+  offerCountries: '',
 };
 
 export const IDENTITY_FIELDS = [
@@ -139,9 +149,12 @@ export const TRANSLATION_FIELDS = [
   'translationLocales',
 ] as const;
 
+export const OFFER_COUNTRY_FIELDS = ['offerCountries'] as const;
+
 export const SITE_CONFIGURATION_FIELDS = [
   ...IDENTITY_FIELDS,
   ...TRANSLATION_FIELDS,
+  ...OFFER_COUNTRY_FIELDS,
   ...FEATURE_FIELDS,
 ] as const;
 
@@ -167,6 +180,9 @@ export function normalizeSiteConfiguration(value: any): SiteConfiguration {
   normalized.translationLocales = normalizeTranslationLocales(
     normalized.translationLocales,
   );
+  // Unknown tokens are dropped HERE (canonical spelling only); the write
+  // validator reports them by name before this ever persists.
+  normalized.offerCountries = canonicalOfferCountries(normalized.offerCountries);
   for (const field of FEATURE_FIELDS) normalized[field] = normalized[field] === true;
   return normalized;
 }

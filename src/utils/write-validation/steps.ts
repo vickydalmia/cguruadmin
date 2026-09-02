@@ -44,6 +44,8 @@ import { validateIdentity } from '../identity-validation';
 import { validateJobSlug } from '../job-slug-validation';
 import { MENU_UID, validateMenuCategorySections } from '../menu-category-validation';
 import { validateMenuNotification } from '../menu-notification-validation';
+import { validateOfferCountriesForWrite } from '../offer-countries-validation';
+import { isOfferCountriesOfferUid } from '../../constants/offer-countries';
 import { validateOfferFieldsForWrite } from '../offer-field-validation';
 import {
   isOfferLifecycleUid,
@@ -329,6 +331,22 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     applies: isCheckoutMerchantOfferUid,
     run: ({ strapi, uid, action, data, documentId, strict }) =>
       validateCheckoutMerchantForWrite(
+        strapi,
+        uid,
+        action,
+        data,
+        documentId,
+        strict,
+      ),
+  },
+  {
+    // offerCountries is a custom STRING csv, not an enumeration, so nothing
+    // at the schema level checks its tokens against the registry or the
+    // Country Setup enabled set. This is that check.
+    name: 'validateOfferCountriesForWrite',
+    applies: isOfferCountriesOfferUid,
+    run: ({ strapi, uid, action, data, documentId, strict }) =>
+      validateOfferCountriesForWrite(
         strapi,
         uid,
         action,

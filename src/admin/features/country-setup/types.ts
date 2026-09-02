@@ -23,6 +23,14 @@ export type CountrySetup = {
   [field: string]: unknown;
 };
 
+/** One row of GET /country-setup/offer-countries — a taggable country/region. */
+export type SelectableOfferCountry = {
+  code: string;
+  displayCode: string;
+  name: string;
+  kind: 'country' | 'region';
+};
+
 /** One row of GET /country-setup/languages — a language the admin may pick. */
 export type SelectableLanguage = {
   code: string;

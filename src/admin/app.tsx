@@ -6,6 +6,7 @@ import * as React from 'react';
 import { Earth } from '@strapi/icons';
 
 import { CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME } from '../constants/checkout-merchant';
+import { OFFER_COUNTRIES_CUSTOM_FIELD_NAME } from '../constants/offer-countries';
 import RichTextEditor from './features/rich-text/rich-text-editor';
 import DateTimeInput from './components/date-time-input';
 import BooleanConfirmInput from './components/boolean-confirm-input';
@@ -97,6 +98,35 @@ export default {
           // every custom field through one untyped slot and feeds it the
           // field's props at runtime — so a component declaring real required
           // props needs this widening to be assignable at all.
+          return {
+            default: module.default as unknown as React.ComponentType,
+          };
+        },
+      },
+    });
+
+    // Offer Countries: the "valid in these countries" multi-select on Coupon
+    // and Product Deal, whose option list is the DYNAMIC Country Setup subset
+    // (a schema enumeration cannot express that). Same custom-field pairing
+    // rule as checkout-merchant: the server half (src/index.ts register) must
+    // declare the same name or the two `global::` uids diverge.
+    app.customFields.register({
+      name: OFFER_COUNTRIES_CUSTOM_FIELD_NAME,
+      type: 'string',
+      intlLabel: {
+        id: 'offer-countries.label',
+        defaultMessage: 'Offer countries',
+      },
+      intlDescription: {
+        id: 'offer-countries.description',
+        defaultMessage:
+          'Countries this offer is valid in (empty = all countries)',
+      },
+      components: {
+        Input: async () => {
+          const module = await import(
+            './features/offer-countries/components/offer-countries-input'
+          );
           return {
             default: module.default as unknown as React.ComponentType,
           };
