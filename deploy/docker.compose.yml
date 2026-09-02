@@ -72,6 +72,15 @@ services:
       # work. Keep exactly one dispatcher on the admin service so render-time
       # traffic cannot amplify retries into overlapping route-inventory scans.
       ISR_OUTBOX_DISPATCHER_ENABLED: "false"
+      # Every socket that can reach this container is internal by construction
+      # (ports are published on loopback and the VPC private IP, firewalled),
+      # so trust private sources without per-host IP allowlisting. On a
+      # single-server deployment the Astro origin's requests hairpin through
+      # Docker NAT and arrive as a bridge-gateway address that differs per
+      # host — an exact RATE_LIMIT_TRUSTED_IPS entry cannot express that.
+      # NEVER set this on the admin service above: proxied visitor traffic
+      # reaches it from the same private gateway and would bypass the limiter.
+      RATE_LIMIT_TRUST_PRIVATE_SOCKETS: "true"
     ports:
       - "127.0.0.1:${RENDER_PORT:-1338}:1337"
       # Same rule as the admin container: APP_BIND must be the VPC private IP,
