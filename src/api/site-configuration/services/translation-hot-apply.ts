@@ -4,12 +4,15 @@
 // expansion reads, then start the job dispatcher), so an admin who picks a
 // language does not have to restart the CMS they are talking to. Other CMS
 // containers still pick the change up at their next restart — the mirror
-// and the dispatcher are per process.
+// is per process; only the designated worker process starts the dispatcher.
 //
 // Never fails the admin's save: every failure is logged loudly and swallowed.
 import type { Core } from '@strapi/strapi';
 import { ensureContentLocales } from '../../../translation/ensure-locales';
-import { primeEnabledContentLocales } from '../../../translation/locales/registry';
+import {
+  enabledContentLocaleCodesSync,
+  primeEnabledContentLocales,
+} from '../../../translation/locales/registry';
 import {
   translationConfigFromEnv,
   translationConfigProblem,
@@ -17,6 +20,7 @@ import {
 import { logTranslation } from '../../../translation/outbox/log';
 import {
   startTranslationOutbox,
+  stopTranslationOutbox,
   translationOutboxRunning,
 } from '../../../translation/outbox/runtime';
 import { invalidateCachedSiteConfiguration } from './cached-configuration';
@@ -25,7 +29,12 @@ export type TranslationHotApplyOutcome =
   | {
       ok: true;
       /** `not-started`: env parses but the site has no target language. */
-      outbox: 'already-running' | 'started' | 'not-started' | 'env-missing';
+      outbox:
+        | 'already-running'
+        | 'started'
+        | 'stopped'
+        | 'not-started'
+        | 'env-missing';
     }
   | { ok: false; error: string };
 
@@ -46,6 +55,17 @@ export async function applyTranslationSettings(
       hint: 'restart the CMS to retry the locale bootstrap',
     });
     return { ok: false, error };
+  }
+
+  // Country Setup is also the runtime kill switch. Previously a save that
+  // disabled translation re-primed the locale list but left an already
+  // running paid dispatcher alive until the process restarted.
+  if (enabledContentLocaleCodesSync().length === 0) {
+    const wasRunning = translationOutboxRunning();
+    if (wasRunning) await stopTranslationOutbox();
+    const outbox = wasRunning ? 'stopped' : 'not-started';
+    logTranslation(strapi, 'info', 'translation.hot_apply', { outbox });
+    return { ok: true, outbox };
   }
 
   if (translationOutboxRunning()) {

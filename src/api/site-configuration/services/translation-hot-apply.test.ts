@@ -14,6 +14,7 @@ vi.mock('../../../translation/locales/registry', () => ({
   primeEnabledContentLocales: vi.fn(async () => {
     calls.push('prime');
   }),
+  enabledContentLocaleCodesSync: vi.fn(() => ['ar']),
 }));
 vi.mock('../../../translation/config', () => ({
   translationConfigFromEnv: vi.fn(() => null),
@@ -27,11 +28,19 @@ vi.mock('../../../translation/outbox/runtime', () => ({
     calls.push('start');
     running = true;
   }),
+  stopTranslationOutbox: vi.fn(async () => {
+    calls.push('stop');
+    running = false;
+  }),
 }));
 
 import { ensureContentLocales } from '../../../translation/ensure-locales';
 import { translationConfigFromEnv } from '../../../translation/config';
-import { startTranslationOutbox } from '../../../translation/outbox/runtime';
+import { enabledContentLocaleCodesSync } from '../../../translation/locales/registry';
+import {
+  startTranslationOutbox,
+  stopTranslationOutbox,
+} from '../../../translation/outbox/runtime';
 import { applyTranslationSettings } from './translation-hot-apply';
 
 function fakeStrapi() {
@@ -99,6 +108,21 @@ describe('applyTranslationSettings', () => {
     // The locale steps still ran: a NEW language needs its i18n row and a
     // fresh sync mirror even though the dispatcher is already up.
     expect(calls).toEqual(['invalidate', 'ensure', 'prime']);
+  });
+
+  it('stops a running dispatcher as soon as Country Setup disables translation', async () => {
+    running = true;
+    vi.mocked(enabledContentLocaleCodesSync).mockReturnValueOnce([]);
+    const { strapi, log } = fakeStrapi();
+
+    const outcome = await applyTranslationSettings(strapi);
+
+    expect(stopTranslationOutbox).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual(['invalidate', 'ensure', 'prime', 'stop']);
+    expect(outcome).toEqual({ ok: true, outbox: 'stopped' });
+    expect(events(log.info)).toContainEqual(
+      expect.objectContaining({ event: 'translation.hot_apply', outbox: 'stopped' }),
+    );
   });
 
   it('swallows a locale bootstrap failure, logs it loudly and skips the outbox', async () => {

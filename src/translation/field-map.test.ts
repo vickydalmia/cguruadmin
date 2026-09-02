@@ -158,6 +158,8 @@ describe('collectTranslatableLeaves', () => {
     // Budgets derive from schema maxLength × 0.95.
     expect(byPath.get('seo.metaTitle')?.maxLength).toBe(66);
     expect(byPath.get('shortDescription')?.maxLength).toBe(190);
+    expect(byPath.get('seo.metaTitle')?.validationMaxLength).toBe(70);
+    expect(byPath.get('shortDescription')?.validationMaxLength).toBe(200);
     expect(byPath.get('description')?.kind).toBe('richtext');
   });
 

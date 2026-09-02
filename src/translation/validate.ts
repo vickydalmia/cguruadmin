@@ -63,6 +63,28 @@ export type ProtectedValueMask = {
   restore: (translated: string) => string;
 };
 
+function markerLabel(index: number): string {
+  let value = index + 1;
+  let label = '';
+  while (value > 0) {
+    value -= 1;
+    label = String.fromCharCode(65 + (value % 26)) + label;
+    value = Math.floor(value / 26);
+  }
+  return label;
+}
+
+function markerPattern(label: string): RegExp {
+  // Models occasionally add spaces around placeholder separators or change
+  // their case. Those changes carry no semantic meaning, so accept them when
+  // restoring the exact protected source bytes. Alphabetic labels avoid
+  // Arabic-Indic digit normalisation in dense Arabic rich text.
+  return new RegExp(
+    `\\{\\{\\s*CGPV\\s*[_-]?\\s*${label}\\s*\\}\\}`,
+    'giu',
+  );
+}
+
 /**
  * Replace protected facts before they reach the model. Asking a model to copy
  * `AED 150`, `20%`, a URL, or a placeholder verbatim is weaker than making
@@ -72,7 +94,11 @@ export type ProtectedValueMask = {
  */
 export function maskProtectedValues(value: string): ProtectedValueMask {
   const spans: Array<{ start: number; end: number; value: string }> = [];
-  for (const pattern of protectedPatterns()) {
+  // HTML is already validated by sameHtmlStructure(). Mask it as well so the
+  // model cannot rewrite attributes, but keep it out of protectedValues() so
+  // one changed tag reports the precise html-structure problem only.
+  const maskPatterns = [/<!--[\s\S]*?-->|<[^>]+>/gu, ...protectedPatterns()];
+  for (const pattern of maskPatterns) {
     const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
     const matcher = new RegExp(pattern.source, flags);
     for (let match = matcher.exec(value); match; match = matcher.exec(value)) {
@@ -92,7 +118,8 @@ export function maskProtectedValues(value: string): ProtectedValueMask {
 
   const replacements = spans.map((span, index) => ({
     ...span,
-    token: `{{CG_PROTECTED_${index}}}`,
+    label: markerLabel(index),
+    token: `{{CGPV_${markerLabel(index)}}}`,
   }));
   let masked = '';
   let cursor = 0;
@@ -107,7 +134,7 @@ export function maskProtectedValues(value: string): ProtectedValueMask {
     restore(translated: string) {
       return replacements.reduce(
         (current, replacement) =>
-          current.split(replacement.token).join(replacement.value),
+          current.replace(markerPattern(replacement.label), () => replacement.value),
         translated,
       );
     },
@@ -189,7 +216,8 @@ export function validateTranslatedBatch(
       problems.push('not-a-string');
     } else {
       if (!value.trim()) problems.push('empty');
-      if (leaf.maxLength && [...value].length > leaf.maxLength) {
+      const maximumLength = leaf.validationMaxLength ?? leaf.maxLength;
+      if (maximumLength && [...value].length > maximumLength) {
         problems.push('over-budget');
       }
       if (leaf.kind === 'richtext' && !sameHtmlStructure(leaf.value, value)) {

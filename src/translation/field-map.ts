@@ -22,8 +22,10 @@ export type LeafPath = string;
 export type TranslatableLeaf = {
   path: LeafPath;
   kind: 'plain' | 'richtext';
-  /** Hard schema budget for the TRANSLATED value, when the field has one. */
+  /** Prompt target, slightly below the schema ceiling when one exists. */
   maxLength?: number;
+  /** Actual schema ceiling; omitted for dictionary limits, where maxLength is hard. */
+  validationMaxLength?: number;
   value: string;
   /**
    * Optional guidance shown to the LLM under "## Field notes" (e.g. which
@@ -99,6 +101,11 @@ function leafBudget(definition: any): number | undefined {
   return Number.isFinite(max) && max > 0 ? Math.floor(max * 0.95) : undefined;
 }
 
+function leafValidationBudget(definition: any): number | undefined {
+  const max = Number(definition?.maxLength);
+  return Number.isFinite(max) && max > 0 ? Math.floor(max) : undefined;
+}
+
 export type RelationTarget = { targetUid: string; documentIds: string[] };
 
 export type RelationExistence = {
@@ -149,6 +156,7 @@ export function collectTranslatableLeaves(
             path,
             kind: leafKind(definition),
             maxLength: leafBudget(definition),
+            validationMaxLength: leafValidationBudget(definition),
             value: fieldValue,
           });
         }

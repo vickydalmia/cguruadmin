@@ -139,12 +139,51 @@ describe('validateTranslatedBatch', () => {
     expect(mask.masked).not.toContain('{customerName}');
     expect(
       mask.restore(
-        'وفّر {{CG_PROTECTED_0}} على {{CG_PROTECTED_1}} لدى ' +
-          '{{CG_PROTECTED_2}} للعميل {{CG_PROTECTED_3}}',
+        'وفّر {{CGPV_A}} على {{CGPV_B}} لدى ' +
+          '{{CGPV_C}} للعميل {{CGPV_D}}',
       ),
     ).toBe(
       'وفّر 20% على AED 150 لدى https://shop.example/x للعميل {customerName}',
     );
+    expect(
+      mask.restore(
+        'وفّر {{ cgpv-a }} على {{ CGPV _ B }} لدى ' +
+          '{{CGPV_C}} للعميل {{CGPV_D}}',
+      ),
+    ).toBe(
+      'وفّر 20% على AED 150 لدى https://shop.example/x للعميل {customerName}',
+    );
+  });
+
+  it('uses alphabetic marker labels when dense copy contains more than 26 facts', () => {
+    const source = Array.from({ length: 28 }, (_, index) => `${index + 1}%`).join(' ');
+    const mask = maskProtectedValues(source);
+
+    expect(mask.masked).toContain('{{CGPV_A}}');
+    expect(mask.masked).toContain('{{CGPV_Z}}');
+    expect(mask.masked).toContain('{{CGPV_AA}}');
+    expect(mask.masked).toContain('{{CGPV_AB}}');
+    expect(mask.restore(mask.masked)).toBe(source);
+  });
+
+  it('masks complete HTML tags so the model cannot alter attributes or structure', () => {
+    const source = '<a href="https://shop.example/deal" rel="nofollow">Save 20%</a>';
+    const mask = maskProtectedValues(source);
+
+    expect(mask.masked).toBe('{{CGPV_A}}Save {{CGPV_B}}{{CGPV_C}}');
+    expect(mask.restore('{{CGPV_A}}وفّر {{CGPV_B}}{{CGPV_C}}')).toBe(
+      '<a href="https://shop.example/deal" rel="nofollow">وفّر 20%</a>',
+    );
+  });
+
+  it('uses the real schema ceiling while prompting toward a shorter target', () => {
+    expect(
+      validateTranslatedBatch(
+        [leaf('seo.metaDescription', 'Source', { maxLength: 4, validationMaxLength: 5 })],
+        { 'seo.metaDescription': 'عربية' },
+        ARABIC,
+      ),
+    ).toEqual([]);
   });
 
   it('rejects unchanged English prose for an Arabic target', () => {

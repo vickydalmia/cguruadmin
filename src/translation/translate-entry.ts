@@ -138,6 +138,7 @@ function correctiveMessage(
     'Return the COMPLETE object again with exactly the requested keys.',
     '- Rephrase naturally to fit maxChars; never truncate.',
     '- Reproduce source HTML tags, order, and attributes exactly.',
+    '- Preserve every {{CGPV_*}} marker exactly once; each marker is an immutable source fact.',
     '- Preserve numbers, prices, percentages, URLs, emails, and placeholders verbatim.',
     `- Replace unchanged English prose with fluent ${locale.name}.`,
     '',

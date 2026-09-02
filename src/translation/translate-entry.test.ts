@@ -171,11 +171,11 @@ describe('translateEntryLeaves', () => {
     const complete = vi.fn(async ({ user }: any) => {
       expect(user).not.toContain('AED 150');
       expect(user).not.toContain('20%');
-      expect(user).toContain('{{CG_PROTECTED_0}}');
-      expect(user).toContain('{{CG_PROTECTED_1}}');
+      expect(user).toContain('{{CGPV_A}}');
+      expect(user).toContain('{{CGPV_B}}');
       return {
         text: JSON.stringify({
-          description: 'وفّر {{CG_PROTECTED_0}} على {{CG_PROTECTED_1}} اليوم',
+          description: 'وفّر {{CGPV_A}} على {{CGPV_B}} اليوم',
         }),
         inputTokens: 3,
         outputTokens: 2,

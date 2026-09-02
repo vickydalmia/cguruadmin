@@ -37,8 +37,11 @@ edits made there.
   validated (exact HTML structure, protected numbers/prices/URLs/placeholders,
   target-script presence for non-Latin scripts, no untranslated English) with
   one focused corrective retry for only the failed fields. Protected facts are
-  replaced with opaque tokens before either model sees them and restored from
-  the source before validation, so a model cannot localize or alter them.
+  replaced with short alphabetically labelled `{{CGPV_*}}` markers before
+  either model sees them and restored from the source before validation, so a
+  model cannot localize or alter them. Alphabetic labels avoid Arabic-Indic
+  digit normalization; harmless marker case/separator spacing is tolerated
+  during restoration.
   Output that still fails is NEVER published: the current locale version is
   retained and the complete job receives at most
   `TRANSLATION_QUALITY_RETRY_MAX` durable retries (default one), then becomes a
@@ -135,12 +138,15 @@ edits made there.
 2. In **Settings → Country Setup** turn **Translation enabled** on and pick
    the target languages in the multi-select (it lists every language ICU can
    name, with native name, `RTL` badge, script and the `/xx/` prefix). Save.
+   Turning the switch off later immediately stops the dispatcher on the CMS
+   instance handling the save; pending rows remain durable. Restart sibling
+   CMS processes so their locale mirrors follow the disabled configuration.
 3. The save **hot-applies to the CMS instance that handled it**: the i18n
    locale rows are created, the sync locale mirror the ISR path twins read is
    re-primed and the dispatcher starts (only if the env block parses — an
    incomplete block is logged as `translation.hot_apply … env-missing` and
-   nothing starts). **Restart every other CMS container** — the mirror and
-   locale mirrors are per process; only the designated admin process starts
+   nothing starts). **Restart every other CMS container** — locale mirrors
+   are per process; only the designated admin process starts
    the dispatcher. A hot-apply failure never fails the save;
    it is logged as `translation.hot_apply_failed` and a restart retries it.
 4. Grant editor roles the new locale (Settings → Roles → Content Manager →

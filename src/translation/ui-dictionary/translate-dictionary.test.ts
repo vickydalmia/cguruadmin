@@ -88,7 +88,7 @@ function sourceJson(user: string): Record<string, string> {
 const arabicFor = (source: string) =>
   [
     'نص',
-    ...(source.match(/\{\{CG_PROTECTED_\d+\}\}|\{[a-zA-Z_][\w.-]*\}/gu) ?? []),
+    ...(source.match(/\{\{CGPV_[A-Z]+\}\}|\{[a-zA-Z_][\w.-]*\}/gu) ?? []),
   ].join(' ');
 
 /** Echo provider: translates every key it is asked for unless `failWhen` says otherwise. */
