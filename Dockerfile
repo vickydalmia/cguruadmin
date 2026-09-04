@@ -26,7 +26,12 @@ RUN corepack enable && corepack prepare yarn@1.22.22 --activate
 RUN yarn config set network-timeout 600000 -g && yarn install --frozen-lockfile --production=false
 
 COPY . .
-RUN yarn test
+# The build stage otherwise inherits NODE_ENV=production, which intentionally
+# enables runtime throttles. Tests must run in their normal test environment so
+# catalogue-scan fixtures do not wait on the production documents-per-second
+# limiter. This override applies only to this layer; the build and final image
+# remain production.
+RUN NODE_ENV=test yarn test
 RUN yarn build
 
 RUN yarn install --production --frozen-lockfile --ignore-scripts
