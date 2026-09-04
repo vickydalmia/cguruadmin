@@ -565,6 +565,7 @@ describe('private offer redeem resolver', () => {
 
   it('pins a unique Product Deal resolver to English and never exposes a stale shared code', async () => {
     const harness = createHarness();
+    setEnabledContentLocaleCodesForTest(['ar']);
     harness.ctx.params = {
       entityType: 'deal',
       documentId: 'deal-document-1',
@@ -600,6 +601,96 @@ describe('private offer redeem resolver', () => {
     expect(payload.data.affiliateLink).toBe(
       'https://merchant.invalid/shared',
     );
+  });
+
+  it('uses Arabic presentation fields but keeps English redemption data authoritative', async () => {
+    const harness = createHarness();
+    setEnabledContentLocaleCodesForTest(['ar']);
+    harness.ctx.params = {
+      entityType: 'coupon',
+      documentId: 'coupon-document-1',
+    } as any;
+    harness.ctx.query = { locale: 'ar' };
+    harness.couponFindOne
+      .mockResolvedValueOnce({
+        documentId: 'coupon-document-1',
+        title: 'Save 20%',
+        couponType: 'static',
+        code: 'SAVE20',
+        affiliateLink: 'https://merchant.invalid/english-target',
+        stores: [{ name: 'Amazon' }],
+      })
+      .mockResolvedValueOnce({
+        documentId: 'coupon-document-1',
+        title: 'وفّر 20٪',
+        code: 'WRONG-LOCALIZED-CODE',
+        affiliateLink: 'https://merchant.invalid/wrong-target',
+        stores: [{ name: 'أمازون' }],
+      });
+
+    const payload = await harness.controller.getRedeemOffer(harness.ctx as any);
+
+    expect(harness.couponFindOne).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        documentId: 'coupon-document-1',
+        locale: 'ar',
+        fields: ['title'],
+      }),
+    );
+    expect(payload.data).toMatchObject({
+      title: 'وفّر 20٪',
+      code: 'SAVE20',
+      affiliateLink: 'https://merchant.invalid/english-target',
+      stores: [{ name: 'أمازون' }],
+      locale: 'ar',
+      dir: 'rtl',
+    });
+  });
+
+  it('keeps an Arabic activation available while its localized row is missing', async () => {
+    const harness = createHarness();
+    setEnabledContentLocaleCodesForTest(['ar']);
+    harness.ctx.params = {
+      entityType: 'deal',
+      documentId: 'deal-document-1',
+    } as any;
+    harness.ctx.query = { locale: 'ar' };
+    harness.dealFindOne
+      .mockResolvedValueOnce({
+        documentId: 'deal-document-1',
+        title: 'English fallback deal',
+        couponType: 'static',
+        code: 'SAVE10',
+        affiliateLink: 'https://merchant.invalid/deal',
+        brands: [{ name: 'English brand' }],
+      })
+      .mockResolvedValueOnce(null);
+
+    const payload = await harness.controller.getRedeemOffer(harness.ctx as any);
+
+    expect(payload.data).toMatchObject({
+      title: 'English fallback deal',
+      code: 'SAVE10',
+      affiliateLink: 'https://merchant.invalid/deal',
+      brands: [{ name: 'English brand' }],
+      locale: 'ar',
+      dir: 'rtl',
+    });
+  });
+
+  it('rejects a disabled localized redeem route before reading an offer', async () => {
+    const harness = createHarness();
+    harness.ctx.params = {
+      entityType: 'coupon',
+      documentId: 'coupon-document-1',
+    } as any;
+    harness.ctx.query = { locale: 'ar' };
+
+    await harness.controller.getRedeemOffer(harness.ctx as any);
+
+    expect(harness.ctx.notFound).toHaveBeenCalledWith('Offer not found');
+    expect(harness.couponFindOne).not.toHaveBeenCalled();
   });
 
   it('never guesses the entity type from the document id', async () => {

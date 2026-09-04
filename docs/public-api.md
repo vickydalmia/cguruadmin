@@ -484,6 +484,13 @@ per-visitor codes from a unique pool exactly as Coupons do. A `code` stored on
 a unique offer is redacted to `null` on the way out, because it is a legacy
 leftover, never the code the visitor should receive.
 
+An optional `?locale=<enabled-code>` controls presentation only. The resolver
+always reads code, pool, affiliate destination and lifecycle from the English
+row, then overlays a nonblank localized title and named merchant relation from
+the requested published locale. If that localized row is missing it retains
+the English presentation, so an existing activation never breaks while a
+translation is pending. Unknown or disabled locale codes return 404.
+
 ## ISR offer route inventory
 
 `GET /api/isr-offer-routes` returns only the canonical numeric detail routes

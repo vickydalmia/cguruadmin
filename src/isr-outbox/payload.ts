@@ -151,6 +151,9 @@ export function localizeTranslationPayload(
       ? { optionalPaths: [...new Set(optionalPaths)] }
       : {}),
     ...(scopes.length > 0 ? { scopes: [...new Set(scopes)] } : {}),
+    ...(payload.offerInvalidations?.length
+      ? { offerInvalidations: payload.offerInvalidations }
+      : {}),
   };
 }
 

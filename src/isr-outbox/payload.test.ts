@@ -210,6 +210,9 @@ describe('localizeTranslationPayload', () => {
       paths: ['/', '/amazon-coupons/', '/amazon-deals/'],
       optionalPaths: ['/amazon-deals/'],
       scopes: ['insights'],
+      offerInvalidations: [
+        { entityType: 'coupon', documentId: 'coupon-1' },
+      ],
     });
   });
 

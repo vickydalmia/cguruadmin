@@ -40,6 +40,8 @@ import {
   REDEEM_DOCUMENT_ID_PATTERN,
   REDEEM_UIDS,
   isRedeemResolverAuthorized,
+  requestedRedeemLocale,
+  resolveRedeemDocument,
 } from '../services/redeem-resolution';
 import { resolveOfferDetailIdentity } from '../services/offer-detail-resolution';
 import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
@@ -293,37 +295,14 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       return ctx.notFound('Offer not found');
     }
 
-    const uid = REDEEM_UIDS[entityType as keyof typeof REDEEM_UIDS];
-    const commonFields = [
-      'title',
-      'code',
-      'affiliateLink',
-      'expiresAt',
-      'scheduledAt',
-      'contentStatus',
-      'updatedAt',
-    ];
-    // Both offer types can draw from a pool now, so neither branch is
-    // entity-specific any more.
-    const fields = [...commonFields, 'couponType'];
-    const namedRelation = { fields: ['name'] };
-    const populate = {
-      uniqueCouponPool: { fields: ['name'] },
-      stores: namedRelation,
-      brands: namedRelation,
-      banks: namedRelation,
-    };
+    const locale = requestedRedeemLocale(ctx.query?.locale);
+    if (!locale) return ctx.notFound('Offer not found');
 
-    const offer = await strapi.documents(uid as any).findOne({
+    const offer = await resolveRedeemDocument(strapi, {
+      entityType: entityType as keyof typeof REDEEM_UIDS,
       documentId,
-      // Redemption data is shared machine state (code, pool and affiliate
-      // URL). Pin its resolver to the route-owning English row so a caller's
-      // `?locale=` can never change which code or destination is activated.
-      locale: DEFAULT_CONTENT_LOCALE,
-      status: 'published',
-      fields,
-      populate,
-    } as any);
+      locale,
+    });
     if (!offer) return ctx.notFound('Offer not found');
 
     // This route bypasses the sanitizers above, so apply the same redaction —
