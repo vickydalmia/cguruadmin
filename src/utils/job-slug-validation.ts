@@ -62,8 +62,10 @@ export async function validateJobSlug(
   const incoming = slug.trim();
 
   // Updates replace their own row and therefore exclude it; a clone leaves
-  // its source in place, so the source participates in the check.
-  const excludeDocumentId = action === 'update' ? documentId : undefined;
+  // its source in place, so the source participates in the check. A first
+  // locale version validates as a create WITH its shared documentId: its
+  // English row is the same document, not a collision.
+  const excludeDocumentId = action === 'clone' ? undefined : documentId;
   const collision = await strapi.documents(JOB_UID).findFirst({
     filters: {
       // $eqi: the schema regex forces lowercase on new writes, but a legacy

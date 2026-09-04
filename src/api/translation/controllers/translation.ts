@@ -2,11 +2,12 @@
 // router by registerTranslationRoutes — src/api/*/routes cannot
 // authenticate an admin session; see src/register/admin-routes.ts).
 import type { Core } from '@strapi/strapi';
+import { z } from 'zod';
+import { localizedApiUids } from '../../../translation/backfill';
 import {
-  enqueueTranslationBackfill,
-  estimateTranslationBackfill,
-  localizedApiUids,
-} from '../../../translation/backfill';
+  currentBackfillRun,
+  startTranslationBackfill,
+} from '../../../translation/backfill-run';
 import { enabledContentLocales } from '../../../translation/locales/registry';
 import {
   enqueueStandaloneTranslationJob,
@@ -33,6 +34,14 @@ function badRequest(ctx: any, message: string) {
   ctx.status = 400;
   ctx.body = { error: message };
 }
+
+const backfillBodySchema = z.object({
+  mode: z.enum(['all', 'repair']).default('all'),
+  uids: z.array(z.string().trim().min(1)).min(1).optional(),
+  locales: z.array(z.string().trim().min(1)).min(1).optional(),
+  force: z.boolean().default(false),
+  dryRun: z.boolean().default(false),
+}).strict();
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   /** Per-entry panel payload: one status row per enabled target locale. */
@@ -83,39 +92,72 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     ctx.body = { enqueued: locales.length, locales: locales.map((locale) => locale.code) };
   },
 
-  /** Super-admin: enqueue the whole catalogue (idempotent, coalescing). */
+  /**
+   * Super-admin: start the catalogue backfill (idempotent, coalescing) or,
+   * with `dryRun`, its cost estimate — in the background. The scan takes
+   * minutes on a real catalogue, so the request answers 202 with the run
+   * state at once; progress and the result arrive through `outboxStatus`
+   * (`backfill`). One durable run per database at a time: a second request
+   * while one is active answers 409 with that run's state instead of starting
+   * another.
+   */
   async backfill(ctx: any) {
-    const { uids, locales, force, dryRun, mode: rawMode } = ctx.request?.body ?? {};
-    const mode = rawMode === undefined ? 'all' : String(rawMode);
-    if (mode !== 'all' && mode !== 'repair') {
-      return badRequest(ctx, 'mode must be "all" or "repair".');
+    const parsed = backfillBodySchema.safeParse(ctx.request?.body ?? {});
+    if (!parsed.success) {
+      return badRequest(
+        ctx,
+        parsed.error.issues.map((issue) => issue.message).join('; '),
+      );
     }
-    if (dryRun === true) {
-      ctx.body = await estimateTranslationBackfill(strapi, {
-        uids: Array.isArray(uids) ? uids.map(String) : undefined,
-        locales: Array.isArray(locales) ? locales.map(String) : undefined,
-        force: force === true,
-        mode,
-      });
-      return;
+    const { uids, locales, force, dryRun, mode } = parsed.data;
+    const knownUids = new Set([...localizedApiUids(strapi), 'ui-dictionary']);
+    const requestedUids = uids ? [...new Set(uids)] : undefined;
+    const unknownUid = requestedUids?.find((uid) => !knownUids.has(uid));
+    if (unknownUid) {
+      return badRequest(ctx, `Unknown localized content type: ${unknownUid}`);
     }
-    if (!(await translationRuntimeActive(strapi))) {
+    const enabledLocaleCodes = new Set(
+      (await enabledContentLocales(strapi)).map((locale) => locale.code),
+    );
+    const requestedLocales = locales ? [...new Set(locales)] : undefined;
+    const unknownLocale = requestedLocales?.find(
+      (locale) => !enabledLocaleCodes.has(locale),
+    );
+    if (unknownLocale) {
+      return badRequest(ctx, `Target locale "${unknownLocale}" is not enabled.`);
+    }
+    if (!dryRun && !(await translationRuntimeActive(strapi))) {
       return badRequest(
         ctx,
         'Translation is not active on this deployment (Country Setup switch or TRANSLATION_* env missing).',
       );
     }
-    ctx.body = await enqueueTranslationBackfill(strapi, {
-      uids: Array.isArray(uids) ? uids.map(String) : undefined,
-      locales: Array.isArray(locales) ? locales.map(String) : undefined,
-      force: force === true,
+    const { started, run } = await startTranslationBackfill(strapi, {
+      uids: requestedUids,
+      locales: requestedLocales,
+      force,
+      dryRun,
       mode,
     });
+    ctx.set('Cache-Control', 'private, no-store');
+    if (!started) {
+      ctx.status = 409;
+      ctx.body = {
+        error: 'A translation backfill is already running; wait for it to finish.',
+        run,
+      };
+      return;
+    }
+    ctx.status = 202;
+    ctx.body = { accepted: true, run };
   },
 
-  /** Dispatcher + queue health, cost-today, backlog. */
+  /** Dispatcher + queue health, cost-today, backlog, and the backfill run. */
   async outboxStatus(ctx: any) {
     ctx.set('Cache-Control', 'private, no-store');
-    ctx.body = await getTranslationStatus();
+    ctx.body = {
+      ...(await getTranslationStatus()),
+      backfill: await currentBackfillRun(strapi),
+    };
   },
 });

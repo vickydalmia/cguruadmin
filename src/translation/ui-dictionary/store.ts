@@ -21,7 +21,6 @@ import {
 import { catalogueEntryHash } from './hash';
 import { resolveSourceRow } from './plural';
 import {
-  ADVISORY_LOCK_SQL,
   type Db,
   loadCatalogueRows,
   loadLiveCatalogueRowsForKeys,
@@ -32,6 +31,7 @@ import {
   upsertCatalogueRows,
   upsertTranslations,
 } from './store-queries';
+import { advisoryTransactionLock } from '../../utils/database-dialect';
 import { planCatalogueSync } from './sync-plan';
 import type {
   AiTranslationWrite,
@@ -140,7 +140,7 @@ export class UiDictionaryStore {
   /** Idempotent by version; the whole diff commits or nothing does. */
   async syncCatalogue(input: CatalogueSyncInput): Promise<CatalogueSyncResult> {
     return this.transaction(async (trx) => {
-      await trx.raw(ADVISORY_LOCK_SQL, [CATALOGUE_LOCK_NAME]);
+      await advisoryTransactionLock(trx, CATALOGUE_LOCK_NAME);
       const meta = await this.readMeta(trx);
       if (meta?.version === input.version) {
         return { unchanged: true, added: 0, changed: 0, removed: 0, touchedKeys: [], version: input.version };
@@ -198,7 +198,7 @@ export class UiDictionaryStore {
     this.assertTranslationLocale(locale);
     if (rows.length === 0) return { written: 0, staleDropped: [], guarded: 0 };
     return this.transaction(async (trx) => {
-      await trx.raw(ADVISORY_LOCK_SQL, [localeLockName(locale)]);
+      await advisoryTransactionLock(trx, localeLockName(locale));
       const current = await loadLiveCatalogueRowsForKeys(trx, rows.map((row) => row.key));
       const accepted: TranslationUpsert[] = [];
       const staleDropped: string[] = [];
@@ -220,7 +220,7 @@ export class UiDictionaryStore {
   ): Promise<{ key: string; sourceHash: string }> {
     this.assertTranslationLocale(locale);
     return this.transaction(async (trx) => {
-      await trx.raw(ADVISORY_LOCK_SQL, [localeLockName(locale)]);
+      await advisoryTransactionLock(trx, localeLockName(locale));
       const source = resolveSourceRow(await loadLiveCatalogueRowsForKeys(trx, [key]), key);
       if (!source) throw new UiDictionaryError('UNKNOWN_KEY', `${key} is not in the catalogue`);
       const problem = textProblem(text, source.row);
@@ -243,7 +243,7 @@ export class UiDictionaryStore {
     userId: number | null,
   ): Promise<{ key: string; overrideText: string | null; effectiveHash: string; changed: boolean }> {
     return this.transaction(async (trx) => {
-      await trx.raw(ADVISORY_LOCK_SQL, [CATALOGUE_LOCK_NAME]);
+      await advisoryTransactionLock(trx, CATALOGUE_LOCK_NAME);
       const row = (await loadLiveCatalogueRowsForKeys(trx, [key])).get(key);
       if (!row) throw new UiDictionaryError('UNKNOWN_KEY', `${key} is not in the catalogue`);
       return this.applyEnglishOverride(trx, row, text, userId);
@@ -352,7 +352,10 @@ export class UiDictionaryStore {
   ): Promise<ImportMessagesResult> {
     const isEnglish = locale === DEFAULT_CONTENT_LOCALE;
     return this.transaction(async (trx) => {
-      await trx.raw(ADVISORY_LOCK_SQL, [isEnglish ? CATALOGUE_LOCK_NAME : localeLockName(locale)]);
+      await advisoryTransactionLock(
+        trx,
+        isEnglish ? CATALOGUE_LOCK_NAME : localeLockName(locale),
+      );
       const liveByKey = new Map((await loadCatalogueRows(trx)).map((row) => [row.key, row]));
       const result: ImportMessagesResult = { written: 0, skipped: [] };
       const writes: TranslationUpsert[] = [];

@@ -65,6 +65,29 @@ describe('inspectLocaleVersion', () => {
     ).resolves.toEqual({ current: true, skippedRelations: [] });
   });
 
+  it('compares memory through the write mutators, so stored whitespace normalisation is current', async () => {
+    // Provider output with a trailing space and a doubled space; the persisted
+    // row went through normaliseTextFields (trim + collapse) on its write.
+    // Comparing raw memory with the stored row made such rows "not current"
+    // forever: rewritten and re-invalidated on every sweep.
+    const strapi = strapiWithTarget({
+      ...source,
+      locale: 'ar',
+      name: 'الاسم العربي',
+    });
+
+    await expect(
+      inspectLocaleVersion(
+        strapi,
+        STORE_UID,
+        'store-1',
+        'ar',
+        source,
+        new Map([['name', ' الاسم  العربي ']]),
+      ),
+    ).resolves.toEqual({ current: true, skippedRelations: [] });
+  });
+
   it('requires a write when the target row is absent', async () => {
     const strapi = strapiWithTarget(null);
 

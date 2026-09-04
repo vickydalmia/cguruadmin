@@ -20,6 +20,7 @@ import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
 import { sourceContentHash } from './source-hash';
 import { translationPromptFingerprint } from './prompts';
 import type { ContentLocale } from './locales/resolve';
+import { translationSourceIneligible } from './eligibility';
 
 const PAGE_SIZE = 1_000;
 
@@ -86,6 +87,7 @@ export type BackfillResult = {
   selected: number;
   enqueued: number;
   skippedCurrent: number;
+  skippedIneligible: number;
   providerCallsExpected: number;
   perUid: Record<string, number>;
   locales: string[];
@@ -93,13 +95,64 @@ export type BackfillResult = {
 
 export type BackfillMode = 'all' | 'repair';
 
-type CandidateScan = {
-  inputs: TranslationJobInsert[];
+export type BackfillProgress = {
+  uidsTotal: number;
+  uidsDone: number;
+  currentUid: string | null;
+  documentsScanned: number;
   selected: number;
+  enqueued: number;
   skippedCurrent: number;
+  skippedIneligible: number;
+};
+
+type CandidateScan = {
+  selected: number;
+  enqueued: number;
+  skippedCurrent: number;
+  skippedIneligible: number;
   providerChars: number[];
   perUid: Record<string, number>;
 };
+
+type ScanOptions = {
+  mode: BackfillMode;
+  force: boolean;
+  reason: string;
+  /**
+   * Receives each page's job inputs as soon as the page is scanned. The
+   * enqueue path commits them right away (bounded transactions, see
+   * flushInputs); the estimate path passes nothing.
+   */
+  onPage?: (inputs: TranslationJobInsert[]) => Promise<number>;
+  onProgress?: (progress: BackfillProgress) => void;
+};
+
+/**
+ * Inserts per transaction. insertTranslationJobsBulk takes one advisory
+ * transaction lock per event key, and every lock is held until commit.
+ * Postgres's shared lock table holds roughly max_locks_per_transaction ×
+ * max_connections entries (6,400 on stock settings), so enqueueing a whole
+ * catalogue in one transaction fails with "out of shared memory" and enqueues
+ * nothing. Committing per bounded chunk keeps the lock footprint small; the
+ * outbox's pending-only unique index makes a partial run safely resumable.
+ */
+const ENQUEUE_CHUNK = 500;
+
+async function flushInputs(
+  strapi: Core.Strapi,
+  inputs: readonly TranslationJobInsert[],
+): Promise<number> {
+  let enqueued = 0;
+  for (let start = 0; start < inputs.length; start += ENQUEUE_CHUNK) {
+    const chunk = inputs.slice(start, start + ENQUEUE_CHUNK);
+    await strapi.db.transaction(async ({ trx }: any) => {
+      await insertTranslationJobsBulk(trx, chunk);
+    });
+    enqueued += chunk.length;
+  }
+  return enqueued;
+}
 
 function completeMemory(
   translations: Record<string, string> | null,
@@ -119,20 +172,41 @@ async function scanContentCandidates(
   strapi: Core.Strapi,
   uids: readonly string[],
   locales: readonly ContentLocale[],
-  options: { mode: BackfillMode; force: boolean; reason: string },
+  options: ScanOptions,
 ): Promise<CandidateScan> {
   const scan: CandidateScan = {
-    inputs: [],
     selected: 0,
+    enqueued: 0,
     skippedCurrent: 0,
+    skippedIneligible: 0,
     providerChars: [],
     perUid: {},
+  };
+  const progress: BackfillProgress = {
+    uidsTotal: uids.length,
+    uidsDone: 0,
+    currentUid: null,
+    documentsScanned: 0,
+    selected: 0,
+    enqueued: 0,
+    skippedCurrent: 0,
+    skippedIneligible: 0,
+  };
+  const report = () => {
+    progress.selected = scan.selected;
+    progress.enqueued = scan.enqueued;
+    progress.skippedCurrent = scan.skippedCurrent;
+    progress.skippedIneligible = scan.skippedIneligible;
+    options.onProgress?.({ ...progress });
   };
   if (uids.length === 0 || locales.length === 0) return scan;
   const store = translationStore(strapi);
   for (const uid of uids) {
     scan.perUid[uid] = 0;
+    progress.currentUid = uid;
+    report();
     for await (const page of defaultLocaleDocumentIds(strapi, uid)) {
+      const inputs: TranslationJobInsert[] = [];
       for (const documentId of page) {
         const source = await loadPopulatedEntry(
           strapi,
@@ -140,7 +214,13 @@ async function scanContentCandidates(
           documentId,
           DEFAULT_CONTENT_LOCALE,
         );
+        progress.documentsScanned += 1;
         if (!source) continue;
+        if (translationSourceIneligible(uid, source)) {
+          scan.skippedIneligible += locales.length;
+          report();
+          continue;
+        }
         const leaves = collectTranslatableLeaves(strapi, uid, source);
         for (const locale of locales) {
           const targetLocale = locale.code;
@@ -157,8 +237,11 @@ async function scanContentCandidates(
             !options.force && state?.sourceHash === hash && memoryComplete;
           const latestNeedsRepair =
             latestJob?.status === 'failed' || latestJob?.status === 'blocked';
+          // Only repair mode acts on "current": the full plan comparison is
+          // the expensive part of the scan (a second deep populate plus
+          // existence batches), so mode "all" does not pay for it.
           let current = false;
-          if (textCurrent && !latestNeedsRepair) {
+          if (options.mode === 'repair' && textCurrent && !latestNeedsRepair) {
             const inspection = await inspectLocaleVersion(
               strapi,
               uid,
@@ -174,7 +257,7 @@ async function scanContentCandidates(
             continue;
           }
           const providerRequired = !textCurrent && leaves.length > 0;
-          scan.inputs.push({
+          inputs.push({
             uid,
             documentId,
             targetLocale,
@@ -191,20 +274,31 @@ async function scanContentCandidates(
           }
         }
       }
+      if (inputs.length > 0 && options.onPage) {
+        scan.enqueued += await options.onPage(inputs);
+      }
+      report();
     }
+    progress.uidsDone += 1;
+    report();
   }
+  progress.currentUid = null;
+  report();
   return scan;
 }
 
+export type BackfillOptions = {
+  uids?: string[];
+  locales?: string[];
+  force?: boolean;
+  reason?: string;
+  mode?: BackfillMode;
+  onProgress?: (progress: BackfillProgress) => void;
+};
+
 export async function enqueueTranslationBackfill(
   strapi: Core.Strapi,
-  options: {
-    uids?: string[];
-    locales?: string[];
-    force?: boolean;
-    reason?: string;
-    mode?: BackfillMode;
-  } = {},
+  options: BackfillOptions = {},
 ): Promise<BackfillResult> {
   const reason = options.reason ?? TRANSLATION_BACKFILL_REASON;
   const mode = options.mode ?? 'all';
@@ -218,28 +312,27 @@ export async function enqueueTranslationBackfill(
   );
   let selected = 0;
   let skippedCurrent = 0;
+  let skippedIneligible = 0;
   let providerCallsExpected = 0;
   const dictionaryProviderChars: number[] = [];
   let perUid: Record<string, number> = {};
   let enqueued = 0;
   if (locales.length === 0) {
-    return { selected, enqueued, skippedCurrent, providerCallsExpected, perUid, locales };
+    return { selected, enqueued, skippedCurrent, skippedIneligible, providerCallsExpected, perUid, locales };
   }
 
   const scan = await scanContentCandidates(strapi, uids, targetLocales, {
     mode,
     force: options.force === true,
     reason,
+    onPage: (inputs) => flushInputs(strapi, inputs),
+    onProgress: options.onProgress,
   });
   selected += scan.selected;
   skippedCurrent += scan.skippedCurrent;
+  skippedIneligible += scan.skippedIneligible;
   perUid = scan.perUid;
-  if (scan.inputs.length > 0) {
-    await strapi.db.transaction(async ({ trx }: any) => {
-      await insertTranslationJobsBulk(trx, scan.inputs);
-    });
-    enqueued += scan.inputs.length;
-  }
+  enqueued += scan.enqueued;
   // After the content waves: the storefront's UI text, one job per locale
   // (inert unless the translation runtime is up — same as every enqueue).
   if (includesDictionary(options.uids)) {
@@ -282,6 +375,7 @@ export async function enqueueTranslationBackfill(
     selected,
     enqueued,
     skippedCurrent,
+    skippedIneligible,
     providerCallsExpected,
     perUid,
     locales,
@@ -295,12 +389,7 @@ export async function enqueueTranslationBackfill(
  */
 export async function estimateTranslationBackfill(
   strapi: Core.Strapi,
-  options: {
-    uids?: string[];
-    locales?: string[];
-    mode?: BackfillMode;
-    force?: boolean;
-  } = {},
+  options: Omit<BackfillOptions, 'reason'> = {},
 ): Promise<CostEstimate & BackfillResult> {
   const config = translationConfigFromEnv();
   const targetLocales = (await enabledContentLocales(strapi)).filter(
@@ -314,6 +403,7 @@ export async function estimateTranslationBackfill(
     mode: options.mode ?? 'all',
     force: options.force === true,
     reason: TRANSLATION_BACKFILL_REASON,
+    onProgress: options.onProgress,
   });
   const perEntryChars = [...scan.providerChars];
   const perUid = { ...scan.perUid };
@@ -354,6 +444,7 @@ export async function estimateTranslationBackfill(
     selected,
     enqueued: 0,
     skippedCurrent,
+    skippedIneligible: scan.skippedIneligible,
     providerCallsExpected: estimate.estimatedCalls,
     perUid,
     locales,

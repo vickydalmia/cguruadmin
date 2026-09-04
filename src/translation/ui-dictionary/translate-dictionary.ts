@@ -6,6 +6,7 @@
 // moment it comes back: a later group's failure defers only what is still
 // missing, never what was already delivered.
 import type { Core } from '@strapi/strapi';
+import { createHash } from 'node:crypto';
 import type { TranslationConfig } from '../config';
 import { usdForTokens } from '../cost';
 import { TranslationError } from '../errors';
@@ -13,6 +14,7 @@ import type { TranslatableLeaf } from '../field-map';
 import type { ContentLocale } from '../locales/resolve';
 import type { JobOutcome } from '../outbox/dispatcher';
 import type { TranslationJob, TranslationOutboxStore } from '../outbox/store';
+import { TRANSLATION_NIGHTLY_CONSISTENCY_REASON } from '../outbox/reasons';
 import type { TranslationProvider } from '../provider/types';
 import { translateEntryLeaves } from '../translate-entry';
 import { DEFAULT_CONTENT_LOCALE } from '../../constants/content-locales';
@@ -32,6 +34,8 @@ export type UiDictionaryJobDeps = {
   assertLease: () => Promise<void>;
   /** Test seam; production reads and writes the dictionary tables. */
   dictionary?: Pick<UiDictionaryStore, 'pendingLeaves' | 'writeAiTranslations'>;
+  previousFailure?: { sourceHash: string | null } | null;
+  recordSourceHash?: (sourceHash: string) => Promise<unknown>;
 };
 
 export type UiDictionaryJobUsage = {
@@ -132,6 +136,23 @@ export async function processUiDictionaryJob(deps: UiDictionaryJobDeps): Promise
   );
   if (pending.length === 0) {
     return { outcome: { state: 'skipped', reason: 'dictionary current' }, usage: usage() };
+  }
+  const pendingHash = createHash('sha256')
+    .update(JSON.stringify(pending.map((leaf) => [leaf.key, leaf.sourceHash])))
+    .digest('hex');
+  await deps.recordSourceHash?.(pendingHash);
+  if (
+    job.reason === TRANSLATION_NIGHTLY_CONSISTENCY_REASON &&
+    deps.previousFailure &&
+    (!deps.previousFailure.sourceHash || deps.previousFailure.sourceHash === pendingHash)
+  ) {
+    return {
+      outcome: {
+        state: 'skipped',
+        reason: 'unchanged terminal failure; awaiting catalogue change or manual retry',
+      },
+      usage: usage(),
+    };
   }
 
   const groups = groupsOf(pending, UI_DICTIONARY_GROUP_SIZE);

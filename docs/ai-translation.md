@@ -31,12 +31,17 @@ edits made there.
   re-mirrors relations (owner side and ordered). Translation writes carry an
   explicit source/target/write-plan context through the normal validation
   pipeline; sanitization, required values, schema limits, SEO/URL safety,
-  Coupon invariants, lifecycle, identity/slug uniqueness and component
-  structure still run. The only source-parity exceptions are the documented
-  legacy cases: translated short descriptions do not inherit English's
-  160-character minimum, exact source homepage media IDs may preserve legacy
-  dimensions, and a legacy source offer with no taxonomy may mirror that
-  empty taxonomy. A target-only defect is never grandfathered.
+  Coupon invariants, identity/slug uniqueness and component structure still
+  run. A first locale version validates as a create but keeps the document's
+  shared documentId, so uniqueness checks recognise the English row as the
+  same document. The only source-parity exceptions are the documented legacy
+  cases: translated short descriptions do not inherit English's 160-character
+  minimum, exact source homepage media IDs may preserve legacy dimensions, and
+  a legacy source offer with no taxonomy may mirror that empty taxonomy. The
+  offer lifecycle guards (schedule/expiry dates) are not applied to a locale
+  write at all: every lifecycle field is non-localized and copied from the
+  English row, so an already-expired offer is a stored state, not a target
+  defect. A target-only defect is never grandfathered.
 - **Dependencies** — required localized relations are resolved before any
   provider call. Coupon/Deal taxonomy is required when it exists in English;
   homepage, menu, footer, global and static-page relations are always required.
@@ -99,7 +104,8 @@ edits made there.
   so a later write-validation failure can retry without buying the same text.
 - **Consistency sweep** — the nightly sweep is an opt-in recovery net
   (`TRANSLATION_NIGHTLY_CONSISTENCY_ENABLED=false` by default) for writes that
-  bypassed the document middleware. It labels its jobs separately. If
+  bypassed the document middleware. It starts a durable `mode: "repair"` scan,
+  returns immediately to cron, and labels selected jobs separately. If
   the newest older attempt is a terminal failure and the English source has
   not changed since that attempt, the dispatcher records the nightly check as
   skipped without another provider call. An English edit, catalogue sync or
@@ -151,9 +157,11 @@ edits made there.
   id in every language (`/coupon/123/` and `/ar/coupon/123/`); aggregate,
   listing, campaign, entity-page and search responses normalize translated
   row ids to that public id before they leave the CMS. The separate redeem
-  handoff uses the shared logical identity and is deliberately unprefixed
-  (`/redeem/coupon/<documentId>`): code mode, static code, unique pool and
-  affiliate destination are shared machine data, not translated content.
+  handoff uses the shared logical identity. Its browser-facing document keeps
+  the current language (`/redeem/coupon/<documentId>` or
+  `/ar/redeem/coupon/<documentId>`), while unique-code allocation stays on the
+  unprefixed POST route. Code mode, static code, unique pool and affiliate
+  destination remain shared machine data and never enter an AI request.
   The list of languages, their direction and `og:locale` come from
   `languages[]` in `GET /api/site-settings`, never from a hardcoded list.
 
@@ -202,16 +210,25 @@ edits made there.
    calls `POST /translation/backfill` with `mode: "repair"` and selects only
    missing rows, stale hashes, latest failed/blocked jobs, incomplete memory
    and relation drift. `mode: "all"` remains the compatible default. Both
-   modes accept `locales`, `uids`, `force` and `dryRun`; the response separates
-   `selected`, `enqueued`, `skippedCurrent`, `providerCallsExpected` and
-   `perUid`. The operation is idempotent and resumable: fully current entries
-   perform neither a provider call, CMS write nor ISR invalidation. The card
-   shows queued / running / blocked / failed / done-today and
-   today's spend against the budget and polls while jobs are queued; the raw
-   feed is `GET /translation/outbox-status`. After a pipeline fix, this
-   manual backfill is what re-runs previously failed entries — the nightly
-   consistency sweep deliberately skips a failed entry whose English source
-   has not changed.
+   modes accept `locales`, `uids`, `force` and `dryRun`. The scan runs in
+   the background: the endpoint answers `202 { accepted, run }` at once (or
+   `409` with the active run while one is in progress — one run per shared
+   database), and `GET /translation/outbox-status` carries the run
+   as `backfill` with its progress (`currentUid`, `documentsScanned`,
+   `selected`, `enqueued`) and, when `status` is `done`, the result
+   (`selected`, `enqueued`, `skippedCurrent`, `skippedIneligible`,
+   `providerCallsExpected`,
+   `perUid`, plus the cost fields for a dry run) or, when `failed`, the
+   error. Run state and leases are persisted in
+   `translation_backfill_runs`; a designated dispatcher process resumes an
+   interrupted scan after restart. Jobs are committed per page as the scan
+   advances, so a run is idempotent and resumable: fully current entries
+   perform neither a provider call, CMS write nor ISR invalidation. The card shows the scan's progress
+   line, then queued / running / blocked / failed / done-today and today's
+   spend against the budget, and polls while a scan or jobs are running.
+   After a pipeline fix, this manual backfill is what re-runs previously
+   failed entries — the nightly consistency sweep deliberately skips a failed
+   entry whose English source has not changed.
 7. Watch failures/retries in the Translation panel, UI Text's sync card or
    `GET /translation/outbox-status`. Successful results publish automatically.
 
@@ -289,6 +306,11 @@ per locale and merge during a short bounded debounce; a large backfill
 therefore advances bounded gateway versions instead of one per row. Shared
 non-localized changes such as slug or visibility still invalidate every
 affected locale.
+
+`translation-isr:<locale>` is only the database coalescing key. Every durable
+ISR row also owns a unique `delivery_key`, stable across retries of that row and
+sent to the gateway as its idempotency key. Reusing a locale's coalescing key
+there would suppress later translations for the gateway's 31-day dedupe TTL.
 
 ## Recovery sequence
 

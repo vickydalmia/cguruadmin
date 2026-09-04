@@ -128,9 +128,7 @@ const TranslationPanel: PanelComponent = ({ model, documentId }) => {
   }, [load]);
 
   const anyInProgress = Boolean(
-    status?.locales.some(
-      (locale) => locale.state === 'in-progress' || locale.state === 'blocked',
-    ),
+    status?.locales.some((locale) => locale.state === 'in-progress'),
   );
   React.useEffect(() => {
     if (!anyInProgress) return;

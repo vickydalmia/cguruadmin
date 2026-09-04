@@ -32,8 +32,10 @@ import { logTranslation } from './log';
 import { TRANSLATION_NIGHTLY_CONSISTENCY_REASON } from './reasons';
 import { TranslationOutboxStore, type TranslationJob } from './store';
 import { DEFAULT_CONTENT_LOCALE } from '../../constants/content-locales';
+import { translationSourceIneligible } from '../eligibility';
 
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1_000;
+const DEPENDENCY_RECONCILE_INTERVAL_MS = 60_000;
 
 /**
  * Validation and SQL-integrity failures are deterministic publication
@@ -89,7 +91,16 @@ export function shouldRetryTranslationFailure(
 
 export type JobOutcome =
   | { state: 'delivered'; notes?: string }
-  | { state: 'skipped'; reason: string }
+  | {
+      state: 'skipped';
+      reason: string;
+      /**
+       * The locale row is live (or its removal is final), so parents blocked
+       * on this document may proceed. A skip that leaves the row absent — an
+       * unchanged terminal failure, a superseded job — must not wake them.
+       */
+      published?: boolean;
+    }
   | { state: 'deferred'; reason: string; delayMs: number }
   | {
       state: 'blocked';
@@ -105,6 +116,7 @@ export class TranslationDispatcher {
   private running: Promise<void> | null = null;
   private stopped = false;
   private nextCleanupAt = 0;
+  private nextDependencyReconcileAt = 0;
   private readonly store: TranslationOutboxStore;
   private readonly provider: TranslationProvider;
   private readonly startedAt = Date.now();
@@ -214,6 +226,15 @@ export class TranslationDispatcher {
           });
         }
       }
+      if (now >= this.nextDependencyReconcileAt) {
+        this.nextDependencyReconcileAt = now + DEPENDENCY_RECONCILE_INTERVAL_MS;
+        const awakened = await this.store.reconcileReadyBlocked();
+        if (awakened > 0) {
+          logTranslation(this.strapi, 'info', 'translation.dependencies_reconciled', {
+            awakened,
+          });
+        }
+      }
       await Promise.all(
         Array.from({ length: this.outboxConfig.batchSize }, () =>
           this.dispatchOne(),
@@ -307,9 +328,17 @@ export class TranslationDispatcher {
     }
 
     if (outcome.state === 'delivered' || outcome.state === 'skipped') {
-      const marked = await this.store.markDelivered(job);
+      const outcomeCode = outcome.state === 'delivered'
+        ? 'delivered'
+        : outcome.reason.startsWith('unchanged terminal failure')
+          ? 'unchanged-terminal-failure'
+          : outcome.reason.includes('already current')
+            ? 'current'
+            : outcome.reason.includes('source') && outcome.reason.includes('gone')
+              ? 'source-gone'
+              : 'skipped';
+      const marked = await this.store.markDelivered(job, outcomeCode);
       if (marked) {
-        const awakened = await this.store.enqueueBlockedDependents(job);
         this.lastDeliveredAt = Date.now();
         logTranslation(this.strapi, 'info', 'translation.job_delivered', {
           jobId: job.id,
@@ -322,7 +351,9 @@ export class TranslationDispatcher {
           tokensIn: usage.tokensIn,
           tokensOut: usage.tokensOut,
           costUsd: usage.costUsd,
-          awakenedDependents: awakened,
+          // Parent wakeups are committed by the localized content write,
+          // keyed on actual row availability rather than this job outcome.
+          awakenedDependents: 0,
         });
       }
       return true;
@@ -333,15 +364,18 @@ export class TranslationDispatcher {
         outcome.dependencies,
         outcome.reason,
       );
-      const awakened = marked && outcome.published
-        ? await this.store.enqueueBlockedDependents(job)
-        : 0;
+      // A dependency delivered between this job's existence check and the
+      // markBlocked above found no blocked row to wake. Re-check once now.
+      const selfEnqueued = marked
+        ? await this.store.enqueueSelfIfDependenciesArrived(job, outcome.dependencies)
+        : false;
       logTranslation(this.strapi, 'warn', 'translation.job_blocked', {
         jobId: job.id,
         eventKey: job.eventKey,
         error: outcome.reason,
         blockedOn: outcome.dependencies,
-        awakenedDependents: awakened,
+        awakenedDependents: 0,
+        selfEnqueued,
       });
       return true;
     }
@@ -413,10 +447,7 @@ export class TranslationDispatcher {
     // The UI-text dictionary has no document: its own tables are its memory
     // and it persists per key group. Everything below is per-entry work.
     if (job.uid === UI_DICTIONARY_UID) {
-      // A catalogue change enqueues its own non-nightly reason. Therefore a
-      // nightly job behind a terminal dictionary failure represents the same
-      // catalogue and must not buy the same failed provider attempt forever.
-      if (previousNightlyJob?.status === 'failed') {
+      if (previousNightlyJob?.status === 'failed' && !previousNightlyJob.sourceHash) {
         return {
           outcome: {
             state: 'skipped',
@@ -433,6 +464,8 @@ export class TranslationDispatcher {
         job,
         locale,
         assertLease,
+        previousFailure: previousNightlyJob,
+        recordSourceHash: (sourceHash) => this.store.recordSourceHash(job, sourceHash),
       });
     }
 
@@ -461,12 +494,23 @@ export class TranslationDispatcher {
         outcome: {
           state: 'skipped',
           reason: 'source document gone; generated locale removed',
+          published: true,
         },
         usage: noUsage,
       };
     }
 
-    if (previousNightlyJob?.status === 'failed') {
+    // Dead offers have no public route and must not buy a translation merely
+    // because the catalogue backfill walks historical English rows. Keep any
+    // existing locale row/memory intact for audit and possible reactivation.
+    if (translationSourceIneligible(job.uid, source)) {
+      return {
+        outcome: { state: 'skipped', reason: 'expired source offer is not translation-eligible' },
+        usage: noUsage,
+      };
+    }
+
+    if (previousNightlyJob?.status === 'failed' && !previousNightlyJob.sourceHash) {
       const sourceUpdatedAt = new Date(source.updatedAt ?? source.updated_at ?? 0);
       if (
         Number.isFinite(sourceUpdatedAt.getTime()) &&
@@ -487,6 +531,24 @@ export class TranslationDispatcher {
       leaves,
       translationPromptFingerprint(this.strapi, locale),
     );
+    await this.store.recordSourceHash?.(job, hash);
+    if (previousNightlyJob?.status === 'failed') {
+      const sourceUpdatedAt = new Date(source.updatedAt ?? source.updated_at ?? 0);
+      const hashUnchanged = previousNightlyJob.sourceHash === hash;
+      const legacyTimestampUnchanged =
+        !previousNightlyJob.sourceHash &&
+        Number.isFinite(sourceUpdatedAt.getTime()) &&
+        sourceUpdatedAt <= previousNightlyJob.createdAt;
+      if (hashUnchanged || legacyTimestampUnchanged) {
+        return {
+          outcome: {
+            state: 'skipped',
+            reason: 'unchanged terminal failure; awaiting English edit or manual retry',
+          },
+          usage: noUsage,
+        };
+      }
+    }
     const state = await this.store.readState(
       job.uid,
       job.documentId,
@@ -605,6 +667,7 @@ export class TranslationDispatcher {
         outcome: {
           state: 'skipped',
           reason: 'source deleted during translation; generated locale removed',
+          published: true,
         },
         usage,
       };
@@ -694,6 +757,7 @@ export class TranslationDispatcher {
           outcome: {
             state: 'skipped',
             reason: 'locale version already current',
+            published: true,
           },
           usage,
         };

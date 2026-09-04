@@ -415,7 +415,7 @@ writes refresh only `/ar/...` consumers and do not rebuild the default-only
 sitemap. Route inventory refreshes only when a localized row is created or
 removed. A repeated hash-current backfill first compares the full persisted
 locale plan and emits no CMS write or ISR event when it is already current.
-The full nightly consistency pass is opt-in with
+The nightly durable repair scan is opt-in with
 `TRANSLATION_NIGHTLY_CONSISTENCY_ENABLED=true`; when enabled, it does not retry
 a terminally failed unchanged source. Edit the English source or run an
 explicit manual backfill when a deliberate retry is required. This is
@@ -423,6 +423,12 @@ load-bearing for large catalogues; if a deployment
 shows repeated `routes` refreshes for every translated Coupon or steadily
 advancing versions after the translation queue is empty, the CMS image is
 older than this contract.
+
+Catalogue backfills and dry-run estimates are database-backed background runs,
+not request-bound scans. Only one `translation_backfill_runs` row may be active
+for the shared database; the admin dispatcher resumes a stale lease after a
+restart. A `202` means the scan was accepted, while progress and the final
+selection/cost result are read from `/translation/outbox-status`.
 
 Defaults and every queue/cost control are defined in the cross-system
 [environment guide](https://github.com/vickydalmia/cguru-ui/blob/main/docs/environment.md#cms-translation-engine).
@@ -669,8 +675,11 @@ where status <> 'delivered'
 order by id;
 ```
 
-Do not manually recreate outbox rows. Their stable event keys provide
-idempotent delivery and the dispatcher retries them automatically.
+Do not manually recreate outbox rows. The dispatcher delivers each row under
+`<event_key>#<row id>` — stable across that row's retries, so the gateway's
+idempotency window de-duplicates a redelivery, and unique per row, so the
+coalesced keys (`translation-isr:<locale>`, the sweep reasons) are not
+mistaken for an already-accepted event — and retries failures automatically.
 
 Targeted payloads may include `optionalPaths`, always as a subset of `paths`.
 These are conditionally generated entity Deal pages. The gateway still

@@ -181,11 +181,52 @@ describe('validateTranslatedBatch', () => {
     ]);
   });
 
+  it('keeps month-name dates as translatable prose around whole numbers', () => {
+    // A month name is prose ("Dec" -> "ديسمبر"); only the day and the year are
+    // facts, each as one whole number. The earlier month-name rule split the
+    // year ("Dec 20" + "26") and a reordered marker pair restored a wrong date.
+    expect(protectedValues('Sale ends 31 Dec 2026')).toEqual(['31', '2026']);
+    expect(protectedValues('Valid till 15 March 2026, order by Dec 31, 2025')).toEqual([
+      '15',
+      '2026',
+      '31',
+      '2025',
+    ]);
+    const mask = maskProtectedValues('Sale ends 31 Dec 2026');
+    expect(mask.masked).toBe('Sale ends {{CGPV_A}} Dec {{CGPV_B}}');
+    expect(mask.restore('ينتهي التخفيض {{CGPV_A}} ديسمبر {{CGPV_B}}')).toBe(
+      'ينتهي التخفيض 31 ديسمبر 2026',
+    );
+  });
+
+  it('never starts a currency code or unit inside a word', () => {
+    // Sticky matching on the full string: `\b` sees the real left neighbour,
+    // so the lek code inside "FALL"/"MALL" and the month inside "Kumar" are
+    // not facts. Anchoring on a slice made every offset a word boundary.
+    expect(protectedValues('FALL 20% off')).toEqual(['20%']);
+    expect(protectedValues('MALL 20% OFF')).toEqual(['20%']);
+    expect(protectedValues('Kumar 10% off')).toEqual(['10%']);
+    expect(protectedValues('Get AED 749 off and ALL 5 items')).toEqual(['AED 749', 'ALL 5']);
+    expect(maskProtectedValues('FALL 20% off').masked).toBe('FALL {{CGPV_A}} off');
+  });
+
   it('masks quoted HTML attributes as one ordered span', () => {
     const source = '<a title="1 > 0" href="https://x.test/a)">Save 15%</a><!-- note -->';
     const mask = maskProtectedValues(source);
     expect(mask.masked).toBe('{{CGPV_A}}Save {{CGPV_B}}{{CGPV_C}}{{CGPV_D}}');
     expect(mask.restore(mask.masked)).toBe(source);
+  });
+
+  it('masks numeric and named HTML character references as whole spans', () => {
+    const source = 'Tom &#8217;s offer costs AED 20 &amp; ships today';
+    const mask = maskProtectedValues(source);
+
+    expect(protectedValues(source)).toEqual(['&#8217;', 'AED 20', '&amp;']);
+    expect(mask.masked).toBe(
+      'Tom {{CGPV_A}}s offer costs {{CGPV_B}} {{CGPV_C}} ships today',
+    );
+    expect(mask.restore(mask.masked)).toBe(source);
+    expect(mask.masked).not.toContain('&#{{CGPV_');
   });
 
   it('rejects invented protected facts and collapsed duplicate values', () => {
@@ -234,8 +275,10 @@ describe('validateTranslatedBatch', () => {
     const judge = (copy: string) =>
       validateTranslatedBatch([leaf('copy', source)], { copy }, ARABIC, masks);
 
-    // Sentence-final price and reordered exact markers are fine.
-    expect(judge('راجع {{CGPV_B}}، أعمال فنية تبدأ من {{CGPV_A}}.')).toEqual([]);
+    // Reordering exact markers can swap two immutable facts and is rejected.
+    expect(judge('راجع {{CGPV_B}}، أعمال فنية تبدأ من {{CGPV_A}}.')).toEqual([
+      { path: 'copy', problems: ['protected-value-changed'] },
+    ]);
     expect(judge('راجع {{CGPV_B}}، أعمال فنية تبدأ من {{ cgpv-a }}.')).toEqual([
       { path: 'copy', problems: ['protected-value-changed'] },
     ]);
@@ -263,7 +306,7 @@ describe('validateTranslatedBatch', () => {
     expect(
       validateTranslatedBatch(
         [leaf('copy', source, { maxLength: 10 })],
-        { copy: 'راجع {{CGPV_B}}، أعمال فنية تبدأ من {{CGPV_A}}.' },
+        { copy: 'أعمال فنية تبدأ من {{CGPV_A}}، راجع {{CGPV_B}}.' },
         ARABIC,
         masks,
       ),
@@ -293,7 +336,9 @@ describe('validateTranslatedBatch', () => {
         ARABIC,
         masks,
       ),
-    ).toEqual([{ path: 'body', problems: ['html-structure-changed'] }]);
+    ).toEqual([
+      { path: 'body', problems: ['html-structure-changed', 'protected-value-changed'] },
+    ]);
     expect(stripMarkers('{{CGPV_A}}من {{ cgpv b }}.')).toBe(' من {{ cgpv b }}.');
   });
 

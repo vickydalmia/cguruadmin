@@ -481,6 +481,83 @@ describe('runWriteValidation — translation writes use narrow source-parity exc
     expect(localizedPlan).not.toHaveProperty('slug');
   });
 
+  it('lets a first locale version keep its own English row out of uniqueness checks', async () => {
+    // A job's slug is shared across locales. Its first Arabic write validates
+    // as a create (no target row yet) but with the shared documentId, so the
+    // English row it finds is the same document — not a collision.
+    // The only job with this slug is the document being translated.
+    const findFirst = vi.fn(async ({ filters }: any) =>
+      filters?.documentId?.$ne === 'job-1'
+        ? null
+        : { documentId: 'job-1', slug: 'senior-editor', title: 'Senior editor' },
+    );
+    const strapi = fakeStrapi({ human: false }) as any;
+    strapi.documents = () => ({
+      findOne: async () => null,
+      findFirst,
+      findMany: async () => [],
+      count: async () => 0,
+    });
+    const plan = { title: 'محرر أول', category: 'التحرير' };
+    const source = { ...plan, documentId: 'job-1', title: 'Senior editor', slug: 'senior-editor', category: 'Editorial' };
+    await expect(
+      runWithTranslationWriteContext(
+        {
+          sourceEntry: source,
+          targetLocale: 'ar',
+          plan: { data: plan, skippedRelations: [] },
+          targetRowExisted: false,
+          operation: 'upsert',
+        },
+        () =>
+          runWriteValidation(strapi, {
+            uid: 'api::job.job',
+            action: 'update',
+            params: { data: plan, locale: 'ar', documentId: 'job-1' },
+          }),
+      ),
+    ).resolves.toBeNull();
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filters: expect.objectContaining({ documentId: { $ne: 'job-1' } }),
+      }),
+    );
+  });
+
+  it('does not judge the source offer lifecycle on a translation write', async () => {
+    // Every lifecycle field is non-localized and copied from English; an
+    // already-expired offer is a stored state, not a target defect.
+    const lifecycle = COLLECTED_STEPS.find((s) => s.name === 'validateOfferLifecycle')!;
+    const base = {
+      strapi: {
+        ...(fakeStrapi({ human: false }) as any),
+        contentType: () => ({ attributes: {} }),
+      },
+      uid: 'api::coupon.coupon',
+      action: 'create',
+      data: { title: 'عرض منتهي', expiresAt: '2020-01-01T00:00:00.000Z' },
+      documentId: 'coupon-1',
+      strict: true,
+      locale: 'ar',
+    } as any;
+    await expect(lifecycle.run({ ...base, translation: null })).rejects.toThrow(
+      /Expires at must be in the future/u,
+    );
+    // The step short-circuits synchronously: no validator call at all.
+    expect(
+      lifecycle.run({
+        ...base,
+        translation: {
+          sourceEntry: { expiresAt: '2020-01-01T00:00:00.000Z' },
+          targetLocale: 'ar',
+          plan: { data: base.data, skippedRelations: [] },
+          targetRowExisted: false,
+          operation: 'upsert',
+        },
+      }),
+    ).toBeUndefined();
+  });
+
   it('rejects the same short description outside the flag', async () => {
     const error = await caught(() =>
       runWriteValidation(fakeStrapi({ human: false }), arabicWrite({ ...translated })),

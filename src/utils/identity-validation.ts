@@ -158,7 +158,9 @@ export async function validateIdentity(
     (slugTouched && (isCreate || incomingRoute !== toRouteSlug(storedSlug, kind)));
   // Updates replace their own row and therefore exclude it. A clone leaves its
   // source in place, so the source must participate in both uniqueness checks.
-  const excludeDocumentId = action === 'update' ? documentId : undefined;
+  // A first locale version validates as a create with its shared documentId
+  // and must not collide with its own other-locale rows.
+  const excludeDocumentId = action === 'clone' ? undefined : documentId;
   // Only the default-language name owns generated public routes. Localized
   // names are display copy: translating "Al-Futtaim Automall" to Arabic must
   // not change, invalidate, or be validated as the /al-futtaim-automall-deals/

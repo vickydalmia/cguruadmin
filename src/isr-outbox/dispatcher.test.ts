@@ -11,6 +11,7 @@ import type { IsrOutboxEvent } from './types';
 
 const event: IsrOutboxEvent = {
   id: '42',
+  deliveryKey: 'delivery-42',
   eventKey: 'stable-key',
   lockToken: 'lease-1',
   payload: { paths: ['/amazon/'] },
@@ -248,8 +249,11 @@ describe('deliverOutboxEvent', () => {
     expect((init as RequestInit).headers).toMatchObject({
       authorization: 'Bearer secret',
     });
+    // Per-row delivery key: the logical key is reused by coalesced rows, and
+    // the gateway would otherwise treat every later row as an already-accepted
+    // duplicate for its 31-day idempotency window.
     expect(JSON.parse(String((init as RequestInit).body))).toEqual({
-      eventKey: 'stable-key',
+      eventKey: 'delivery-42',
       paths: ['/amazon/', '/amazon-deals/'],
       optionalPaths: ['/amazon-deals/'],
     });

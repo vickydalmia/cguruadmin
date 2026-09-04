@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => {
     markFailed: vi.fn(async () => true),
     markBlocked: vi.fn(async () => true),
     enqueueBlockedDependents: vi.fn(async () => 0),
+    enqueueSelfIfDependenciesArrived: vi.fn(async () => false),
     scheduleRetry: vi.fn(async () => ({
       owned: true,
       superseded: false,
@@ -151,7 +152,7 @@ describe('TranslationDispatcher — ui-dictionary hand-off', () => {
 
     expect(strapi.getModel).not.toHaveBeenCalled();
     expect(mocks.processUiDictionaryJob).toHaveBeenCalledTimes(1);
-    expect(mocks.processUiDictionaryJob).toHaveBeenCalledWith({
+    expect(mocks.processUiDictionaryJob).toHaveBeenCalledWith(expect.objectContaining({
       strapi,
       provider,
       config: CONFIG,
@@ -159,9 +160,11 @@ describe('TranslationDispatcher — ui-dictionary hand-off', () => {
       job: JOB,
       locale: expect.objectContaining({ code: 'ar' }),
       assertLease: expect.any(Function),
-    });
+      previousFailure: null,
+      recordSourceHash: expect.any(Function),
+    }));
     // Same bookkeeping as a content job: delivered row + usage in the log line.
-    expect(mocks.store.markDelivered).toHaveBeenCalledWith(JOB);
+    expect(mocks.store.markDelivered).toHaveBeenCalledWith(JOB, 'delivered');
     expect(mocks.logTranslation).toHaveBeenCalledWith(
       strapi,
       'info',
@@ -227,7 +230,10 @@ describe('TranslationDispatcher — ui-dictionary hand-off', () => {
     await expect(dispatchOne()).resolves.toBe(true);
 
     expect(mocks.processUiDictionaryJob).not.toHaveBeenCalled();
-    expect(mocks.store.markDelivered).toHaveBeenCalledWith(nightlyJob);
+    expect(mocks.store.markDelivered).toHaveBeenCalledWith(
+      nightlyJob,
+      'unchanged-terminal-failure',
+    );
     expect(mocks.logTranslation).toHaveBeenCalledWith(
       expect.anything(),
       'info',
@@ -310,6 +316,34 @@ describe('TranslationDispatcher — hash-current content', () => {
   };
   const source = { documentId: 'store-1', name: 'Store' };
 
+  it('skips an expired offer before leaf collection or any provider call', async () => {
+    const expiredJob = {
+      ...contentJob,
+      uid: 'api::coupon.coupon',
+      eventKey: 'api::coupon.coupon:coupon-expired:ar',
+      documentId: 'coupon-expired',
+    };
+    mocks.store.claim.mockResolvedValueOnce(expiredJob);
+    mocks.loadPopulatedEntry.mockResolvedValueOnce({
+      documentId: 'coupon-expired',
+      contentStatus: 'expired',
+      title: 'Old coupon',
+    });
+    mocks.collectTranslatableLeaves.mockClear();
+    mocks.resolveRelationDependencies.mockClear();
+    mocks.translateEntryLeaves.mockClear();
+    mocks.writeLocaleVersion.mockClear();
+    mocks.store.markDelivered.mockClear();
+
+    await expect(dispatcher().dispatchOne()).resolves.toBe(true);
+
+    expect(mocks.collectTranslatableLeaves).not.toHaveBeenCalled();
+    expect(mocks.resolveRelationDependencies).not.toHaveBeenCalled();
+    expect(mocks.translateEntryLeaves).not.toHaveBeenCalled();
+    expect(mocks.writeLocaleVersion).not.toHaveBeenCalled();
+    expect(mocks.store.markDelivered).toHaveBeenCalledWith(expiredJob, 'skipped');
+  });
+
   it('blocks on required locale relations before making a provider call', async () => {
     mocks.store.claim.mockResolvedValueOnce(contentJob);
     mocks.loadPopulatedEntry.mockResolvedValueOnce(source);
@@ -343,6 +377,36 @@ describe('TranslationDispatcher — hash-current content', () => {
       [expect.objectContaining({ documentId: 'store-2' })],
       expect.stringContaining('required relation'),
     );
+    // Closes the processing-window race: a store row delivered between the
+    // existence check and markBlocked found nothing to wake, so the job
+    // re-checks its named dependencies once after blocking.
+    expect(mocks.store.enqueueSelfIfDependenciesArrived).toHaveBeenCalledWith(
+      contentJob,
+      [expect.objectContaining({ documentId: 'store-2' })],
+    );
+    // A required-missing block leaves no live row: nothing is woken.
+    expect(mocks.store.enqueueBlockedDependents).not.toHaveBeenCalled();
+  });
+
+  it('wakes dependents only for skips that leave a live locale row', async () => {
+    // "unchanged terminal failure": the row was never published, so parents
+    // blocked on it must not be woken into a re-block cycle.
+    mocks.store.enqueueBlockedDependents.mockClear();
+    mocks.store.claim.mockResolvedValueOnce({
+      ...contentJob,
+      reason: 'nightly consistency',
+    });
+    mocks.loadPopulatedEntry.mockResolvedValueOnce({
+      ...source,
+      updatedAt: '2026-09-01T00:00:00.000Z',
+    });
+    mocks.store.previousJob.mockResolvedValueOnce({
+      status: 'failed',
+      createdAt: new Date('2026-09-02T00:00:00.000Z'),
+    });
+    await expect(dispatcher().dispatchOne()).resolves.toBe(true);
+    expect(mocks.store.markDelivered).toHaveBeenCalled();
+    expect(mocks.store.enqueueBlockedDependents).not.toHaveBeenCalled();
   });
 
   it('keeps paid memory when a required relation disappears during translation', async () => {
@@ -478,7 +542,10 @@ describe('TranslationDispatcher — hash-current content', () => {
     expect(mocks.collectTranslatableLeaves).not.toHaveBeenCalled();
     expect(mocks.translateEntryLeaves).not.toHaveBeenCalled();
     expect(mocks.writeLocaleVersion).not.toHaveBeenCalled();
-    expect(mocks.store.markDelivered).toHaveBeenCalledWith(nightlyJob);
+    expect(mocks.store.markDelivered).toHaveBeenCalledWith(
+      nightlyJob,
+      'unchanged-terminal-failure',
+    );
   });
 
   it('retries a nightly terminal failure after the English source changes', async () => {
@@ -544,7 +611,7 @@ describe('TranslationDispatcher — hash-current content', () => {
     expect(mocks.inspectLocaleVersion).toHaveBeenCalledTimes(1);
     expect(mocks.writeLocaleVersion).not.toHaveBeenCalled();
     expect(mocks.translateEntryLeaves).not.toHaveBeenCalled();
-    expect(mocks.store.markDelivered).toHaveBeenCalledWith(contentJob);
+    expect(mocks.store.markDelivered).toHaveBeenCalledWith(contentJob, 'current');
     expect(mocks.logTranslation).toHaveBeenCalledWith(
       expect.anything(),
       'info',

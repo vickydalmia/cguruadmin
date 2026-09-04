@@ -62,10 +62,12 @@ export async function validateUniqueEntityPageTemplate(
     strapi,
     pageTemplate as Exclude<EntityPageTemplate, 'default'>,
   );
-  // On update, the current document is the legitimate owner. On clone,
-  // Strapi's documentId identifies the SOURCE document, not the new row, so
-  // excluding it would let the clone duplicate its campaign template.
-  const currentDocumentId = action === 'update' ? documentId : undefined;
+  // On update (and on a first locale version, which validates as a create
+  // with its shared documentId) the current document is the legitimate
+  // owner. On clone, Strapi's documentId identifies the SOURCE document, not
+  // the new row, so excluding it would let the clone duplicate its campaign
+  // template.
+  const currentDocumentId = action === 'clone' ? undefined : documentId;
   const other = owners.find((owner) => owner.documentId !== currentDocumentId);
   if (other) {
     throw toValidationError([

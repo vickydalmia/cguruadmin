@@ -22,6 +22,7 @@ export type TranslationOutboxStatus = {
     backlogOverdue?: boolean;
     historicalFailures?: number;
   } | null;
+  backfill: BackfillRun | null;
 };
 
 export type BackfillEstimate = {
@@ -35,6 +36,7 @@ export type BackfillEstimate = {
   locales: string[];
   selected: number;
   skippedCurrent: number;
+  skippedIneligible: number;
   providerCallsExpected: number;
 };
 
@@ -42,9 +44,40 @@ export type BackfillResult = {
   selected: number;
   enqueued: number;
   skippedCurrent: number;
+  skippedIneligible: number;
   providerCallsExpected: number;
   perUid: Record<string, number>;
   locales: string[];
+};
+
+/** Progress of the background scan, as reported by the CMS run state. */
+export type BackfillProgress = {
+  uidsTotal: number;
+  uidsDone: number;
+  currentUid: string | null;
+  documentsScanned: number;
+  selected: number;
+  enqueued: number;
+  skippedCurrent: number;
+  skippedIneligible: number;
+};
+
+/**
+ * The durable database-backed run: POST /translation/backfill answers 202
+ * with it (or 409 while one is active) and GET /translation/outbox-status
+ * carries the latest one as `backfill` until a new run replaces it.
+ */
+export type BackfillRun = {
+  id: string;
+  mode: 'all' | 'repair';
+  dryRun: boolean;
+  force: boolean;
+  status: 'running' | 'done' | 'failed';
+  startedAt: string;
+  finishedAt: string | null;
+  progress: BackfillProgress;
+  result: (BackfillResult & Partial<BackfillEstimate>) | null;
+  error: string | null;
 };
 
 export type QueueSummary = {
@@ -72,7 +105,67 @@ export function unwrapOutboxStatus(response: unknown): TranslationOutboxStatus {
     ok: typeof value.ok === 'boolean' ? value.ok : undefined,
     dispatcher: value.dispatcher ?? null,
     outbox: value.outbox ?? null,
+    backfill: unwrapBackfillRun(value.backfill),
   };
+}
+
+/** A run object from either endpoint; `null` when the CMS reports none. */
+export function unwrapBackfillRun(value: unknown): BackfillRun | null {
+  if (!value || typeof value !== 'object') return null;
+  const run = value as any;
+  if (
+    typeof run.id !== 'string' ||
+    !['running', 'done', 'failed'].includes(run.status) ||
+    !run.progress ||
+    typeof run.progress !== 'object'
+  ) {
+    return null;
+  }
+  return {
+    id: run.id,
+    mode: run.mode === 'repair' ? 'repair' : 'all',
+    dryRun: run.dryRun === true,
+    force: run.force === true,
+    status: run.status,
+    startedAt: String(run.startedAt ?? ''),
+    finishedAt: typeof run.finishedAt === 'string' ? run.finishedAt : null,
+    progress: {
+      uidsTotal: Number(run.progress.uidsTotal ?? 0) || 0,
+      uidsDone: Number(run.progress.uidsDone ?? 0) || 0,
+      currentUid: typeof run.progress.currentUid === 'string' ? run.progress.currentUid : null,
+      documentsScanned: Number(run.progress.documentsScanned ?? 0) || 0,
+      selected: Number(run.progress.selected ?? 0) || 0,
+      enqueued: Number(run.progress.enqueued ?? 0) || 0,
+      skippedCurrent: Number(run.progress.skippedCurrent ?? 0) || 0,
+      skippedIneligible: Number(run.progress.skippedIneligible ?? 0) || 0,
+    },
+    result: run.result && typeof run.result === 'object' ? run.result : null,
+    error: typeof run.error === 'string' ? run.error : null,
+  };
+}
+
+/** POST /translation/backfill: 202 `{ accepted, run }`. */
+export function unwrapBackfillStart(response: unknown): BackfillRun {
+  const value = body(response);
+  const run = unwrapBackfillRun(value?.run);
+  if (!run) throw new Error('Backfill start returned an unexpected response.');
+  return run;
+}
+
+/** One line for the card while the scan runs. */
+export function describeBackfillProgress(run: BackfillRun): string {
+  const { progress } = run;
+  const stage = progress.currentUid
+    ? `scanning ${shortUid(progress.currentUid)} (${progress.uidsDone + 1}/${progress.uidsTotal})`
+    : progress.uidsTotal > 0 && progress.uidsDone >= progress.uidsTotal
+      ? 'finishing'
+      : 'starting';
+  const verb = run.dryRun ? 'Estimating' : 'Repairing';
+  return (
+    `${verb}: ${stage} — ${formatCount(progress.documentsScanned)} document(s) scanned, ` +
+    `${formatCount(progress.selected)} selected` +
+    (run.dryRun ? '' : `, ${formatCount(progress.enqueued)} queued`)
+  );
 }
 
 export function unwrapBackfillEstimate(response: unknown): BackfillEstimate {

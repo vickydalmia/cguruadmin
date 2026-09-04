@@ -32,6 +32,8 @@ export interface IsrOutboxPayload {
 
 export interface IsrOutboxEvent {
   id: string;
+  /** Unique delivery attempt identity, stable across retries of this row. */
+  deliveryKey: string;
   eventKey: string;
   lockToken: string;
   payload: IsrOutboxPayload;

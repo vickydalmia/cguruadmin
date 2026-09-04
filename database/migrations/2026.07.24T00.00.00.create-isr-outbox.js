@@ -8,7 +8,9 @@ module.exports = {
 
     await knex.schema.createTable(TABLE, (table) => {
       table.bigIncrements("id").primary();
-      table.string("event_key", 64).notNullable().unique();
+      // Pending-only uniqueness is installed by the coalescing migration;
+      // history must be allowed to reuse the same logical key.
+      table.string("event_key", 64).notNullable();
       table.jsonb("payload").notNullable();
       table.string("reason", 255).notNullable();
       table.string("status", 16).notNullable().defaultTo("pending");

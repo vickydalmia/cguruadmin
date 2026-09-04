@@ -54,6 +54,7 @@ import {
 } from '../translation/outbox/runtime';
 import {
   insertTranslationJob,
+  enqueueBlockedDependentsForAvailableTarget,
   TRANSLATION_STATE_TABLE,
 } from '../translation/outbox/store';
 import { enabledContentLocales } from '../translation/locales/registry';
@@ -398,6 +399,28 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
                   });
                 }
                 translationEnqueued = true;
+              }
+
+              // The row itself is the dependency signal. Enqueue exact
+              // blocked parents in the SAME transaction so an AI write or a
+              // human-created locale row cannot commit without its wakeup.
+              const writtenLocale = String(
+                context.params?.locale ?? DEFAULT_CONTENT_LOCALE,
+              );
+              if (
+                writtenLocale !== DEFAULT_CONTENT_LOCALE &&
+                writtenLocale !== '*' &&
+                context.action !== 'delete'
+              ) {
+                const awakened = await enqueueBlockedDependentsForAvailableTarget(
+                  trx,
+                  {
+                    uid: context.uid,
+                    documentId,
+                    targetLocale: writtenLocale,
+                  },
+                );
+                if (awakened > 0) translationEnqueued = true;
               }
             }
           } catch (err: any) {

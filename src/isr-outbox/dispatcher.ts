@@ -70,6 +70,11 @@ export interface OutboxDeliveryStore {
   ): Promise<{ owned: boolean; attemptCount: number; delayMs: number }>;
 }
 
+/** Per-row gateway key: UUID-stable across retries, unique across DB restores. */
+export function deliveryEventKey(event: Pick<IsrOutboxEvent, 'deliveryKey'>): string {
+  return event.deliveryKey;
+}
+
 export async function deliverOutboxEvent(
   event: IsrOutboxEvent,
   config: Pick<
@@ -89,7 +94,14 @@ export async function deliverOutboxEvent(
       'content-type': 'application/json',
       accept: 'application/json',
     },
-    body: JSON.stringify({ eventKey: event.eventKey, ...event.payload }),
+    // The gateway derives its 31-day idempotency keys (and the route-inventory
+    // refresh token) from `eventKey`. Coalesced rows reuse one LOGICAL key
+    // (`translation-isr:<locale>`, the sweep reasons), so the delivery key must
+    // be per row: unique for every pending row, stable across retries of it.
+    body: JSON.stringify({
+      eventKey: deliveryEventKey(event),
+      ...event.payload,
+    }),
     signal: AbortSignal.timeout(config.requestTimeoutMs),
   });
   if (!response.ok) {

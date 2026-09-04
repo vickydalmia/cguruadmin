@@ -4,7 +4,11 @@ import type { TranslatableLeaf } from './field-map';
 import { resolveContentLocale, type ContentLocale } from './locales/resolve';
 import { resetPromptCacheForTest } from './prompts';
 import { resetTranslationSlotsForTest } from './provider';
-import { translateEntryLeaves } from './translate-entry';
+import {
+  providerFacingLengthLimit,
+  translateEntryLeaves,
+} from './translate-entry';
+import { maskProtectedValues } from './validate';
 
 const CONFIG: TranslationConfig = {
   provider: 'openai-compatible',
@@ -44,6 +48,20 @@ beforeEach(() => {
 });
 
 describe('translateEntryLeaves', () => {
+  it('converts restored schema ceilings to exact marker-visible ceilings', () => {
+    const shortFact = maskProtectedValues('Save AED 20 today');
+    const longFact = maskProtectedValues(
+      'Visit https://example.test/a/very/long/affiliate/path today',
+    );
+
+    expect(
+      providerFacingLengthLimit(20, shortFact) + shortFact.restoredLengthDelta,
+    ).toBe(20);
+    expect(
+      providerFacingLengthLimit(80, longFact) + longFact.restoredLengthDelta,
+    ).toBe(80);
+  });
+
   it('returns the batch translations with token accounting', async () => {
     const complete = vi.fn(async ({ user }: any) => {
       expect(user).toContain('"name"');
@@ -119,6 +137,44 @@ describe('translateEntryLeaves', () => {
     expect(result.needsReview).toBe(false);
     expect(result.inputTokens).toBe(22);
     expect(result.model).toBe('editor-m');
+  });
+
+  it('quotes the restored hard ceiling once in a protected-value correction', async () => {
+    const complete = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: JSON.stringify({ title: 'هذا عنوان عربي طويل جدا {{CGPV_A}}' }),
+        inputTokens: 1,
+        outputTokens: 1,
+        model: 'writer',
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({ title: 'عرض {{CGPV_A}}' }),
+        inputTokens: 1,
+        outputTokens: 1,
+        model: 'writer-correction',
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({ title: 'عرض {{CGPV_A}}' }),
+        inputTokens: 1,
+        outputTokens: 1,
+        model: 'editor',
+      });
+
+    await translateEntryLeaves(
+      strapi,
+      { name: 'fake', complete },
+      CONFIG,
+      LOCALE,
+      [leaf('title', 'Save 20% today', { maxLength: 16, validationMaxLength: 20 })],
+    );
+
+    const correction = complete.mock.calls[1][0].user as string;
+    const mask = maskProtectedValues('Save 20% today');
+    expect(correction).toContain('restored schema ceiling 20 Unicode characters');
+    expect(correction).toContain(
+      `at most ${providerFacingLengthLimit(20, mask)} Unicode characters`,
+    );
   });
 
   it('repairs only failed fields so a correction cannot damage valid translations', async () => {

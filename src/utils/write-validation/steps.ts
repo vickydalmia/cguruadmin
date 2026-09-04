@@ -460,8 +460,16 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     // cron's partial {contentStatus} update as "no dates".
     name: 'validateOfferLifecycle',
     applies: isOfferLifecycleUid,
-    run: ({ strapi, uid, action, data, documentId, strict }) =>
-      validateOfferLifecycle(strapi, uid, action, data, documentId, strict),
+    // Every lifecycle field (scheduledAt, expiresAt, publishedOn,
+    // contentStatus) is non-localized and copied from the English row, so a
+    // locale write can carry no target-only lifecycle defect. Judging the
+    // source's dates as if they were new input rejected every offer that had
+    // already expired — a legitimate stored state, not a defect — after its
+    // translation had been paid for.
+    run: ({ strapi, uid, action, data, documentId, strict, translation }) =>
+      translation
+        ? undefined
+        : validateOfferLifecycle(strapi, uid, action, data, documentId, strict),
   },
   {
     // Blank-after-trim rejection and required-field enforcement.

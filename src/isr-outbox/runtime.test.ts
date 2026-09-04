@@ -27,6 +27,7 @@ import {
   enqueueStandaloneIsrEvent,
   startIsrOutbox,
 } from './runtime';
+import { setEnabledContentLocaleCodesForTest } from '../translation/locales/registry';
 
 const strapi = { log: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } } as any;
 
@@ -80,6 +81,8 @@ describe('startIsrOutbox', () => {
 });
 
 describe('enqueueStandaloneIsrEvent', () => {
+  afterEach(() => setEnabledContentLocaleCodesForTest([]));
+
   it('purges response caches after commit before ISR delivery is woken', async () => {
     let onCommit: (() => void) | undefined;
     const trx = vi.fn();
@@ -109,6 +112,26 @@ describe('enqueueStandaloneIsrEvent', () => {
     );
     expect(mocks.purgeResponseCaches).toHaveBeenCalledTimes(1);
     expect(mocks.purgeEntityPopularSearchCatalog).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidates localized twins for shared standalone changes', async () => {
+    setEnabledContentLocaleCodesForTest(['ar']);
+    const trx = vi.fn();
+    const transaction = vi.fn(async (callback: any) =>
+      callback({ trx, onCommit: vi.fn() }),
+    );
+
+    await enqueueStandaloneIsrEvent({ db: { transaction } } as any, {
+      reason: 'rating:store:amazon',
+      payload: { paths: ['/amazon/'] },
+    });
+
+    expect(mocks.insertIsrOutboxEvent).toHaveBeenCalledWith(
+      trx,
+      expect.objectContaining({
+        payload: { paths: ['/amazon/', '/ar/amazon/'] },
+      }),
+    );
   });
 });
 

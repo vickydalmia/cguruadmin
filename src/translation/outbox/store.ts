@@ -13,6 +13,10 @@ import type {
   CompletionAttemptHooks,
 } from '../provider';
 import type { ProviderCompletion } from '../provider/types';
+import {
+  advisoryTransactionLock,
+  isPostgresConnection,
+} from '../../utils/database-dialect';
 
 export const TRANSLATION_OUTBOX_TABLE = 'translation_outbox';
 export const TRANSLATION_STATE_TABLE = 'translation_state';
@@ -41,6 +45,7 @@ export type TranslationJob = {
   lastError: string | null;
   lockToken: string;
   reason: string;
+  sourceHash?: string | null;
 };
 
 export type TranslationJobInsert = {
@@ -60,6 +65,72 @@ export function translationEventKey(input: {
   return `${input.uid}:${input.documentId}:${input.targetLocale}`;
 }
 
+function parseDependencies(value: unknown): TranslationDependency[] {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Wake parents from the content transaction that made a locale row available.
+ * This is deliberately keyed on durable row availability, not on a worker
+ * reporting that some job for the row completed.
+ */
+export async function enqueueBlockedDependentsForAvailableTarget(
+  transaction: Transaction,
+  target: { uid: string; documentId: string; targetLocale: string },
+): Promise<number> {
+  let query = transaction(TRANSLATION_OUTBOX_TABLE)
+    .where({ status: 'blocked', target_locale: target.targetLocale })
+    .whereNotExists(
+      transaction(`${TRANSLATION_OUTBOX_TABLE} as newer`)
+        .whereRaw(`newer.event_key = ${TRANSLATION_OUTBOX_TABLE}.event_key`)
+        .whereRaw(`newer.id > ${TRANSLATION_OUTBOX_TABLE}.id`)
+        .select(transaction.raw('1')),
+    );
+  if (isPostgresConnection(transaction)) {
+    query = query.whereRaw('blocked_on @> ?::jsonb', [
+      JSON.stringify([{ targetUid: target.uid, documentId: target.documentId }]),
+    ]);
+  }
+  let rows: any[] = await query.select([
+    'uid',
+    'document_id',
+    'target_locale',
+    'force',
+    'blocked_on',
+  ]);
+  if (!isPostgresConnection(transaction)) {
+    rows = rows.filter((row) =>
+      parseDependencies(row.blocked_on).some(
+        (dependency) =>
+          dependency.targetUid === target.uid &&
+          dependency.documentId === target.documentId,
+      ),
+    );
+  }
+  const inputs = [
+    ...new Map(
+      rows.map((row) => {
+        const input: TranslationJobInsert = {
+          uid: String(row.uid),
+          documentId: String(row.document_id),
+          targetLocale: String(row.target_locale),
+          kind: 'relation-sync',
+          force: row.force === true || row.force === 1,
+          reason: `dependency ${target.uid}:${target.documentId} available`,
+        };
+        return [translationEventKey(input), input];
+      }),
+    ).values(),
+  ];
+  if (inputs.length > 0) await insertTranslationJobsBulk(transaction, inputs);
+  return inputs.length;
+}
+
 /**
  * Coalescing insert: at most one PENDING job per document+locale (partial
  * unique index). A conflicting insert upgrades the pending row instead —
@@ -76,7 +147,43 @@ export async function insertTranslationJob(
   // pending state. Without this lock, a save that lands while an older job is
   // processing can create a newer pending row and make the older worker's
   // retry violate the partial unique index.
-  await transaction.raw(`SELECT pg_advisory_xact_lock(hashtext(?))`, [eventKey]);
+  await advisoryTransactionLock(transaction, eventKey);
+  if (!isPostgresConnection(transaction)) {
+    const pending: any = await transaction(TRANSLATION_OUTBOX_TABLE)
+      .where({ event_key: eventKey, status: 'pending' })
+      .first();
+    if (pending) {
+      await transaction(TRANSLATION_OUTBOX_TABLE)
+        .where({ id: pending.id, status: 'pending' })
+        .update({
+          kind:
+            input.kind === 'translate' || pending.kind === 'translate'
+              ? 'translate'
+              : 'relation-sync',
+          force:
+            input.force === true || pending.force === true || pending.force === 1,
+          reason:
+            input.reason === TRANSLATION_NIGHTLY_CONSISTENCY_REASON
+              ? pending.reason
+              : input.reason.slice(0, 255),
+        });
+      return;
+    }
+    await transaction(TRANSLATION_OUTBOX_TABLE).insert({
+      event_key: eventKey,
+      uid: input.uid,
+      document_id: input.documentId,
+      target_locale: input.targetLocale,
+      kind: input.kind,
+      force: input.force === true,
+      status: 'pending',
+      attempt_count: 0,
+      next_attempt_at: new Date(),
+      reason: input.reason.slice(0, 255),
+      created_at: new Date(),
+    });
+    return;
+  }
   await transaction.raw(
     `INSERT INTO ${TRANSLATION_OUTBOX_TABLE} ` +
       `(event_key, uid, document_id, target_locale, kind, force, status, ` +
@@ -112,6 +219,10 @@ export async function insertTranslationJobsBulk(
   transaction: Transaction,
   inputs: readonly TranslationJobInsert[],
 ): Promise<void> {
+  if (!isPostgresConnection(transaction)) {
+    for (const input of inputs) await insertTranslationJob(transaction, input);
+    return;
+  }
   const CHUNK = 500;
   for (let start = 0; start < inputs.length; start += CHUNK) {
     const chunk = inputs.slice(start, start + CHUNK);
@@ -166,6 +277,7 @@ function toJob(row: any, lockToken: string): TranslationJob {
     lastError: row.last_error ?? null,
     lockToken,
     reason: String(row.reason ?? ''),
+    sourceHash: row.source_hash ? String(row.source_hash) : null,
   };
 }
 
@@ -233,7 +345,7 @@ export class TranslationOutboxStore {
     return this.strapi.db.transaction(async ({ trx }: any) => {
       const now = new Date();
       const expiredLease = new Date(now.getTime() - this.leaseMs);
-      const row = await trx(TRANSLATION_OUTBOX_TABLE)
+      let query = trx(TRANSLATION_OUTBOX_TABLE)
         .where((query: any) => {
           query
             .where((pending: any) => {
@@ -247,10 +359,9 @@ export class TranslationOutboxStore {
                 .where('locked_at', '<=', expiredLease);
             });
         })
-        .orderBy('id', 'asc')
-        .forUpdate()
-        .skipLocked()
-        .first();
+        .orderBy('id', 'asc');
+      if (isPostgresConnection(trx)) query = query.forUpdate().skipLocked();
+      const row = await query.first();
       if (!row) return null;
       const lockToken = randomUUID();
       await trx(TRANSLATION_OUTBOX_TABLE)
@@ -276,7 +387,7 @@ export class TranslationOutboxStore {
     return Number(updated) === 1;
   }
 
-  async markDelivered(job: TranslationJob): Promise<boolean> {
+  async markDelivered(job: TranslationJob, outcomeCode = 'delivered'): Promise<boolean> {
     const now = new Date();
     const updated = await this.ownedUpdate(job).update({
       status: 'delivered',
@@ -285,6 +396,7 @@ export class TranslationOutboxStore {
       lock_token: null,
       last_error: null,
       blocked_on: null,
+      outcome_code: outcomeCode,
     });
     return Number(updated) === 1;
   }
@@ -297,6 +409,7 @@ export class TranslationOutboxStore {
       lock_token: null,
       last_error: error.slice(0, 4_000),
       blocked_on: null,
+      outcome_code: 'failed',
     });
     return Number(updated) === 1;
   }
@@ -313,42 +426,140 @@ export class TranslationOutboxStore {
       lock_token: null,
       last_error: error.slice(0, 4_000),
       blocked_on: JSON.stringify(dependencies),
+      outcome_code: 'blocked',
     });
+    return Number(updated) === 1;
+  }
+
+  async recordSourceHash(job: TranslationJob, sourceHash: string): Promise<boolean> {
+    const updated = await this.ownedUpdate(job).update({ source_hash: sourceHash });
+    if (Number(updated) === 1) job.sourceHash = sourceHash;
     return Number(updated) === 1;
   }
 
   /**
    * A newly available locale row wakes only parents that named it in their
-   * structured dependency list. The blocked row remains immutable history; a
-   * coalesced relation-sync row becomes the parent's latest operational state.
+   * structured dependency list AND are still waiting: the blocked row must be
+   * the latest row for its event key. Blocked rows are immutable history, so
+   * without that condition every later delivery of the child (including the
+   * relation-sync the wake itself produced) re-woke parents that had long
+   * been repaired — and two entities that name each other (a coupon's
+   * required store; the store's optional curated coupons) woke each other
+   * forever. `force` carries over so a forced re-translate that was blocked
+   * before its provider call is still re-translated rather than rebuilt.
    */
   async enqueueBlockedDependents(job: TranslationJob): Promise<number> {
     if (job.uid === 'ui-dictionary') return 0;
     return this.strapi.db.transaction(async ({ trx }: any) => {
-      const dependency = JSON.stringify([
-        { targetUid: job.uid, documentId: job.documentId },
-      ]);
-      const rows: any[] = await trx(TRANSLATION_OUTBOX_TABLE)
-        .where({ status: 'blocked', target_locale: job.targetLocale })
-        .whereRaw('blocked_on @> ?::jsonb', [dependency])
-        .select(['uid', 'document_id', 'target_locale']);
-      const inputs = [
-        ...new Map(
-          rows.map((row) => {
-            const input: TranslationJobInsert = {
-              uid: String(row.uid),
-              documentId: String(row.document_id),
-              targetLocale: String(row.target_locale),
-              kind: 'relation-sync',
-              reason: `dependency ${job.uid}:${job.documentId} delivered`,
-            };
-            return [translationEventKey(input), input];
-          }),
-        ).values(),
-      ];
-      if (inputs.length > 0) await insertTranslationJobsBulk(trx, inputs);
-      return inputs.length;
+      return enqueueBlockedDependentsForAvailableTarget(trx, {
+        uid: job.uid,
+        documentId: job.documentId,
+        targetLocale: job.targetLocale,
+      });
     });
+  }
+
+  /**
+   * Close the processing-window race: a dependency delivered between this
+   * job's existence check and its `markBlocked` found no blocked row to wake.
+   * Re-check once after blocking and self-enqueue when any named target now
+   * exists; a child delivering after this point sees the blocked row.
+   */
+  async enqueueSelfIfDependenciesArrived(
+    job: TranslationJob,
+    dependencies: readonly TranslationDependency[],
+  ): Promise<boolean> {
+    const byUid = new Map<string, Set<string>>();
+    for (const dependency of dependencies) {
+      const set = byUid.get(dependency.targetUid) ?? new Set<string>();
+      set.add(dependency.documentId);
+      byUid.set(dependency.targetUid, set);
+    }
+    let arrived = false;
+    for (const [targetUid, documentIds] of byUid) {
+      const model = this.strapi.getModel(targetUid as any) as any;
+      if (model?.pluginOptions?.i18n?.localized !== true) continue;
+      const rows: any[] = await this.strapi.db.query(targetUid as any).findMany({
+        where: { documentId: { $in: [...documentIds] }, locale: job.targetLocale },
+        select: ['documentId'],
+        limit: 1,
+      } as any);
+      if (rows?.length) {
+        arrived = true;
+        break;
+      }
+    }
+    if (!arrived) return false;
+    await this.strapi.db.transaction(async ({ trx }: any) => {
+      await insertTranslationJob(trx, {
+        uid: job.uid,
+        documentId: job.documentId,
+        targetLocale: job.targetLocale,
+        kind: 'relation-sync',
+        force: job.force,
+        reason: 'dependency delivered while this job was processing',
+      });
+    });
+    return true;
+  }
+
+  /**
+   * Bounded recovery net for a transient failure between blocking a parent
+   * and enqueueing its wakeup. It considers only latest blocked rows and
+   * queues each parent at most once because the new pending row supersedes it.
+   */
+  async reconcileReadyBlocked(limit = 100): Promise<number> {
+    const rows: any[] = await this.strapi.db
+      .connection(TRANSLATION_OUTBOX_TABLE)
+      .where({ status: 'blocked' })
+      .whereNotExists(
+        this.strapi.db
+          .connection(`${TRANSLATION_OUTBOX_TABLE} as newer`)
+          .whereRaw(`newer.event_key = ${TRANSLATION_OUTBOX_TABLE}.event_key`)
+          .whereRaw(`newer.id > ${TRANSLATION_OUTBOX_TABLE}.id`)
+          .select(this.strapi.db.connection.raw('1')),
+      )
+      .orderBy('id', 'asc')
+      .limit(limit)
+      .select([
+        'uid',
+        'document_id',
+        'target_locale',
+        'force',
+        'blocked_on',
+      ]);
+    const ready: TranslationJobInsert[] = [];
+    for (const row of rows) {
+      const dependencies = parseDependencies(row.blocked_on);
+      let arrived = false;
+      for (const dependency of dependencies) {
+        const found = await this.strapi.db.query(dependency.targetUid as any).findOne({
+          where: {
+            documentId: dependency.documentId,
+            locale: String(row.target_locale),
+          },
+          select: ['documentId'],
+        } as any);
+        if (found) {
+          arrived = true;
+          break;
+        }
+      }
+      if (!arrived) continue;
+      ready.push({
+        uid: String(row.uid),
+        documentId: String(row.document_id),
+        targetLocale: String(row.target_locale),
+        kind: 'relation-sync',
+        force: row.force === true || row.force === 1,
+        reason: 'dependency availability reconciled',
+      });
+    }
+    if (ready.length === 0) return 0;
+    await this.strapi.db.transaction(async ({ trx }: any) => {
+      await insertTranslationJobsBulk(trx, ready);
+    });
+    return ready.length;
   }
 
   async scheduleRetry(
@@ -366,7 +577,7 @@ export class TranslationOutboxStore {
       delayMsOverride ??
       Math.min(this.maxBackoffMs, 2_000 * 2 ** Math.min(attemptCount - 1, 12));
     return this.strapi.db.transaction(async ({ trx }: any) => {
-      await trx.raw(`SELECT pg_advisory_xact_lock(hashtext(?))`, [job.eventKey]);
+      await advisoryTransactionLock(trx, job.eventKey);
       const newerPending = await trx(TRANSLATION_OUTBOX_TABLE)
         .where({ event_key: job.eventKey, status: 'pending' })
         .whereNot({ id: job.id })
@@ -417,10 +628,22 @@ export class TranslationOutboxStore {
   }
 
   async deleteDeliveredBefore(cutoff: Date): Promise<number> {
-    const deleted = await this.strapi.db
-      .connection(TRANSLATION_OUTBOX_TABLE)
+    const connection = this.strapi.db.connection;
+    const deleted = await connection(TRANSLATION_OUTBOX_TABLE)
       .whereIn('status', ['delivered', 'failed'])
       .where('created_at', '<', cutoff)
+      .delete();
+    // A blocked row that a later row for the same key has superseded is
+    // history too; keeping it only makes the wake query scan it forever.
+    await connection(TRANSLATION_OUTBOX_TABLE)
+      .where({ status: 'blocked' })
+      .where('created_at', '<', cutoff)
+      .whereExists(
+        connection(`${TRANSLATION_OUTBOX_TABLE} as newer`)
+          .whereRaw(`newer.event_key = ${TRANSLATION_OUTBOX_TABLE}.event_key`)
+          .whereRaw(`newer.id > ${TRANSLATION_OUTBOX_TABLE}.id`)
+          .select(connection.raw('1')),
+      )
       .delete();
     await this.strapi.db
       .connection(TRANSLATION_USAGE_TABLE)
@@ -476,10 +699,7 @@ export class TranslationOutboxStore {
     const estimatedCost = this.estimatedAttemptCost(config, context);
     await this.strapi.db.transaction(async ({ trx }: any) => {
       if (config.dailyBudgetUsd > 0) {
-        await trx.raw(
-          `SELECT pg_advisory_xact_lock(hashtext(?))`,
-          ['translation-daily-budget'],
-        );
+        await advisoryTransactionLock(trx, 'translation-daily-budget');
         const midnight = new Date();
         midnight.setUTCHours(0, 0, 0, 0);
         const row = await trx(TRANSLATION_USAGE_TABLE)
@@ -601,13 +821,28 @@ export class TranslationOutboxStore {
     const expiredLease = new Date(Date.now() - this.leaseMs);
     const midnight = new Date();
     midnight.setUTCHours(0, 0, 0, 0);
+    const latestIds = connection(TRANSLATION_OUTBOX_TABLE)
+      .select('event_key')
+      .max({ id: 'id' })
+      .where((builder: any) =>
+        builder
+          .whereNull('outcome_code')
+          .orWhereNot('outcome_code', 'unchanged-terminal-failure'),
+      )
+      .groupBy('event_key')
+      .as('latest_ids');
     const [latestRows, oldestRow, expiredRow, todayRow, usageRow, historyRow] = await Promise.all([
-      connection.raw(
-        `SELECT status, COUNT(*)::bigint AS count FROM (` +
-          `SELECT DISTINCT ON (event_key) event_key, status ` +
-          `FROM ${TRANSLATION_OUTBOX_TABLE} ORDER BY event_key, id DESC` +
-          `) latest GROUP BY status`,
-      ),
+      connection(`${TRANSLATION_OUTBOX_TABLE} as latest`)
+        .join(latestIds, function joinLatest(this: any) {
+          this.on('latest.event_key', '=', 'latest_ids.event_key').andOn(
+            'latest.id',
+            '=',
+            'latest_ids.id',
+          );
+        })
+        .select('latest.status as status')
+        .count({ count: '*' })
+        .groupBy('latest.status'),
       connection(TRANSLATION_OUTBOX_TABLE)
         .whereIn('status', ['pending', 'processing'])
         .min({ oldest: 'created_at' })
@@ -721,10 +956,21 @@ export class TranslationOutboxStore {
     uid: string,
     documentId: string,
     locale: string,
-  ): Promise<{ status: string; attemptCount: number; lastError: string | null } | null> {
-    const row: any = await this.strapi.db
+  ): Promise<{
+    status: string;
+    attemptCount: number;
+    lastError: string | null;
+    sourceHash: string | null;
+  } | null> {
+    const query = this.strapi.db
       .connection(TRANSLATION_OUTBOX_TABLE)
-      .where({ uid, document_id: documentId, target_locale: locale })
+      .where({ uid, document_id: documentId, target_locale: locale });
+    query.andWhere((builder: any) =>
+      builder
+        .whereNull('outcome_code')
+        .orWhereNot('outcome_code', 'unchanged-terminal-failure'),
+    );
+    const row: any = await query
       .orderBy('id', 'desc')
       .first();
     if (!row) return null;
@@ -732,6 +978,7 @@ export class TranslationOutboxStore {
       status: String(row.status),
       attemptCount: Number(row.attempt_count),
       lastError: row.last_error ?? null,
+      sourceHash: row.source_hash ? String(row.source_hash) : null,
     };
   }
 
@@ -742,18 +989,33 @@ export class TranslationOutboxStore {
    */
   async previousJob(
     job: TranslationJob,
-  ): Promise<{ status: string; createdAt: Date } | null> {
-    const row: any = await this.strapi.db
-      .connection(TRANSLATION_OUTBOX_TABLE)
+  ): Promise<{ status: string; createdAt: Date; sourceHash: string | null } | null> {
+    const connection = this.strapi.db.connection;
+    const row: any = await connection(TRANSLATION_OUTBOX_TABLE)
       .where({ event_key: job.eventKey })
       .where('id', '<', job.id)
+      .where({ status: 'failed' })
+      .whereNotExists(
+        connection(`${TRANSLATION_OUTBOX_TABLE} as success`)
+          .whereRaw(`success.event_key = ${TRANSLATION_OUTBOX_TABLE}.event_key`)
+          .whereRaw(`success.id > ${TRANSLATION_OUTBOX_TABLE}.id`)
+          .whereRaw('success.id < ?', [job.id])
+          .where({ 'success.status': 'delivered' })
+          .where((builder: any) =>
+            builder
+              .whereNull('success.outcome_code')
+              .orWhereNot('success.outcome_code', 'unchanged-terminal-failure'),
+          )
+          .select(connection.raw('1')),
+      )
       .orderBy('id', 'desc')
-      .select(['status', 'created_at'])
+      .select(['status', 'created_at', 'source_hash'])
       .first();
     if (!row) return null;
     return {
       status: String(row.status),
       createdAt: new Date(row.created_at),
+      sourceHash: row.source_hash ? String(row.source_hash) : null,
     };
   }
 }

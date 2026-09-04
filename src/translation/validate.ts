@@ -53,6 +53,7 @@ const AMOUNT = '\\d+(?:[,.]\\d+)*';
  */
 export type ProtectedSpanKind =
   | 'html'
+  | 'html-entity'
   | 'url'
   | 'email'
   | 'placeholder'
@@ -105,24 +106,34 @@ function htmlSpanAt(value: string, start: number): ProtectedSpan | null {
   return null;
 }
 
-function anchored(pattern: RegExp, value: string): string | null {
-  const flags = pattern.flags.replace(/g/gu, '');
-  const match = new RegExp(`^(?:${pattern.source})`, flags).exec(value);
+/**
+ * Match `pattern` exactly at `start` of the FULL string (sticky), never on a
+ * slice: a `\b` or lookbehind at the pattern's left edge must see the real
+ * neighbouring character. Anchoring `^` on `value.slice(start)` made every
+ * offset a word boundary, so "FALL 20%" protected "ALL 20" (the lek code) and
+ * "Kumar 10%" protected "mar 10".
+ */
+function anchoredAt(pattern: RegExp, value: string, start: number): string | null {
+  const flags = pattern.flags.replace(/[gy]/gu, '') + 'y';
+  const sticky = new RegExp(pattern.source, flags);
+  sticky.lastIndex = start;
+  const match = sticky.exec(value);
   return match?.[0] || null;
 }
 
-function phoneAt(value: string): string | null {
-  const matched = anchored(
+function phoneAt(value: string, start: number): string | null {
+  const matched = anchoredAt(
     /(?:\+\d{1,3}[ .-]?)?(?:\(?\d{2,4}\)?[ .-]?){2,5}\d{2,4}/u,
     value,
+    start,
   );
   if (!matched) return null;
   const digitCount = matched.match(/\d/gu)?.length ?? 0;
   return digitCount >= 7 && digitCount <= 15 ? matched : null;
 }
 
-function urlAt(value: string): string | null {
-  const matched = anchored(/https?:\/\/[^\s"'<>]+/u, value);
+function urlAt(value: string, start: number): string | null {
+  const matched = anchoredAt(/https?:\/\/[^\s"'<>]+/u, value, start);
   // Sentence full stops and commas are delimiters. Other trailing punctuation
   // (`)`, `]`, `?`, `!`, `;`, `:`) is valid URL data and remains protected.
   return matched?.replace(/[.,]+$/u, '') || null;
@@ -149,32 +160,34 @@ export function protectedSpans(
       }
     }
 
-    const remaining = value.slice(start);
     const candidates: Array<[ProtectedSpanKind, string | null]> = [
       // URLs intentionally retain all non-delimiter trailing bytes. `)`, `]`,
       // `?`, `!`, `;` and `:` are valid URL data and must not be peeled off by
       // sentence-punctuation heuristics.
-      ['url', urlAt(remaining)],
-      ['email', anchored(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/u, remaining)],
+      ['url', urlAt(value, start)],
+      ['email', anchoredAt(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/u, value, start)],
       [
         'placeholder',
-        anchored(/\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[a-zA-Z_][\w.-]*\}|%[a-z]/u, remaining),
+        anchoredAt(/\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[a-zA-Z_][\w.-]*\}|%[a-z]/u, value, start),
       ],
-      ['currency', anchored(currencyAmountPattern(), remaining)],
-      ['percentage', anchored(new RegExp(`${AMOUNT}\\s*(?:%|٪)`, 'u'), remaining)],
-      [
-        'date',
-        anchored(
-          /(?:\d{1,4}[-\/.]\d{1,2}[-\/.]\d{1,4}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:,\s*\d{4})?)/iu,
-          remaining,
-        ),
-      ],
-      ['time', anchored(/\d{1,2}:\d{2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?/iu, remaining)],
-      ['version', anchored(/(?:v(?:ersion)?\s*)?\d+(?:\.\d+){1,4}/iu, remaining)],
-      ['range', anchored(new RegExp(`${AMOUNT}\\s*(?:-|–|—|to)\\s*${AMOUNT}`, 'iu'), remaining)],
-      ['phone', phoneAt(remaining)],
+      // Keep character references whole. Without this, `&#8217;` became
+      // `&#{{CGPV_A}};` and any entity normalization destroyed the marker.
+      ['html-entity', anchoredAt(/&(?:#\d+|#x[\da-f]+|[a-z][a-z0-9]+);/iu, value, start)],
+      ['currency', anchoredAt(currencyAmountPattern(), value, start)],
+      ['percentage', anchoredAt(new RegExp(`${AMOUNT}\\s*(?:%|٪)`, 'u'), value, start)],
+      // Numeric dates only. A month NAME is prose the translator must render
+      // ("Dec" -> "ديسمبر"); the day and year around it are protected by the
+      // number rule as two whole numbers. The earlier month-name branch
+      // consumed just two digits of a year ("31 Dec 2026" -> `31`, `Dec 20`,
+      // `26`) and, because markers may legitimately move, restored to a
+      // different date.
+      ['date', anchoredAt(/\d{1,4}[-\/.]\d{1,2}[-\/.]\d{1,4}/u, value, start)],
+      ['time', anchoredAt(/\d{1,2}:\d{2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?/iu, value, start)],
+      ['version', anchoredAt(/(?:v(?:ersion)?\s*)?\d+(?:\.\d+){1,4}/iu, value, start)],
+      ['range', anchoredAt(new RegExp(`${AMOUNT}\\s*(?:-|–|—|to)\\s*${AMOUNT}`, 'iu'), value, start)],
+      ['phone', phoneAt(value, start)],
       // No word boundary: digits glued to words ("90ml") are immutable too.
-      ['number', anchored(new RegExp(`${AMOUNT}(?:st|nd|rd|th)?`, 'iu'), remaining)],
+      ['number', anchoredAt(new RegExp(`${AMOUNT}(?:st|nd|rd|th)?`, 'iu'), value, start)],
     ];
     const found = candidates.find(([, matched]) => Boolean(matched));
     if (!found?.[1]) {
@@ -197,6 +210,8 @@ export type ProtectedValueMask = {
   masked: string;
   /** Marker labels (A, B, … AA) in source order — one per masked span. */
   labels: string[];
+  /** Restored codepoints minus marker codepoints for exact output budgeting. */
+  restoredLengthDelta: number;
   restore: (translated: string) => string;
 };
 
@@ -235,7 +250,7 @@ export function stripMarkers(value: string): string {
 export function maskProtectedValues(value: string): ProtectedValueMask {
   const spans = protectedSpans(value, { includeHtml: true });
   if (spans.length === 0) {
-    return { masked: value, labels: [], restore: (text) => text };
+    return { masked: value, labels: [], restoredLengthDelta: 0, restore: (text) => text };
   }
 
   const replacements = spans.map((span, index) => ({
@@ -254,6 +269,11 @@ export function maskProtectedValues(value: string): ProtectedValueMask {
   return {
     masked,
     labels: replacements.map((replacement) => replacement.label),
+    restoredLengthDelta: replacements.reduce(
+      (sum, replacement) =>
+        sum + [...replacement.value].length - [...replacement.token].length,
+      0,
+    ),
     restore(translated: string) {
       return replacements.reduce(
         (current, replacement) =>
@@ -321,14 +341,17 @@ function keepsMarkers(labels: readonly string[], output: string): boolean {
   const markerLikes = output.match(/\{\{[^{}]*CGPV[^{}]*\}\}/giu) ?? [];
   const exactMarkers = output.match(anyMarkerPattern()) ?? [];
   if (markerLikes.length !== exactMarkers.length) return false;
-  let total = 0;
+  const actual: string[] = [];
   for (const match of output.matchAll(anyMarkerPattern())) {
-    total += 1;
-    if (!known.has(match[1].toUpperCase())) return false;
+    const label = match[1].toUpperCase();
+    if (!known.has(label)) return false;
+    actual.push(label);
   }
-  return total === labels.length && labels.every(
-    (label) => (output.match(markerPattern(label)) ?? []).length === 1,
-  );
+  // Immutable facts are positional as well as byte-exact. Accepting A/B as
+  // B/A can swap two prices or date components while still passing a multiset
+  // check and publish a materially false sentence.
+  return actual.length === labels.length &&
+    labels.every((label, index) => actual[index] === label.toUpperCase());
 }
 
 /**

@@ -101,6 +101,14 @@ function budgetsSection(leaves: readonly TranslatableLeaf[]): string {
   return budgets.length ? ['## Length budgets', budgets.join('\n')].join('\n') : '';
 }
 
+export function providerFacingLengthLimit(
+  restoredLimit: number | undefined,
+  mask: ProtectedValueMask,
+): number | undefined {
+  if (!restoredLimit) return restoredLimit;
+  return Math.max(0, restoredLimit - mask.restoredLengthDelta);
+}
+
 function writerMessage(
   locale: ContentLocale,
   leaves: readonly TranslatableLeaf[],
@@ -146,6 +154,7 @@ function correctiveMessage(
   verdicts: readonly LeafVerdict[],
   context?: TranslationContentContext,
   draft?: Record<string, unknown>,
+  masks?: ReadonlyMap<string, ProtectedValueMask>,
 ): string {
   const notes = verdicts.map(
     ({ path, problems }) => `* ${path}: ${problems.join(', ')}`,
@@ -154,8 +163,15 @@ function correctiveMessage(
     if (!problems.includes('over-budget')) return [];
     const leaf = leaves.find((candidate) => candidate.path === path);
     const limit = leaf?.validationMaxLength ?? leaf?.maxLength;
+    const rawLimit = limit
+      ? providerFacingLengthLimit(limit, masks?.get(path) ?? maskProtectedValues(''))
+      : undefined;
     return limit
-      ? [`* ${path}: compact naturally to at most ${limit} Unicode characters.`]
+      ? [
+          `* ${path}: restored schema ceiling ${limit} Unicode characters; ` +
+            `the JSON value you return must be at most ${rawLimit} Unicode characters ` +
+            `including its protected markers.`,
+        ]
       : [];
   });
   return [
@@ -314,10 +330,19 @@ export async function translateEntryLeaves(
     const masks = new Map(
       chunk.map((leaf) => [leaf.path, maskProtectedValues(leaf.value)] as const),
     );
-    const modelChunk = chunk.map((leaf) => ({
-      ...leaf,
-      value: masks.get(leaf.path)!.masked,
-    }));
+    const modelChunk = chunk.map((leaf) => {
+      const mask = masks.get(leaf.path)!;
+      return {
+        ...leaf,
+        value: mask.masked,
+        // Keep the real restored-text ceiling available to the focused
+        // correction. Dictionary leaves do not normally carry a separate
+        // validationMaxLength, so without this they had the marker adjustment
+        // applied twice and were told an artificially small limit.
+        validationMaxLength: leaf.validationMaxLength ?? leaf.maxLength,
+        maxLength: providerFacingLengthLimit(leaf.maxLength, mask),
+      };
+    });
     // Validated on the RAW model output: the markers are the facts, and the
     // validator restores the source bytes itself for the structure, budget
     // and script checks.
@@ -344,6 +369,8 @@ export async function translateEntryLeaves(
             repairLeaves,
             repairVerdicts,
             context,
+            undefined,
+            masks,
           ),
         }, attemptHooks?.('writer-correction'));
         addUsage(correction);
@@ -376,6 +403,7 @@ export async function translateEntryLeaves(
             repairVerdicts,
             context,
             pickBatchKeys(writerBatch, repairLeaves),
+            masks,
           ),
         }, attemptHooks?.('editor-correction'));
         addUsage(correction);

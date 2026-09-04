@@ -11,8 +11,17 @@ import {
   hasOutboxWork,
   mergeOutboxPayloads,
 } from './payload';
+import {
+  advisoryTransactionLock,
+  isPostgresConnection,
+} from '../utils/database-dialect';
 
 export const ISR_OUTBOX_TABLE = 'isr_outbox';
+
+/** Translation-wave debounce: slide by this much per merge … */
+const TRANSLATION_DEBOUNCE_MS = 500;
+/** … but never later than this after the pending row was created. */
+const TRANSLATION_DEBOUNCE_MAX_MS = 5_000;
 
 type Transaction = any;
 
@@ -98,6 +107,7 @@ export function parseIsrOutboxPayload(value: unknown): IsrOutboxPayload {
 function toEvent(row: any, lockToken: string): IsrOutboxEvent {
   return {
     id: String(row.id),
+    deliveryKey: String(row.delivery_key ?? `${row.event_key}#${row.id}`),
     eventKey: row.event_key,
     lockToken,
     payload: parseIsrOutboxPayload(row.payload),
@@ -134,11 +144,11 @@ export async function insertIsrOutboxEvent(
     bounds.maxPayloadBytes,
   );
   if (input.eventKey) {
-    await transaction.raw(`SELECT pg_advisory_xact_lock(hashtext(?))`, [eventKey]);
-    const pending = await transaction(ISR_OUTBOX_TABLE)
-      .where({ event_key: eventKey, status: 'pending' })
-      .forUpdate()
-      .first();
+    await advisoryTransactionLock(transaction, eventKey);
+    let pendingQuery = transaction(ISR_OUTBOX_TABLE)
+      .where({ event_key: eventKey, status: 'pending' });
+    if (isPostgresConnection(transaction)) pendingQuery = pendingQuery.forUpdate();
+    const pending = await pendingQuery.first();
     if (pending) {
       const merged = boundOutboxPayload(
         mergeOutboxPayloads(parseIsrOutboxPayload(pending.payload), payload),
@@ -146,9 +156,17 @@ export async function insertIsrOutboxEvent(
         bounds.maxPayloadBytes,
       );
       // A short debounce turns large translation waves into a bounded number
-      // of gateway versions without delaying editor-originated events.
+      // of gateway versions without delaying editor-originated events. The
+      // window is bounded from the row's creation: a wave that keeps writing
+      // faster than the debounce must still flush, otherwise the one pending
+      // row is never claimable and the locale stays stale for the whole run.
       const nextAttemptAt = eventKey.startsWith('translation-isr:')
-        ? new Date(Date.now() + 500)
+        ? new Date(
+            Math.min(
+              Date.now() + TRANSLATION_DEBOUNCE_MS,
+              new Date(pending.created_at ?? now).getTime() + TRANSLATION_DEBOUNCE_MAX_MS,
+            ),
+          )
         : new Date(pending.next_attempt_at ?? now);
       await transaction(ISR_OUTBOX_TABLE)
         .where({ id: pending.id, status: 'pending' })
@@ -162,17 +180,18 @@ export async function insertIsrOutboxEvent(
   }
   const inserted = await transaction(ISR_OUTBOX_TABLE)
     .insert({
+      delivery_key: randomUUID(),
       event_key: eventKey,
       payload: JSON.stringify(payload),
       reason: input.reason.slice(0, 255),
       status: 'pending',
       attempt_count: 0,
       next_attempt_at: eventKey.startsWith('translation-isr:')
-        ? new Date(now.getTime() + 500)
+        ? new Date(now.getTime() + TRANSLATION_DEBOUNCE_MS)
         : now,
       created_at: now,
     })
-    .returning(['id', 'event_key']);
+    .returning(['id', 'event_key', 'delivery_key']);
   const row = Array.isArray(inserted) ? inserted[0] : inserted;
   return {
     id: String(row?.id ?? ''),
@@ -192,7 +211,7 @@ export class IsrOutboxStore {
     return this.strapi.db.transaction(async ({ trx }: any) => {
       const now = new Date();
       const expiredLease = new Date(now.getTime() - this.leaseMs);
-      const row = await trx(ISR_OUTBOX_TABLE)
+      let query = trx(ISR_OUTBOX_TABLE)
         .where((query: any) => {
           query
             .where((pending: any) => {
@@ -206,10 +225,9 @@ export class IsrOutboxStore {
                 .where('locked_at', '<=', expiredLease);
             });
         })
-        .orderBy('id', 'asc')
-        .forUpdate()
-        .skipLocked()
-        .first();
+        .orderBy('id', 'asc');
+      if (isPostgresConnection(trx)) query = query.forUpdate().skipLocked();
+      const row = await query.first();
 
       if (!row) return null;
       let payload: IsrOutboxPayload;
@@ -289,12 +307,12 @@ export class IsrOutboxStore {
       // pending would violate the partial unique index. The newer row does not
       // necessarily cover the same paths, so merge the failed payload into it
       // before retiring this attempt as superseded.
-      await trx.raw(`SELECT pg_advisory_xact_lock(hashtext(?))`, [event.eventKey]);
-      const newerPending = await trx(ISR_OUTBOX_TABLE)
+      await advisoryTransactionLock(trx, event.eventKey);
+      let newerPendingQuery = trx(ISR_OUTBOX_TABLE)
         .where({ event_key: event.eventKey, status: 'pending' })
-        .whereNot({ id: event.id })
-        .forUpdate()
-        .first();
+        .whereNot({ id: event.id });
+      if (isPostgresConnection(trx)) newerPendingQuery = newerPendingQuery.forUpdate();
+      const newerPending = await newerPendingQuery.first();
       if (newerPending) {
         const bounds = readOutboxPayloadBounds();
         const merged = boundOutboxPayload(
@@ -307,7 +325,15 @@ export class IsrOutboxStore {
         );
         await trx(ISR_OUTBOX_TABLE)
           .where({ id: newerPending.id, status: 'pending' })
-          .update({ payload: JSON.stringify(merged) });
+          .update({
+            payload: JSON.stringify(merged),
+            attempt_count: Math.max(
+              Number(newerPending.attempt_count ?? 0),
+              attemptCount,
+            ),
+            next_attempt_at: new Date(Date.now() + delayMs),
+            last_error: error.slice(0, 4_000),
+          });
         const retired = await trx(ISR_OUTBOX_TABLE)
           .where({
             id: event.id,
@@ -316,16 +342,16 @@ export class IsrOutboxStore {
             lock_token: event.lockToken,
           })
           .update({
-            status: 'delivered',
+            status: 'superseded',
             delivered_at: new Date(),
             locked_at: null,
             lock_token: null,
-            last_error: 'superseded by a newer pending ISR event after delivery failure',
+            last_error: error.slice(0, 4_000),
           });
         return {
           owned: Number(retired) === 1,
           attemptCount,
-          delayMs: 0,
+          delayMs,
         };
       }
 
@@ -350,7 +376,7 @@ export class IsrOutboxStore {
 
   async deleteDeliveredBefore(cutoff: Date): Promise<number> {
     return this.strapi.db.connection(ISR_OUTBOX_TABLE)
-      .where({ status: 'delivered' })
+      .whereIn('status', ['delivered', 'superseded'])
       .where('delivered_at', '<', cutoff)
       .delete();
   }

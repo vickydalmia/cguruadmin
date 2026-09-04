@@ -46,6 +46,7 @@ describe('ISR outbox payload validation', () => {
 describe('ISR outbox lease ownership', () => {
   const event: IsrOutboxEvent = {
     id: '42',
+    deliveryKey: 'delivery-42',
     eventKey: 'event-42',
     lockToken: 'owner-token',
     payload: { all: true },
@@ -146,6 +147,7 @@ describe('ISR retry/pending coalescing', () => {
     const store = new IsrOutboxStore(strapi, 120_000, 300_000);
     const event: IsrOutboxEvent = {
       id: '42',
+      deliveryKey: 'delivery-42',
       eventKey: 'translation-isr:ar',
       lockToken: 'owner-token',
       payload: { localePrefix: '/ar', paths: ['/older/'] },
@@ -155,13 +157,15 @@ describe('ISR retry/pending coalescing', () => {
 
     await expect(store.scheduleRetry(event, 'gateway timeout')).resolves.toMatchObject({
       owned: true,
-      delayMs: 0,
+      delayMs: 1_000,
     });
 
     expect(rows[0]).toMatchObject({
-      status: 'delivered',
+      status: 'superseded',
       lock_token: null,
+      last_error: 'gateway timeout',
     });
+    expect(rows[1]).toMatchObject({ attempt_count: 1, last_error: 'gateway timeout' });
     expect(parseIsrOutboxPayload(rows[1].payload)).toEqual({
       localePrefix: '/ar',
       paths: ['/older/', '/newer/'],
@@ -223,5 +227,54 @@ describe('translation ISR coalescing', () => {
     expect(updates).toBe(9_999);
     expect(parseIsrOutboxPayload(row.payload).paths).toHaveLength(10);
     expect(parseIsrOutboxPayload(row.payload).localePrefix).toBe('/ar');
+    // The debounce slides, but never past a bound from the row's creation:
+    // a wave writing faster than the debounce still flushes.
+    const createdAt = new Date(row.created_at).getTime();
+    const nextAttemptAt = new Date(row.next_attempt_at).getTime();
+    expect(nextAttemptAt).toBeGreaterThanOrEqual(createdAt);
+    expect(nextAttemptAt).toBeLessThanOrEqual(createdAt + 5_000);
+  });
+
+  it('caps the sliding debounce five seconds after the pending row was created', async () => {
+    const createdAt = new Date('2026-09-04T10:00:00.000Z');
+    let row: any = {
+      id: '7',
+      event_key: 'translation-isr:ar',
+      status: 'pending',
+      payload: JSON.stringify({ localePrefix: '/ar', paths: ['/a/'] }),
+      created_at: createdAt,
+      next_attempt_at: new Date(createdAt.getTime() + 500),
+    };
+    const transaction: any = (_table: string) => {
+      const chain: any = {
+        where() {
+          return chain;
+        },
+        forUpdate() {
+          return chain;
+        },
+        async first() {
+          return { ...row };
+        },
+        async update(value: Record<string, unknown>) {
+          row = { ...row, ...value };
+          return 1;
+        },
+      };
+      return chain;
+    };
+    transaction.raw = vi.fn(async () => undefined);
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date(createdAt.getTime() + 20_000));
+      await insertIsrOutboxEvent(transaction, {
+        eventKey: 'translation-isr:ar',
+        reason: 'translated row',
+        payload: { localePrefix: '/ar', paths: ['/b/'] },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(new Date(row.next_attempt_at).getTime()).toBe(createdAt.getTime() + 5_000);
   });
 });

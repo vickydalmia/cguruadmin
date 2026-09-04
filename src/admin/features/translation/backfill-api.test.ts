@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  describeBackfillProgress,
   formatUsd,
   queueBusy,
   queueSummary,
   shortUid,
   unwrapBackfillEstimate,
   unwrapBackfillResult,
+  unwrapBackfillStart,
   unwrapOutboxStatus,
 } from './backfill-api';
 
@@ -62,6 +64,45 @@ describe('translation backfill client helpers', () => {
     expect(
       unwrapBackfillResult({ data: { enqueued: 9, perUid: {}, locales: ['ar'] } }).enqueued,
     ).toBe(9);
+  });
+
+  it('unwraps the background run from the start response and the status feed', () => {
+    const run = {
+      id: 'run-1',
+      mode: 'repair',
+      dryRun: false,
+      force: false,
+      status: 'running',
+      startedAt: '2026-09-04T10:00:00.000Z',
+      finishedAt: null,
+      progress: {
+        uidsTotal: 7,
+        uidsDone: 1,
+        currentUid: 'api::brand.brand',
+        documentsScanned: 1234,
+        selected: 120,
+        enqueued: 120,
+        skippedCurrent: 1100,
+      },
+      result: null,
+      error: null,
+    };
+    expect(unwrapBackfillStart({ data: { accepted: true, run } })).toMatchObject({
+      id: 'run-1',
+      status: 'running',
+    });
+    expect(() => unwrapBackfillStart({ data: { accepted: true } })).toThrow(/unexpected/);
+
+    const status = unwrapOutboxStatus({
+      data: { enabled: true, dispatcher: null, outbox: null, backfill: run },
+    });
+    expect(status.backfill?.progress.documentsScanned).toBe(1234);
+    expect(describeBackfillProgress(status.backfill!)).toBe(
+      'Repairing: scanning brand (2/7) — 1,234 document(s) scanned, 120 selected, 120 queued',
+    );
+    expect(
+      unwrapOutboxStatus({ data: { enabled: true, dispatcher: null, outbox: null } }).backfill,
+    ).toBeNull();
   });
 
   it('formats money and uids for the card', () => {

@@ -6,6 +6,9 @@ import { insertIsrOutboxEvent, ISR_OUTBOX_TABLE } from './store';
 import type { IsrOutboxInsert } from './types';
 import { purgeResponseCaches } from '../middlewares/cache';
 import { purgeEntityPopularSearchCatalog } from '../api/store/services/entity-popular-searches';
+import { advisoryTransactionLock } from '../utils/database-dialect';
+import { expandPayloadPathsForLocales } from './payload';
+import { enabledContentLocaleCodesSync } from '../translation/locales/registry';
 
 let dispatcher: IsrOutboxDispatcher | null = null;
 
@@ -73,9 +76,22 @@ export async function enqueueStandaloneIsrEvent(
   strapi: Core.Strapi,
   input: IsrOutboxInsert,
 ): Promise<{ id: string; eventKey: string }> {
+  // Standalone callers mutate shared state outside the document middleware
+  // (ratings and curated relation cleanup). Give their explicit paths the
+  // same locale twins as a normal shared-field write. `all` already covers
+  // every locale and a locale-scoped command must never be widened.
+  const localizedInput = input.payload.localePrefix
+    ? input
+    : {
+        ...input,
+        payload: expandPayloadPathsForLocales(
+          input.payload,
+          enabledContentLocaleCodesSync(),
+        ),
+      };
   return strapi.db.transaction(
     async ({ trx, onCommit }: { trx: any; onCommit: (fn: () => void) => void }) => {
-      const event = await insertIsrOutboxEvent(trx, input);
+      const event = await insertIsrOutboxEvent(trx, localizedInput);
       onCommit(() => {
         // Standalone events are used after cron/Query Engine writes, which do
         // not pass through the document middleware's after-commit purge. Wake
@@ -108,9 +124,7 @@ export async function enqueueCoalescedIsrSweep(
 ): Promise<CoalescedIsrSweepResult> {
   return strapi.db.transaction(
     async ({ trx, onCommit }: { trx: any; onCommit: (fn: () => void) => void }) => {
-      await trx.raw(`SELECT pg_advisory_xact_lock(hashtext(?))`, [
-        `isr-sweep:${input.reason}`,
-      ]);
+      await advisoryTransactionLock(trx, `isr-sweep:${input.reason}`);
       const pending = await trx(ISR_OUTBOX_TABLE)
         .where({ reason: input.reason, status: 'pending' })
         .select('id', 'event_key')

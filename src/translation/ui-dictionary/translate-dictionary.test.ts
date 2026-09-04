@@ -260,7 +260,9 @@ describe('processUiDictionaryJob', () => {
     expect(writer).toContain(uiDictionaryBrief(LOCALE));
     expect(writer).toContain('coupons and deals website');
     expect(writer).toContain("* offers.count.few: plural form 'few' for count like 3");
-    expect(writer).toContain('## Length budgets\n* offers.count.few: maxChars 40');
+    // The model sees the ten-character marker rather than the seven-character
+    // `{count}` placeholder, so 43 raw characters restore to the hard 40.
+    expect(writer).toContain('## Length budgets\n* offers.count.few: maxChars 43');
     expect(writer).not.toContain('nav.home: maxChars');
     expect(writer).not.toContain('nav.home: plural');
     expect(dictionary.writeAiTranslations).toHaveBeenCalledWith('ar', [

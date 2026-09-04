@@ -26,9 +26,9 @@ function booleanFromEnv(name: string, fallback: boolean): boolean {
 }
 
 /**
- * The document middleware is the normal incremental trigger. A full nightly
- * catalogue audit is an optional recovery tool because even hash-current
- * rows still cost database reads; large sites must opt into that load.
+ * The document middleware is the normal incremental trigger. A nightly
+ * durable repair scan is an optional recovery tool because proving current
+ * rows still costs database reads; large sites must opt into that load.
  */
 export function translationNightlyConsistencyEnabled(): boolean {
   return booleanFromEnv('TRANSLATION_NIGHTLY_CONSISTENCY_ENABLED', false);

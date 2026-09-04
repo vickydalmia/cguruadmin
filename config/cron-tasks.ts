@@ -4,7 +4,10 @@ import { computeContentStatus } from '../src/utils/content-status';
 import { enqueueStandaloneIsrEvent } from '../src/isr-outbox/runtime';
 import { removeInactiveCuratedOfferRelations } from '../src/utils/curated-offer-cleanup';
 import { removeDisplayedTopPicksFromOrdered } from '../src/utils/curated-offer-top-picks';
-import { enqueueTranslationBackfill } from '../src/translation/backfill';
+import {
+  backfillRunActive,
+  startTranslationBackfill,
+} from '../src/translation/backfill-run';
 import { TRANSLATION_NIGHTLY_CONSISTENCY_REASON } from '../src/translation/outbox/reasons';
 import { translationNightlyConsistencyEnabled } from '../src/translation/outbox/config';
 import { translationRuntimeActive } from '../src/translation/outbox/runtime';
@@ -334,24 +337,30 @@ export default {
     },
   },
 
-  // AI-translation consistency: re-enqueue every localized document into the
-  // translation outbox. Guarded like every other nightly scan; a no-op on
-  // deployments with translation off. Cheap by construction — the dispatcher
-  // no-ops hash-current entries without an LLM call, so this only pays for
-  // (a) entries whose English changed through a path the middleware missed
-  // and (b) relation drift, both of which it repairs by the next morning.
+  // AI-translation consistency: start the same durable repair scan exposed in
+  // Country Setup. The cron request returns immediately; progress survives an
+  // HTTP timeout or process restart in translation_backfill_runs. Repair mode
+  // avoids filling the queue with catalogue rows already proven current.
   nightlyTranslationConsistency: {
     task: async ({ strapi }: { strapi: any }) => {
       try {
         if (!translationNightlyConsistencyEnabled()) return;
         if (!(await translationRuntimeActive(strapi))) return;
-        const result = await enqueueTranslationBackfill(strapi, {
+        if (await backfillRunActive(strapi)) {
+          strapi.log.info({
+            event: 'translation.nightly_consistency_skipped',
+            reason: 'a manual backfill is running',
+          });
+          return;
+        }
+        const result = await startTranslationBackfill(strapi, {
+          mode: 'repair',
           reason: TRANSLATION_NIGHTLY_CONSISTENCY_REASON,
         });
         strapi.log.info({
-          event: 'translation.nightly_consistency_enqueued',
-          enqueued: result.enqueued,
-          locales: result.locales,
+          event: 'translation.nightly_consistency_started',
+          runId: result.run.id,
+          started: result.started,
         });
       } catch (err: any) {
         strapi.log.error({

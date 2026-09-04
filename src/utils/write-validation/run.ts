@@ -106,14 +106,16 @@ export async function runWriteValidation(
   // need to judge the record Strapi will actually produce. Overlay the
   // normalized locale plan on the populated English source for validation
   // only. A first locale row is validated as a create so validators do not
-  // try to use a target row that does not exist yet.
+  // read a target row that does not exist yet, but it keeps the document's
+  // (locale-shared) documentId: uniqueness validators need it to recognise
+  // the English row as the same document rather than a colliding one, and
+  // relation-eligibility validators query the default locale by it.
   const validationCtx: StepContext =
     translation?.sourceEntry && ctx.data && typeof ctx.data === 'object'
       ? {
           ...ctx,
           action: translation.targetRowExisted ? ctx.action : 'create',
           data: { ...translation.sourceEntry, ...ctx.data },
-          documentId: translation.targetRowExisted ? ctx.documentId : undefined,
         }
       : ctx;
 

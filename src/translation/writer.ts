@@ -10,11 +10,28 @@ import type { Core } from '@strapi/strapi';
 import {
   buildLocalizedData,
   collectTranslatableLeaves,
+  collectRelationReferences,
   resolveRelationDependencies,
   type RelationDependency,
   type LocalizedWritePlan,
 } from './field-map';
 import { runWithTranslationWriteContext } from './write-flag';
+import { sanitizeRichtextData } from '../utils/sanitize-richtext';
+import { normaliseTextFields } from '../utils/text-field-validation';
+
+/**
+ * The write pipeline's mutators (richtext allowlist, trim/collapse) change
+ * the plan before it is persisted, so translation memory — the raw provider
+ * output — must be normalised the same way before it is compared with the
+ * stored row. Otherwise a translation with a trailing space is "not current"
+ * forever: rewritten and re-invalidated on every sweep.
+ */
+function normalisedPlanData(uid: string, data: Record<string, unknown>) {
+  const clone = structuredClone(data);
+  sanitizeRichtextData(uid, clone);
+  normaliseTextFields(uid, 'update', clone);
+  return clone;
+}
 
 export class TranslationDependencyBlockedError extends Error {
   readonly dependencies: RelationDependency[];
@@ -166,17 +183,16 @@ export async function inspectLocaleVersion(
       leaf.value,
     ]),
   );
-  // Every populated relation on the persisted target row necessarily exists;
-  // using this local set avoids a second batch of existence queries merely to
-  // normalize the row into buildLocalizedData's comparison shape.
-  const targetRelations = await resolveRelationDependencies(
-    strapi,
-    uid,
-    targetEntry,
-    targetLocale,
-  );
   const targetExistence = {
-    present: new Set([...targetRelations.existence.present]),
+    // The target entry is already deeply populated. Every relation visible on
+    // it necessarily exists, so derive the keys locally instead of issuing a
+    // second batch of existence queries during every repair inspection.
+    present: new Set(
+      collectRelationReferences(strapi, uid, targetEntry).map(
+        ({ targetUid, documentId: targetDocumentId }) =>
+          `${targetUid}:${targetDocumentId}`,
+      ),
+    ),
   };
   const persisted = buildLocalizedData(
     strapi,
@@ -187,7 +203,10 @@ export async function inspectLocaleVersion(
   );
 
   return {
-    current: isDeepStrictEqual(desired.data, persisted.data),
+    current: isDeepStrictEqual(
+      normalisedPlanData(uid, desired.data),
+      normalisedPlanData(uid, persisted.data),
+    ),
     skippedRelations: desired.skippedRelations,
   };
 }

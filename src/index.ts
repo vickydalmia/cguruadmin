@@ -78,7 +78,12 @@ import { primeEnabledContentLocales } from './translation/locales/registry';
 import {
   startTranslationOutbox,
   stopTranslationOutbox,
+  translationOutboxRunning,
 } from './translation/outbox/runtime';
+import {
+  resumeTranslationBackfillRun,
+  stopTranslationBackfillRecovery,
+} from './translation/backfill-run';
 
 export default {
   async register({ strapi }: { strapi: Core.Strapi }) {
@@ -299,12 +304,16 @@ export default {
     }
     if (translationBootstrapReady) {
       await startTranslationOutbox(strapi);
+      if (translationOutboxRunning()) {
+        await resumeTranslationBackfillRun(strapi);
+      }
     }
 
     startIsrOutbox(strapi);
   },
 
   async destroy() {
+    stopTranslationBackfillRecovery();
     await stopIsrOutbox();
     await stopTranslationOutbox();
   },
