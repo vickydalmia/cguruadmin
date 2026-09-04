@@ -43,7 +43,7 @@ export function useRecordLock({
   // The clone view reuses the edit route with the ORIGIN's documentId, but a
   // clone save is a `create` of a brand-new document — locking here would
   // block the clone form on the source entry's lock (or worse, hold the
-  // source's lock and push its real editor into the blocked modal).
+  // source's lock and push its real editor into the blocked state).
   const isCloneView = pathname.includes('/clone/');
   // Single types never get a documentId prop — the server locks them under
   // its own pseudo id when documentId is omitted; the client key below is
@@ -63,7 +63,7 @@ export function useRecordLock({
     // getFetchClient, NOT the useFetchClient hook: the hook's client aborts
     // its in-flight requests when the component unmounts — which is exactly
     // when the release below fires. With the hook, the release never reached
-    // the server and the next editor sat behind the modal for the full 90 s
+    // the server and the next editor saw the stale lock for the full 90 s
     // TTL after this one had already left.
     const { post } = getFetchClient();
     const key = `${model}:${lockDocumentId}`;
@@ -83,7 +83,7 @@ export function useRecordLock({
 
     const applyResult = (parsed: Exclude<ParsedAcquire, null>) => {
       // Bail out (return prev) when nothing the panel renders has changed,
-      // so steady-state heartbeats don't re-render the panel or the modal.
+      // so steady-state heartbeats don't re-render the lock panel.
       setState((prev) => {
         if (parsed.kind === 'mine') {
           return prev.phase === 'mine' && prev.key === key
@@ -204,16 +204,11 @@ export function useRecordLock({
     };
   }, [lockable, model, lockDocumentId, isSingleType]);
 
-  // Until this exact tab owns the lock, grey out and freeze the edit form.
-  // `inert` removes the whole subtree from clicking, typing and tab order — a
-  // true read-only view. This closes the pre-acquire window where a duplicate
-  // same-user tab could submit before the modal appeared. Strapi re-renders
-  // can swap the form node out from under us, so a MutationObserver re-applies
-  // the freeze until ownership is confirmed; it watches document.body (not
-  // <main>, which Strapi can also replace, orphaning the observer).
-    const blocked = state.phase === 'blocked' && state.key === currentKey;
-    const mine = state.phase === 'mine' && state.key === currentKey;
-    const readOnly = lockable && !mine;
+  // Until this exact tab owns the lock, freeze the complete edit form. The
+  // navigation shells sit outside it; the server remains the final write guard.
+  const blocked = state.phase === 'blocked' && state.key === currentKey;
+  const mine = state.phase === 'mine' && state.key === currentKey;
+  const readOnly = lockable && !mine;
   return {
     state,
     lockable,
