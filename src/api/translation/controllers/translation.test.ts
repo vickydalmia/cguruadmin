@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   localizedApiUids: vi.fn(() => ['api::coupon.coupon']),
   currentBackfillRun: vi.fn(async () => null),
+  cancelTranslationBackfill: vi.fn(async () => ({
+    cancelled: true,
+    run: { id: 'run-1', status: 'cancelled' },
+  })),
   startTranslationBackfill: vi.fn(async () => ({
     started: true,
     run: { id: 'run-1', status: 'running' },
@@ -18,6 +22,7 @@ vi.mock('../../../translation/backfill', () => ({
   localizedApiUids: mocks.localizedApiUids,
 }));
 vi.mock('../../../translation/backfill-run', () => ({
+  cancelTranslationBackfill: mocks.cancelTranslationBackfill,
   currentBackfillRun: mocks.currentBackfillRun,
   startTranslationBackfill: mocks.startTranslationBackfill,
 }));
@@ -35,9 +40,10 @@ vi.mock('../../../translation/status', () => ({
 
 import translationController from './translation';
 
-function context(body: unknown) {
+function context(body: unknown, params: Record<string, string> = {}) {
   return {
     request: { body },
+    params,
     set: vi.fn(),
     status: 0,
     body: null as unknown,
@@ -97,5 +103,15 @@ describe('translation backfill controller validation', () => {
         locales: ['ar'],
       }),
     );
+  });
+
+  it('stops a durable scan without touching queued translation jobs', async () => {
+    const ctx = context({}, { id: 'run-1' });
+    await controller.cancelBackfill(ctx);
+    expect(mocks.cancelTranslationBackfill).toHaveBeenCalledWith({}, 'run-1');
+    expect(ctx.body).toMatchObject({
+      cancelled: true,
+      run: { id: 'run-1', status: 'cancelled' },
+    });
   });
 });

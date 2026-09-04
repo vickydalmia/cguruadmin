@@ -7,6 +7,7 @@ const receiptIsr = require('../../database/migrations/2026.07.29T12.00.00.add-is
 const createTranslation = require('../../database/migrations/2026.08.30T00.00.00.create-translation-outbox.js');
 const dependencyMigration = require('../../database/migrations/2026.09.04T00.00.00.translation-dependencies-and-isr-coalescing.js');
 const reliabilityMigration = require('../../database/migrations/2026.09.05T00.00.00.translation-isr-reliability.js');
+const performanceMigration = require('../../database/migrations/2026.09.06T00.00.00.translation-backfill-performance.js');
 
 const databaseUrl = process.env.UNIQUE_CODE_TEST_DATABASE_URL;
 const postgresDescribe = databaseUrl ? describe : describe.skip;
@@ -37,6 +38,7 @@ postgresDescribe('translation/ISR reliability migrations on PostgreSQL', () => {
     await createTranslation.up(knex);
     await dependencyMigration.up(knex);
     await reliabilityMigration.up(knex);
+    await performanceMigration.up(knex);
   });
 
   afterAll(async () => {

@@ -530,7 +530,7 @@ export function buildLocalizedData(
         continue;
       }
       if (definition.type === 'relation') {
-        if (!definition.target || definition.relation?.toLowerCase?.().includes('morph')) {
+        if (!isOwnerSideRelation(definition) || !definition.target || definition.relation?.toLowerCase?.().includes('morph')) {
           continue;
         }
         out[key] = relationValue(definition, fieldValue, path);

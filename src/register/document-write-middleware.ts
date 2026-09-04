@@ -410,6 +410,23 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
               if (
                 writtenLocale !== DEFAULT_CONTENT_LOCALE &&
                 writtenLocale !== '*' &&
+                context.action !== 'delete' &&
+                !isTranslationWrite()
+              ) {
+                // Human target-locale edits invalidate the proof recorded by
+                // the translation writer. The paid text memory remains, but
+                // the next repair must inspect/reconcile the actual row.
+                await trx(TRANSLATION_STATE_TABLE)
+                  .where({
+                    uid: context.uid,
+                    document_id: documentId,
+                    locale: writtenLocale,
+                  })
+                  .update({ published_plan_hash: null });
+              }
+              if (
+                writtenLocale !== DEFAULT_CONTENT_LOCALE &&
+                writtenLocale !== '*' &&
                 context.action !== 'delete'
               ) {
                 const awakened = await enqueueBlockedDependentsForAvailableTarget(

@@ -7,22 +7,37 @@
 import type { Core } from '@strapi/strapi';
 import { estimateBackfillCost, type CostEstimate } from './cost';
 import { translationConfigFromEnv } from './config';
-import { collectTranslatableLeaves } from './field-map';
+import {
+  buildLocalizedData,
+  collectRelationTargets,
+  collectTranslatableLeaves,
+  resolveRelationExistence,
+  type RelationTarget,
+} from './field-map';
 import { enabledContentLocales } from './locales/registry';
 import { translationStore, wakeTranslationOutbox } from './outbox/runtime';
-import { insertTranslationJobsBulk, type TranslationJobInsert } from './outbox/store';
+import {
+  insertTranslationJobsBulk,
+  translationSnapshotKey,
+  type TranslationJobInsert,
+} from './outbox/store';
 import { TRANSLATION_BACKFILL_REASON } from './outbox/reasons';
 import { UI_DICTIONARY_UID } from './ui-dictionary/constants';
 import { enqueueUiDictionaryJobs } from './ui-dictionary/enqueue';
 import { UiDictionaryStore } from './ui-dictionary/store';
-import { inspectLocaleVersion, loadPopulatedEntry } from './writer';
+import {
+  inspectPopulatedLocaleVersion,
+  loadPopulatedEntries,
+  localizedPlanHash,
+} from './writer';
 import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
 import { sourceContentHash } from './source-hash';
 import { translationPromptFingerprint } from './prompts';
 import type { ContentLocale } from './locales/resolve';
 import { translationSourceIneligible } from './eligibility';
+import { translationPopulate } from './populate';
 
-const PAGE_SIZE = 1_000;
+const PAGE_SIZE = 50;
 
 /**
  * Wave order: relation targets before relation owners, catalog before the
@@ -57,23 +72,24 @@ export function localizedApiUids(strapi: Core.Strapi): string[] {
   );
 }
 
-async function* defaultLocaleDocumentIds(
+type SourcePage = { entries: any[]; lastId: number };
+
+async function* defaultLocaleEntries(
   strapi: Core.Strapi,
   uid: string,
-): AsyncGenerator<string[]> {
-  let lastId = 0;
+  afterId = 0,
+): AsyncGenerator<SourcePage> {
+  let lastId = afterId;
   for (;;) {
     const rows: any[] = await strapi.db.query(uid as any).findMany({
       where: { locale: DEFAULT_CONTENT_LOCALE, id: { $gt: lastId } },
-      select: ['id', 'documentId'],
       orderBy: { id: 'asc' },
       limit: PAGE_SIZE,
+      populate: translationPopulate(strapi, uid),
     } as any);
     if (!rows?.length) return;
     lastId = Number(rows[rows.length - 1].id);
-    yield rows
-      .map((row) => row?.documentId)
-      .filter((id): id is string => typeof id === 'string' && Boolean(id));
+    yield { entries: rows, lastId };
     if (rows.length < PAGE_SIZE) return;
   }
 }
@@ -106,13 +122,20 @@ export type BackfillProgress = {
   skippedIneligible: number;
 };
 
-type CandidateScan = {
+export type CandidateScan = {
   selected: number;
   enqueued: number;
   skippedCurrent: number;
   skippedIneligible: number;
   providerChars: number[];
   perUid: Record<string, number>;
+};
+
+export type BackfillCheckpoint = {
+  uidIndex: number;
+  lastSourceId: number;
+  documentsScanned: number;
+  scan: CandidateScan;
 };
 
 type ScanOptions = {
@@ -125,7 +148,13 @@ type ScanOptions = {
    * flushInputs); the estimate path passes nothing.
    */
   onPage?: (inputs: TranslationJobInsert[]) => Promise<number>;
-  onProgress?: (progress: BackfillProgress) => void;
+  onProgress?: (progress: BackfillProgress) => void | Promise<void>;
+  onCheckpoint?: (
+    progress: BackfillProgress,
+    checkpoint: BackfillCheckpoint,
+  ) => Promise<void>;
+  checkpoint?: BackfillCheckpoint | null;
+  persistPlanHashes?: boolean;
 };
 
 /**
@@ -168,122 +197,297 @@ function completeMemory(
   );
 }
 
+function cloneScan(scan: CandidateScan): CandidateScan {
+  return {
+    ...scan,
+    providerChars: [...scan.providerChars],
+    perUid: { ...scan.perUid },
+  };
+}
+
+function maxDocumentsPerSecond(): number {
+  const fallback = process.env.NODE_ENV === 'test' ? 0 : 20;
+  const parsed = Number.parseInt(
+    process.env.TRANSLATION_BACKFILL_MAX_DOCS_PER_SECOND ?? '',
+    10,
+  );
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+async function throttlePage(startedAt: number, documents: number): Promise<void> {
+  const maximum = maxDocumentsPerSecond();
+  if (maximum <= 0 || documents <= 0) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    return;
+  }
+  const remaining = Math.ceil((documents / maximum) * 1_000) -
+    (Date.now() - startedAt);
+  if (remaining > 0) {
+    await new Promise<void>((resolve) => setTimeout(resolve, remaining));
+  } else {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
+
+function mergeRelationTargets(
+  strapi: Core.Strapi,
+  uid: string,
+  entries: readonly any[],
+): RelationTarget[] {
+  const byUid = new Map<string, Set<string>>();
+  for (const entry of entries) {
+    for (const target of collectRelationTargets(strapi, uid, entry)) {
+      const ids = byUid.get(target.targetUid) ?? new Set<string>();
+      for (const documentId of target.documentIds) ids.add(documentId);
+      byUid.set(target.targetUid, ids);
+    }
+  }
+  return [...byUid.entries()].map(([targetUid, documentIds]) => ({
+    targetUid,
+    documentIds: [...documentIds],
+  }));
+}
+
 async function scanContentCandidates(
   strapi: Core.Strapi,
   uids: readonly string[],
   locales: readonly ContentLocale[],
   options: ScanOptions,
 ): Promise<CandidateScan> {
-  const scan: CandidateScan = {
-    selected: 0,
-    enqueued: 0,
-    skippedCurrent: 0,
-    skippedIneligible: 0,
-    providerChars: [],
-    perUid: {},
-  };
+  const initial = options.checkpoint;
+  const scan: CandidateScan = initial
+    ? cloneScan(initial.scan)
+    : {
+        selected: 0,
+        enqueued: 0,
+        skippedCurrent: 0,
+        skippedIneligible: 0,
+        providerChars: [],
+        perUid: {},
+      };
   const progress: BackfillProgress = {
     uidsTotal: uids.length,
-    uidsDone: 0,
+    uidsDone: Math.min(initial?.uidIndex ?? 0, uids.length),
     currentUid: null,
-    documentsScanned: 0,
-    selected: 0,
-    enqueued: 0,
-    skippedCurrent: 0,
-    skippedIneligible: 0,
+    documentsScanned: initial?.documentsScanned ?? 0,
+    selected: scan.selected,
+    enqueued: scan.enqueued,
+    skippedCurrent: scan.skippedCurrent,
+    skippedIneligible: scan.skippedIneligible,
   };
-  const report = () => {
+  const report = async (checkpoint?: BackfillCheckpoint) => {
     progress.selected = scan.selected;
     progress.enqueued = scan.enqueued;
     progress.skippedCurrent = scan.skippedCurrent;
     progress.skippedIneligible = scan.skippedIneligible;
-    options.onProgress?.({ ...progress });
+    await options.onProgress?.({ ...progress });
+    if (checkpoint) {
+      await options.onCheckpoint?.(
+        { ...progress },
+        { ...checkpoint, scan: cloneScan(checkpoint.scan) },
+      );
+    }
   };
   if (uids.length === 0 || locales.length === 0) return scan;
   const store = translationStore(strapi);
-  for (const uid of uids) {
-    scan.perUid[uid] = 0;
+  const localeCodes = locales.map((locale) => locale.code);
+
+  for (
+    let uidIndex = Math.min(initial?.uidIndex ?? 0, uids.length);
+    uidIndex < uids.length;
+    uidIndex += 1
+  ) {
+    const uid = uids[uidIndex];
+    scan.perUid[uid] ??= 0;
     progress.currentUid = uid;
-    report();
-    for await (const page of defaultLocaleDocumentIds(strapi, uid)) {
+    progress.uidsDone = uidIndex;
+    const firstSourceId = uidIndex === initial?.uidIndex
+      ? initial.lastSourceId
+      : 0;
+    await report({
+      uidIndex,
+      lastSourceId: firstSourceId,
+      documentsScanned: progress.documentsScanned,
+      scan,
+    });
+
+    for await (const page of defaultLocaleEntries(strapi, uid, firstSourceId)) {
+      const pageStartedAt = Date.now();
       const inputs: TranslationJobInsert[] = [];
-      for (const documentId of page) {
-        const source = await loadPopulatedEntry(
-          strapi,
+      const populatedSources = page.entries.filter(
+        (entry) => typeof entry?.documentId === 'string' && entry.documentId,
+      );
+      const sources = populatedSources.filter((source) => {
+        if (!translationSourceIneligible(uid, source)) return true;
+        scan.skippedIneligible += locales.length;
+        return false;
+      });
+      const snapshot = await store.readBackfillSnapshot(
+        uid,
+        sources.map((entry) => String(entry.documentId)),
+        localeCodes,
+      );
+      const inspections = new Map<string, Array<{
+        source: any;
+        documentId: string;
+        leaves: ReturnType<typeof collectTranslatableLeaves>;
+        translations: Record<string, string>;
+        state: { publishedPlanHash?: string | null };
+      }>>();
+
+      const select = (
+        documentId: string,
+        targetLocale: string,
+        providerRequired: boolean,
+        characters: number,
+      ) => {
+        inputs.push({
           uid,
           documentId,
-          DEFAULT_CONTENT_LOCALE,
-        );
-        progress.documentsScanned += 1;
-        if (!source) continue;
-        if (translationSourceIneligible(uid, source)) {
-          scan.skippedIneligible += locales.length;
-          report();
-          continue;
-        }
+          targetLocale,
+          kind: providerRequired ? 'translate' : 'relation-sync',
+          force: options.force,
+          reason: options.reason,
+        });
+        scan.selected += 1;
+        scan.perUid[uid] += 1;
+        if (providerRequired) scan.providerChars.push(characters);
+      };
+
+      for (const source of sources) {
+        const documentId = String(source.documentId);
         const leaves = collectTranslatableLeaves(strapi, uid, source);
+        const characters = leaves.reduce((sum, leaf) => sum + leaf.value.length, 0);
         for (const locale of locales) {
           const targetLocale = locale.code;
           const hash = sourceContentHash(
             leaves,
             translationPromptFingerprint(strapi, locale),
           );
-          const [state, latestJob] = await Promise.all([
-            store.readState(uid, documentId, targetLocale),
-            store.activeJob(uid, documentId, targetLocale),
-          ]);
+          const key = translationSnapshotKey(documentId, targetLocale);
+          const state = snapshot.states.get(key) ?? null;
+          const latestJob = snapshot.jobs.get(key) ?? null;
           const memoryComplete = completeMemory(state?.translations ?? null, leaves);
           const textCurrent =
             !options.force && state?.sourceHash === hash && memoryComplete;
           const latestNeedsRepair =
             latestJob?.status === 'failed' || latestJob?.status === 'blocked';
-          // Only repair mode acts on "current": the full plan comparison is
-          // the expensive part of the scan (a second deep populate plus
-          // existence batches), so mode "all" does not pay for it.
-          let current = false;
           if (options.mode === 'repair' && textCurrent && !latestNeedsRepair) {
-            const inspection = await inspectLocaleVersion(
-              strapi,
-              uid,
-              documentId,
-              targetLocale,
+            const pending = inspections.get(targetLocale) ?? [];
+            pending.push({
               source,
-              new Map(Object.entries(state!.translations!)),
-            );
-            current = inspection.current && inspection.skippedRelations.length === 0;
-          }
-          if (options.mode === 'repair' && current) {
-            scan.skippedCurrent += 1;
+              documentId,
+              leaves,
+              translations: state!.translations!,
+              state: state!,
+            });
+            inspections.set(targetLocale, pending);
             continue;
           }
           const providerRequired = !textCurrent && leaves.length > 0;
-          inputs.push({
+          select(documentId, targetLocale, providerRequired, characters);
+        }
+      }
+
+      for (const [targetLocale, pending] of inspections) {
+        const documentIds = pending.map((candidate) => candidate.documentId);
+        const relationExistence = await resolveRelationExistence(
+          strapi,
+          mergeRelationTargets(
+            strapi,
             uid,
-            documentId,
-            targetLocale,
-            kind: providerRequired ? 'translate' : 'relation-sync',
-            force: options.force,
-            reason: options.reason,
-          });
-          scan.selected += 1;
-          scan.perUid[uid] += 1;
-          if (providerRequired) {
-            scan.providerChars.push(
-              leaves.reduce((sum, leaf) => sum + leaf.value.length, 0),
-            );
+            pending.map((candidate) => candidate.source),
+          ),
+          targetLocale,
+        );
+        const targetRows: any[] = await strapi.db.query(uid as any).findMany({
+          where: { locale: targetLocale, documentId: { $in: documentIds } },
+          select: ['documentId'],
+        } as any);
+        const targetIds = new Set(
+          (targetRows ?? []).map((row) => String(row.documentId)),
+        );
+        const desiredById = new Map<string, ReturnType<typeof buildLocalizedData>>();
+        const fallbackIds: string[] = [];
+
+        for (const candidate of pending) {
+          const desired = buildLocalizedData(
+            strapi,
+            uid,
+            candidate.source,
+            new Map(Object.entries(candidate.translations)),
+            relationExistence,
+          );
+          desiredById.set(candidate.documentId, desired);
+          const planHash = localizedPlanHash(uid, desired.data);
+          const hashCurrent =
+            targetIds.has(candidate.documentId) &&
+            desired.skippedRelations.length === 0 &&
+            candidate.state.publishedPlanHash === planHash;
+          if (hashCurrent) {
+            scan.skippedCurrent += 1;
+          } else if (targetIds.has(candidate.documentId)) {
+            fallbackIds.push(candidate.documentId);
+          } else {
+            select(candidate.documentId, targetLocale, false, 0);
+          }
+        }
+
+        const loadedFallbacks = fallbackIds.length > 0
+          ? await loadPopulatedEntries(strapi, uid, fallbackIds, targetLocale)
+          : [];
+        const fallbackEntries = new Map(
+          loadedFallbacks.map(
+            (entry) => [String(entry.documentId), entry],
+          ),
+        );
+        for (const candidate of pending) {
+          if (!fallbackIds.includes(candidate.documentId)) continue;
+          const desired = desiredById.get(candidate.documentId)!;
+          const inspection = inspectPopulatedLocaleVersion(
+            strapi,
+            uid,
+            fallbackEntries.get(candidate.documentId) ?? null,
+            desired,
+          );
+          if (inspection.current && inspection.skippedRelations.length === 0) {
+            scan.skippedCurrent += 1;
+            if (options.persistPlanHashes) {
+              await store.recordPublishedPlanHash(
+                uid,
+                candidate.documentId,
+                targetLocale,
+                inspection.planHash,
+              );
+            }
+          } else {
+            select(candidate.documentId, targetLocale, false, 0);
           }
         }
       }
+
+      progress.documentsScanned += page.entries.length;
       if (inputs.length > 0 && options.onPage) {
         scan.enqueued += await options.onPage(inputs);
       }
-      report();
+      await report({
+        uidIndex,
+        lastSourceId: page.lastId,
+        documentsScanned: progress.documentsScanned,
+        scan,
+      });
+      await throttlePage(pageStartedAt, page.entries.length);
     }
-    progress.uidsDone += 1;
-    report();
+    progress.uidsDone = uidIndex + 1;
+    await report({
+      uidIndex: uidIndex + 1,
+      lastSourceId: 0,
+      documentsScanned: progress.documentsScanned,
+      scan,
+    });
   }
   progress.currentUid = null;
-  report();
+  await report();
   return scan;
 }
 
@@ -293,7 +497,10 @@ export type BackfillOptions = {
   force?: boolean;
   reason?: string;
   mode?: BackfillMode;
-  onProgress?: (progress: BackfillProgress) => void;
+  onProgress?: (progress: BackfillProgress) => void | Promise<void>;
+  /** Internal durable-run cursor; never accepted from the HTTP request. */
+  checkpoint?: BackfillCheckpoint | null;
+  onCheckpoint?: ScanOptions['onCheckpoint'];
 };
 
 export async function enqueueTranslationBackfill(
@@ -327,6 +534,9 @@ export async function enqueueTranslationBackfill(
     reason,
     onPage: (inputs) => flushInputs(strapi, inputs),
     onProgress: options.onProgress,
+    onCheckpoint: options.onCheckpoint,
+    checkpoint: options.checkpoint,
+    persistPlanHashes: true,
   });
   selected += scan.selected;
   skippedCurrent += scan.skippedCurrent;
@@ -404,6 +614,9 @@ export async function estimateTranslationBackfill(
     force: options.force === true,
     reason: TRANSLATION_BACKFILL_REASON,
     onProgress: options.onProgress,
+    onCheckpoint: options.onCheckpoint,
+    checkpoint: options.checkpoint,
+    persistPlanHashes: false,
   });
   const perEntryChars = [...scan.providerChars];
   const perUid = { ...scan.perUid };

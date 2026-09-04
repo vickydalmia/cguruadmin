@@ -62,7 +62,7 @@ describe('inspectLocaleVersion', () => {
         source,
         new Map([['name', 'الاسم العربي']]),
       ),
-    ).resolves.toEqual({ current: true, skippedRelations: [] });
+    ).resolves.toMatchObject({ current: true, skippedRelations: [] });
   });
 
   it('compares memory through the write mutators, so stored whitespace normalisation is current', async () => {
@@ -85,7 +85,7 @@ describe('inspectLocaleVersion', () => {
         source,
         new Map([['name', ' الاسم  العربي ']]),
       ),
-    ).resolves.toEqual({ current: true, skippedRelations: [] });
+    ).resolves.toMatchObject({ current: true, skippedRelations: [] });
   });
 
   it('requires a write when the target row is absent', async () => {
@@ -120,6 +120,6 @@ describe('inspectLocaleVersion', () => {
         source,
         new Map([['name', 'الاسم العربي']]),
       ),
-    ).resolves.toEqual({ current: false, skippedRelations: [] });
+    ).resolves.toMatchObject({ current: false, skippedRelations: [] });
   });
 });

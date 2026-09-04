@@ -181,7 +181,8 @@ edits made there.
    before enabling a positive daily budget—model pricing can change, so verify
    it at deployment time rather than copying an old estimate.
    Keep `TRANSLATION_OUTBOX_DISPATCHER_ENABLED=true` only on the admin
-   `strapi` service and `false` on `strapi-render`. The shared database lease
+   `strapi` service and `false` on `strapi-render`. Backfill ownership is
+   independently enabled only on `strapi-maintenance`. The shared database lease
    is safe with multiple workers, but per-process provider concurrency would
    otherwise multiply paid throughput and make the intended limit misleading.
 2. In **Settings → Country Setup** turn **Translation enabled** on and pick
@@ -219,16 +220,21 @@ edits made there.
    (`selected`, `enqueued`, `skippedCurrent`, `skippedIneligible`,
    `providerCallsExpected`,
    `perUid`, plus the cost fields for a dry run) or, when `failed`, the
-   error. Run state and leases are persisted in
-   `translation_backfill_runs`; a designated dispatcher process resumes an
-   interrupted scan after restart. Jobs are committed per page as the scan
+   error. Run state, page checkpoints and leases are persisted in
+   `translation_backfill_runs`; the dedicated `strapi-maintenance` process
+   resumes an interrupted scan at its last completed 50-document page. The
+   translation-only populate graph excludes inverse `mappedBy` collections,
+   and `TRANSLATION_BACKFILL_MAX_DOCS_PER_SECOND` defaults to 20 so the scan
+   cannot starve a two-core portal. Jobs are committed per page as the scan
    advances, so a run is idempotent and resumable: fully current entries
    perform neither a provider call, CMS write nor ISR invalidation. The card shows the scan's progress
    line, then queued / running / blocked / failed / done-today and today's
    spend against the budget, and polls while a scan or jobs are running.
    After a pipeline fix, this manual backfill is what re-runs previously
    failed entries — the nightly consistency sweep deliberately skips a failed
-   entry whose English source has not changed.
+   entry whose English source has not changed. **Stop scan** calls
+   `POST /translation/backfill/:id/cancel`; it stops future pages but never
+   removes translation jobs already committed by earlier pages.
 7. Watch failures/retries in the Translation panel, UI Text's sync card or
    `GET /translation/outbox-status`. Successful results publish automatically.
 

@@ -283,6 +283,8 @@ function toJob(row: any, lockToken: string): TranslationJob {
 
 export type TranslationStateRow = {
   sourceHash: string;
+  /** Hash of the last locale write plan proven to match the content row. */
+  publishedPlanHash: string | null;
   translatedAt: Date | null;
   needsReview: boolean;
   reviewNotes: string | null;
@@ -297,6 +299,22 @@ export type TranslationStateRow = {
    */
   translations: Record<string, string> | null;
 };
+
+export type TranslationJobSnapshot = {
+  status: string;
+  attemptCount: number;
+  lastError: string | null;
+  sourceHash: string | null;
+};
+
+export type TranslationBackfillSnapshot = {
+  states: Map<string, TranslationStateRow>;
+  jobs: Map<string, TranslationJobSnapshot>;
+};
+
+export function translationSnapshotKey(documentId: string, locale: string): string {
+  return `${documentId}\u0000${locale}`;
+}
 
 /**
  * jsonb comes back as an object from pg and as its text form from sqlite;
@@ -322,6 +340,29 @@ function parseStoredTranslations(
     (entry): entry is [string, string] => typeof entry[1] === 'string',
   );
   return Object.fromEntries(entries);
+}
+
+function stateFromDatabaseRow(row: any): TranslationStateRow {
+  return {
+    sourceHash: String(row.source_hash),
+    publishedPlanHash: row.published_plan_hash
+      ? String(row.published_plan_hash)
+      : null,
+    translatedAt: row.translated_at ? new Date(row.translated_at) : null,
+    needsReview: row.needs_review === true || row.needs_review === 1,
+    reviewNotes: row.review_notes ?? null,
+    lastError: row.last_error ?? null,
+    translations: parseStoredTranslations(row.translations),
+  };
+}
+
+function jobSnapshotFromDatabaseRow(row: any): TranslationJobSnapshot {
+  return {
+    status: String(row.status),
+    attemptCount: Number(row.attempt_count),
+    lastError: row.last_error ?? null,
+    sourceHash: row.source_hash ? String(row.source_hash) : null,
+  };
 }
 
 export type TranslationOutboxSummary = {
@@ -900,14 +941,52 @@ export class TranslationOutboxStore {
       .where({ uid, document_id: documentId, locale })
       .first();
     if (!row) return null;
-    return {
-      sourceHash: String(row.source_hash),
-      translatedAt: row.translated_at ? new Date(row.translated_at) : null,
-      needsReview: row.needs_review === true || row.needs_review === 1,
-      reviewNotes: row.review_notes ?? null,
-      lastError: row.last_error ?? null,
-      translations: parseStoredTranslations(row.translations),
-    };
+    return stateFromDatabaseRow(row);
+  }
+
+  /** Two page-sized reads replace two database round trips per document. */
+  async readBackfillSnapshot(
+    uid: string,
+    documentIds: readonly string[],
+    locales: readonly string[],
+  ): Promise<TranslationBackfillSnapshot> {
+    const states = new Map<string, TranslationStateRow>();
+    const jobs = new Map<string, TranslationJobSnapshot>();
+    if (documentIds.length === 0 || locales.length === 0) return { states, jobs };
+
+    const [stateRows, jobRows]: [any[], any[]] = await Promise.all([
+      this.strapi.db
+        .connection(TRANSLATION_STATE_TABLE)
+        .where({ uid })
+        .whereIn('document_id', [...documentIds])
+        .whereIn('locale', [...locales]),
+      this.strapi.db
+        .connection(TRANSLATION_OUTBOX_TABLE)
+        .where({ uid })
+        .whereIn('document_id', [...documentIds])
+        .whereIn('target_locale', [...locales])
+        .andWhere((builder: any) =>
+          builder
+            .whereNull('outcome_code')
+            .orWhereNot('outcome_code', 'unchanged-terminal-failure'),
+        )
+        .orderBy('id', 'desc'),
+    ]);
+
+    for (const row of stateRows ?? []) {
+      states.set(
+        translationSnapshotKey(String(row.document_id), String(row.locale)),
+        stateFromDatabaseRow(row),
+      );
+    }
+    for (const row of jobRows ?? []) {
+      const key = translationSnapshotKey(
+        String(row.document_id),
+        String(row.target_locale),
+      );
+      if (!jobs.has(key)) jobs.set(key, jobSnapshotFromDatabaseRow(row));
+    }
+    return { states, jobs };
   }
 
   async upsertState(
@@ -921,6 +1000,8 @@ export class TranslationOutboxStore {
       lastError: string | null;
       /** The delivered leaf translations — the durable translation memory. */
       translations: Record<string, string> | null;
+      /** Null until the corresponding locale row has been proven/published. */
+      publishedPlanHash?: string | null;
     },
   ): Promise<void> {
     const values = {
@@ -931,12 +1012,25 @@ export class TranslationOutboxStore {
       last_error: state.lastError,
       translations:
         state.translations === null ? null : JSON.stringify(state.translations),
+      published_plan_hash: state.publishedPlanHash ?? null,
     };
     await this.strapi.db
       .connection(TRANSLATION_STATE_TABLE)
       .insert({ uid, document_id: documentId, locale, ...values })
       .onConflict(['uid', 'document_id', 'locale'])
       .merge(values);
+  }
+
+  async recordPublishedPlanHash(
+    uid: string,
+    documentId: string,
+    locale: string,
+    planHash: string,
+  ): Promise<void> {
+    await this.strapi.db
+      .connection(TRANSLATION_STATE_TABLE)
+      .where({ uid, document_id: documentId, locale })
+      .update({ published_plan_hash: planHash });
   }
 
   async deleteState(
@@ -956,12 +1050,7 @@ export class TranslationOutboxStore {
     uid: string,
     documentId: string,
     locale: string,
-  ): Promise<{
-    status: string;
-    attemptCount: number;
-    lastError: string | null;
-    sourceHash: string | null;
-  } | null> {
+  ): Promise<TranslationJobSnapshot | null> {
     const query = this.strapi.db
       .connection(TRANSLATION_OUTBOX_TABLE)
       .where({ uid, document_id: documentId, target_locale: locale });
@@ -974,12 +1063,7 @@ export class TranslationOutboxStore {
       .orderBy('id', 'desc')
       .first();
     if (!row) return null;
-    return {
-      status: String(row.status),
-      attemptCount: Number(row.attempt_count),
-      lastError: row.last_error ?? null,
-      sourceHash: row.source_hash ? String(row.source_hash) : null,
-    };
+    return jobSnapshotFromDatabaseRow(row);
   }
 
   /**

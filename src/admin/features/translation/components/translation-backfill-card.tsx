@@ -102,6 +102,7 @@ export function TranslationBackfillCard({ translationEnabled }: { translationEna
   const [statusError, setStatusError] = React.useState<string | null>(null);
   const [estimate, setEstimate] = React.useState<BackfillEstimate | null>(null);
   const [starting, setStarting] = React.useState(false);
+  const [cancelling, setCancelling] = React.useState(false);
   const [confirming, setConfirming] = React.useState(false);
   const [confirmingMode, setConfirmingMode] = React.useState<'all' | 'repair'>('all');
   // The run this card started and still owes feedback for (estimate box or
@@ -124,7 +125,7 @@ export function TranslationBackfillCard({ translationEnabled }: { translationEna
   React.useEffect(() => void load(), [load]);
 
   const run: BackfillRun | null = status?.backfill ?? null;
-  const running = run?.status === 'running';
+  const running = run?.status === 'running' || run?.status === 'pending';
   const busy = status ? queueBusy(queueSummary(status)) : false;
   React.useEffect(() => {
     if (!busy && !running) return;
@@ -135,12 +136,14 @@ export function TranslationBackfillCard({ translationEnabled }: { translationEna
   // Completion of the run this card started: estimate → summary box; enqueue
   // → toast with the counts; failure → danger toast with the CMS error.
   React.useEffect(() => {
-    if (!run || run.status === 'running' || trackedRun.current !== run.id) return;
+    if (!run || ['pending', 'running'].includes(run.status) || trackedRun.current !== run.id) return;
     trackedRun.current = null;
-    if (run.status === 'failed') {
+    if (run.status === 'failed' || run.status === 'cancelled') {
       toggleNotification({
-        type: 'danger',
-        message: `${run.dryRun ? 'Estimate' : 'Backfill'} failed: ${run.error ?? 'unknown error'}`,
+        type: run.status === 'cancelled' ? 'warning' : 'danger',
+        message: run.status === 'cancelled'
+          ? 'Backfill scan stopped. Jobs already queued are still being processed.'
+          : `${run.dryRun ? 'Estimate' : 'Backfill'} failed: ${run.error ?? 'unknown error'}`,
       });
       return;
     }
@@ -175,10 +178,33 @@ export function TranslationBackfillCard({ translationEnabled }: { translationEna
     }
   };
 
+  const cancel = async () => {
+    if (!run || !['pending', 'running'].includes(run.status)) return;
+    setCancelling(true);
+    try {
+      const stopped = unwrapBackfillStart(
+        await post(`/translation/backfill/${run.id}/cancel`, {}),
+      );
+      trackedRun.current = null;
+      setStatus((previous) => previous ? { ...previous, backfill: stopped } : previous);
+      toggleNotification({
+        type: 'warning',
+        message: 'Backfill scan stopped. Jobs already queued were not deleted.',
+      });
+    } catch (error) {
+      toggleNotification({ type: 'danger', message: translationError(error) });
+    } finally {
+      setCancelling(false);
+      void load();
+    }
+  };
+
   if (hidden) return null;
 
   const active = status?.enabled === true;
-  const controlsLocked = starting || running;
+  const controlsLocked = starting || cancelling || running;
+  const runnerLate = run?.status === 'pending' &&
+    Date.now() - new Date(run.startedAt).getTime() > 30_000;
 
   return (
     <Box paddingTop={5}>
@@ -221,6 +247,17 @@ export function TranslationBackfillCard({ translationEnabled }: { translationEna
           >
             Queue all
           </Button>
+          {running ? (
+            <Button
+              variant="danger-light"
+              size="S"
+              loading={cancelling}
+              disabled={cancelling}
+              onClick={() => void cancel()}
+            >
+              Stop scan
+            </Button>
+          ) : null}
         </Flex>
       </Flex>
       <Box paddingTop={3}>
@@ -228,14 +265,25 @@ export function TranslationBackfillCard({ translationEnabled }: { translationEna
         {statusError ? (
           <Typography tag="p" variant="pi" textColor="danger600">{statusError}</Typography>
         ) : null}
-        {run?.status === 'running' ? (
+        {run && ['pending', 'running'].includes(run.status) ? (
           <Typography tag="p" variant="pi" textColor="primary600">
             {describeBackfillProgress(run)}
+          </Typography>
+        ) : null}
+        {runnerLate ? (
+          <Typography tag="p" variant="pi" textColor="warning700">
+            The maintenance runner has not claimed this scan. Check the
+            strapi-maintenance container before waiting or starting another run.
           </Typography>
         ) : null}
         {run?.status === 'failed' ? (
           <Typography tag="p" variant="pi" textColor="danger600">
             {`Last ${run.dryRun ? 'estimate' : 'backfill'} failed: ${run.error ?? 'unknown error'}`}
+          </Typography>
+        ) : null}
+        {run?.status === 'cancelled' ? (
+          <Typography tag="p" variant="pi" textColor="warning700">
+            Last backfill scan was stopped. Jobs already queued continue normally.
           </Typography>
         ) : null}
         {run?.status === 'done' && !run.dryRun && run.result ? (

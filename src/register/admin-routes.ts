@@ -245,6 +245,14 @@ export function registerTranslationRoutes(strapi: Core.Strapi): void {
         },
       },
       {
+        method: 'POST',
+        path: '/backfill/:id/cancel',
+        handler: 'api::translation.translation.cancelBackfill',
+        config: {
+          policies: ['admin::isAuthenticatedAdmin', 'global::super-admin-only'],
+        },
+      },
+      {
         method: 'GET',
         path: '/outbox-status',
         handler: 'api::translation.translation.outboxStatus',

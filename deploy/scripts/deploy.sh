@@ -72,13 +72,14 @@ APP_PORT="${APP_PORT:-$(read_env APP_PORT)}"
 APP_PORT="${APP_PORT:-1337}"
 RENDER_PORT="${RENDER_PORT:-$(read_env RENDER_PORT)}"
 RENDER_PORT="${RENDER_PORT:-1338}"
-# Both Strapi containers share one image and env file; `strapi` keeps the
-# admin panel + cron on APP_PORT, `strapi-render` serves render traffic on
-# RENDER_PORT with cron disabled. Order matters at startup — see the deploy
-# section below.
+# All Strapi roles share one image and env file: `strapi` keeps the admin
+# panel + dispatchers, `strapi-render` serves render traffic, and the
+# CPU-limited `strapi-maintenance` process claims catalogue scans. Order
+# matters at startup — see the deploy section below.
 ADMIN_SERVICE="strapi"
 RENDER_SERVICE="strapi-render"
-SERVICES="${ADMIN_SERVICE} ${RENDER_SERVICE}"
+MAINTENANCE_SERVICE="strapi-maintenance"
+SERVICES="${ADMIN_SERVICE} ${RENDER_SERVICE} ${MAINTENANCE_SERVICE}"
 # APP_BIND (the extra VPC-private-IP publish) is read straight from ${ENV_FILE}
 # by `docker compose --env-file` interpolation — the compose `:?` guard aborts
 # the deploy if it is missing — so deploy.sh does not need to handle it here.
@@ -142,8 +143,8 @@ wait_for_healthy() {
 # reconciliation steps in src/index.ts bootstrap; two processes doing that at
 # once race on DDL that is not all lock-guarded (e.g. the check-then-
 # createTable in database/site-selection-reconciliation.js). Letting the admin
-# container finish first means the render container boots against an already
-# reconciled schema and its own reconcilers become no-ops.
+# container finish first means the other roles boot against an already
+# reconciled schema and their own reconcilers become no-ops.
 # No --remove-orphans here: combined with a single-service `up` its scope has
 # differed across Compose versions, and removing the sibling container mid
 # deploy is not worth the hygiene. Run `docker compose ... down
@@ -155,6 +156,10 @@ wait_for_healthy "${ADMIN_SERVICE}"
 log "Starting ${RENDER_SERVICE} ..."
 compose up -d "${RENDER_SERVICE}"
 wait_for_healthy "${RENDER_SERVICE}"
+
+log "Starting ${MAINTENANCE_SERVICE} ..."
+compose up -d "${MAINTENANCE_SERVICE}"
+wait_for_healthy "${MAINTENANCE_SERVICE}"
 
 # ── Verify health endpoints ─────────────────────────────────────────────────
 

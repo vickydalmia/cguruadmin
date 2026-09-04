@@ -5,6 +5,7 @@ import type { Core } from '@strapi/strapi';
 import { z } from 'zod';
 import { localizedApiUids } from '../../../translation/backfill';
 import {
+  cancelTranslationBackfill,
   currentBackfillRun,
   startTranslationBackfill,
 } from '../../../translation/backfill-run';
@@ -150,6 +151,25 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     }
     ctx.status = 202;
     ctx.body = { accepted: true, run };
+  },
+
+  /** Stop only the durable catalogue scan; already-enqueued jobs stay live. */
+  async cancelBackfill(ctx: any) {
+    const id = String(ctx.params?.id ?? '');
+    if (!id) return badRequest(ctx, 'Backfill run id is required.');
+    const result = await cancelTranslationBackfill(strapi, id);
+    ctx.set('Cache-Control', 'private, no-store');
+    if (!result.run) {
+      ctx.status = 404;
+      ctx.body = { error: 'Translation backfill run not found.' };
+      return;
+    }
+    if (!result.cancelled) {
+      ctx.status = 409;
+      ctx.body = { error: 'Translation backfill is already finished.', run: result.run };
+      return;
+    }
+    ctx.body = { cancelled: true, run: result.run };
   },
 
   /** Dispatcher + queue health, cost-today, backlog, and the backfill run. */

@@ -12,6 +12,7 @@ const receiptIsr = require('../../database/migrations/2026.07.29T12.00.00.add-is
 const createTranslation = require('../../database/migrations/2026.08.30T00.00.00.create-translation-outbox.js');
 const dependencyMigration = require('../../database/migrations/2026.09.04T00.00.00.translation-dependencies-and-isr-coalescing.js');
 const reliabilityMigration = require('../../database/migrations/2026.09.05T00.00.00.translation-isr-reliability.js');
+const performanceMigration = require('../../database/migrations/2026.09.06T00.00.00.translation-backfill-performance.js');
 
 describe('translation/ISR reliability migrations on SQLite', () => {
   let knex: Knex;
@@ -56,6 +57,8 @@ describe('translation/ISR reliability migrations on SQLite', () => {
 
     await dependencyMigration.up(knex);
     await reliabilityMigration.up(knex);
+    await performanceMigration.up(knex);
+    await performanceMigration.up(knex);
     await reliabilityMigration.up(knex);
 
     const rows = await knex('isr_outbox').orderBy('id');
@@ -92,11 +95,14 @@ describe('translation/ISR reliability migrations on SQLite', () => {
     await expect(knex.schema.hasColumn('translation_outbox', 'source_hash')).resolves.toBe(true);
     await expect(knex.schema.hasColumn('translation_outbox', 'outcome_code')).resolves.toBe(true);
     await expect(knex.schema.hasTable('translation_backfill_runs')).resolves.toBe(true);
+    await expect(knex.schema.hasColumn('translation_backfill_runs', 'checkpoint')).resolves.toBe(true);
+    await expect(knex.schema.hasColumn('translation_state', 'published_plan_hash')).resolves.toBe(true);
   });
 
   it('claims jobs and wakes a blocked parent exactly once on SQLite', async () => {
     await dependencyMigration.up(knex);
     await reliabilityMigration.up(knex);
+    await performanceMigration.up(knex);
     const old = new Date('2020-01-01T00:00:00.000Z');
     const dependency = {
       path: 'coupons.0',
@@ -206,6 +212,7 @@ describe('translation/ISR reliability migrations on SQLite', () => {
   it('reports only the latest job per document while retaining failure history', async () => {
     await dependencyMigration.up(knex);
     await reliabilityMigration.up(knex);
+    await performanceMigration.up(knex);
     const now = new Date();
     const base = {
       uid: 'api::coupon.coupon',
@@ -253,5 +260,91 @@ describe('translation/ISR reliability migrations on SQLite', () => {
     expect(summary.counts).toEqual({ delivered: 1, blocked: 1 });
     expect(summary.historicalFailures).toBe(1);
     expect(summary.deliveredToday).toBe(1);
+  });
+
+  it('loads page-sized state and latest-job snapshots in two batched reads', async () => {
+    await dependencyMigration.up(knex);
+    await reliabilityMigration.up(knex);
+    await performanceMigration.up(knex);
+    const now = new Date();
+    await knex('translation_state').insert([
+      {
+        uid: 'api::store.store',
+        document_id: 'store-a',
+        locale: 'ar',
+        source_hash: 'source-a',
+        published_plan_hash: 'plan-a',
+        translated_at: now,
+        needs_review: false,
+        translations: JSON.stringify({ name: 'متجر' }),
+      },
+      {
+        uid: 'api::store.store',
+        document_id: 'outside-page',
+        locale: 'ar',
+        source_hash: 'outside',
+        translated_at: now,
+        needs_review: false,
+      },
+    ]);
+    const base = {
+      event_key: 'api::store.store:store-a:ar',
+      uid: 'api::store.store',
+      document_id: 'store-a',
+      target_locale: 'ar',
+      kind: 'translate',
+      force: false,
+      next_attempt_at: now,
+      reason: 'test',
+      created_at: now,
+    };
+    await knex('translation_outbox').insert([
+      {
+        ...base,
+        status: 'failed',
+        attempt_count: 1,
+        source_hash: 'old-source',
+        outcome_code: 'failed',
+        last_error: 'old failure',
+      },
+      {
+        ...base,
+        status: 'delivered',
+        attempt_count: 0,
+        source_hash: 'source-a',
+        outcome_code: 'delivered',
+        delivered_at: now,
+      },
+      {
+        ...base,
+        status: 'failed',
+        attempt_count: 0,
+        source_hash: 'source-a',
+        outcome_code: 'unchanged-terminal-failure',
+        last_error: 'irrelevant validation history',
+      },
+    ]);
+    const store = new TranslationOutboxStore(
+      { db: { connection: knex } } as any,
+      120_000,
+      300_000,
+    );
+
+    const snapshot = await store.readBackfillSnapshot(
+      'api::store.store',
+      ['store-a'],
+      ['ar'],
+    );
+
+    expect(snapshot.states.get('store-a\u0000ar')).toMatchObject({
+      sourceHash: 'source-a',
+      publishedPlanHash: 'plan-a',
+      translations: { name: 'متجر' },
+    });
+    expect(snapshot.jobs.get('store-a\u0000ar')).toMatchObject({
+      status: 'delivered',
+      sourceHash: 'source-a',
+    });
+    expect(snapshot.states.has('outside-page\u0000ar')).toBe(false);
   });
 });

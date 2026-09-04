@@ -78,10 +78,9 @@ import { primeEnabledContentLocales } from './translation/locales/registry';
 import {
   startTranslationOutbox,
   stopTranslationOutbox,
-  translationOutboxRunning,
 } from './translation/outbox/runtime';
 import {
-  resumeTranslationBackfillRun,
+  startTranslationBackfillRunner,
   stopTranslationBackfillRecovery,
 } from './translation/backfill-run';
 
@@ -304,9 +303,7 @@ export default {
     }
     if (translationBootstrapReady) {
       await startTranslationOutbox(strapi);
-      if (translationOutboxRunning()) {
-        await resumeTranslationBackfillRun(strapi);
-      }
+      startTranslationBackfillRunner(strapi);
     }
 
     startIsrOutbox(strapi);

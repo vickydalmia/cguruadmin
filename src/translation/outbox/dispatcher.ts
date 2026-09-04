@@ -704,6 +704,7 @@ export class TranslationDispatcher {
           : null,
         lastError: null,
         translations: Object.fromEntries(translations),
+        publishedPlanHash: null,
       });
     }
 
@@ -740,6 +741,12 @@ export class TranslationDispatcher {
         translations,
       );
       if (inspection.current) {
+        await this.store.recordPublishedPlanHash?.(
+          job.uid,
+          job.documentId,
+          job.targetLocale,
+          inspection.planHash,
+        );
         if (latestRelations.optional.length > 0) {
           return {
             outcome: {
@@ -798,6 +805,7 @@ export class TranslationDispatcher {
           : null,
         lastError: cause instanceof Error ? cause.message : String(cause),
         translations: Object.fromEntries(translations),
+        publishedPlanHash: null,
       });
       throw new TranslationError('TRANSLATION_WRITE_REJECTED', {
         cause,
@@ -814,6 +822,7 @@ export class TranslationDispatcher {
         : null,
       lastError: null,
       translations: Object.fromEntries(translations),
+      publishedPlanHash: writeResult.planHash,
     });
 
     // 7. Optional forward-curation joins may be repaired after the base entity

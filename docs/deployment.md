@@ -315,6 +315,8 @@ TRANSLATION_OUTBOX_MAX_BACKOFF_MS=21600000
 TRANSLATION_OUTBOX_RETENTION_DAYS=30
 TRANSLATION_OUTBOX_ALERT_AFTER_ATTEMPTS=5
 TRANSLATION_OUTBOX_BACKLOG_ALERT_MS=3600000
+TRANSLATION_BACKFILL_RUNNER_ENABLED=true
+TRANSLATION_BACKFILL_MAX_DOCS_PER_SECOND=20
 TRANSLATION_NIGHTLY_CONSISTENCY_ENABLED=false
 
 # Persistent-ISR transactional outbox
@@ -426,9 +428,15 @@ older than this contract.
 
 Catalogue backfills and dry-run estimates are database-backed background runs,
 not request-bound scans. Only one `translation_backfill_runs` row may be active
-for the shared database; the admin dispatcher resumes a stale lease after a
-restart. A `202` means the scan was accepted, while progress and the final
-selection/cost result are read from `/translation/outbox-status`.
+for the shared database. Production Compose runs the scanner only in the
+CPU-limited `strapi-maintenance` service; `strapi` and `strapi-render` explicitly
+disable it. The scanner reads 50-document pages with a translation-only
+population graph, caps its default pace at 20 documents/second and resumes from
+the last committed cursor after restart. A `202` means the scan was accepted,
+while progress and the final selection/cost result are read from
+`/translation/outbox-status`. Super Admins can stop only the scan with
+`POST /translation/backfill/:id/cancel`; jobs committed by earlier pages remain
+queued.
 
 Defaults and every queue/cost control are defined in the cross-system
 [environment guide](https://github.com/vickydalmia/cguru-ui/blob/main/docs/environment.md#cms-translation-engine).

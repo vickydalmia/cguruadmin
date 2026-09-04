@@ -72,8 +72,9 @@ export type BackfillRun = {
   mode: 'all' | 'repair';
   dryRun: boolean;
   force: boolean;
-  status: 'running' | 'done' | 'failed';
+  status: 'pending' | 'running' | 'cancelled' | 'done' | 'failed';
   startedAt: string;
+  heartbeatAt: string | null;
   finishedAt: string | null;
   progress: BackfillProgress;
   result: (BackfillResult & Partial<BackfillEstimate>) | null;
@@ -115,7 +116,7 @@ export function unwrapBackfillRun(value: unknown): BackfillRun | null {
   const run = value as any;
   if (
     typeof run.id !== 'string' ||
-    !['running', 'done', 'failed'].includes(run.status) ||
+    !['pending', 'running', 'cancelled', 'done', 'failed'].includes(run.status) ||
     !run.progress ||
     typeof run.progress !== 'object'
   ) {
@@ -128,6 +129,7 @@ export function unwrapBackfillRun(value: unknown): BackfillRun | null {
     force: run.force === true,
     status: run.status,
     startedAt: String(run.startedAt ?? ''),
+    heartbeatAt: typeof run.heartbeatAt === 'string' ? run.heartbeatAt : null,
     finishedAt: typeof run.finishedAt === 'string' ? run.finishedAt : null,
     progress: {
       uidsTotal: Number(run.progress.uidsTotal ?? 0) || 0,
@@ -160,7 +162,11 @@ export function describeBackfillProgress(run: BackfillRun): string {
     : progress.uidsTotal > 0 && progress.uidsDone >= progress.uidsTotal
       ? 'finishing'
       : 'starting';
-  const verb = run.dryRun ? 'Estimating' : 'Repairing';
+  const verb = run.status === 'pending'
+    ? 'Waiting for the maintenance runner'
+    : run.dryRun
+      ? 'Estimating'
+      : 'Repairing';
   return (
     `${verb}: ${stage} — ${formatCount(progress.documentsScanned)} document(s) scanned, ` +
     `${formatCount(progress.selected)} selected` +

@@ -74,6 +74,7 @@ describe('translation backfill client helpers', () => {
       force: false,
       status: 'running',
       startedAt: '2026-09-04T10:00:00.000Z',
+      heartbeatAt: '2026-09-04T10:01:00.000Z',
       finishedAt: null,
       progress: {
         uidsTotal: 7,
@@ -90,6 +91,7 @@ describe('translation backfill client helpers', () => {
     expect(unwrapBackfillStart({ data: { accepted: true, run } })).toMatchObject({
       id: 'run-1',
       status: 'running',
+      heartbeatAt: '2026-09-04T10:01:00.000Z',
     });
     expect(() => unwrapBackfillStart({ data: { accepted: true } })).toThrow(/unexpected/);
 
@@ -103,6 +105,27 @@ describe('translation backfill client helpers', () => {
     expect(
       unwrapOutboxStatus({ data: { enabled: true, dispatcher: null, outbox: null } }).backfill,
     ).toBeNull();
+  });
+
+  it('describes a run waiting for the isolated maintenance process', () => {
+    const run = unwrapBackfillStart({
+      data: {
+        run: {
+          id: 'run-pending',
+          mode: 'repair',
+          dryRun: false,
+          force: false,
+          status: 'pending',
+          startedAt: '2026-09-04T10:00:00.000Z',
+          heartbeatAt: null,
+          finishedAt: null,
+          progress: {},
+          result: null,
+          error: null,
+        },
+      },
+    });
+    expect(describeBackfillProgress(run)).toContain('Waiting for the maintenance runner');
   });
 
   it('formats money and uids for the card', () => {

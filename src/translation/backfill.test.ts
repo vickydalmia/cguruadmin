@@ -16,8 +16,9 @@ const mocks = vi.hoisted(() => ({
   })),
   readState: vi.fn(),
   activeJob: vi.fn(),
-  loadPopulatedEntry: vi.fn(),
-  inspectLocaleVersion: vi.fn(),
+  loadPopulatedEntries: vi.fn(),
+  inspectPopulatedLocaleVersion: vi.fn(),
+  recordPublishedPlanHash: vi.fn(),
   collectTranslatableLeaves: vi.fn(() => []),
 }));
 
@@ -27,9 +28,27 @@ vi.mock('./outbox/runtime', () => ({
   translationStore: vi.fn(() => ({
     readState: mocks.readState,
     activeJob: mocks.activeJob,
+    recordPublishedPlanHash: mocks.recordPublishedPlanHash,
+    readBackfillSnapshot: async (uid: string, documentIds: string[], locales: string[]) => {
+      const states = new Map();
+      const jobs = new Map();
+      for (const documentId of documentIds) {
+        for (const locale of locales) {
+          const key = `${documentId}\u0000${locale}`;
+          const state = await mocks.readState(uid, documentId, locale);
+          const job = await mocks.activeJob(uid, documentId, locale);
+          if (state) states.set(key, state);
+          if (job) jobs.set(key, job);
+        }
+      }
+      return { states, jobs };
+    },
   })),
 }));
-vi.mock('./outbox/store', () => ({ insertTranslationJobsBulk: mocks.insertTranslationJobsBulk }));
+vi.mock('./outbox/store', () => ({
+  insertTranslationJobsBulk: mocks.insertTranslationJobsBulk,
+  translationSnapshotKey: (documentId: string, locale: string) => `${documentId}\u0000${locale}`,
+}));
 vi.mock('./ui-dictionary/enqueue', () => ({ enqueueUiDictionaryJobs: mocks.enqueueUiDictionaryJobs }));
 vi.mock('./ui-dictionary/store', () => ({
   UiDictionaryStore: class {
@@ -43,10 +62,17 @@ vi.mock('./ui-dictionary/store', () => ({
 }));
 vi.mock('./config', () => ({ translationConfigFromEnv: mocks.translationConfigFromEnv }));
 vi.mock('./writer', () => ({
-  loadPopulatedEntry: mocks.loadPopulatedEntry,
-  inspectLocaleVersion: mocks.inspectLocaleVersion,
+  loadPopulatedEntries: mocks.loadPopulatedEntries,
+  inspectPopulatedLocaleVersion: mocks.inspectPopulatedLocaleVersion,
+  localizedPlanHash: vi.fn(() => 'plan'),
 }));
-vi.mock('./field-map', () => ({ collectTranslatableLeaves: mocks.collectTranslatableLeaves }));
+vi.mock('./field-map', () => ({
+  collectTranslatableLeaves: mocks.collectTranslatableLeaves,
+  collectRelationTargets: vi.fn(() => []),
+  resolveRelationExistence: vi.fn(async () => ({ present: new Set() })),
+  buildLocalizedData: vi.fn(() => ({ data: {}, skippedRelations: [] })),
+}));
+vi.mock('./populate', () => ({ translationPopulate: vi.fn(() => ({})) }));
 vi.mock('./source-hash', () => ({ sourceContentHash: vi.fn(() => 'hash') }));
 vi.mock('./prompts', () => ({ translationPromptFingerprint: vi.fn(() => 'prompt') }));
 
@@ -177,7 +203,12 @@ describe('estimateTranslationBackfill — ui-dictionary', () => {
 describe('repair selection', () => {
   it('does not enqueue or estimate provider calls for expired offers', async () => {
     const query = vi.fn(() => ({
-      findMany: vi.fn(async () => [{ id: 1, documentId: 'expired-coupon' }]),
+      findMany: vi.fn(async () => [{
+        id: 1,
+        documentId: 'expired-coupon',
+        contentStatus: 'expired',
+        title: 'Old coupon',
+      }]),
     }));
     const expiredStrapi = {
       contentTypes: {
@@ -188,11 +219,6 @@ describe('repair selection', () => {
         transaction: vi.fn(async (callback) => callback({ trx: {} })),
       },
     } as any;
-    mocks.loadPopulatedEntry.mockResolvedValueOnce({
-      documentId: 'expired-coupon',
-      contentStatus: 'expired',
-      title: 'Old coupon',
-    });
     mocks.collectTranslatableLeaves.mockClear();
     mocks.readState.mockClear();
     mocks.insertTranslationJobsBulk.mockClear();
@@ -216,10 +242,14 @@ describe('repair selection', () => {
 
   it('separates current entries from provider-backed repairs', async () => {
     const query = vi.fn(() => ({
-      findMany: vi.fn(async () => [
-        { id: 1, documentId: 'current' },
-        { id: 2, documentId: 'missing' },
-      ]),
+      findMany: vi.fn(async (options: any) =>
+        options?.where?.locale === 'ar'
+          ? [{ documentId: 'current' }]
+          : [
+              { id: 1, documentId: 'current', name: 'current' },
+              { id: 2, documentId: 'missing', name: 'missing' },
+            ],
+      ),
     }));
     const repairStrapi = {
       contentTypes: {
@@ -230,21 +260,21 @@ describe('repair selection', () => {
         transaction: vi.fn(async (callback) => callback({ trx: {} })),
       },
     } as any;
-    mocks.loadPopulatedEntry.mockImplementation(async (_s, _u, documentId) => ({
-      documentId,
-      name: documentId,
-    }));
     mocks.collectTranslatableLeaves.mockImplementation((_s, _u, source) => [
       { path: 'name', kind: 'plain', value: source.name },
     ]);
     mocks.readState.mockImplementation(async (_u, documentId) =>
       documentId === 'current'
-        ? { sourceHash: 'hash', translations: { name: 'حالي' } }
+        ? {
+            sourceHash: 'hash',
+            publishedPlanHash: 'plan',
+            translations: { name: 'حالي' },
+          }
         : null,
     );
     mocks.activeJob.mockResolvedValue(null);
-    mocks.inspectLocaleVersion.mockResolvedValue({ current: true, skippedRelations: [] });
     mocks.insertTranslationJobsBulk.mockClear();
+    mocks.loadPopulatedEntries.mockClear();
 
     const result = await enqueueTranslationBackfill(repairStrapi, {
       mode: 'repair',
@@ -262,11 +292,63 @@ describe('repair selection', () => {
     expect(mocks.insertTranslationJobsBulk).toHaveBeenCalledWith({}, [
       expect.objectContaining({ documentId: 'missing', kind: 'translate' }),
     ]);
+    expect(mocks.loadPopulatedEntries).not.toHaveBeenCalled();
+  });
+
+  it('backfills a legacy plan hash once without enqueueing a write', async () => {
+    const query = vi.fn(() => ({
+      findMany: vi.fn(async (options: any) =>
+        options?.where?.locale === 'ar'
+          ? [{ documentId: 'legacy-current' }]
+          : [{ id: 1, documentId: 'legacy-current', name: 'Current' }],
+      ),
+    }));
+    const repairStrapi = {
+      contentTypes: {
+        'api::store.store': { pluginOptions: { i18n: { localized: true } } },
+      },
+      db: {
+        query,
+        transaction: vi.fn(async (callback) => callback({ trx: {} })),
+      },
+    } as any;
+    mocks.collectTranslatableLeaves.mockReturnValue([
+      { path: 'name', kind: 'plain', value: 'Current' },
+    ]);
+    mocks.readState.mockResolvedValue({
+      sourceHash: 'hash',
+      publishedPlanHash: null,
+      translations: { name: 'حالي' },
+    });
+    mocks.activeJob.mockResolvedValue(null);
+    mocks.loadPopulatedEntries.mockResolvedValue([{ documentId: 'legacy-current' }]);
+    mocks.inspectPopulatedLocaleVersion.mockReturnValue({
+      current: true,
+      skippedRelations: [],
+      planHash: 'plan',
+    });
+    mocks.recordPublishedPlanHash.mockClear();
+    mocks.insertTranslationJobsBulk.mockClear();
+
+    const result = await enqueueTranslationBackfill(repairStrapi, {
+      mode: 'repair',
+      uids: ['api::store.store'],
+      locales: ['ar'],
+    });
+
+    expect(result).toMatchObject({ selected: 0, enqueued: 0, skippedCurrent: 1 });
+    expect(mocks.recordPublishedPlanHash).toHaveBeenCalledWith(
+      'api::store.store',
+      'legacy-current',
+      'ar',
+      'plan',
+    );
+    expect(mocks.insertTranslationJobsBulk).not.toHaveBeenCalled();
   });
 
   it('skips the plan inspection in mode "all" and selects every entry', async () => {
     const query = vi.fn(() => ({
-      findMany: vi.fn(async () => [{ id: 1, documentId: 'current' }]),
+      findMany: vi.fn(async () => [{ id: 1, documentId: 'current', name: 'x' }]),
     }));
     const allStrapi = {
       contentTypes: {
@@ -274,11 +356,10 @@ describe('repair selection', () => {
       },
       db: { query, transaction: vi.fn(async (callback) => callback({ trx: {} })) },
     } as any;
-    mocks.loadPopulatedEntry.mockResolvedValue({ documentId: 'current', name: 'x' });
     mocks.collectTranslatableLeaves.mockReturnValue([{ path: 'name', kind: 'plain', value: 'x' }]);
     mocks.readState.mockResolvedValue({ sourceHash: 'hash', translations: { name: 'حالي' } });
     mocks.activeJob.mockResolvedValue(null);
-    mocks.inspectLocaleVersion.mockClear();
+    mocks.inspectPopulatedLocaleVersion.mockClear();
 
     const result = await enqueueTranslationBackfill(allStrapi, {
       mode: 'all',
@@ -288,18 +369,17 @@ describe('repair selection', () => {
 
     // Hash-current memory rebuilds without a provider call; the inspection
     // is repair-only because it is the expensive half of the scan.
-    expect(mocks.inspectLocaleVersion).not.toHaveBeenCalled();
+    expect(mocks.inspectPopulatedLocaleVersion).not.toHaveBeenCalled();
     expect(result).toMatchObject({ selected: 1, skippedCurrent: 0, providerCallsExpected: 0 });
   });
 
   it('commits the enqueue per page in bounded transactions, never one for the whole catalogue', async () => {
-    // 1,200 documents in two pages of 1,000 + 200 → three transactions of at
-    // most 500 inputs each for the first page, one for the second. One
-    // transaction for everything would hold an advisory lock per document and
-    // exhaust Postgres's shared lock table on a real catalogue.
+    // 120 documents in pages of 50 + 50 + 20. Every page commits before the
+    // next one is scanned, bounding both population and advisory locks.
     const pages = [
-      Array.from({ length: 1_000 }, (_, i) => ({ id: i + 1, documentId: `d${i + 1}` })),
-      Array.from({ length: 200 }, (_, i) => ({ id: 1_001 + i, documentId: `d${1_001 + i}` })),
+      Array.from({ length: 50 }, (_, i) => ({ id: i + 1, documentId: `d${i + 1}` })),
+      Array.from({ length: 50 }, (_, i) => ({ id: 51 + i, documentId: `d${51 + i}` })),
+      Array.from({ length: 20 }, (_, i) => ({ id: 101 + i, documentId: `d${101 + i}` })),
     ];
     let call = 0;
     const query = vi.fn(() => ({
@@ -312,7 +392,6 @@ describe('repair selection', () => {
       },
       db: { query, transaction },
     } as any;
-    mocks.loadPopulatedEntry.mockImplementation(async (_s, _u, documentId) => ({ documentId }));
     mocks.collectTranslatableLeaves.mockReturnValue([{ path: 'name', kind: 'plain', value: 'x' }]);
     mocks.readState.mockResolvedValue(null);
     mocks.activeJob.mockResolvedValue(null);
@@ -326,13 +405,13 @@ describe('repair selection', () => {
       onProgress: (p) => progress.push(p.enqueued),
     });
 
-    expect(result.enqueued).toBe(1_200);
+    expect(result.enqueued).toBe(120);
     expect(transaction).toHaveBeenCalledTimes(3);
     const sizes = mocks.insertTranslationJobsBulk.mock.calls.map((c: any[]) => c[1].length);
-    expect(sizes).toEqual([500, 500, 200]);
-    expect(Math.max(...progress)).toBe(1_200);
+    expect(sizes).toEqual([50, 50, 20]);
+    expect(Math.max(...progress)).toBe(120);
     // Progress is reported after each page, so the first page's total is seen
     // before the second page is scanned.
-    expect(progress).toContain(1_000);
+    expect(progress).toContain(50);
   });
 });

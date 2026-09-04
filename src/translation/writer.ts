@@ -5,6 +5,7 @@
 // ISR outbox event that revalidates the localized paths. The locale upsert
 // semantics are core's (repository.js: update with a locale that has no row
 // CREATES it, copying non-localized fields).
+import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { Core } from '@strapi/strapi';
 import {
@@ -18,6 +19,7 @@ import {
 import { runWithTranslationWriteContext } from './write-flag';
 import { sanitizeRichtextData } from '../utils/sanitize-richtext';
 import { normaliseTextFields } from '../utils/text-field-validation';
+import { translationPopulate } from './populate';
 
 /**
  * The write pipeline's mutators (richtext allowlist, trim/collapse) change
@@ -26,11 +28,20 @@ import { normaliseTextFields } from '../utils/text-field-validation';
  * stored row. Otherwise a translation with a trailing space is "not current"
  * forever: rewritten and re-invalidated on every sweep.
  */
-function normalisedPlanData(uid: string, data: Record<string, unknown>) {
+export function normalisedPlanData(uid: string, data: Record<string, unknown>) {
   const clone = structuredClone(data);
   sanitizeRichtextData(uid, clone);
   normaliseTextFields(uid, 'update', clone);
   return clone;
+}
+
+export function localizedPlanHash(
+  uid: string,
+  data: Record<string, unknown>,
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify(normalisedPlanData(uid, data)))
+    .digest('hex');
 }
 
 export class TranslationDependencyBlockedError extends Error {
@@ -46,9 +57,9 @@ export class TranslationDependencyBlockedError extends Error {
 }
 
 /**
- * Deeply-populated source entry — everything the walker needs: components
- * (nested), media ids, relation documentIds. Built with the content-manager
- * populate-builder like i18n's own fill-from-locale service.
+ * Translation-populated source entry — everything the walker needs, without
+ * inverse mappedBy collections or Media Library folders. The schema-derived
+ * plan is cached per Strapi process (see populate.ts).
  */
 export async function loadPopulatedEntry(
   strapi: Core.Strapi,
@@ -56,20 +67,28 @@ export async function loadPopulatedEntry(
   documentId: string,
   locale: string,
 ): Promise<any | null> {
-  // The populate-builder service is itself a factory function; the Service
-  // type erases that, hence the cast (same shape i18n's fill-from-locale
-  // uses it with).
-  const populateBuilder = strapi
-    .plugin('content-manager')
-    .service('populate-builder') as unknown as (uid: string) => {
-    populateDeep(depth: number): { build(): Promise<any> };
-  };
-  const populate = await populateBuilder(uid).populateDeep(Infinity).build();
   return strapi.documents(uid as any).findOne({
     documentId,
     locale,
-    populate,
+    populate: translationPopulate(strapi, uid),
   } as any);
+}
+
+/** Bounded batch loader used by catalogue scans. */
+export async function loadPopulatedEntries(
+  strapi: Core.Strapi,
+  uid: string,
+  documentIds: readonly string[],
+  locale: string,
+): Promise<any[]> {
+  if (documentIds.length === 0) return [];
+  return (await strapi.db.query(uid as any).findMany({
+    where: {
+      locale,
+      documentId: { $in: [...documentIds] },
+    },
+    populate: translationPopulate(strapi, uid),
+  } as any)) ?? [];
 }
 
 export async function writeLocaleVersion(
@@ -83,6 +102,7 @@ export async function writeLocaleVersion(
   skippedRelations: LocalizedWritePlan['skippedRelations'];
   missingDependencies: RelationDependency[];
   created: boolean;
+  planHash: string;
 }> {
   const relations = await resolveRelationDependencies(
     strapi,
@@ -125,6 +145,7 @@ export async function writeLocaleVersion(
     skippedRelations: plan.skippedRelations,
     missingDependencies: relations.missing,
     created: !existing,
+    planHash: localizedPlanHash(uid, plan.data),
   };
 }
 
@@ -133,7 +154,58 @@ export type LocaleVersionInspection = {
   current: boolean;
   /** Relations absent from the target locale and therefore omitted from the plan. */
   skippedRelations: LocalizedWritePlan['skippedRelations'];
+  /** Fingerprint persisted after a successful/current publication. */
+  planHash: string;
 };
+
+export function inspectPopulatedLocaleVersion(
+  strapi: Core.Strapi,
+  uid: string,
+  targetEntry: any | null,
+  desired: LocalizedWritePlan,
+): LocaleVersionInspection {
+  const planHash = localizedPlanHash(uid, desired.data);
+  if (!targetEntry) {
+    return {
+      current: false,
+      skippedRelations: desired.skippedRelations,
+      planHash,
+    };
+  }
+
+  const targetTranslations = new Map(
+    collectTranslatableLeaves(strapi, uid, targetEntry).map((leaf) => [
+      leaf.path,
+      leaf.value,
+    ]),
+  );
+  const targetExistence = {
+    // The target entry is already populated with the same bounded graph.
+    // Every visible relation therefore exists in this locale.
+    present: new Set(
+      collectRelationReferences(strapi, uid, targetEntry).map(
+        ({ targetUid, documentId: targetDocumentId }) =>
+          `${targetUid}:${targetDocumentId}`,
+      ),
+    ),
+  };
+  const persisted = buildLocalizedData(
+    strapi,
+    uid,
+    targetEntry,
+    targetTranslations,
+    targetExistence,
+  );
+
+  return {
+    current: isDeepStrictEqual(
+      normalisedPlanData(uid, desired.data),
+      normalisedPlanData(uid, persisted.data),
+    ),
+    skippedRelations: desired.skippedRelations,
+    planHash,
+  };
+}
 
 /**
  * Determine whether a locale write would change anything, without running the
@@ -173,42 +245,7 @@ export async function inspectLocaleVersion(
     documentId,
     targetLocale,
   );
-  if (!targetEntry) {
-    return { current: false, skippedRelations: desired.skippedRelations };
-  }
-
-  const targetTranslations = new Map(
-    collectTranslatableLeaves(strapi, uid, targetEntry).map((leaf) => [
-      leaf.path,
-      leaf.value,
-    ]),
-  );
-  const targetExistence = {
-    // The target entry is already deeply populated. Every relation visible on
-    // it necessarily exists, so derive the keys locally instead of issuing a
-    // second batch of existence queries during every repair inspection.
-    present: new Set(
-      collectRelationReferences(strapi, uid, targetEntry).map(
-        ({ targetUid, documentId: targetDocumentId }) =>
-          `${targetUid}:${targetDocumentId}`,
-      ),
-    ),
-  };
-  const persisted = buildLocalizedData(
-    strapi,
-    uid,
-    targetEntry,
-    targetTranslations,
-    targetExistence,
-  );
-
-  return {
-    current: isDeepStrictEqual(
-      normalisedPlanData(uid, desired.data),
-      normalisedPlanData(uid, persisted.data),
-    ),
-    skippedRelations: desired.skippedRelations,
-  };
+  return inspectPopulatedLocaleVersion(strapi, uid, targetEntry, desired);
 }
 
 /** Remove a generated locale when its English source document is deleted. */
