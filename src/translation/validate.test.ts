@@ -357,6 +357,21 @@ describe('validateTranslatedBatch', () => {
     ]);
   });
 
+  it('requires target-language text for one-word notification headings', () => {
+    expect(
+      validateTranslatedBatch(
+        [leaf('notification.coupon.0.titleOverride', 'Sale')],
+        { 'notification.coupon.0.titleOverride': 'Sale' },
+        ARABIC,
+      ),
+    ).toEqual([
+      {
+        path: 'notification.coupon.0.titleOverride',
+        problems: ['untranslated-source', 'target-language-missing'],
+      },
+    ]);
+  });
+
   it('uses alphabetic marker labels when dense copy contains more than 26 facts', () => {
     const source = Array.from({ length: 28 }, (_, index) => `${index + 1}%`).join(' ');
     const mask = maskProtectedValues(source);

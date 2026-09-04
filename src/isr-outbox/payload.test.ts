@@ -222,6 +222,23 @@ describe('localizeTranslationPayload', () => {
     ).toEqual({ localePrefix: '/ar', paths: ['/ar/', '/ar/amazon/'] });
   });
 
+  it('keeps the canonical sitemap when localized route membership changes', () => {
+    expect(
+      localizeTranslationPayload(
+        {
+          paths: ['/', '/sitemap_index.xml', '/about-us/'],
+          scopes: ['sitemap', 'routes', 'chrome'],
+        },
+        'ar',
+        { routeMembershipChanged: true },
+      ),
+    ).toEqual({
+      localePrefix: '/ar',
+      paths: ['/', '/sitemap_index.xml', '/about-us/'],
+      scopes: ['sitemap', 'routes', 'chrome'],
+    });
+  });
+
   it('constrains global chrome invalidations to a locale prefix', () => {
     const payload = { all: true as const, scopes: ['chrome'] };
     expect(localizeTranslationPayload(payload, 'ar')).toEqual({

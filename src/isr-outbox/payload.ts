@@ -121,9 +121,9 @@ export function createOutboxPayload(
 
 /**
  * Narrow a localized content invalidation to the locale that was written.
- * The public sitemap currently contains default-locale URLs only. Existing
- * locale rows keep route membership, while creation/removal retains `routes`
- * so the inventory can admit or remove that exact localized path.
+ * Existing locale rows keep route membership, while creation/removal retains
+ * `routes` and the root sitemap work so the inventory and canonical sitemap
+ * can admit or remove that exact localized path atomically.
  */
 export function localizeTranslationPayload(
   payload: IsrOutboxPayload,
@@ -134,13 +134,14 @@ export function localizeTranslationPayload(
   if (!locale) return payload;
   const membershipChanged = options.routeMembershipChanged === true;
   const paths = (payload.paths ?? []).filter(
-    (path) => path !== SITEMAP_INDEX_PATH,
+    (path) => membershipChanged || path !== SITEMAP_INDEX_PATH,
   );
   const optionalPathSet = new Set(payload.optionalPaths ?? []);
   const optionalPaths = paths.filter((path) => optionalPathSet.has(path));
   const scopes = (payload.scopes ?? []).filter(
     (scope) =>
-      scope !== 'sitemap' && (membershipChanged || scope !== 'routes'),
+      (membershipChanged || scope !== 'sitemap') &&
+      (membershipChanged || scope !== 'routes'),
   );
 
   return {

@@ -81,25 +81,27 @@ export async function resolveRedeemDocument(
   },
 ): Promise<Record<string, unknown> | null> {
   const uid = REDEEM_UIDS[input.entityType];
-  const source = await strapi.documents(uid as any).findOne({
-    documentId: input.documentId,
-    locale: DEFAULT_CONTENT_LOCALE,
-    status: 'published',
-    fields: [...REDEEM_COMMON_FIELDS],
-    populate: REDEEM_POPULATE,
-  } as any);
+  const [source, localizedPresentation] = await Promise.all([
+    strapi.documents(uid as any).findOne({
+      documentId: input.documentId,
+      locale: DEFAULT_CONTENT_LOCALE,
+      status: 'published',
+      fields: [...REDEEM_COMMON_FIELDS],
+      populate: REDEEM_POPULATE,
+    } as any),
+    input.locale === DEFAULT_CONTENT_LOCALE
+      ? Promise.resolve(null)
+      : strapi.documents(uid as any).findOne({
+          documentId: input.documentId,
+          locale: input.locale,
+          status: 'published',
+          fields: [...REDEEM_PRESENTATION_FIELDS],
+          populate: REDEEM_PRESENTATION_POPULATE,
+        } as any),
+  ]);
   if (!source) return null;
 
-  let presentation: Record<string, unknown> | null = null;
-  if (input.locale !== DEFAULT_CONTENT_LOCALE) {
-    presentation = (await strapi.documents(uid as any).findOne({
-      documentId: input.documentId,
-      locale: input.locale,
-      status: 'published',
-      fields: [...REDEEM_PRESENTATION_FIELDS],
-      populate: REDEEM_PRESENTATION_POPULATE,
-    } as any)) as Record<string, unknown> | null;
-  }
+  const presentation = localizedPresentation as Record<string, unknown> | null;
 
   const merged = { ...(source as Record<string, unknown>) };
   if (typeof presentation?.title === 'string' && presentation.title.trim()) {

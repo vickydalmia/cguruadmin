@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  enabledContentLocales: vi.fn(async () => [{ code: 'ar' }, { code: 'hi' }]),
+  enabledContentLocales: vi.fn(async () => [
+    { code: 'ar', script: 'Arab' },
+    { code: 'hi', script: 'Deva' },
+  ]),
   wakeTranslationOutbox: vi.fn(),
   insertTranslationJobsBulk: vi.fn(async () => undefined),
   enqueueUiDictionaryJobs: vi.fn(async (_strapi: unknown, input: { locales?: readonly string[] }) => ({
@@ -293,6 +296,119 @@ describe('repair selection', () => {
       expect.objectContaining({ documentId: 'missing', kind: 'translate' }),
     ]);
     expect(mocks.loadPopulatedEntries).not.toHaveBeenCalled();
+  });
+
+  it('inspects structural singletons even when their published plan hash matches', async () => {
+    const query = vi.fn(() => ({
+      findMany: vi.fn(async (options: any) =>
+        options?.where?.locale === 'ar'
+          ? [{ documentId: 'footer' }]
+          : [{ id: 1, documentId: 'footer', title: 'Footer' }],
+      ),
+    }));
+    const footerStrapi = {
+      contentTypes: {
+        'api::footer.footer': {
+          kind: 'singleType',
+          pluginOptions: { i18n: { localized: true } },
+        },
+      },
+      db: {
+        query,
+        transaction: vi.fn(async (callback) => callback({ trx: {} })),
+      },
+    } as any;
+    mocks.collectTranslatableLeaves.mockReturnValue([
+      { path: 'title', kind: 'plain', value: 'Footer' },
+    ]);
+    mocks.readState.mockResolvedValue({
+      sourceHash: 'hash',
+      publishedPlanHash: 'plan',
+      translations: { title: 'التذييل' },
+    });
+    mocks.activeJob.mockResolvedValue(null);
+    mocks.loadPopulatedEntries.mockResolvedValue([{ documentId: 'footer' }]);
+    mocks.inspectPopulatedLocaleVersion.mockReturnValue({
+      current: false,
+      skippedRelations: [],
+      planHash: 'plan',
+    });
+    mocks.insertTranslationJobsBulk.mockClear();
+
+    const result = await enqueueTranslationBackfill(footerStrapi, {
+      mode: 'repair',
+      uids: ['api::footer.footer'],
+      locales: ['ar'],
+    });
+
+    expect(result).toMatchObject({ selected: 1, enqueued: 1, skippedCurrent: 0 });
+    expect(mocks.loadPopulatedEntries).toHaveBeenCalledWith(
+      footerStrapi,
+      'api::footer.footer',
+      ['footer'],
+      'ar',
+    );
+    expect(mocks.insertTranslationJobsBulk).toHaveBeenCalledWith({}, [
+      expect.objectContaining({
+        uid: 'api::footer.footer',
+        documentId: 'footer',
+        kind: 'relation-sync',
+      }),
+    ]);
+  });
+
+  it('repairs complete legacy memory whose notification heading stayed English', async () => {
+    const query = vi.fn(() => ({
+      findMany: vi.fn(async () => [
+        { id: 1, documentId: 'menu', title: 'Header Settings' },
+      ]),
+    }));
+    const menuStrapi = {
+      contentTypes: {
+        'api::menu.menu': {
+          kind: 'singleType',
+          pluginOptions: { i18n: { localized: true } },
+        },
+      },
+      db: {
+        query,
+        transaction: vi.fn(async (callback) => callback({ trx: {} })),
+      },
+    } as any;
+    mocks.collectTranslatableLeaves.mockReturnValue([
+      {
+        path: 'notification.coupon.0.titleOverride',
+        kind: 'plain',
+        value: 'Sale',
+      },
+    ]);
+    mocks.readState.mockResolvedValue({
+      sourceHash: 'hash',
+      publishedPlanHash: 'plan',
+      translations: { 'notification.coupon.0.titleOverride': 'Sale' },
+    });
+    mocks.activeJob.mockResolvedValue(null);
+    mocks.insertTranslationJobsBulk.mockClear();
+
+    const result = await enqueueTranslationBackfill(menuStrapi, {
+      mode: 'repair',
+      uids: ['api::menu.menu'],
+      locales: ['ar'],
+    });
+
+    expect(result).toMatchObject({
+      selected: 1,
+      enqueued: 1,
+      skippedCurrent: 0,
+      providerCallsExpected: 2,
+    });
+    expect(mocks.insertTranslationJobsBulk).toHaveBeenCalledWith({}, [
+      expect.objectContaining({
+        uid: 'api::menu.menu',
+        documentId: 'menu',
+        kind: 'translate',
+      }),
+    ]);
   });
 
   it('backfills a legacy plan hash once without enqueueing a write', async () => {

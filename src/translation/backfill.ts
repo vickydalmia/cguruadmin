@@ -33,11 +33,27 @@ import {
 import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
 import { sourceContentHash } from './source-hash';
 import { translationPromptFingerprint } from './prompts';
-import type { ContentLocale } from './locales/resolve';
+import { unicodeScriptPattern, type ContentLocale } from './locales/resolve';
 import { translationSourceIneligible } from './eligibility';
 import { translationPopulate } from './populate';
+import { validateTranslatedBatch } from './validate';
 
 const PAGE_SIZE = 50;
+
+/**
+ * Structural singletons are few but their nested component trees drive every
+ * page (menu, footer, homepage, global and CMS static pages). A saved plan hash
+ * proves what the translator last intended to write; it cannot prove that a
+ * later editor/import did not remove a component or relation. Repair scans
+ * therefore compare these rows exactly. High-volume catalogue types retain
+ * the plan-hash fast path that keeps a full sweep affordable.
+ */
+function requiresExactPersistedPlanInspection(
+  strapi: Core.Strapi,
+  uid: string,
+): boolean {
+  return (strapi.contentTypes as Record<string, any>)?.[uid]?.kind === 'singleType';
+}
 
 /**
  * Wave order: relation targets before relation owners, catalog before the
@@ -186,6 +202,7 @@ async function flushInputs(
 function completeMemory(
   translations: Record<string, string> | null,
   leaves: ReturnType<typeof collectTranslatableLeaves>,
+  locale: ContentLocale,
 ): translations is Record<string, string> {
   return Boolean(
     translations &&
@@ -193,7 +210,12 @@ function completeMemory(
         (leaf) =>
           typeof translations[leaf.path] === 'string' &&
           translations[leaf.path].trim().length > 0,
-      ),
+      ) &&
+      validateTranslatedBatch(
+        leaves,
+        translations,
+        unicodeScriptPattern(locale.script),
+      ).length === 0,
   );
 }
 
@@ -298,6 +320,10 @@ async function scanContentCandidates(
     uidIndex += 1
   ) {
     const uid = uids[uidIndex];
+    const inspectPersistedPlan = requiresExactPersistedPlanInspection(
+      strapi,
+      uid,
+    );
     scan.perUid[uid] ??= 0;
     progress.currentUid = uid;
     progress.uidsDone = uidIndex;
@@ -367,7 +393,11 @@ async function scanContentCandidates(
           const key = translationSnapshotKey(documentId, targetLocale);
           const state = snapshot.states.get(key) ?? null;
           const latestJob = snapshot.jobs.get(key) ?? null;
-          const memoryComplete = completeMemory(state?.translations ?? null, leaves);
+          const memoryComplete = completeMemory(
+            state?.translations ?? null,
+            leaves,
+            locale,
+          );
           const textCurrent =
             !options.force && state?.sourceHash === hash && memoryComplete;
           const latestNeedsRepair =
@@ -421,6 +451,7 @@ async function scanContentCandidates(
           desiredById.set(candidate.documentId, desired);
           const planHash = localizedPlanHash(uid, desired.data);
           const hashCurrent =
+            !inspectPersistedPlan &&
             targetIds.has(candidate.documentId) &&
             desired.skippedRelations.length === 0 &&
             candidate.state.publishedPlanHash === planHash;

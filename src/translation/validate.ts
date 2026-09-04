@@ -369,10 +369,14 @@ function keepsMaskedFacts(maskedSource: string, output: string): boolean {
   return sameMultiset(facts(maskedSource), facts(output));
 }
 
-function isEnglishProse(value: string): boolean {
+function hasEnglishText(value: string): boolean {
   const text = value.replace(/<[^>]+>/gu, ' ');
   const words = text.match(/[a-z]+(?:['’-][a-z]+)?/giu) ?? [];
-  return words.length >= 2 && words.join('').length >= 8;
+  // A one-word promotional label ("Sale", "Offers", "Apply") still needs
+  // translation. Only actual entity `name` leaves receive the identity
+  // exemption; requiring two words allowed short menu/notification headings
+  // to be persisted unchanged and then treated as durable memory forever.
+  return words.join('').length >= 2;
 }
 
 function sameVisibleText(source: string, translated: string): boolean {
@@ -433,7 +437,7 @@ export function validateTranslatedBatch(
       // homepage title overrides — never receive this exemption.
       const actualEntityName = leaf.identity === true && leaf.path === 'name';
       const enforceTranslatedProse =
-        !actualEntityName && isEnglishProse(leaf.value);
+        !actualEntityName && hasEnglishText(leaf.value);
       if (enforceTranslatedProse && sameVisibleText(leaf.value, value)) {
         problems.push('untranslated-source');
       }
