@@ -7,7 +7,11 @@ import type { Core } from '@strapi/strapi';
 import type { TranslationConfig } from '../config';
 import { usdForTokens } from '../cost';
 import { TranslationError } from '../errors';
-import { collectTranslatableLeaves } from '../field-map';
+import {
+  collectTranslatableLeaves,
+  resolveRelationDependencies,
+  type RelationDependency,
+} from '../field-map';
 import { enabledContentLocales } from '../locales/registry';
 import { createTranslationProvider } from '../provider';
 import type { TranslationProvider } from '../provider/types';
@@ -18,16 +22,18 @@ import { translationPromptFingerprint } from '../prompts';
 import { translateEntryLeaves } from '../translate-entry';
 import {
   deleteLocaleVersion,
+  inspectLocaleVersion,
   loadPopulatedEntry,
+  TranslationDependencyBlockedError,
   writeLocaleVersion,
 } from '../writer';
 import type { TranslationOutboxConfig } from './config';
 import { logTranslation } from './log';
+import { TRANSLATION_NIGHTLY_CONSISTENCY_REASON } from './reasons';
 import { TranslationOutboxStore, type TranslationJob } from './store';
 import { DEFAULT_CONTENT_LOCALE } from '../../constants/content-locales';
 
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1_000;
-const RELATION_RETRY_DELAY_MS = 5 * 60 * 1_000;
 
 /**
  * Validation and SQL-integrity failures are deterministic publication
@@ -85,6 +91,13 @@ export type JobOutcome =
   | { state: 'delivered'; notes?: string }
   | { state: 'skipped'; reason: string }
   | { state: 'deferred'; reason: string; delayMs: number }
+  | {
+      state: 'blocked';
+      reason: string;
+      dependencies: RelationDependency[];
+      /** This row is live and may unblock parents despite its own optional drift. */
+      published?: boolean;
+    }
   | { state: 'failed'; reason: string };
 
 export class TranslationDispatcher {
@@ -296,6 +309,7 @@ export class TranslationDispatcher {
     if (outcome.state === 'delivered' || outcome.state === 'skipped') {
       const marked = await this.store.markDelivered(job);
       if (marked) {
+        const awakened = await this.store.enqueueBlockedDependents(job);
         this.lastDeliveredAt = Date.now();
         logTranslation(this.strapi, 'info', 'translation.job_delivered', {
           jobId: job.id,
@@ -308,8 +322,27 @@ export class TranslationDispatcher {
           tokensIn: usage.tokensIn,
           tokensOut: usage.tokensOut,
           costUsd: usage.costUsd,
+          awakenedDependents: awakened,
         });
       }
+      return true;
+    }
+    if (outcome.state === 'blocked') {
+      const marked = await this.store.markBlocked(
+        job,
+        outcome.dependencies,
+        outcome.reason,
+      );
+      const awakened = marked && outcome.published
+        ? await this.store.enqueueBlockedDependents(job)
+        : 0;
+      logTranslation(this.strapi, 'warn', 'translation.job_blocked', {
+        jobId: job.id,
+        eventKey: job.eventKey,
+        error: outcome.reason,
+        blockedOn: outcome.dependencies,
+        awakenedDependents: awakened,
+      });
       return true;
     }
     if (outcome.state === 'failed') {
@@ -372,9 +405,26 @@ export class TranslationDispatcher {
       };
     }
 
+    const previousNightlyJob =
+      !job.force && job.reason === TRANSLATION_NIGHTLY_CONSISTENCY_REASON
+        ? await this.store.previousJob(job)
+        : null;
+
     // The UI-text dictionary has no document: its own tables are its memory
     // and it persists per key group. Everything below is per-entry work.
     if (job.uid === UI_DICTIONARY_UID) {
+      // A catalogue change enqueues its own non-nightly reason. Therefore a
+      // nightly job behind a terminal dictionary failure represents the same
+      // catalogue and must not buy the same failed provider attempt forever.
+      if (previousNightlyJob?.status === 'failed') {
+        return {
+          outcome: {
+            state: 'skipped',
+            reason: 'unchanged terminal failure; awaiting catalogue change or manual retry',
+          },
+          usage: noUsage,
+        };
+      }
       return processUiDictionaryJob({
         strapi: this.strapi,
         provider: this.provider,
@@ -416,6 +466,22 @@ export class TranslationDispatcher {
       };
     }
 
+    if (previousNightlyJob?.status === 'failed') {
+      const sourceUpdatedAt = new Date(source.updatedAt ?? source.updated_at ?? 0);
+      if (
+        Number.isFinite(sourceUpdatedAt.getTime()) &&
+        sourceUpdatedAt <= previousNightlyJob.createdAt
+      ) {
+        return {
+          outcome: {
+            state: 'skipped',
+            reason: 'unchanged terminal failure; awaiting English edit or manual retry',
+          },
+          usage: noUsage,
+        };
+      }
+    }
+
     const leaves = collectTranslatableLeaves(this.strapi, job.uid, source);
     const hash = sourceContentHash(
       leaves,
@@ -444,6 +510,28 @@ export class TranslationDispatcher {
       );
     const textCurrent =
       !job.force && state?.sourceHash === hash && memoryComplete;
+
+    // Required localized relations are publication dependencies, not a text
+    // failure. Resolve them before the provider so a child that has not been
+    // translated yet costs no tokens and leaves the existing locale row live.
+    const sourceRelations = await resolveRelationDependencies(
+      this.strapi,
+      job.uid,
+      source,
+      job.targetLocale,
+    );
+    if (sourceRelations.required.length > 0) {
+      return {
+        outcome: {
+          state: 'blocked',
+          reason:
+            `${sourceRelations.required.length} required relation target(s) ` +
+            `missing in ${job.targetLocale}`,
+          dependencies: sourceRelations.required,
+        },
+        usage: noUsage,
+      };
+    }
 
     // 3. The language work — only when the source actually changed.
     let translations: ReadonlyMap<string, string>;
@@ -539,12 +627,84 @@ export class TranslationDispatcher {
         usage,
       };
     }
+    // Durable paid output is committed after the final source-hash check but
+    // before any publication dependency or write check. If a relation
+    // disappears during the provider calls, or validation/persistence later
+    // rejects the locale write, the repair job reuses these exact strings
+    // without another call.
+    if (!textCurrent) {
+      await this.store.upsertState(job.uid, job.documentId, job.targetLocale, {
+        sourceHash: hash,
+        needsReview,
+        reviewNotes: reviewNotes.length
+          ? reviewNotes.join('\n').slice(0, 4_000)
+          : null,
+        lastError: null,
+        translations: Object.fromEntries(translations),
+      });
+    }
 
-    // 5. Persist the locale version through the document pipeline.
+    const latestRelations = await resolveRelationDependencies(
+      this.strapi,
+      job.uid,
+      latestSource,
+      job.targetLocale,
+    );
+    if (latestRelations.required.length > 0) {
+      return {
+        outcome: {
+          state: 'blocked',
+          reason:
+            `${latestRelations.required.length} required relation target(s) ` +
+            `missing in ${job.targetLocale}`,
+          dependencies: latestRelations.required,
+        },
+        usage,
+      };
+    }
+
+    // 5. A hash-current row may still need a write when relations/component
+    // structure drifted, or when migrate:fresh removed the locale row while
+    // translation memory survived. Inspect the exact write plan before using
+    // the documents API: a true no-op must not emit another ISR invalidation.
+    if (textCurrent) {
+      const inspection = await inspectLocaleVersion(
+        this.strapi,
+        job.uid,
+        job.documentId,
+        job.targetLocale,
+        latestSource,
+        translations,
+      );
+      if (inspection.current) {
+        if (latestRelations.optional.length > 0) {
+          return {
+            outcome: {
+              state: 'blocked',
+              reason:
+                `${latestRelations.optional.length} optional relation target(s) ` +
+                `awaiting repair in ${job.targetLocale}`,
+              dependencies: latestRelations.optional,
+              published: true,
+            },
+            usage,
+          };
+        }
+        return {
+          outcome: {
+            state: 'skipped',
+            reason: 'locale version already current',
+          },
+          usage,
+        };
+      }
+    }
+
+    // 6. Persist the locale version through the document pipeline.
     await assertLease();
-    let skippedRelations: Awaited<ReturnType<typeof writeLocaleVersion>>;
+    let writeResult: Awaited<ReturnType<typeof writeLocaleVersion>>;
     try {
-      skippedRelations = await writeLocaleVersion(
+      writeResult = await writeLocaleVersion(
         this.strapi,
         job.uid,
         job.documentId,
@@ -553,7 +713,28 @@ export class TranslationDispatcher {
         translations,
       );
     } catch (cause) {
+      if (cause instanceof TranslationDependencyBlockedError) {
+        return {
+          outcome: {
+            state: 'blocked',
+            reason:
+              `${cause.dependencies.length} required relation target(s) ` +
+              `missing in ${job.targetLocale}`,
+            dependencies: cause.dependencies,
+          },
+          usage,
+        };
+      }
       if (!isPermanentTranslationWriteError(cause)) throw cause;
+      await this.store.upsertState(job.uid, job.documentId, job.targetLocale, {
+        sourceHash: hash,
+        needsReview,
+        reviewNotes: reviewNotes.length
+          ? reviewNotes.join('\n').slice(0, 4_000)
+          : null,
+        lastError: cause instanceof Error ? cause.message : String(cause),
+        translations: Object.fromEntries(translations),
+      });
       throw new TranslationError('TRANSLATION_WRITE_REJECTED', {
         cause,
         detail: cause instanceof Error ? cause.message : String(cause),
@@ -561,34 +742,27 @@ export class TranslationDispatcher {
     }
     await assertLease();
 
-    // 6. Bookkeeping — including the translation memory the next rebuild
-    // (or the next fresh migration) reuses without an LLM call.
     await this.store.upsertState(job.uid, job.documentId, job.targetLocale, {
       sourceHash: hash,
       needsReview,
-      reviewNotes: reviewNotes.length ? reviewNotes.join('\n').slice(0, 4_000) : null,
+      reviewNotes: reviewNotes.length
+        ? reviewNotes.join('\n').slice(0, 4_000)
+        : null,
       lastError: null,
       translations: Object.fromEntries(translations),
     });
 
-    // 7. Missing relation targets: text is saved, joins are partial. Retry
-    // the (now hash-current, LLM-free) job a few times, then accept with a
-    // note — the nightly sweep and the backfill's final wave converge it.
-    if (skippedRelations.length > 0) {
-      if (job.attemptCount < this.outboxConfig.relationRetryMax) {
-        return {
-          outcome: {
-            state: 'deferred',
-            reason: `${skippedRelations.length} relation target(s) missing in ${job.targetLocale}`,
-            delayMs: RELATION_RETRY_DELAY_MS,
-          },
-          usage,
-        };
-      }
+    // 7. Optional forward-curation joins may be repaired after the base entity
+    // exists, but the job remains visibly blocked until that exact repair.
+    if (writeResult.missingDependencies.length > 0) {
       return {
         outcome: {
-          state: 'delivered',
-          notes: `accepted with ${skippedRelations.length} unresolved relation target(s)`,
+          state: 'blocked',
+          reason:
+            `${writeResult.missingDependencies.length} optional relation ` +
+            `target(s) awaiting repair in ${job.targetLocale}`,
+          dependencies: writeResult.missingDependencies,
+          published: true,
         },
         usage,
       };

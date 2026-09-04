@@ -2583,8 +2583,18 @@ export interface ApiMenuMenu extends Struct.SingleTypeSchema {
         number
       >;
     topBrandsLabel: Schema.Attribute.String &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
       Schema.Attribute.DefaultTo<'Top Brands'>;
     topBrandsTitle: Schema.Attribute.String &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
       Schema.Attribute.DefaultTo<'All Brands'>;
     topBrandsViewAllUrl: Schema.Attribute.String &
       Schema.Attribute.DefaultTo<'/brands/'>;

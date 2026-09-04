@@ -375,6 +375,21 @@ describe('validateAffiliateOfferForWrite — stored state and payload shapes', (
       }),
     ).resolves.toBeUndefined();
   });
+
+  it('enforces the invariant for an explicit translation publication', async () => {
+    const background = harness({ path: null });
+
+    await expect(
+      validateAffiliateOfferForWrite(
+        background.strapi,
+        uid,
+        'create',
+        { isForAffiliateBrand: true, stores: [STORE_ONE] },
+        undefined,
+        true,
+      ),
+    ).rejects.toThrow('cannot have Stores');
+  });
 });
 
 describe('validateAffiliateBrandFlip', () => {

@@ -1,5 +1,9 @@
 import type { Core } from '@strapi/strapi';
 import { sanitizeOutput } from '../../../utils/offer-visibility';
+import {
+  requestedOfferTargetLocale,
+} from '../../coupon/services/public-offer-ids';
+import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
 
 const PAGE_POPULATE = {
   hero: { populate: { image: true, highlights: true } },
@@ -21,7 +25,9 @@ const JOB_POPULATE = {
 } as const;
 
 async function careerPage(strapi: Core.Strapi, ctx: any) {
+  const locale = requestedOfferTargetLocale(ctx) ?? DEFAULT_CONTENT_LOCALE;
   const page = await strapi.documents('api::career-page.career-page' as any).findFirst({
+    locale,
     populate: PAGE_POPULATE as any,
   });
   return page
@@ -30,7 +36,9 @@ async function careerPage(strapi: Core.Strapi, ctx: any) {
 }
 
 async function activeJobs(strapi: Core.Strapi, ctx: any) {
+  const locale = requestedOfferTargetLocale(ctx) ?? DEFAULT_CONTENT_LOCALE;
   const jobs = await strapi.documents('api::job.job' as any).findMany({
+    locale,
     filters: { isActive: true } as any,
     sort: ['sortOrder:asc', 'title:asc'] as any,
     populate: JOB_POPULATE as any,

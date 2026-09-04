@@ -5,6 +5,8 @@ import { enqueueStandaloneIsrEvent } from '../src/isr-outbox/runtime';
 import { removeInactiveCuratedOfferRelations } from '../src/utils/curated-offer-cleanup';
 import { removeDisplayedTopPicksFromOrdered } from '../src/utils/curated-offer-top-picks';
 import { enqueueTranslationBackfill } from '../src/translation/backfill';
+import { TRANSLATION_NIGHTLY_CONSISTENCY_REASON } from '../src/translation/outbox/reasons';
+import { translationNightlyConsistencyEnabled } from '../src/translation/outbox/config';
 import { translationRuntimeActive } from '../src/translation/outbox/runtime';
 
 /**
@@ -341,8 +343,11 @@ export default {
   nightlyTranslationConsistency: {
     task: async ({ strapi }: { strapi: any }) => {
       try {
+        if (!translationNightlyConsistencyEnabled()) return;
         if (!(await translationRuntimeActive(strapi))) return;
-        const result = await enqueueTranslationBackfill(strapi);
+        const result = await enqueueTranslationBackfill(strapi, {
+          reason: TRANSLATION_NIGHTLY_CONSISTENCY_REASON,
+        });
         strapi.log.info({
           event: 'translation.nightly_consistency_enqueued',
           enqueued: result.enqueued,

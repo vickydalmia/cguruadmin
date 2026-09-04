@@ -34,6 +34,12 @@ export type TranslatableLeaf = {
    * source content.
    */
   note?: string;
+  /**
+   * Actual taxonomy entity name that may legitimately remain in Latin script.
+   * Still offered for translation; only the "must be translated" verdicts
+   * are waived. Promotional headings never receive this flag.
+   */
+  identity?: boolean;
 };
 
 /**
@@ -86,6 +92,13 @@ function isLocalizedAttribute(definition: any): boolean {
   return definition?.pluginOptions?.i18n?.localized === true;
 }
 
+const ENTITY_NAME_UIDS = new Set([
+  'api::store.store',
+  'api::brand.brand',
+  'api::category.category',
+  'api::bank.bank',
+]);
+
 function isOwnerSideRelation(definition: any): boolean {
   // mappedBy marks the inverse side; writing the owner side is what creates
   // the join rows, and the inverse reads them back for free.
@@ -108,6 +121,16 @@ function leafValidationBudget(definition: any): number | undefined {
 
 export type RelationTarget = { targetUid: string; documentIds: string[] };
 
+export type RelationReference = {
+  path: LeafPath;
+  targetUid: string;
+  documentId: string;
+};
+
+export type RelationDependency = RelationReference & {
+  required: boolean;
+};
+
 export type RelationExistence = {
   /**
    * `${targetUid}:${documentId}` for every relation target that exists in
@@ -122,6 +145,33 @@ export type LocalizedWritePlan = {
   /** Relation targets dropped because their locale version is missing. */
   skippedRelations: Array<{ path: LeafPath; targetUid: string; documentId: string }>;
 };
+
+const OPTIONAL_FORWARD_RELATION_UIDS = new Set([
+  'api::store.store',
+  'api::brand.brand',
+  'api::category.category',
+  'api::bank.bank',
+]);
+
+const OFFER_UIDS = new Set(['api::coupon.coupon', 'api::deal.deal']);
+const OFFER_TAXONOMY_RELATIONS = new Set([
+  'stores',
+  'logoStore',
+  'brands',
+  'categories',
+  'banks',
+]);
+
+/** Publication impact of a missing localized relation target. */
+export function relationIsRequired(uid: string, path: string): boolean {
+  if (OPTIONAL_FORWARD_RELATION_UIDS.has(uid)) return false;
+  if (OFFER_UIDS.has(uid)) {
+    return OFFER_TAXONOMY_RELATIONS.has(path.split('.')[0] ?? '');
+  }
+  // Homepage, menu, footer, global, CMS pages and jobs are structural: their
+  // relation graph must be complete before the locale row becomes public.
+  return true;
+}
 
 /**
  * Every localized attribute of `uid`, walked depth-first over the POPULATED
@@ -158,6 +208,9 @@ export function collectTranslatableLeaves(
             maxLength: leafBudget(definition),
             validationMaxLength: leafValidationBudget(definition),
             value: fieldValue,
+            ...(path === 'name' && ENTITY_NAME_UIDS.has(uid)
+              ? { identity: true }
+              : {}),
           });
         }
         continue;
@@ -197,17 +250,18 @@ export function collectTranslatableLeaves(
  * Every relation target referenced from the localized attributes, grouped by
  * target uid — the input for the batched locale-existence check.
  */
-export function collectRelationTargets(
+export function collectRelationReferences(
   strapi: Core.Strapi,
   uid: string,
   entry: any,
-): RelationTarget[] {
+): RelationReference[] {
   const model = strapi.getModel(uid as any) as AnySchema;
-  const byUid = new Map<string, Set<string>>();
+  const references: RelationReference[] = [];
 
   const walk = (
     schema: AnySchema,
     value: any,
+    prefix: string,
     insideComponent: boolean,
   ) => {
     for (const [key, definition] of Object.entries(schema.attributes ?? {})) {
@@ -217,6 +271,7 @@ export function collectRelationTargets(
         // relations, which are force-localized without carrying the flag.
         if (!isOwnerSideRelation(definition)) continue;
       }
+      const path = prefix ? `${prefix}.${key}` : key;
       const fieldValue = value?.[key];
       if (definition.type === 'relation') {
         if (!isOwnerSideRelation(definition) || !definition.target) continue;
@@ -228,36 +283,105 @@ export function collectRelationTargets(
         for (const item of items) {
           const documentId = item?.documentId;
           if (typeof documentId !== 'string' || !documentId) continue;
-          const set = byUid.get(definition.target) ?? new Set<string>();
-          set.add(documentId);
-          byUid.set(definition.target, set);
+          references.push({ path, targetUid: definition.target, documentId });
         }
         continue;
       }
       if (definition.type === 'component') {
         const child = componentSchema(strapi, definition.component);
         if (definition.repeatable && Array.isArray(fieldValue)) {
-          for (const item of fieldValue) walk(child, item, true);
+          for (const [index, item] of fieldValue.entries()) {
+            walk(child, item, `${path}.${index}`, true);
+          }
         } else if (fieldValue && typeof fieldValue === 'object') {
-          walk(child, fieldValue, true);
+          walk(child, fieldValue, path, true);
         }
         continue;
       }
       if (definition.type === 'dynamiczone' && Array.isArray(fieldValue)) {
-        for (const item of fieldValue) {
+        for (const [index, item] of fieldValue.entries()) {
           if (item?.__component) {
-            walk(componentSchema(strapi, item.__component), item, true);
+            walk(
+              componentSchema(strapi, item.__component),
+              item,
+              `${path}.${index}`,
+              true,
+            );
           }
         }
       }
     }
   };
 
-  walk(model, entry, false);
+  walk(model, entry, '', false);
+  return references;
+}
+
+export function collectRelationTargets(
+  strapi: Core.Strapi,
+  uid: string,
+  entry: any,
+): RelationTarget[] {
+  const byUid = new Map<string, Set<string>>();
+  for (const { targetUid, documentId } of collectRelationReferences(
+    strapi,
+    uid,
+    entry,
+  )) {
+    const set = byUid.get(targetUid) ?? new Set<string>();
+    set.add(documentId);
+    byUid.set(targetUid, set);
+  }
   return [...byUid.entries()].map(([targetUid, documentIds]) => ({
     targetUid,
     documentIds: [...documentIds],
   }));
+}
+
+export async function resolveRelationDependencies(
+  strapi: Core.Strapi,
+  uid: string,
+  entry: any,
+  targetLocale: string,
+): Promise<{
+  existence: RelationExistence;
+  missing: RelationDependency[];
+  required: RelationDependency[];
+  optional: RelationDependency[];
+}> {
+  const references = collectRelationReferences(strapi, uid, entry);
+  const byUid = new Map<string, Set<string>>();
+  for (const reference of references) {
+    const set = byUid.get(reference.targetUid) ?? new Set<string>();
+    set.add(reference.documentId);
+    byUid.set(reference.targetUid, set);
+  }
+  const existence = await resolveRelationExistence(
+    strapi,
+    [...byUid.entries()].map(([targetUid, documentIds]) => ({
+      targetUid,
+      documentIds: [...documentIds],
+    })),
+    targetLocale,
+  );
+  const seen = new Set<string>();
+  const missing = references.flatMap((reference) => {
+    const key = `${reference.path}:${reference.targetUid}:${reference.documentId}`;
+    if (
+      seen.has(key) ||
+      existence.present.has(`${reference.targetUid}:${reference.documentId}`)
+    ) {
+      return [];
+    }
+    seen.add(key);
+    return [{ ...reference, required: relationIsRequired(uid, reference.path) }];
+  });
+  return {
+    existence,
+    missing,
+    required: missing.filter((dependency) => dependency.required),
+    optional: missing.filter((dependency) => !dependency.required),
+  };
 }
 
 /**

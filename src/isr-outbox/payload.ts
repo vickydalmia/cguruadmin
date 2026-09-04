@@ -120,12 +120,46 @@ export function createOutboxPayload(
 }
 
 /**
- * Locale twins for every page path: with content locales enabled, the same
- * document renders at `/x/` AND `/<locale>/x/`, and an invalidation that
- * misses the twin leaves a stale translated page live indefinitely. Pure —
- * the caller (insertIsrOutboxEvent) supplies the boot-primed locale codes.
- * A full sweep (`all`) already covers everything; the sitemap index is
- * shard-expanded by the gateway and has no locale twin of its own.
+ * Narrow a localized content invalidation to the locale that was written.
+ * The public sitemap currently contains default-locale URLs only. Existing
+ * locale rows keep route membership, while creation/removal retains `routes`
+ * so the inventory can admit or remove that exact localized path.
+ */
+export function localizeTranslationPayload(
+  payload: IsrOutboxPayload,
+  targetLocale: string,
+  options: { routeMembershipChanged?: boolean } = {},
+): IsrOutboxPayload {
+  const locale = targetLocale.trim().replace(/^\/+|\/+$/g, '');
+  if (!locale) return payload;
+  const membershipChanged = options.routeMembershipChanged === true;
+  const paths = (payload.paths ?? []).filter(
+    (path) => path !== SITEMAP_INDEX_PATH,
+  );
+  const optionalPathSet = new Set(payload.optionalPaths ?? []);
+  const optionalPaths = paths.filter((path) => optionalPathSet.has(path));
+  const scopes = (payload.scopes ?? []).filter(
+    (scope) =>
+      scope !== 'sitemap' && (membershipChanged || scope !== 'routes'),
+  );
+
+  return {
+    ...(payload.all ? { all: true as const } : {}),
+    localePrefix: `/${locale}`,
+    ...(paths.length > 0 ? { paths: [...new Set(paths)] } : {}),
+    ...(optionalPaths.length > 0
+      ? { optionalPaths: [...new Set(optionalPaths)] }
+      : {}),
+    ...(scopes.length > 0 ? { scopes: [...new Set(scopes)] } : {}),
+  };
+}
+
+/**
+ * Expand a shared non-localized change to every configured language. This is
+ * intentionally not used for localized prose: only locale rows admitted by
+ * the storefront inventory exist, and those are invalidated after their own
+ * successful write. A full sweep (`all`) already covers everything; the
+ * sitemap index is shard-expanded by the gateway and has no locale twin.
  */
 export function expandPayloadPathsForLocales(
   payload: IsrOutboxPayload,
@@ -166,6 +200,47 @@ export function hasOutboxWork(payload: IsrOutboxPayload): boolean {
   );
 }
 
+/** Merge a burst of pending writes without widening it beyond one locale. */
+export function mergeOutboxPayloads(
+  before: IsrOutboxPayload,
+  after: IsrOutboxPayload,
+): IsrOutboxPayload {
+  if (before.localePrefix !== after.localePrefix) {
+    throw new Error('cannot coalesce ISR payloads for different locales');
+  }
+  const paths = [...new Set([...(before.paths ?? []), ...(after.paths ?? [])])];
+  const required = new Set([
+    ...(before.paths ?? []).filter(
+      (path) => !(before.optionalPaths ?? []).includes(path),
+    ),
+    ...(after.paths ?? []).filter(
+      (path) => !(after.optionalPaths ?? []).includes(path),
+    ),
+  ]);
+  const optionalPaths = paths.filter(
+    (path) => !required.has(path) && (
+      (before.optionalPaths ?? []).includes(path) ||
+      (after.optionalPaths ?? []).includes(path)
+    ),
+  );
+  const offers = [
+    ...new Map(
+      [...(before.offerInvalidations ?? []), ...(after.offerInvalidations ?? [])]
+        .map((offer) => [`${offer.entityType}:${offer.documentId}`, offer]),
+    ).values(),
+  ];
+  return {
+    ...(before.all || after.all ? { all: true as const } : {}),
+    ...(before.localePrefix ? { localePrefix: before.localePrefix } : {}),
+    ...(paths.length ? { paths } : {}),
+    ...(optionalPaths.length ? { optionalPaths } : {}),
+    ...((before.scopes?.length || after.scopes?.length)
+      ? { scopes: [...new Set([...(before.scopes ?? []), ...(after.scopes ?? [])])] }
+      : {}),
+    ...(offers.length ? { offerInvalidations: offers } : {}),
+  };
+}
+
 export function boundOutboxPayload(
   payload: IsrOutboxPayload,
   maximumPaths: number,
@@ -181,6 +256,7 @@ export function boundOutboxPayload(
   }
   const full: IsrOutboxPayload = {
     all: true,
+    ...(payload.localePrefix ? { localePrefix: payload.localePrefix } : {}),
     ...(payload.scopes?.length ? { scopes: payload.scopes } : {}),
     ...(payload.offerInvalidations?.length
       ? { offerInvalidations: payload.offerInvalidations }
@@ -197,6 +273,7 @@ export function boundOutboxPayload(
 export function outboxPayloadSummary(payload: IsrOutboxPayload) {
   return {
     all: payload.all === true,
+    localePrefix: payload.localePrefix ?? null,
     pathCount: payload.paths?.length ?? 0,
     pathSample: payload.paths?.slice(0, 100) ?? [],
     pathsTruncated: (payload.paths?.length ?? 0) > 100,

@@ -21,7 +21,7 @@ describe('keepsProtectedValues', () => {
     expect(keepsProtectedValues('View all', 'View all 3 offers').ok).toBe(true);
     expect(keepsProtectedValues('Save 20% at https://x.test/a', 'Save at https://x.test/a')).toEqual({
       ok: false,
-      missing: ['20%', '20'],
+      missing: ['20%'],
     });
   });
 });

@@ -197,6 +197,61 @@ describe('translateEntryLeaves', () => {
     );
   });
 
+  it('accepts a writer that keeps every marker but ends the Arabic clause with the price', async () => {
+    // The UAE backfill's dominant dead-letter: "from AED 749 onwards." became
+    // "تبدأ من AED 749." and the restored-prose regexes read the sentence-final
+    // amount as a changed fact. Judged by markers, it is exactly right.
+    const complete = vi.fn(async ({ user }: any) => {
+      expect(user).toContain('## Markers');
+      expect(user).not.toContain('AED 749');
+      return {
+        text: JSON.stringify({
+          content: '{{CGPV_A}}{{CGPV_B}}استمتع بأعمال فنية تبدأ من {{CGPV_C}}.{{CGPV_D}}{{CGPV_E}}',
+        }),
+        inputTokens: 3,
+        outputTokens: 2,
+        model: 'm',
+      };
+    });
+
+    const result = await translateEntryLeaves(
+      strapi,
+      { name: 'fake', complete },
+      CONFIG,
+      LOCALE,
+      [
+        leaf('content', '<ul><li>Enjoy artworks from AED 749 onwards.</li></ul>', {
+          kind: 'richtext',
+        }),
+      ],
+    );
+
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(result.translations.get('content')).toBe(
+      '<ul><li>استمتع بأعمال فنية تبدأ من AED 749.</li></ul>',
+    );
+  });
+
+  it('rejects a writer that drops a marker, after one corrective pass', async () => {
+    const complete = vi.fn(async () => ({
+      text: JSON.stringify({ description: 'وفّر {{CGPV_A}} اليوم' }),
+      inputTokens: 1,
+      outputTokens: 1,
+      model: 'm',
+    }));
+    await expect(
+      translateEntryLeaves(
+        strapi,
+        { name: 'fake', complete },
+        CONFIG,
+        LOCALE,
+        [leaf('description', 'Save 20% on AED 150 today')],
+      ),
+    ).rejects.toThrow(/writer output failed validation .*protected-value-changed/);
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(complete.mock.calls[1][0].user).toContain('{{CGPV_*}} marker exactly once');
+  });
+
   it('does not return a writeable result when correction remains broken', async () => {
     const complete = vi.fn(async () => ({
       text: JSON.stringify({ body: '<div>changed</div>' }),

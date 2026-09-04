@@ -60,7 +60,12 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     if (!nameSlug) return null;
     const requestedDealSlug = `${nameSlug}-deals`;
 
-    const resolved = await resolveEntityByDealSlug(strapi, requestedDealSlug);
+    const locale = cleanText(rawQuery.locale) ?? 'en';
+    const resolved = await resolveEntityByDealSlug(
+      strapi,
+      requestedDealSlug,
+      locale,
+    );
     if (!resolved) return null;
 
     const page = normalizePage(rawQuery.page);
@@ -76,6 +81,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const start = (page - 1) * pageSize;
     const [rawDeals, matchedTotal, routeConflict] = await Promise.all([
       strapi.documents('api::deal.deal' as any).findMany({
+        locale,
         filters: filters as any,
         fields: DEAL_FIELDS as any,
         populate: dealPopulate() as any,
@@ -84,6 +90,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         limit: pageSize,
       } as any),
       strapi.documents('api::deal.deal' as any).count({
+        locale,
         filters: filters as any,
       } as any),
       hasRouteConflict(strapi, resolved),
@@ -101,7 +108,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     // actionable while the superset says rows exist.
     const supersetTotal = typeof matchedTotal === 'number' ? matchedTotal : 0;
     const total = pagedDeals.length === 0 && supersetTotal > 0
-      ? await countActionableDeals(strapi, filters)
+      ? await countActionableDeals(strapi, filters, locale)
       : supersetTotal;
 
     const [entity, deals] = await Promise.all([
@@ -196,8 +203,12 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     };
   },
 
-  async listPublicRoutes() {
-    const allItems = await loadSettingItems(strapi, ENTITY_DEAL_PAGE_CONFIGS);
+  async listPublicRoutes(locale = 'en') {
+    const allItems = await loadSettingItems(
+      strapi,
+      ENTITY_DEAL_PAGE_CONFIGS,
+      locale,
+    );
     // A generated Deal page with nothing to render is not a route. Emitting one
     // per entity regardless of liveDealCount doubled the site's route surface
     // with pages that render empty, and put them in the sitemap.

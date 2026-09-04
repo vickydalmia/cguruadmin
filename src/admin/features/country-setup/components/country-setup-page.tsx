@@ -26,6 +26,7 @@ import {
   FEATURE_FORM_DEFINITIONS,
   type CountrySetup,
 } from '../types';
+import { TranslationBackfillCard } from '../../translation/components/translation-backfill-card';
 import { OfferCountriesField } from './offer-countries-field';
 import { TranslationLanguagesField } from './translation-languages-field';
 
@@ -239,6 +240,9 @@ export default function CountrySetupPage() {
                   />
                 </Box>
               </Flex>
+              <TranslationBackfillCard
+                translationEnabled={form.translationEnabled === true}
+              />
             </Box>
 
             <Box padding={6} background="neutral0" shadow="filterShadow" hasRadius>

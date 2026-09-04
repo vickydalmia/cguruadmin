@@ -65,6 +65,22 @@ function contextSection(
   ].join('\n');
 }
 
+/**
+ * Lives in the USER message on purpose: the system prompts are hashed into
+ * every stored translation (translationPromptFingerprint), so a wording
+ * change there re-translates the whole catalogue at real cost.
+ */
+function markerSection(): string {
+  return [
+    '## Markers',
+    '* Tokens of the form {{CGPV_X}} stand for immutable source facts: prices,',
+    '  numbers, percentages, URLs, e-mail addresses, placeholders and HTML tags.',
+    '* Reproduce every marker exactly once, unchanged, where that fact belongs in',
+    '  the sentence. Never alter, drop, duplicate, translate or spell one out.',
+    '* Do not add any number, amount, currency, URL or e-mail of your own.',
+  ].join('\n');
+}
+
 function sourcePayload(leaves: readonly TranslatableLeaf[]): Record<string, string> {
   const payload: Record<string, string> = {};
   for (const leaf of leaves) payload[leaf.path] = leaf.value;
@@ -92,6 +108,7 @@ function writerMessage(
 ): string {
   return [
     contextSection(locale, context),
+    markerSection(),
     '## English source JSON',
     JSON.stringify(sourcePayload(leaves), null, 1),
     fieldNotesSection(leaves),
@@ -109,6 +126,7 @@ function editorMessage(
 ): string {
   return [
     contextSection(locale, context),
+    markerSection(),
     '## English source JSON',
     JSON.stringify(sourcePayload(leaves), null, 1),
     `## ${locale.name} draft JSON`,
@@ -132,11 +150,26 @@ function correctiveMessage(
   const notes = verdicts.map(
     ({ path, problems }) => `* ${path}: ${problems.join(', ')}`,
   );
+  const exactLimits = verdicts.flatMap(({ path, problems }) => {
+    if (!problems.includes('over-budget')) return [];
+    const leaf = leaves.find((candidate) => candidate.path === path);
+    const limit = leaf?.validationMaxLength ?? leaf?.maxLength;
+    return limit
+      ? [`* ${path}: compact naturally to at most ${limit} Unicode characters.`]
+      : [];
+  });
   return [
     'Your previous answer had problems with these fields:',
     notes.join('\n'),
     'Return the COMPLETE object again with exactly the requested keys.',
     '- Rephrase naturally to fit maxChars; never truncate.',
+    ...(exactLimits.length
+      ? [
+          'For the over-budget SEO fields, use these exact schema ceilings:',
+          exactLimits.join('\n'),
+          'Compact wording only; never cut rich text, remove HTML, or remove protected markers.',
+        ]
+      : []),
     '- Reproduce source HTML tags, order, and attributes exactly.',
     '- Preserve every {{CGPV_*}} marker exactly once; each marker is an immutable source fact.',
     '- Preserve numbers, prices, percentages, URLs, emails, and placeholders verbatim.',
@@ -263,8 +296,9 @@ export async function translateEntryLeaves(
     stage: 'writer' | 'editor',
     chunk: readonly TranslatableLeaf[],
     batch: Record<string, unknown>,
+    masks: ReadonlyMap<string, ProtectedValueMask>,
   ): Record<string, unknown> => {
-    const verdicts = validateTranslatedBatch(chunk, batch, targetScript);
+    const verdicts = validateTranslatedBatch(chunk, batch, targetScript, masks);
     if (verdicts.length) {
       const detail = verdicts
         .map(({ path, problems }) => `${path}: ${problems.join(', ')}`)
@@ -284,8 +318,11 @@ export async function translateEntryLeaves(
       ...leaf,
       value: masks.get(leaf.path)!.masked,
     }));
+    // Validated on the RAW model output: the markers are the facts, and the
+    // validator restores the source bytes itself for the structure, budget
+    // and script checks.
     const validateModelBatch = (batch: Record<string, unknown>) =>
-      validateTranslatedBatch(chunk, restoredBatch(batch, masks), targetScript);
+      validateTranslatedBatch(chunk, batch, targetScript, masks);
 
     const first = await completeWithRetry(provider, config, {
       system: writerSystem,
@@ -316,11 +353,7 @@ export async function translateEntryLeaves(
         );
       }
     }
-    requireClean(
-      'writer',
-      chunk,
-      restoredBatch(writerBatch, masks),
-    );
+    requireClean('writer', chunk, writerBatch, masks);
 
     const edited = await completeWithRetry(provider, config, {
       system: editorSystem,
@@ -352,10 +385,9 @@ export async function translateEntryLeaves(
         );
       }
     }
-    const cleanEditorBatch = requireClean(
-      'editor',
-      chunk,
-      restoredBatch(editorBatch, masks),
+    const cleanEditorBatch = restoredBatch(
+      requireClean('editor', chunk, editorBatch, masks),
+      masks,
     );
 
     for (const leaf of chunk) {

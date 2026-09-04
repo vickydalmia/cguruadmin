@@ -37,29 +37,166 @@ function sameHtmlStructure(source: string, translated: string): boolean {
 }
 
 /**
+ * A number with optional thousands/decimal separators, where every separator
+ * must be followed by a digit. English keeps an amount mid-sentence ("AED 749
+ * onwards"); natural Arabic routinely ends the clause with it ("تبدأ من AED
+ * 749."), and a greedy `[\d,.]*` made the sentence-ending "." part of the
+ * amount on the output side only — the whole UAE backfill failed on it.
+ */
+const AMOUNT = '\\d+(?:[,.]\\d+)*';
+
+/**
  * Identifiers that must survive translation verbatim: URLs and email
  * addresses embedded in the text. (Coupon codes never enter the pipeline —
  * `code` fields are non-localized — so codes inside prose are the LLM's
  * brief, not a hard gate: too many false positives on ALL-CAPS words.)
  */
-function protectedPatterns(): RegExp[] {
-  return [
-    /https?:\/\/[^\s"'<>]+/gu,
-    /[\w.+-]+@[\w-]+\.[\w.]+/gu,
-    /\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[a-zA-Z_][\w.-]*\}|%[a-z]/gu,
-    currencyAmountPattern(),
-    /\d[\d,.]*\s*(?:%|٪)/gu,
-    /\b\d[\d,.]*(?:st|nd|rd|th)?\b/giu,
-  ];
+export type ProtectedSpanKind =
+  | 'html'
+  | 'url'
+  | 'email'
+  | 'placeholder'
+  | 'currency'
+  | 'percentage'
+  | 'date'
+  | 'time'
+  | 'version'
+  | 'range'
+  | 'phone'
+  | 'number';
+
+export type ProtectedSpan = {
+  start: number;
+  end: number;
+  value: string;
+  kind: ProtectedSpanKind;
+};
+
+/**
+ * Consume one complete HTML tag/comment, respecting quoted `>` characters in
+ * attributes. A regex such as `<[^>]+>` splits `<a title="1 > 0">` and then
+ * lets the model rewrite the rest of the tag, which is exactly the structure
+ * the marker boundary is meant to make unavailable.
+ */
+function htmlSpanAt(value: string, start: number): ProtectedSpan | null {
+  if (value.startsWith('<!--', start)) {
+    const close = value.indexOf('-->', start + 4);
+    if (close === -1) return null;
+    const end = close + 3;
+    return { start, end, value: value.slice(start, end), kind: 'html' };
+  }
+  if (value[start] !== '<') return null;
+  let quote: '"' | "'" | null = null;
+  for (let index = start + 1; index < value.length; index += 1) {
+    const char = value[index];
+    if (quote) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === '>') {
+      const end = index + 1;
+      return { start, end, value: value.slice(start, end), kind: 'html' };
+    }
+  }
+  return null;
+}
+
+function anchored(pattern: RegExp, value: string): string | null {
+  const flags = pattern.flags.replace(/g/gu, '');
+  const match = new RegExp(`^(?:${pattern.source})`, flags).exec(value);
+  return match?.[0] || null;
+}
+
+function phoneAt(value: string): string | null {
+  const matched = anchored(
+    /(?:\+\d{1,3}[ .-]?)?(?:\(?\d{2,4}\)?[ .-]?){2,5}\d{2,4}/u,
+    value,
+  );
+  if (!matched) return null;
+  const digitCount = matched.match(/\d/gu)?.length ?? 0;
+  return digitCount >= 7 && digitCount <= 15 ? matched : null;
+}
+
+function urlAt(value: string): string | null {
+  const matched = anchored(/https?:\/\/[^\s"'<>]+/u, value);
+  // Sentence full stops and commas are delimiters. Other trailing punctuation
+  // (`)`, `]`, `?`, `!`, `;`, `:`) is valid URL data and remains protected.
+  return matched?.replace(/[.,]+$/u, '') || null;
+}
+
+/**
+ * Ordered, non-overlapping tokenizer. At each source offset the most specific
+ * atomic forms win before the catch-all number rule. This prevents a date,
+ * version, phone number or currency amount from becoming several separately
+ * movable markers and makes one source byte belong to at most one marker.
+ */
+export function protectedSpans(
+  value: string,
+  options: { includeHtml?: boolean } = {},
+): ProtectedSpan[] {
+  const spans: ProtectedSpan[] = [];
+  for (let start = 0; start < value.length;) {
+    if (options.includeHtml) {
+      const html = htmlSpanAt(value, start);
+      if (html) {
+        spans.push(html);
+        start = html.end;
+        continue;
+      }
+    }
+
+    const remaining = value.slice(start);
+    const candidates: Array<[ProtectedSpanKind, string | null]> = [
+      // URLs intentionally retain all non-delimiter trailing bytes. `)`, `]`,
+      // `?`, `!`, `;` and `:` are valid URL data and must not be peeled off by
+      // sentence-punctuation heuristics.
+      ['url', urlAt(remaining)],
+      ['email', anchored(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/u, remaining)],
+      [
+        'placeholder',
+        anchored(/\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[a-zA-Z_][\w.-]*\}|%[a-z]/u, remaining),
+      ],
+      ['currency', anchored(currencyAmountPattern(), remaining)],
+      ['percentage', anchored(new RegExp(`${AMOUNT}\\s*(?:%|٪)`, 'u'), remaining)],
+      [
+        'date',
+        anchored(
+          /(?:\d{1,4}[-\/.]\d{1,2}[-\/.]\d{1,4}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:,\s*\d{4})?)/iu,
+          remaining,
+        ),
+      ],
+      ['time', anchored(/\d{1,2}:\d{2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?/iu, remaining)],
+      ['version', anchored(/(?:v(?:ersion)?\s*)?\d+(?:\.\d+){1,4}/iu, remaining)],
+      ['range', anchored(new RegExp(`${AMOUNT}\\s*(?:-|–|—|to)\\s*${AMOUNT}`, 'iu'), remaining)],
+      ['phone', phoneAt(remaining)],
+      // No word boundary: digits glued to words ("90ml") are immutable too.
+      ['number', anchored(new RegExp(`${AMOUNT}(?:st|nd|rd|th)?`, 'iu'), remaining)],
+    ];
+    const found = candidates.find(([, matched]) => Boolean(matched));
+    if (!found?.[1]) {
+      start += 1;
+      continue;
+    }
+    const [kind, matched] = found as [ProtectedSpanKind, string];
+    const end = start + matched.length;
+    spans.push({ start, end, value: matched, kind });
+    start = end;
+  }
+  return spans;
 }
 
 export function protectedValues(value: string): string[] {
-  const patterns = protectedPatterns();
-  return patterns.flatMap((pattern) => value.match(pattern) ?? []);
+  return protectedSpans(value).map((span) => span.value);
 }
 
 export type ProtectedValueMask = {
   masked: string;
+  /** Marker labels (A, B, … AA) in source order — one per masked span. */
+  labels: string[];
   restore: (translated: string) => string;
 };
 
@@ -75,14 +212,17 @@ function markerLabel(index: number): string {
 }
 
 function markerPattern(label: string): RegExp {
-  // Models occasionally add spaces around placeholder separators or change
-  // their case. Those changes carry no semantic meaning, so accept them when
-  // restoring the exact protected source bytes. Alphabetic labels avoid
-  // Arabic-Indic digit normalisation in dense Arabic rich text.
-  return new RegExp(
-    `\\{\\{\\s*CGPV\\s*[_-]?\\s*${label}\\s*\\}\\}`,
-    'giu',
-  );
+  return new RegExp(`\\{\\{CGPV_${label}\\}\\}`, 'gu');
+}
+
+/** Any exact marker, whatever its label. Malformed spellings count as missing. */
+function anyMarkerPattern(): RegExp {
+  return /\{\{CGPV_([A-Z]+)\}\}/gu;
+}
+
+/** The model's text with every marker removed: what it wrote on its own. */
+export function stripMarkers(value: string): string {
+  return value.replace(anyMarkerPattern(), ' ');
 }
 
 /**
@@ -93,28 +233,10 @@ function markerPattern(label: string): RegExp {
  * before output validation and persistence.
  */
 export function maskProtectedValues(value: string): ProtectedValueMask {
-  const spans: Array<{ start: number; end: number; value: string }> = [];
-  // HTML is already validated by sameHtmlStructure(). Mask it as well so the
-  // model cannot rewrite attributes, but keep it out of protectedValues() so
-  // one changed tag reports the precise html-structure problem only.
-  const maskPatterns = [/<!--[\s\S]*?-->|<[^>]+>/gu, ...protectedPatterns()];
-  for (const pattern of maskPatterns) {
-    const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
-    const matcher = new RegExp(pattern.source, flags);
-    for (let match = matcher.exec(value); match; match = matcher.exec(value)) {
-      const matched = match[0];
-      if (!matched) {
-        matcher.lastIndex += 1;
-        continue;
-      }
-      const start = match.index;
-      const end = start + matched.length;
-      if (spans.some((span) => start < span.end && end > span.start)) continue;
-      spans.push({ start, end, value: matched });
-    }
+  const spans = protectedSpans(value, { includeHtml: true });
+  if (spans.length === 0) {
+    return { masked: value, labels: [], restore: (text) => text };
   }
-  spans.sort((left, right) => left.start - right.start || left.end - right.end);
-  if (spans.length === 0) return { masked: value, restore: (text) => text };
 
   const replacements = spans.map((span, index) => ({
     ...span,
@@ -131,6 +253,7 @@ export function maskProtectedValues(value: string): ProtectedValueMask {
 
   return {
     masked,
+    labels: replacements.map((replacement) => replacement.label),
     restore(translated: string) {
       return replacements.reduce(
         (current, replacement) =>
@@ -145,6 +268,8 @@ export function maskProtectedValues(value: string): ProtectedValueMask {
  * Any currency, not a per-site list: every ISO 4217 code ICU knows plus the
  * common symbols and Arabic abbreviations, before OR after the amount. The
  * code list is case-sensitive so ordinary words ("GET 50") stay unprotected.
+ * The word boundary sits on the OUTER side of a code only, so "AED400" is
+ * one fact rather than an unprotected code beside an unprotected number.
  */
 let currencyAmountRegExp: RegExp | null = null;
 
@@ -157,11 +282,12 @@ export function currencyAmountPattern(): RegExp {
     const codes = (intl.supportedValuesOf?.('currency') ?? []).join('|');
     const symbols = '[$€£¥₹₩₺₪฿₫₱₦₴₵₡₲₭₮₸₼₽₾₿]';
     const arabic = 'د\\.إ|ر\\.س|ج\\.م|د\\.ك|ر\\.ق|د\\.ب|ر\\.ع|د\\.ا|ل\\.ل|د\\.م';
-    const code = codes ? `\\b(?:${codes})\\b|` : '';
-    const unit = `(?:${code}${symbols}|${arabic})`;
-    const amount = '\\d[\\d,.]*';
+    const leading = codes ? `\\b(?:${codes})|` : '';
+    const trailing = codes ? `(?:${codes})\\b|` : '';
+    const unitBefore = `(?:${leading}${symbols}|${arabic})`;
+    const unitAfter = `(?:${trailing}${symbols}|${arabic})`;
     currencyAmountRegExp = new RegExp(
-      `${unit}\\s*${amount}|${amount}\\s*${unit}`,
+      `${unitBefore}\\s*${AMOUNT}|${AMOUNT}\\s*${unitAfter}`,
       'gu',
     );
   }
@@ -169,14 +295,55 @@ export function currencyAmountPattern(): RegExp {
   return currencyAmountRegExp;
 }
 
-function keepsProtectedValues(source: string, translated: string): boolean {
-  const ordered = (value: string) => [...protectedValues(value)].sort();
-  const expected = ordered(source);
-  const actual = ordered(translated);
+function sameMultiset(expected: readonly string[], actual: readonly string[]): boolean {
+  const left = [...expected].sort();
+  const right = [...actual].sort();
   return (
-    expected.length === actual.length &&
-    expected.every((identifier, index) => identifier === actual[index])
+    left.length === right.length &&
+    left.every((identifier, index) => identifier === right[index])
   );
+}
+
+/** Unmasked comparison — for callers that validate plain text without a mask. */
+function keepsProtectedValues(source: string, translated: string): boolean {
+  return sameMultiset(protectedValues(source), protectedValues(translated));
+}
+
+/**
+ * Every marker the mask produced appears exactly once in the model's output,
+ * and no marker the mask never produced does. Checked on the RAW output: the
+ * marker is the fact, so this is the whole "did the fact survive" question —
+ * re-matching the restored Arabic prose with context-sensitive regexes is
+ * what used to fail on a sentence-final price.
+ */
+function keepsMarkers(labels: readonly string[], output: string): boolean {
+  const known = new Set(labels.map((label) => label.toUpperCase()));
+  const markerLikes = output.match(/\{\{[^{}]*CGPV[^{}]*\}\}/giu) ?? [];
+  const exactMarkers = output.match(anyMarkerPattern()) ?? [];
+  if (markerLikes.length !== exactMarkers.length) return false;
+  let total = 0;
+  for (const match of output.matchAll(anyMarkerPattern())) {
+    total += 1;
+    if (!known.has(match[1].toUpperCase())) return false;
+  }
+  return total === labels.length && labels.every(
+    (label) => (output.match(markerPattern(label)) ?? []).length === 1,
+  );
+}
+
+/**
+ * The facts the writer added on its own. Both sides are marker-stripped, so
+ * the source side is whatever the mask patterns did not cover; anything
+ * beyond that in the output — a digit run in any script, an amount, a URL,
+ * an e-mail — was invented. (A bare currency word beside a marker is not a
+ * fact by itself and passes; the amount it qualifies is the marker.)
+ */
+function keepsMaskedFacts(maskedSource: string, output: string): boolean {
+  const facts = (value: string) => {
+    const text = stripMarkers(value);
+    return [...protectedValues(text), ...(text.match(/\p{Nd}+/gu) ?? [])];
+  };
+  return sameMultiset(facts(maskedSource), facts(output));
 }
 
 function isEnglishProse(value: string): boolean {
@@ -199,22 +366,31 @@ function sameVisibleText(source: string, translated: string): boolean {
  * missing" check: English prose whose output contains no character of the
  * target script was left untranslated. Null for Latin-script targets, where
  * the check cannot distinguish source from translation.
+ *
+ * With `masks` (the pipeline's case) `translated` is the model's RAW output,
+ * markers included: facts are judged by marker integrity plus "nothing new"
+ * on the marker-stripped text, and the restored text serves the structure,
+ * budget and script checks. Without a mask for a path the plain-text
+ * comparison applies.
  */
 export function validateTranslatedBatch(
   leaves: readonly TranslatableLeaf[],
   translated: Record<string, unknown>,
   targetScript?: RegExp | null,
+  masks?: ReadonlyMap<string, ProtectedValueMask>,
 ): LeafVerdict[] {
   const verdicts: LeafVerdict[] = [];
   const expectedPaths = new Set(leaves.map((leaf) => leaf.path));
   for (const leaf of leaves) {
     const problems: LeafProblem[] = [];
-    const value = translated[leaf.path];
-    if (value === undefined) {
+    const raw = translated[leaf.path];
+    if (raw === undefined) {
       problems.push('missing');
-    } else if (typeof value !== 'string') {
+    } else if (typeof raw !== 'string') {
       problems.push('not-a-string');
     } else {
+      const mask = masks?.get(leaf.path);
+      const value = mask ? mask.restore(raw) : raw;
       if (!value.trim()) problems.push('empty');
       const maximumLength = leaf.validationMaxLength ?? leaf.maxLength;
       if (maximumLength && [...value].length > maximumLength) {
@@ -223,14 +399,18 @@ export function validateTranslatedBatch(
       if (leaf.kind === 'richtext' && !sameHtmlStructure(leaf.value, value)) {
         problems.push('html-structure-changed');
       }
-      if (!keepsProtectedValues(leaf.value, value)) {
+      const factsKept = mask
+        ? keepsMarkers(mask.labels, raw) && keepsMaskedFacts(mask.masked, raw)
+        : keepsProtectedValues(leaf.value, value);
+      if (!factsKept) {
         problems.push('protected-value-changed');
       }
-      // Root taxonomy names are often proper brand names ("Golden Scent",
-      // "American Eagle") that Arabic editorial convention may legitimately
-      // retain in Latin script. They are still offered to the translator; we
-      // simply do not misclassify an unchanged brand identity as prose.
-      const enforceTranslatedProse = leaf.path !== 'name' && isEnglishProse(leaf.value);
+      // Only leaves identified by the schema walker as true entity names may
+      // remain in Latin script. Promotional headings/descriptions — including
+      // homepage title overrides — never receive this exemption.
+      const actualEntityName = leaf.identity === true && leaf.path === 'name';
+      const enforceTranslatedProse =
+        !actualEntityName && isEnglishProse(leaf.value);
       if (enforceTranslatedProse && sameVisibleText(leaf.value, value)) {
         problems.push('untranslated-source');
       }

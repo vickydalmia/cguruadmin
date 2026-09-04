@@ -18,6 +18,7 @@ export type LocaleTranslationStatus = {
     | 'synced'
     | 'stale'
     | 'in-progress'
+    | 'blocked'
     | 'failed';
   needsReview: boolean;
   reviewNotes: string | null;
@@ -58,6 +59,8 @@ export async function entryTranslationStatus(
         verdict = 'in-progress';
       } else if (job?.status === 'failed') {
         verdict = 'failed';
+      } else if (job?.status === 'blocked') {
+        verdict = 'blocked';
       } else if (!state) {
         verdict = 'missing';
       } else if (currentHash && state.sourceHash === currentHash) {

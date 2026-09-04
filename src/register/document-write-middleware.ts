@@ -2,6 +2,8 @@ import type { Core } from '@strapi/strapi';
 import { purgeResponseCaches } from '../middlewares/cache';
 import {
   createOutboxPayload,
+  expandPayloadPathsForLocales,
+  localizeTranslationPayload,
   mergeScope,
   offerEntityTypeFromUid,
   outboxPayloadSummary,
@@ -42,7 +44,10 @@ import { clearDeletedCheckoutMerchant } from '../utils/checkout-merchant-validat
 import { fillHomepageOverrides } from '../utils/homepage-override-fill';
 import { DOCUMENT_WRITE_ACTIONS } from '../constants/document-write';
 import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
-import { isTranslationWrite } from '../translation/write-flag';
+import {
+  isTranslationWrite,
+  translationWriteContext,
+} from '../translation/write-flag';
 import {
   translationRuntimeActive,
   wakeTranslationOutbox,
@@ -52,6 +57,12 @@ import {
   TRANSLATION_STATE_TABLE,
 } from '../translation/outbox/store';
 import { enabledContentLocales } from '../translation/locales/registry';
+import {
+  hasSharedFieldSelection,
+  loadSharedFieldSnapshot,
+  sharedFieldSelection,
+  sharedFieldSnapshotsDiffer,
+} from '../isr-outbox/localized-change';
 
 // The document-write pipeline: the one document-service middleware every
 // editor-facing write flows through. In order: pre-write validation
@@ -200,6 +211,39 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
           });
         } catch {
           festiveOfferBefore = null;
+        }
+      }
+
+      // Content Manager updates resend the full form, including every shared
+      // slug/visibility/media field. Field presence is therefore not evidence
+      // of change: compare the persisted before/after values so an English
+      // title-only edit does not invalidate Arabic before its translation is
+      // ready. Unknown/read-failed state deliberately falls back to all-locale
+      // invalidation.
+      const localizedModel = strapi.getModel(context.uid as any) as any;
+      const localizedType =
+        localizedModel?.pluginOptions?.i18n?.localized === true;
+      const sharedSelection = sharedFieldSelection(
+        localizedModel,
+        context.params?.data,
+      );
+      let sharedBefore: Record<string, unknown> | null = null;
+      if (
+        localizedType &&
+        context.action === 'update' &&
+        context.params?.documentId &&
+        hasSharedFieldSelection(sharedSelection)
+      ) {
+        try {
+          sharedBefore = await loadSharedFieldSnapshot(
+            strapi,
+            context.uid,
+            context.params.documentId,
+            context.params?.locale,
+            sharedSelection,
+          );
+        } catch {
+          sharedBefore = null;
         }
       }
 
@@ -357,12 +401,15 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
               }
             }
           } catch (err: any) {
-            // Never fail an editor's save on translation bookkeeping; the
-            // nightly consistency sweep re-enqueues hash-stale entries.
-            strapi.log.warn(
+            // The job is the durable continuation of this English write.
+            // Failing the transaction is safer than committing content that
+            // can never be translated (the nightly audit is deliberately
+            // optional and is not a delivery mechanism).
+            strapi.log.error(
               `[translation] enqueue failed for ${context.uid} ${documentId}: ` +
                 `${err?.message ?? err}`,
             );
+            throw err;
           }
 
           const afterScope =
@@ -465,8 +512,68 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
           }
 
           if (!scope && offerInvalidations.length === 0) return null;
+          const payload = createOutboxPayload(
+            scope ?? {},
+            offerInvalidations,
+          );
+          const targetLocale = String(
+            context.params?.locale ?? DEFAULT_CONTENT_LOCALE,
+          );
+          const translation = translationWriteContext();
+          const sharedChange = await (async () => {
+            if (!localizedType || isTranslationWrite()) return false;
+            if (targetLocale === '*') return true;
+            if (['publish', 'unpublish'].includes(context.action)) return true;
+            if (context.action !== 'update') return false;
+            if (sharedSelection.unknown) return true;
+            if (!hasSharedFieldSelection(sharedSelection)) return false;
+            try {
+              const after = documentId
+                ? await loadSharedFieldSnapshot(
+                    strapi,
+                    context.uid,
+                    documentId,
+                    context.params?.locale,
+                    sharedSelection,
+                  )
+                : null;
+              return sharedFieldSnapshotsDiffer(sharedBefore, after);
+            } catch {
+              return true;
+            }
+          })();
+          if (
+            localizedType &&
+            !sharedChange &&
+            targetLocale !== DEFAULT_CONTENT_LOCALE &&
+            targetLocale !== '*'
+          ) {
+            const localizedPayload = localizeTranslationPayload(
+              payload,
+              targetLocale,
+              {
+                routeMembershipChanged:
+                  translation
+                    ? !translation.targetRowExisted ||
+                      translation.operation === 'delete'
+                    : ['create', 'delete'].includes(context.action),
+              },
+            );
+            return {
+              payload: localizedPayload,
+              reason: `${context.uid} ${context.action}`,
+              ...(translation
+                ? { eventKey: `translation-isr:${targetLocale}` }
+                : {}),
+            };
+          }
           return {
-            payload: createOutboxPayload(scope ?? {}, offerInvalidations),
+            payload: sharedChange
+              ? expandPayloadPathsForLocales(
+                  payload,
+                  (await enabledContentLocales(strapi)).map((locale) => locale.code),
+                )
+              : payload,
             reason: `${context.uid} ${context.action}`,
           };
         },

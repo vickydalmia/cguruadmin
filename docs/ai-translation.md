@@ -27,21 +27,46 @@ edits made there.
   The dispatcher (`src/translation/outbox/`) claims jobs with leases,
   translates changed text (source-hash gate — an unchanged source costs no
   LLM call), rebuilds the locale version through
-  `strapi.documents().update({ locale })` so sanitization/validation/ISR all
-  run, and re-mirrors relations (owner side, ordered, missing targets
-  retried then accepted with a note). A deterministic locale-write validation
-  or SQL-integrity rejection becomes a terminal failed job after that paid
-  result; it is never sent back to the provider in a cost-increasing loop.
+  `strapi.documents().update({ locale })` so sanitization and ISR run, and
+  re-mirrors relations (owner side and ordered). Translation writes carry an
+  explicit source/target/write-plan context through the normal validation
+  pipeline; sanitization, required values, schema limits, SEO/URL safety,
+  Coupon invariants, lifecycle, identity/slug uniqueness and component
+  structure still run. The only source-parity exceptions are the documented
+  legacy cases: translated short descriptions do not inherit English's
+  160-character minimum, exact source homepage media IDs may preserve legacy
+  dimensions, and a legacy source offer with no taxonomy may mirror that
+  empty taxonomy. A target-only defect is never grandfathered.
+- **Dependencies** — required localized relations are resolved before any
+  provider call. Coupon/Deal taxonomy is required when it exists in English;
+  homepage, menu, footer, global and static-page relations are always required.
+  Missing targets put the job in `blocked` with structured `blocked_on` data,
+  with no provider call, content write or ISR invalidation. Forward curation
+  relations on Store/Brand/Category/Bank may create the base row first, but
+  remain blocked until relation repair. Publishing a dependency wakes exact
+  `relation-sync` jobs for its parents; unresolved jobs are never delivered.
 - **Quality pipeline** — two independent LLM roles per entry: a writer pass
   in the target language, then a native copy-editor pass, each structurally
   validated (exact HTML structure, protected numbers/prices/URLs/placeholders,
   target-script presence for non-Latin scripts, no untranslated English) with
-  one focused corrective retry for only the failed fields. Protected facts are
-  replaced with short alphabetically labelled `{{CGPV_*}}` markers before
-  either model sees them and restored from the source before validation, so a
-  model cannot localize or alter them. Alphabetic labels avoid Arabic-Indic
-  digit normalization; harmless marker case/separator spacing is tolerated
-  during restoration.
+  one focused corrective retry for only the failed fields. Protected facts —
+  every digit run (including digits glued to letters such as `90ml`), currency
+  amounts (`AED 749`, `AED400`, `$40`), percentages, URLs, e-mails,
+  placeholders and HTML tags — are replaced with short alphabetically labelled
+  `{{CGPV_*}}` markers before either model sees them, so a model cannot
+  localize or alter them. The fact check is then made on the model's raw
+  output: every marker exactly once, no unknown marker, and no digit (any
+  script), amount, URL or e-mail added outside the markers. The restored text
+  serves the structure, budget and script checks. (Re-matching the restored
+  Arabic prose with regexes is what dead-lettered the UAE backfill: a
+  sentence-final price matched as `AED 749.` while the English matched
+  `AED 749`.) Alphabetic labels avoid Arabic-Indic digit normalization;
+  marker spelling is strict. The marker brief is part of the per-request user
+  message, not the fingerprinted system prompt. The proper-name exemption is
+  limited to actual entity `name` fields; promotional titles, overrides and
+  descriptions must be translated. If an SEO field exceeds its exact schema
+  maximum, the focused correction asks the provider to compact only that
+  field without truncating rich text or removing protected values.
   Output that still fails is NEVER published: the current locale version is
   retained and the complete job receives at most
   `TRANSLATION_QUALITY_RETRY_MAX` durable retries (default one), then becomes a
@@ -65,7 +90,22 @@ edits made there.
   the backfill rebuilds every locale row from memory with zero LLM calls —
   only genuinely changed English pays. A hash match WITHOUT stored memory
   is treated as stale (re-translate), never rebuilt from the possibly-wiped
-  locale row.
+  locale row. Before a hash-current row is rebuilt, the dispatcher compares
+  the complete schema-derived write plan (text, components, media and
+  relations) with the persisted locale row. An exact match performs no
+  documents-API write and emits no ISR event; a missing row or relation drift
+  still rebuilds from memory without an AI call. A successfully validated paid
+  result is stored after the final source-hash check and before publication,
+  so a later write-validation failure can retry without buying the same text.
+- **Consistency sweep** — the nightly sweep is an opt-in recovery net
+  (`TRANSLATION_NIGHTLY_CONSISTENCY_ENABLED=false` by default) for writes that
+  bypassed the document middleware. It labels its jobs separately. If
+  the newest older attempt is a terminal failure and the English source has
+  not changed since that attempt, the dispatcher records the nightly check as
+  skipped without another provider call. An English edit, catalogue sync or
+  explicit `POST /translation/backfill {}` uses a non-nightly reason and can
+  retry deliberately. A nightly upsert also cannot overwrite a pending editor
+  job's reason. Normal editor writes never depend on the sweep.
 - **UI text** — the storefront's chrome strings (buttons, labels, headings,
   aria-labels, meta templates) are not CMS content; they live in the UI-text
   dictionary (`ui_catalogue` / `ui_translations`) that each storefront
@@ -96,16 +136,17 @@ edits made there.
   remains English (`src/admin/app.tsx` declares only the `en` admin locale);
   content locale versions and storefront UI-dictionary values are what get
   translated.
-- **Frontend** — the storefront serves each extra language under its path
-  prefix (`/ar/…`, matching the URL shape the live couponzguru.ae Arabic
-  pages already have indexed — same English slugs, so the migration keeps
-  every `/ar/` URL 1:1): the Astro middleware strips the prefix and pins
-  the request's content language, `strapiFetch` appends `?locale=`, a
+- **Frontend** — the storefront admits an extra-language path only when its
+  corresponding localized CMS row exists. The Astro middleware strips an
+  admitted prefix and pins the request's content language,
+  `strapiFetch` appends `?locale=`, a
   read-side document middleware in the CMS injects that locale into every
-  content read, the ISR outbox twins every invalidated path with its
-  localized path, and rendered documents get their internal links/form
+  content read, and rendered documents get their internal links/form
   actions re-prefixed (`src/lib/language-links.ts`) so a visitor browsing
   `/ar/…` stays in Arabic — including links inside translated rich text.
+  Existing Arabic rows remain routable while an update is pending. A new
+  English row has no Arabic route until its first Arabic publication; the
+  language switcher and `hreflang` use the same admitted inventory.
   Coupon and Product Deal detail URLs retain the default-locale row's numeric
   id in every language (`/coupon/123/` and `/ar/coupon/123/`); aggregate,
   listing, campaign, entity-page and search responses normalize translated
@@ -142,8 +183,8 @@ edits made there.
    instance handling the save; pending rows remain durable. Restart sibling
    CMS processes so their locale mirrors follow the disabled configuration.
 3. The save **hot-applies to the CMS instance that handled it**: the i18n
-   locale rows are created, the sync locale mirror the ISR path twins read is
-   re-primed and the dispatcher starts (only if the env block parses — an
+   locale rows are created, the locale registry is re-primed and the
+   dispatcher starts (only if the env block parses — an
    incomplete block is logged as `translation.hot_apply … env-missing` and
    nothing starts). **Restart every other CMS container** — locale mirrors
    are per process; only the designated admin process starts
@@ -153,11 +194,24 @@ edits made there.
    locales) and, if editors may trigger paid translations, the
    "Trigger AI translations" permission; grant "Edit storefront UI text" to
    whoever maintains UI copy.
-5. Dry-run the cost: `POST /translation/backfill { "dryRun": true }` (super
-   admin, admin session) and review `estimatedUsd` (content + dictionary).
-6. Backfill: `POST /translation/backfill {}` — idempotent and resumable
-   (re-POST any time; hash-current entries no-op). Watch
-   `GET /translation/outbox-status`.
+5. Dry-run the cost: Settings → Country Setup → AI content translation →
+   **Estimate cost** (Super Admin; the same as `POST /translation/backfill
+   { "dryRun": true }` with an admin session) and review the estimate
+   (content + dictionary).
+6. Backfill: use **Repair missing/failed translations** on the same card. It
+   calls `POST /translation/backfill` with `mode: "repair"` and selects only
+   missing rows, stale hashes, latest failed/blocked jobs, incomplete memory
+   and relation drift. `mode: "all"` remains the compatible default. Both
+   modes accept `locales`, `uids`, `force` and `dryRun`; the response separates
+   `selected`, `enqueued`, `skippedCurrent`, `providerCallsExpected` and
+   `perUid`. The operation is idempotent and resumable: fully current entries
+   perform neither a provider call, CMS write nor ISR invalidation. The card
+   shows queued / running / blocked / failed / done-today and
+   today's spend against the budget and polls while jobs are queued; the raw
+   feed is `GET /translation/outbox-status`. After a pipeline fix, this
+   manual backfill is what re-runs previously failed entries — the nightly
+   consistency sweep deliberately skips a failed entry whose English source
+   has not changed.
 7. Watch failures/retries in the Translation panel, UI Text's sync card or
    `GET /translation/outbox-status`. Successful results publish automatically.
 
@@ -182,10 +236,12 @@ No deploy is needed:
    instance that took the save creates the locale row, re-primes its mirror
    and (if not already running) starts the dispatcher; restart the other CMS
    containers.
-2. `languages[]` in `/api/site-settings` now carries the new code, so the
-   storefront's routing (`/hi/`), `<html dir>`, hreflang, switcher and the
-   ISR twins follow on their next settings refresh (60 s).
-3. **Backfill** (`POST /translation/backfill {}` or, for UI text only,
+2. `languages[]` in `/api/site-settings` now carries the new code. `<html dir>`
+   and localized fetching are available immediately, while individual
+   routes, hreflang alternates and switcher destinations appear only after the
+   matching locale row is published.
+3. **Repair missing/failed translations** (`POST /translation/backfill {
+   "mode": "repair" }` or, for UI text only,
    **Settings → UI Text → Translate missing/stale**). New languages render
    the generic `default.md` / `default-editor.md` prompts with Hindi's facts
    substituted; nothing else is required.
@@ -222,3 +278,41 @@ translations, falling back per key to the storefront's bundled English — and
 every dictionary write triggers one coalesced full ISR sweep. Localized
 sitemap membership remains separate from route serving and page-level
 hreflang.
+
+Content translation writes use locale-scoped ISR invalidation. For example,
+an Arabic Coupon update invalidates `/ar/`, its `/ar/<entity>/` consumers and
+its Arabic detail route, but not their English twins or shared redeem/code
+caches. The ISR payload's `localePrefix` constrains `all`, paths and scopes to
+that language. Localized route membership refreshes only when a locale row is
+created or removed. Translation invalidations share one pending outbox event
+per locale and merge during a short bounded debounce; a large backfill
+therefore advances bounded gateway versions instead of one per row. Shared
+non-localized changes such as slug or visibility still invalidate every
+affected locale.
+
+## Recovery sequence
+
+Use this order for a production repair after deploying a translation pipeline
+change:
+
+1. Disable `TRANSLATION_OUTBOX_DISPATCHER_ENABLED` everywhere; keep Strapi and
+   the storefront serving existing rows.
+2. Back up `translation_outbox`, `translation_state`, `translation_usage`,
+   `ui_catalogue` and `ui_translations`.
+3. Deploy the CMS migrations/code, enabling the dispatcher only on the admin
+   Strapi process. Deploy the matching storefront SSR and ISR gateway release.
+4. While the dispatcher is still stopped, verify idle ISR version counters do
+   not advance. Then resume the single dispatcher.
+5. Run repair for Store, Brand, Category and Bank and wait for the latest
+   pending/processing/blocked/failed counts to reach zero. Repair Coupons and
+   product Deals next; then homepage, menu, footer, global, jobs, CMS static
+   pages and the UI dictionary.
+6. Run one all-UID repair without `force`. Run the identical request again and
+   confirm `providerCallsExpected: 0`, no `translation_usage` change, no
+   content writes and no ISR version movement.
+
+Operational counts use only the latest job for each document/locale. Historical
+failures remain queryable for audit but do not make a repaired catalogue look
+failed. A formerly failed job without stored `translation_state.translations`
+needs one new provider-backed translation (normally the writer and editor
+calls); current or remembered content does not.

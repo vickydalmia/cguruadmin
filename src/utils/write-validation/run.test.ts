@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Core } from '@strapi/strapi';
 import { runWriteValidation } from './run';
+import { runWithTranslationWriteContext } from '../../translation/write-flag';
 import {
   COLLECTED_STEPS,
   LOCKED_STEPS,
@@ -382,5 +383,109 @@ describe('runWriteValidation — the cron stays grandfathered', () => {
     );
 
     expect(error.details?.errors?.length).toBeGreaterThan(0);
+  });
+});
+
+describe('runWriteValidation — translation writes use narrow source-parity exceptions', () => {
+  // The Arabic copy of an entry that already passed every rule. Read against
+  // the English stored row, its denser text fails the 160-char minimum and
+  // its not-yet-translated relations read as "orphaned" — the two rejections
+  // that dead-lettered the UAE backfill. Group A still runs on it.
+  const translated = {
+    name: 'أمازون',
+    shortDescription: '  متجر إلكتروني رائد  ',
+    logo: { documentId: 'logo-1' },
+    logoAlt: 'شعار أمازون',
+    seo: { metaTitle: 'كوبونات أمازون', metaDescription: 'وفّر باستخدام الأكواد.' },
+  };
+
+  // The writer always targets a content locale: documents().update({ locale }).
+  const arabicWrite = (data: any) => ({
+    ...write('api::store.store', data, 'update'),
+    params: { data, locale: 'ar' },
+  });
+
+  const englishSource = {
+    ...translated,
+    name: 'Amazon',
+    slug: 'amazon',
+    shortDescription: 'x'.repeat(200),
+    logoAlt: 'Amazon logo',
+    seo: { metaTitle: 'Amazon coupons', metaDescription: 'Save with verified codes.' },
+  };
+
+  const asTranslation = (data: any, targetRowExisted = false) =>
+    runWithTranslationWriteContext(
+      {
+        sourceEntry: englishSource,
+        targetLocale: 'ar',
+        plan: { data, skippedRelations: [] },
+        targetRowExisted,
+        operation: 'upsert',
+      },
+      () => runWriteValidation(fakeStrapi({ human: false }), arabicWrite(data)),
+    );
+
+  it('allows the locale-specific short description rule while validators still run', async () => {
+    const payload = arabicWrite({ ...translated });
+    await expect(
+      runWithTranslationWriteContext(
+        {
+          sourceEntry: englishSource,
+          targetLocale: 'ar',
+          plan: { data: payload.params.data, skippedRelations: [] },
+          targetRowExisted: false,
+          operation: 'upsert',
+        },
+        () => runWriteValidation(fakeStrapi({ human: false }), payload),
+      ),
+    ).resolves.toBeNull();
+    // Mutators still normalise the payload the write will persist.
+    expect(payload.params.data.shortDescription).toBe('متجر إلكتروني رائد');
+  });
+
+  it('rejects a target-only defect even under the translation flag', async () => {
+    const error = await caught(() =>
+      asTranslation({ ...translated, logoAlt: '' }),
+    );
+    expect(error.details?.errors?.map((e) => e.path.join('.'))).toContain('logoAlt');
+  });
+
+  it('validates shared source values without adding them to the locale plan', async () => {
+    const localizedPlan = { ...translated };
+    const invalidSource = {
+      ...englishSource,
+      slug: 'Bad_Slug',
+    };
+    const error = await caught(() =>
+      runWithTranslationWriteContext(
+        {
+          sourceEntry: invalidSource,
+          targetLocale: 'ar',
+          plan: { data: localizedPlan, skippedRelations: [] },
+          targetRowExisted: false,
+          operation: 'upsert',
+        },
+        () =>
+          runWriteValidation(
+            fakeStrapi({ human: false }),
+            arabicWrite(localizedPlan),
+          ),
+      ),
+    );
+
+    // Arabic does not own the route slug, but schema/SEO rules still inspect
+    // the effective source+plan record. The provider-facing plan remains
+    // locale-only throughout.
+    expect(error.details?.errors?.length).toBeGreaterThan(0);
+    expect(localizedPlan).not.toHaveProperty('slug');
+  });
+
+  it('rejects the same short description outside the flag', async () => {
+    const error = await caught(() =>
+      runWriteValidation(fakeStrapi({ human: false }), arabicWrite({ ...translated })),
+    );
+    const paths = error.details?.errors?.map((e) => e.path.join('.'));
+    expect(paths).toContain('shortDescription');
   });
 });

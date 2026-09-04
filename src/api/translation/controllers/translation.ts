@@ -85,11 +85,17 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
 
   /** Super-admin: enqueue the whole catalogue (idempotent, coalescing). */
   async backfill(ctx: any) {
-    const { uids, locales, force, dryRun } = ctx.request?.body ?? {};
+    const { uids, locales, force, dryRun, mode: rawMode } = ctx.request?.body ?? {};
+    const mode = rawMode === undefined ? 'all' : String(rawMode);
+    if (mode !== 'all' && mode !== 'repair') {
+      return badRequest(ctx, 'mode must be "all" or "repair".');
+    }
     if (dryRun === true) {
       ctx.body = await estimateTranslationBackfill(strapi, {
         uids: Array.isArray(uids) ? uids.map(String) : undefined,
         locales: Array.isArray(locales) ? locales.map(String) : undefined,
+        force: force === true,
+        mode,
       });
       return;
     }
@@ -103,6 +109,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       uids: Array.isArray(uids) ? uids.map(String) : undefined,
       locales: Array.isArray(locales) ? locales.map(String) : undefined,
       force: force === true,
+      mode,
     });
   },
 

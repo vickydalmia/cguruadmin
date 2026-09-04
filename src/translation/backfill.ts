@@ -3,19 +3,23 @@
 // migration package is deliberately NOT used here — its raw SQL bypasses
 // sanitization, validation and ISR, which is exactly what LLM output must
 // not skip. Re-running is free: pending jobs coalesce, and hash-current
-// entries no-op at claim time.
+// entries whose complete persisted locale plan matches no-op before write.
 import type { Core } from '@strapi/strapi';
 import { estimateBackfillCost, type CostEstimate } from './cost';
 import { translationConfigFromEnv } from './config';
 import { collectTranslatableLeaves } from './field-map';
 import { enabledContentLocales } from './locales/registry';
-import { wakeTranslationOutbox } from './outbox/runtime';
+import { translationStore, wakeTranslationOutbox } from './outbox/runtime';
 import { insertTranslationJobsBulk, type TranslationJobInsert } from './outbox/store';
+import { TRANSLATION_BACKFILL_REASON } from './outbox/reasons';
 import { UI_DICTIONARY_UID } from './ui-dictionary/constants';
 import { enqueueUiDictionaryJobs } from './ui-dictionary/enqueue';
 import { UiDictionaryStore } from './ui-dictionary/store';
-import { loadPopulatedEntry } from './writer';
+import { inspectLocaleVersion, loadPopulatedEntry } from './writer';
 import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
+import { sourceContentHash } from './source-hash';
+import { translationPromptFingerprint } from './prompts';
+import type { ContentLocale } from './locales/resolve';
 
 const PAGE_SIZE = 1_000;
 
@@ -79,60 +83,209 @@ function includesDictionary(uids?: readonly string[]): boolean {
 }
 
 export type BackfillResult = {
+  selected: number;
   enqueued: number;
+  skippedCurrent: number;
+  providerCallsExpected: number;
   perUid: Record<string, number>;
   locales: string[];
 };
 
+export type BackfillMode = 'all' | 'repair';
+
+type CandidateScan = {
+  inputs: TranslationJobInsert[];
+  selected: number;
+  skippedCurrent: number;
+  providerChars: number[];
+  perUid: Record<string, number>;
+};
+
+function completeMemory(
+  translations: Record<string, string> | null,
+  leaves: ReturnType<typeof collectTranslatableLeaves>,
+): translations is Record<string, string> {
+  return Boolean(
+    translations &&
+      leaves.every(
+        (leaf) =>
+          typeof translations[leaf.path] === 'string' &&
+          translations[leaf.path].trim().length > 0,
+      ),
+  );
+}
+
+async function scanContentCandidates(
+  strapi: Core.Strapi,
+  uids: readonly string[],
+  locales: readonly ContentLocale[],
+  options: { mode: BackfillMode; force: boolean; reason: string },
+): Promise<CandidateScan> {
+  const scan: CandidateScan = {
+    inputs: [],
+    selected: 0,
+    skippedCurrent: 0,
+    providerChars: [],
+    perUid: {},
+  };
+  if (uids.length === 0 || locales.length === 0) return scan;
+  const store = translationStore(strapi);
+  for (const uid of uids) {
+    scan.perUid[uid] = 0;
+    for await (const page of defaultLocaleDocumentIds(strapi, uid)) {
+      for (const documentId of page) {
+        const source = await loadPopulatedEntry(
+          strapi,
+          uid,
+          documentId,
+          DEFAULT_CONTENT_LOCALE,
+        );
+        if (!source) continue;
+        const leaves = collectTranslatableLeaves(strapi, uid, source);
+        for (const locale of locales) {
+          const targetLocale = locale.code;
+          const hash = sourceContentHash(
+            leaves,
+            translationPromptFingerprint(strapi, locale),
+          );
+          const [state, latestJob] = await Promise.all([
+            store.readState(uid, documentId, targetLocale),
+            store.activeJob(uid, documentId, targetLocale),
+          ]);
+          const memoryComplete = completeMemory(state?.translations ?? null, leaves);
+          const textCurrent =
+            !options.force && state?.sourceHash === hash && memoryComplete;
+          const latestNeedsRepair =
+            latestJob?.status === 'failed' || latestJob?.status === 'blocked';
+          let current = false;
+          if (textCurrent && !latestNeedsRepair) {
+            const inspection = await inspectLocaleVersion(
+              strapi,
+              uid,
+              documentId,
+              targetLocale,
+              source,
+              new Map(Object.entries(state!.translations!)),
+            );
+            current = inspection.current && inspection.skippedRelations.length === 0;
+          }
+          if (options.mode === 'repair' && current) {
+            scan.skippedCurrent += 1;
+            continue;
+          }
+          const providerRequired = !textCurrent && leaves.length > 0;
+          scan.inputs.push({
+            uid,
+            documentId,
+            targetLocale,
+            kind: providerRequired ? 'translate' : 'relation-sync',
+            force: options.force,
+            reason: options.reason,
+          });
+          scan.selected += 1;
+          scan.perUid[uid] += 1;
+          if (providerRequired) {
+            scan.providerChars.push(
+              leaves.reduce((sum, leaf) => sum + leaf.value.length, 0),
+            );
+          }
+        }
+      }
+    }
+  }
+  return scan;
+}
+
 export async function enqueueTranslationBackfill(
   strapi: Core.Strapi,
-  options: { uids?: string[]; locales?: string[]; force?: boolean } = {},
+  options: {
+    uids?: string[];
+    locales?: string[];
+    force?: boolean;
+    reason?: string;
+    mode?: BackfillMode;
+  } = {},
 ): Promise<BackfillResult> {
+  const reason = options.reason ?? TRANSLATION_BACKFILL_REASON;
+  const mode = options.mode ?? 'all';
   const enabled = await enabledContentLocales(strapi);
-  const locales = enabled
-    .map((locale) => locale.code)
-    .filter((code) => !options.locales || options.locales.includes(code));
+  const targetLocales = enabled.filter(
+    (locale) => !options.locales || options.locales.includes(locale.code),
+  );
+  const locales = targetLocales.map((locale) => locale.code);
   const uids = localizedApiUids(strapi).filter(
     (uid) => !options.uids || options.uids.includes(uid),
   );
-  const perUid: Record<string, number> = {};
+  let selected = 0;
+  let skippedCurrent = 0;
+  let providerCallsExpected = 0;
+  const dictionaryProviderChars: number[] = [];
+  let perUid: Record<string, number> = {};
   let enqueued = 0;
-  if (locales.length === 0) return { enqueued, perUid, locales };
+  if (locales.length === 0) {
+    return { selected, enqueued, skippedCurrent, providerCallsExpected, perUid, locales };
+  }
 
-  for (const uid of uids) {
-    perUid[uid] = 0;
-    for await (const page of defaultLocaleDocumentIds(strapi, uid)) {
-      const inputs: TranslationJobInsert[] = page.flatMap((documentId) =>
-        locales.map((targetLocale) => ({
-          uid,
-          documentId,
-          targetLocale,
-          kind: 'translate' as const,
-          force: options.force === true,
-          reason: 'backfill',
-        })),
-      );
-      if (!inputs.length) continue;
-      await strapi.db.transaction(async ({ trx }: any) => {
-        await insertTranslationJobsBulk(trx, inputs);
-      });
-      perUid[uid] += page.length;
-      enqueued += inputs.length;
-    }
+  const scan = await scanContentCandidates(strapi, uids, targetLocales, {
+    mode,
+    force: options.force === true,
+    reason,
+  });
+  selected += scan.selected;
+  skippedCurrent += scan.skippedCurrent;
+  perUid = scan.perUid;
+  if (scan.inputs.length > 0) {
+    await strapi.db.transaction(async ({ trx }: any) => {
+      await insertTranslationJobsBulk(trx, scan.inputs);
+    });
+    enqueued += scan.inputs.length;
   }
   // After the content waves: the storefront's UI text, one job per locale
   // (inert unless the translation runtime is up — same as every enqueue).
   if (includesDictionary(options.uids)) {
+    const dictionaryStore = new UiDictionaryStore(strapi);
+    const dictionaryLocales: string[] = [];
+    for (const locale of locales) {
+      const leaves = await dictionaryStore.pendingLeaves(
+        locale,
+        options.force === true,
+      );
+      if (mode === 'all' || leaves.length > 0) {
+        dictionaryLocales.push(locale);
+        selected += 1;
+        const chars = leaves.reduce((sum, leaf) => sum + leaf.text.length, 0);
+        if (chars > 0) dictionaryProviderChars.push(chars);
+      } else {
+        skippedCurrent += 1;
+      }
+    }
     const dictionary = await enqueueUiDictionaryJobs(strapi, {
-      locales,
+      locales: dictionaryLocales,
       force: options.force === true,
-      reason: 'backfill',
+      reason,
     });
     perUid[UI_DICTIONARY_UID] = dictionary.enqueued.length;
     enqueued += dictionary.enqueued.length;
   }
+  providerCallsExpected = estimateBackfillCost(
+    translationConfigFromEnv() ?? {
+      inputCostPerMTok: 0,
+      outputCostPerMTok: 0,
+      chunkChars: 12_000,
+    },
+    [...scan.providerChars, ...dictionaryProviderChars],
+    0,
+    2,
+  ).estimatedCalls;
   wakeTranslationOutbox();
-  return { enqueued, perUid, locales };
+  return {
+    selected,
+    enqueued,
+    skippedCurrent,
+    providerCallsExpected,
+    perUid,
+    locales,
+  };
 }
 
 /**
@@ -142,40 +295,33 @@ export async function enqueueTranslationBackfill(
  */
 export async function estimateTranslationBackfill(
   strapi: Core.Strapi,
-  options: { uids?: string[]; locales?: string[] } = {},
-): Promise<CostEstimate & { perUid: Record<string, number>; locales: string[] }> {
+  options: {
+    uids?: string[];
+    locales?: string[];
+    mode?: BackfillMode;
+    force?: boolean;
+  } = {},
+): Promise<CostEstimate & BackfillResult> {
   const config = translationConfigFromEnv();
-  const locales = (await enabledContentLocales(strapi))
-    .map((locale) => locale.code)
-    .filter((code) => !options.locales || options.locales.includes(code));
+  const targetLocales = (await enabledContentLocales(strapi)).filter(
+    (locale) => !options.locales || options.locales.includes(locale.code),
+  );
+  const locales = targetLocales.map((locale) => locale.code);
   const uids = localizedApiUids(strapi).filter(
     (uid) => !options.uids || options.uids.includes(uid),
   );
-  const perEntryChars: number[] = [];
-  const perUid: Record<string, number> = {};
-  for (const uid of uids) {
-    perUid[uid] = 0;
-    for await (const page of defaultLocaleDocumentIds(strapi, uid)) {
-      for (const documentId of page) {
-        const entry = await loadPopulatedEntry(
-          strapi,
-          uid,
-          documentId,
-          DEFAULT_CONTENT_LOCALE,
-        );
-        if (!entry) continue;
-        const leaves = collectTranslatableLeaves(strapi, uid, entry);
-        const chars = leaves.reduce((sum, leaf) => sum + leaf.value.length, 0);
-        perEntryChars.push(chars);
-        perUid[uid] += 1;
-      }
-    }
-  }
+  const scan = await scanContentCandidates(strapi, uids, targetLocales, {
+    mode: options.mode ?? 'all',
+    force: options.force === true,
+    reason: TRANSLATION_BACKFILL_REASON,
+  });
+  const perEntryChars = [...scan.providerChars];
+  const perUid = { ...scan.perUid };
+  let selected = scan.selected;
+  let skippedCurrent = scan.skippedCurrent;
   // The system prompt (brief + contract) rides along once per call.
   const promptOverheadChars = 6_000;
-  const localeEntries = perEntryChars.flatMap((chars) =>
-    locales.map(() => chars),
-  );
+  const localeEntries = [...perEntryChars];
   // The dictionary is already per locale: one line per locale holding the
   // characters of every key still missing or stale there. Nothing pending
   // (or translation off → no locales) adds no line at all.
@@ -183,10 +329,18 @@ export async function estimateTranslationBackfill(
     const dictionary = new UiDictionaryStore(strapi);
     perUid[UI_DICTIONARY_UID] = 0;
     for (const locale of locales) {
-      const leaves = await dictionary.pendingLeaves(locale, false);
+      const leaves = await dictionary.pendingLeaves(locale, options.force === true);
       const chars = leaves.reduce((sum, leaf) => sum + leaf.text.length, 0);
-      perUid[UI_DICTIONARY_UID] += leaves.length;
-      if (chars > 0) localeEntries.push(chars);
+      const include = (options.mode ?? 'all') === 'all' || leaves.length > 0;
+      if (include) {
+        perUid[UI_DICTIONARY_UID] += 1;
+        selected += 1;
+        if (chars > 0) {
+          localeEntries.push(chars);
+        }
+      } else {
+        skippedCurrent += 1;
+      }
     }
   }
   const estimate = estimateBackfillCost(
@@ -195,5 +349,13 @@ export async function estimateTranslationBackfill(
     promptOverheadChars,
     2,
   );
-  return { ...estimate, perUid, locales };
+  return {
+    ...estimate,
+    selected,
+    enqueued: 0,
+    skippedCurrent,
+    providerCallsExpected: estimate.estimatedCalls,
+    perUid,
+    locales,
+  };
 }

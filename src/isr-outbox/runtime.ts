@@ -95,8 +95,8 @@ export type CoalescedIsrSweepResult =
   | { skipped: false; id: string; eventKey: string };
 
 /**
- * One full sweep per `reason` at a time. `isr_outbox.event_key` is globally
- * unique with no ON CONFLICT path, so coalescing is "skip while a PENDING
+ * One full sweep per `reason` at a time. Pending rows are unique by event key,
+ * while delivered history remains append-only. Coalescing is "skip while a PENDING
  * row with this reason exists", serialized by an advisory lock. A sweep
  * already PROCESSING may have read state from before the caller's write, so
  * only pending rows count. The skip path still purges the response caches —

@@ -3,6 +3,7 @@ import type { TranslatableLeaf } from './field-map';
 import {
   maskProtectedValues,
   protectedValues,
+  stripMarkers,
   validateTranslatedBatch,
 } from './validate';
 import { parseBatchJson } from './translate-entry';
@@ -112,6 +113,81 @@ describe('validateTranslatedBatch', () => {
     expect(protectedValues('GET 50 today')).toEqual(['50']);
   });
 
+  it('accepts the Arabic renderings that dead-lettered the UAE backfill', () => {
+    // Every row below is a real failure from cguruaedb.csv: the English
+    // source keeps its amount mid-sentence, the faithful Arabic ends the
+    // clause with it, and the old greedy amount / word-boundary regexes saw
+    // "AED 749." or a freshly separated "90" as a changed fact.
+    const cases: [string, string][] = [
+      ['Enjoy artworks from AED 749 onwards.', 'استمتع بأعمال فنية تبدأ من AED 749.'],
+      ['A minimum order of USD 150 is needed.', 'الحد الأدنى للطلب هو USD 150.'],
+      ['Save $40 on orders, limited time.', 'وفّر $40 على الطلبات, لفترة محدودة.'],
+      ['Versace Crystal Noir EDT Spray For Her 90ml', 'عطر فيرساتشي كريستال نوار للنساء 90 مل'],
+      ['Bathing - Upto 40% + Additional10% Off', 'الاستحمام - حتى 40% + خصم إضافي 10%'],
+      ['Stay Starting At Just AED400.', 'إقامة تبدأ من AED400 فقط.'],
+      ['Visit https://noon.com for details.', 'زوروا https://noon.com.'],
+      ['Write to help@x.com today', 'راسل help@x.com.'],
+    ];
+    for (const [source, translated] of cases) {
+      expect(
+        validateTranslatedBatch([leaf('copy', source)], { copy: translated }, ARABIC),
+      ).toEqual([]);
+    }
+  });
+
+  it('protects digits glued to letters and a code glued to its amount as single facts', () => {
+    expect(protectedValues('Spray For Her 90ml')).toEqual(['90']);
+    expect(protectedValues('Upto 40% + Additional10% Off')).toEqual([
+      '40%',
+      '10%',
+    ]);
+    expect(protectedValues('Just AED400.')).toEqual(['AED400']);
+    expect(protectedValues('Visit https://noon.com.')).toEqual(['https://noon.com']);
+    expect(maskProtectedValues('Spray For Her 90ml').masked).toBe(
+      'Spray For Her {{CGPV_A}}ml',
+    );
+    expect(maskProtectedValues('Just AED400.').masked).toBe('Just {{CGPV_A}}.');
+    expect(maskProtectedValues('Over 1,000.').masked).toBe('Over {{CGPV_A}}.');
+  });
+
+  it('tokenizes complete URLs and atomic structured values without overlap', () => {
+    expect(
+      protectedValues(
+        'Visit https://x.test/a) https://x.test/b] https://x.test/c? ' +
+          'https://x.test/d! https://x.test/e; https://x.test/f: and https://x.test/g.',
+      ),
+    ).toEqual([
+      'https://x.test/a)',
+      'https://x.test/b]',
+      'https://x.test/c?',
+      'https://x.test/d!',
+      'https://x.test/e;',
+      'https://x.test/f:',
+      'https://x.test/g',
+    ]);
+    expect(
+      protectedValues(
+        'Call +971 (50) 123-4567 on 04/09/2026 at 10:30 PM; ' +
+          'v2.4.1 costs AED 1,250.50, saves 15%, and lasts 3–5 days.',
+      ),
+    ).toEqual([
+      '+971 (50) 123-4567',
+      '04/09/2026',
+      '10:30 PM',
+      'v2.4.1',
+      'AED 1,250.50',
+      '15%',
+      '3–5',
+    ]);
+  });
+
+  it('masks quoted HTML attributes as one ordered span', () => {
+    const source = '<a title="1 > 0" href="https://x.test/a)">Save 15%</a><!-- note -->';
+    const mask = maskProtectedValues(source);
+    expect(mask.masked).toBe('{{CGPV_A}}Save {{CGPV_B}}{{CGPV_C}}{{CGPV_D}}');
+    expect(mask.restore(mask.masked)).toBe(source);
+  });
+
   it('rejects invented protected facts and collapsed duplicate values', () => {
     const invented = validateTranslatedBatch(
       [leaf('body', 'Save 20% today')],
@@ -145,14 +221,95 @@ describe('validateTranslatedBatch', () => {
     ).toBe(
       'وفّر 20% على AED 150 لدى https://shop.example/x للعميل {customerName}',
     );
-    expect(
-      mask.restore(
-        'وفّر {{ cgpv-a }} على {{ CGPV _ B }} لدى ' +
-          '{{CGPV_C}} للعميل {{CGPV_D}}',
-      ),
-    ).toBe(
-      'وفّر 20% على AED 150 لدى https://shop.example/x للعميل {customerName}',
+    expect(mask.restore('وفّر {{ cgpv-a }} على {{ CGPV _ B }}')).toBe(
+      'وفّر {{ cgpv-a }} على {{ CGPV _ B }}',
     );
+  });
+
+  it('judges masked output by its markers, not by re-matching the restored prose', () => {
+    const source = 'Enjoy artworks from AED 749 onwards, see https://noon.com.';
+    const mask = maskProtectedValues(source);
+    const masks = new Map([['copy', mask]]);
+    expect(mask.labels).toEqual(['A', 'B']);
+    const judge = (copy: string) =>
+      validateTranslatedBatch([leaf('copy', source)], { copy }, ARABIC, masks);
+
+    // Sentence-final price and reordered exact markers are fine.
+    expect(judge('راجع {{CGPV_B}}، أعمال فنية تبدأ من {{CGPV_A}}.')).toEqual([]);
+    expect(judge('راجع {{CGPV_B}}، أعمال فنية تبدأ من {{ cgpv-a }}.')).toEqual([
+      { path: 'copy', problems: ['protected-value-changed'] },
+    ]);
+    // A dropped, duplicated or unknown marker is a changed fact.
+    expect(judge('أعمال فنية تبدأ من {{CGPV_A}}.')).toEqual([
+      { path: 'copy', problems: ['protected-value-changed'] },
+    ]);
+    expect(judge('من {{CGPV_A}} و{{CGPV_A}}، راجع {{CGPV_B}}.')).toEqual([
+      { path: 'copy', problems: ['protected-value-changed'] },
+    ]);
+    expect(judge('من {{CGPV_A}}، راجع {{CGPV_B}} و{{CGPV_C}}.')).toEqual([
+      { path: 'copy', problems: ['protected-value-changed'] },
+    ]);
+    expect(judge('من {{CGPV_A}}، راجع {{CGPV_B}} و{{ cgpv-c }}.')).toEqual([
+      { path: 'copy', problems: ['protected-value-changed'] },
+    ]);
+    // So is any number the writer added on its own, in any digit script.
+    expect(judge('من {{CGPV_A}} واحصل على خصم 50%، راجع {{CGPV_B}}.')).toEqual([
+      { path: 'copy', problems: ['protected-value-changed'] },
+    ]);
+    expect(judge('من {{CGPV_A}} واحصل على ٥٠ درهم، راجع {{CGPV_B}}.')).toEqual([
+      { path: 'copy', problems: ['protected-value-changed'] },
+    ]);
+    // Structure, budget and script checks still see the restored text.
+    expect(
+      validateTranslatedBatch(
+        [leaf('copy', source, { maxLength: 10 })],
+        { copy: 'راجع {{CGPV_B}}، أعمال فنية تبدأ من {{CGPV_A}}.' },
+        ARABIC,
+        masks,
+      ),
+    ).toEqual([{ path: 'copy', problems: ['over-budget'] }]);
+    expect(judge('Enjoy artworks from {{CGPV_A}} onwards, see {{CGPV_B}}.')).toEqual([
+      { path: 'copy', problems: ['untranslated-source', 'target-language-missing'] },
+    ]);
+  });
+
+  it('keeps masked HTML markers in the structure check', () => {
+    const source = '<ul><li>From AED 749.</li></ul>';
+    const mask = maskProtectedValues(source);
+    const masks = new Map([['body', mask]]);
+    expect(mask.masked).toBe('{{CGPV_A}}{{CGPV_B}}From {{CGPV_C}}.{{CGPV_D}}{{CGPV_E}}');
+    expect(
+      validateTranslatedBatch(
+        [leaf('body', source, { kind: 'richtext' })],
+        { body: '{{CGPV_A}}{{CGPV_B}}من {{CGPV_C}}.{{CGPV_D}}{{CGPV_E}}' },
+        ARABIC,
+        masks,
+      ),
+    ).toEqual([]);
+    expect(
+      validateTranslatedBatch(
+        [leaf('body', source, { kind: 'richtext' })],
+        { body: '{{CGPV_B}}{{CGPV_A}}من {{CGPV_C}}.{{CGPV_D}}{{CGPV_E}}' },
+        ARABIC,
+        masks,
+      ),
+    ).toEqual([{ path: 'body', problems: ['html-structure-changed'] }]);
+    expect(stripMarkers('{{CGPV_A}}من {{ cgpv b }}.')).toBe(' من {{ cgpv b }}.');
+  });
+
+  it('does not let a promotional heading claim the entity-name exemption', () => {
+    expect(
+      validateTranslatedBatch(
+        [leaf('hero.products.0.titleOverride', 'Apple AirPods Pro', { identity: true })],
+        { 'hero.products.0.titleOverride': 'Apple AirPods Pro' },
+        ARABIC,
+      ),
+    ).toEqual([
+      {
+        path: 'hero.products.0.titleOverride',
+        problems: ['untranslated-source', 'target-language-missing'],
+      },
+    ]);
   });
 
   it('uses alphabetic marker labels when dense copy contains more than 26 facts', () => {
@@ -221,7 +378,7 @@ describe('validateTranslatedBatch', () => {
   it('allows a root taxonomy name to retain its registered Latin brand identity', () => {
     expect(
       validateTranslatedBatch(
-        [leaf('name', 'Golden Scent')],
+        [leaf('name', 'Golden Scent', { identity: true })],
         { name: 'Golden Scent' },
         ARABIC,
       ),

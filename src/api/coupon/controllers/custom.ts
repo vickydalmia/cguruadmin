@@ -43,7 +43,10 @@ import {
 } from '../services/redeem-resolution';
 import { resolveOfferDetailIdentity } from '../services/offer-detail-resolution';
 import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
-import { attachStablePublicOfferIdsForRequest } from '../services/public-offer-ids';
+import {
+  attachStablePublicOfferIdsForRequest,
+  requestedOfferTargetLocale,
+} from '../services/public-offer-ids';
 
 // The thin coupon controller action map: projections live in
 // ../services/offer-projections, detail-page builders in
@@ -56,9 +59,10 @@ import { attachStablePublicOfferIdsForRequest } from '../services/public-offer-i
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
 
   async getIsrOfferRoutes(ctx) {
+    const locale = requestedOfferTargetLocale(ctx) ?? DEFAULT_CONTENT_LOCALE;
     const [coupons, deals] = await Promise.all([
-      listIsrOfferRoutes(strapi, 'api::coupon.coupon', 'coupon'),
-      listIsrOfferRoutes(strapi, 'api::deal.deal', 'deal'),
+      listIsrOfferRoutes(strapi, 'api::coupon.coupon', 'coupon', locale),
+      listIsrOfferRoutes(strapi, 'api::deal.deal', 'deal', locale),
     ]);
     return ctx.send({ data: [...coupons, ...deals] });
   },

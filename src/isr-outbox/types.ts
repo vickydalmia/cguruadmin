@@ -21,6 +21,8 @@ export interface OfferInvalidation {
 
 export interface IsrOutboxPayload {
   all?: true;
+  /** Constrain this invalidation to routes beneath one localized prefix. */
+  localePrefix?: string;
   paths?: string[];
   /** A normalized subset of paths whose absence must not fail delivery. */
   optionalPaths?: string[];

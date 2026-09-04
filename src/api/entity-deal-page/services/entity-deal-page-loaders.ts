@@ -135,11 +135,13 @@ export async function findAllDocuments(
 export async function countActionableDeals(
   strapi: Core.Strapi,
   filters: Record<string, any>,
+  locale?: string,
 ): Promise<number> {
   const rows = await findAllDocuments(
     strapi,
     'api::deal.deal',
     {
+      ...(locale ? { locale } : {}),
       filters,
       fields: ['contentStatus', 'expiresAt', 'affiliateLink'],
       populate: { dealImage: { fields: ['url'] } },

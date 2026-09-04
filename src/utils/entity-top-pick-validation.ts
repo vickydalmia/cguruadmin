@@ -55,6 +55,7 @@ export async function validateEntityTopPickCoupons(
   uid: EntityTopPickUid,
   data: unknown,
   documentId?: string,
+  locale?: string,
 ): Promise<void> {
   if (
     !data ||
@@ -68,6 +69,7 @@ export async function validateEntityTopPickCoupons(
   const current: unknown = documentId
     ? await strapi.documents(uid).findOne({
         documentId,
+        ...(locale ? { locale } : {}),
         fields: ['documentId'],
         populate: { topPickCoupons: { fields: ['documentId'] } },
       })

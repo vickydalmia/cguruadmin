@@ -15,8 +15,6 @@ export type TranslationOutboxConfig = {
   backlogAlertMs: number;
   /** Durable full-job retries after writer/editor corrective passes fail. */
   qualityRetryMax: number;
-  /** Retries granted to a job whose only failure is missing relation targets. */
-  relationRetryMax: number;
 };
 
 function booleanFromEnv(name: string, fallback: boolean): boolean {
@@ -25,6 +23,15 @@ function booleanFromEnv(name: string, fallback: boolean): boolean {
   if (raw === 'true') return true;
   if (raw === 'false') return false;
   throw new Error(`${name} must be true or false`);
+}
+
+/**
+ * The document middleware is the normal incremental trigger. A full nightly
+ * catalogue audit is an optional recovery tool because even hash-current
+ * rows still cost database reads; large sites must opt into that load.
+ */
+export function translationNightlyConsistencyEnabled(): boolean {
+  return booleanFromEnv('TRANSLATION_NIGHTLY_CONSISTENCY_ENABLED', false);
 }
 
 function intFromEnv(name: string, fallback: number, minimum = 1): number {
@@ -57,6 +64,5 @@ export function readTranslationOutboxConfig(): TranslationOutboxConfig {
       60_000,
     ),
     qualityRetryMax: intFromEnv('TRANSLATION_QUALITY_RETRY_MAX', 1, 0),
-    relationRetryMax: intFromEnv('TRANSLATION_RELATION_RETRY_MAX', 5),
   };
 }

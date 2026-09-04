@@ -66,11 +66,21 @@
     },
     "topBrandsLabel": {
       "type": "string",
-      "default": "Top Brands"
+      "default": "Top Brands",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "topBrandsTitle": {
       "type": "string",
-      "default": "All Brands"
+      "default": "All Brands",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "topBrandsViewAllUrl": {
       "type": "string",

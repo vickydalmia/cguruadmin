@@ -97,7 +97,9 @@ const CURRENT_MEDIA_POPULATE = {
  */
 export async function validateHomepageImages(
   strapi: Core.Strapi,
-  data: any
+  data: any,
+  sourceEntry?: any,
+  locale?: string,
 ): Promise<void> {
   if (!data || typeof data !== 'object') return;
 
@@ -120,15 +122,29 @@ export async function validateHomepageImages(
   if (assigned.length) {
     const current = await strapi.db
       .query('api::homepage.homepage')
-      .findOne({ populate: CURRENT_MEDIA_POPULATE as any });
+      .findOne({
+        ...(locale ? { where: { locale } } : {}),
+        populate: CURRENT_MEDIA_POPULATE as any,
+      });
     const grandfathered = new Set(
       collectOccurrences(current ?? {}, HOMEPAGE_IMAGE_RULES)
         .map((o) => o.fileId)
         .filter((id): id is number => id != null)
     );
 
+    const sourceByPath = new Map(
+      collectOccurrences(sourceEntry ?? {}, HOMEPAGE_IMAGE_RULES).map((item) => [
+        item.path.join('.'),
+        item.fileId,
+      ]),
+    );
+    const exactSourceMirror = (occurrence: Occurrence) =>
+      sourceEntry != null &&
+      sourceByPath.get(occurrence.path.join('.')) === occurrence.fileId;
     const toCheck = assigned.filter(
-      (o) => o.rule.validateExisting || !grandfathered.has(o.fileId!)
+      (o) =>
+        !exactSourceMirror(o) &&
+        (o.rule.validateExisting || !grandfathered.has(o.fileId!)),
     );
     if (toCheck.length) {
       const ids = [...new Set(toCheck.map((o) => o.fileId!))];

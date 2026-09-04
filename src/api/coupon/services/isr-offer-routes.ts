@@ -16,25 +16,42 @@ export async function listIsrOfferRoutes(
   strapi: Core.Strapi,
   uid: 'api::coupon.coupon' | 'api::deal.deal',
   kind: 'coupon' | 'deal',
+  locale = DEFAULT_CONTENT_LOCALE,
 ): Promise<Array<{ path: string; updatedAt?: string }>> {
   const routes: Array<{ path: string; updatedAt?: string }> = [];
   let start = 0;
 
   while (true) {
     const items: any[] = await strapi.documents(uid).findMany({
-      // Public numeric detail URLs belong to the default-locale row. Locale
-      // twins reuse this id under their path prefix; their physical row ids
-      // must never leak into route inventory.
-      locale: DEFAULT_CONTENT_LOCALE,
+      locale,
       status: 'published',
       filters: visibilityFilters(),
-      fields: ['updatedAt'] as any,
+      fields: ['documentId', 'updatedAt'] as any,
       sort: [{ id: 'asc' }] as any,
       start,
       limit: ISR_ROUTE_BATCH_SIZE,
     } as any);
+    if (!items.length) return routes;
+    const publicIds = locale === DEFAULT_CONTENT_LOCALE
+      ? null
+      : new Map(
+          ((await strapi.db.query(uid).findMany({
+            where: {
+              locale: DEFAULT_CONTENT_LOCALE,
+              documentId: {
+                $in: items
+                  .map((item) => item?.documentId)
+                  .filter((id): id is string => typeof id === 'string'),
+              },
+            },
+            select: ['id', 'documentId'],
+          } as any)) as any[]).map((item) => [item.documentId, Number(item.id)]),
+        );
     for (const item of items) {
-      const id = Number(item?.id);
+      // Every locale keeps the default row's stable public numeric URL.
+      const id = publicIds
+        ? publicIds.get(item?.documentId)
+        : Number(item?.id);
       if (!Number.isSafeInteger(id) || id <= 0) continue;
       routes.push({
         path: `/${kind}/${id}/`,

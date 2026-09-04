@@ -95,6 +95,8 @@ export async function validateChangedFields(
   data: unknown,
   documentId?: string,
   strict: boolean = false,
+  locale?: string,
+  translationShortDescription = false,
 ): Promise<void> {
   if (!['create', 'update', 'clone'].includes(action)) return;
   if (!data || typeof data !== 'object') return;
@@ -125,6 +127,7 @@ export async function validateChangedFields(
 
     stored = await strapi.documents(uid as any).findOne({
       documentId,
+      ...(locale ? { locale } : {}),
       fields: [...new Set(fields)] as any,
       ...(seoFields.length > 0
         ? {
@@ -139,6 +142,15 @@ export async function validateChangedFields(
 
   const problems: Problem[] = [];
   for (const rule of rules) {
+    // Arabic and other non-default languages must be useful and fit the
+    // schema, but do not inherit English's editorial 160-character minimum.
+    if (
+      translationShortDescription &&
+      rule.path.length === 1 &&
+      rule.path[0] === 'shortDescription'
+    ) {
+      continue;
+    }
     const incoming = effective
       ? cloneValueAt(data, stored, rule.path)
       : valueAt(data, rule.path);

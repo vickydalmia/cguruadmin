@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { readTranslationOutboxConfig } from './config';
+import {
+  readTranslationOutboxConfig,
+  translationNightlyConsistencyEnabled,
+} from './config';
 
 describe('translation outbox configuration', () => {
   afterEach(() => vi.unstubAllEnvs());
@@ -25,5 +28,19 @@ describe('translation outbox configuration', () => {
   it('rejects ambiguous dispatcher switches', () => {
     vi.stubEnv('TRANSLATION_OUTBOX_DISPATCHER_ENABLED', 'off');
     expect(() => readTranslationOutboxConfig()).toThrow(/must be true or false/);
+  });
+
+  it('keeps the full nightly consistency scan opt-in', () => {
+    vi.stubEnv('TRANSLATION_NIGHTLY_CONSISTENCY_ENABLED', '');
+    expect(translationNightlyConsistencyEnabled()).toBe(false);
+    vi.stubEnv('TRANSLATION_NIGHTLY_CONSISTENCY_ENABLED', 'true');
+    expect(translationNightlyConsistencyEnabled()).toBe(true);
+  });
+
+  it('rejects an ambiguous nightly consistency switch', () => {
+    vi.stubEnv('TRANSLATION_NIGHTLY_CONSISTENCY_ENABLED', 'yes');
+    expect(() => translationNightlyConsistencyEnabled()).toThrow(
+      /must be true or false/,
+    );
   });
 });

@@ -32,6 +32,7 @@ const STATE_LABEL: Record<LocaleTranslationStatus['state'], string> = {
   synced: 'Up to date',
   stale: 'Out of date',
   'in-progress': 'Translating…',
+  blocked: 'Waiting on dependencies',
   failed: 'Failed',
 };
 
@@ -43,6 +44,7 @@ const STATE_VARIANT: Record<
   synced: 'success',
   stale: 'warning',
   'in-progress': 'secondary',
+  blocked: 'warning',
   failed: 'danger',
 };
 
@@ -77,8 +79,8 @@ function LocaleRow({
           Automated quality warning{status.reviewNotes ? `: ${status.reviewNotes}` : ''}
         </Typography>
       ) : null}
-      {status.lastError && status.state === 'failed' ? (
-        <Typography variant="pi" textColor="danger600">
+      {status.lastError && (status.state === 'failed' || status.state === 'blocked') ? (
+        <Typography variant="pi" textColor={status.state === 'failed' ? 'danger600' : 'warning600'}>
           {status.lastError}
         </Typography>
       ) : null}
@@ -126,7 +128,9 @@ const TranslationPanel: PanelComponent = ({ model, documentId }) => {
   }, [load]);
 
   const anyInProgress = Boolean(
-    status?.locales.some((locale) => locale.state === 'in-progress'),
+    status?.locales.some(
+      (locale) => locale.state === 'in-progress' || locale.state === 'blocked',
+    ),
   );
   React.useEffect(() => {
     if (!anyInProgress) return;

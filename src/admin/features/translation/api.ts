@@ -2,7 +2,7 @@
 export type LocaleTranslationStatus = {
   locale: string;
   localeName: string;
-  state: 'missing' | 'synced' | 'stale' | 'in-progress' | 'failed';
+  state: 'missing' | 'synced' | 'stale' | 'in-progress' | 'blocked' | 'failed';
   needsReview: boolean;
   reviewNotes: string | null;
   translatedAt: string | null;

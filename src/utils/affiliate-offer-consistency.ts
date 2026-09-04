@@ -154,12 +154,13 @@ async function nonAffiliateBrandNames(
 }
 
 /**
- * Enforces the affiliate-offer invariant for Content-Manager writes: toggle ON
- * means zero Stores, only affiliate Brands, and no payload-explicit Logo
- * Store / Checkout merchant. Non-CM writes are fully exempt — imports and
- * crons keep working untouched, and a row they dirty is caught (stores/brands)
- * or cleared (logoStore/checkoutMerchant, via the Group A normaliser) on the
- * row's next admin save.
+ * Enforces the affiliate-offer invariant for Content-Manager writes and the
+ * explicit translation-publication path: toggle ON means zero Stores, only
+ * affiliate Brands, and no payload-explicit Logo Store / Checkout merchant.
+ * Other non-CM writes are exempt — imports and crons keep working untouched,
+ * and a row they dirty is caught (stores/brands) or cleared
+ * (logoStore/checkoutMerchant, via the Group A normaliser) on its next admin
+ * save.
  *
  * `logoStore`/`checkoutMerchant` are only judged when the PAYLOAD sets them:
  * the editor cannot see a hidden field, so rejecting stored dirt here would
@@ -171,10 +172,11 @@ export async function validateAffiliateOfferForWrite(
   action: string,
   data: unknown,
   documentId?: string,
+  translationWrite = false,
 ): Promise<void> {
   if (
     !['create', 'update', 'clone'].includes(action) ||
-    !isContentManagerWrite(strapi)
+    (!isContentManagerWrite(strapi) && !translationWrite)
   ) {
     return;
   }

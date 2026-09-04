@@ -8,10 +8,9 @@ import type {
 import { readOutboxPayloadBounds } from './config';
 import {
   boundOutboxPayload,
-  expandPayloadPathsForLocales,
   hasOutboxWork,
+  mergeOutboxPayloads,
 } from './payload';
-import { enabledContentLocaleCodesSync } from '../translation/locales/registry';
 
 export const ISR_OUTBOX_TABLE = 'isr_outbox';
 
@@ -48,6 +47,13 @@ export function parseIsrOutboxPayload(value: unknown): IsrOutboxPayload {
     'payload.optionalPaths',
   );
   const scopes = stringArray(input.scopes, 'payload.scopes');
+  const localePrefix = input.localePrefix;
+  if (
+    localePrefix !== undefined &&
+    (typeof localePrefix !== 'string' || !/^\/[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/iu.test(localePrefix))
+  ) {
+    throw new Error('payload.localePrefix must be a normalized locale prefix');
+  }
   const pathSet = new Set(paths ?? []);
   if (optionalPaths?.some((path) => !pathSet.has(path))) {
     throw new Error('payload.optionalPaths must be a subset of payload.paths');
@@ -77,6 +83,7 @@ export function parseIsrOutboxPayload(value: unknown): IsrOutboxPayload {
   }
   const payload: IsrOutboxPayload = {
     ...(input.all === true ? { all: true as const } : {}),
+    ...(typeof localePrefix === 'string' ? { localePrefix } : {}),
     ...(paths?.length ? { paths } : {}),
     ...(optionalPaths?.length ? { optionalPaths } : {}),
     ...(scopes?.length ? { scopes } : {}),
@@ -121,13 +128,38 @@ export async function insertIsrOutboxEvent(
   const eventKey = input.eventKey ?? randomUUID();
   const now = new Date();
   const bounds = readOutboxPayloadBounds();
-  // Locale twins BEFORE bounding, so a twin-doubled path list can still
-  // collapse to the full-sweep fallback instead of overflowing.
   const payload = boundOutboxPayload(
-    expandPayloadPathsForLocales(input.payload, enabledContentLocaleCodesSync()),
+    input.payload,
     bounds.maxPaths,
     bounds.maxPayloadBytes,
   );
+  if (input.eventKey) {
+    await transaction.raw(`SELECT pg_advisory_xact_lock(hashtext(?))`, [eventKey]);
+    const pending = await transaction(ISR_OUTBOX_TABLE)
+      .where({ event_key: eventKey, status: 'pending' })
+      .forUpdate()
+      .first();
+    if (pending) {
+      const merged = boundOutboxPayload(
+        mergeOutboxPayloads(parseIsrOutboxPayload(pending.payload), payload),
+        bounds.maxPaths,
+        bounds.maxPayloadBytes,
+      );
+      // A short debounce turns large translation waves into a bounded number
+      // of gateway versions without delaying editor-originated events.
+      const nextAttemptAt = eventKey.startsWith('translation-isr:')
+        ? new Date(Date.now() + 500)
+        : new Date(pending.next_attempt_at ?? now);
+      await transaction(ISR_OUTBOX_TABLE)
+        .where({ id: pending.id, status: 'pending' })
+        .update({
+          payload: JSON.stringify(merged),
+          reason: input.reason.slice(0, 255),
+          next_attempt_at: nextAttemptAt,
+        });
+      return { id: String(pending.id), eventKey, payload: merged };
+    }
+  }
   const inserted = await transaction(ISR_OUTBOX_TABLE)
     .insert({
       event_key: eventKey,
@@ -135,7 +167,9 @@ export async function insertIsrOutboxEvent(
       reason: input.reason.slice(0, 255),
       status: 'pending',
       attempt_count: 0,
-      next_attempt_at: now,
+      next_attempt_at: eventKey.startsWith('translation-isr:')
+        ? new Date(now.getTime() + 500)
+        : now,
       created_at: now,
     })
     .returning(['id', 'event_key']);
@@ -249,22 +283,69 @@ export class IsrOutboxStore {
       this.maxBackoffMs,
       1_000 * 2 ** Math.min(attemptCount - 1, 12),
     );
-    const updated = await this.strapi.db.connection(ISR_OUTBOX_TABLE)
-      .where({
-        id: event.id,
-        event_key: event.eventKey,
-        status: 'processing',
-        lock_token: event.lockToken,
-      })
-      .update({
-        status: 'pending',
-        attempt_count: attemptCount,
-        next_attempt_at: new Date(Date.now() + delayMs),
-        locked_at: null,
-        lock_token: null,
-        last_error: error.slice(0, 4_000),
-      });
-    return { owned: Number(updated) === 1, attemptCount, delayMs };
+    return this.strapi.db.transaction(async ({ trx }: any) => {
+      // Serialize with keyed inserts. A newer write may have created a pending
+      // row while this event was processing; blindly returning this row to
+      // pending would violate the partial unique index. The newer row does not
+      // necessarily cover the same paths, so merge the failed payload into it
+      // before retiring this attempt as superseded.
+      await trx.raw(`SELECT pg_advisory_xact_lock(hashtext(?))`, [event.eventKey]);
+      const newerPending = await trx(ISR_OUTBOX_TABLE)
+        .where({ event_key: event.eventKey, status: 'pending' })
+        .whereNot({ id: event.id })
+        .forUpdate()
+        .first();
+      if (newerPending) {
+        const bounds = readOutboxPayloadBounds();
+        const merged = boundOutboxPayload(
+          mergeOutboxPayloads(
+            event.payload,
+            parseIsrOutboxPayload(newerPending.payload),
+          ),
+          bounds.maxPaths,
+          bounds.maxPayloadBytes,
+        );
+        await trx(ISR_OUTBOX_TABLE)
+          .where({ id: newerPending.id, status: 'pending' })
+          .update({ payload: JSON.stringify(merged) });
+        const retired = await trx(ISR_OUTBOX_TABLE)
+          .where({
+            id: event.id,
+            event_key: event.eventKey,
+            status: 'processing',
+            lock_token: event.lockToken,
+          })
+          .update({
+            status: 'delivered',
+            delivered_at: new Date(),
+            locked_at: null,
+            lock_token: null,
+            last_error: 'superseded by a newer pending ISR event after delivery failure',
+          });
+        return {
+          owned: Number(retired) === 1,
+          attemptCount,
+          delayMs: 0,
+        };
+      }
+
+      const updated = await trx(ISR_OUTBOX_TABLE)
+        .where({
+          id: event.id,
+          event_key: event.eventKey,
+          status: 'processing',
+          lock_token: event.lockToken,
+        })
+        .update({
+          status: 'pending',
+          attempt_count: attemptCount,
+          next_attempt_at: new Date(Date.now() + delayMs),
+          locked_at: null,
+          lock_token: null,
+          last_error: error.slice(0, 4_000),
+        });
+      return { owned: Number(updated) === 1, attemptCount, delayMs };
+    });
   }
 
   async deleteDeliveredBefore(cutoff: Date): Promise<number> {

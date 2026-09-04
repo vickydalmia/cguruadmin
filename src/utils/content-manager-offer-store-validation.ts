@@ -52,8 +52,10 @@ const rejectStoreCount = (count: number): never => {
 };
 
 /**
- * Enforces the editor-only at-most-one-Store contract while leaving the schema and
- * every non-Content-Manager write path many-to-many compatible.
+ * Enforces the editor-only at-most-one-Store contract while leaving the schema
+ * and ordinary non-Content-Manager write paths many-to-many compatible.
+ * Translation publication opts in explicitly because it must pass the same
+ * structural rule.
  *
  * Updates and clones resolve their relation command against the stored row.
  * Reading even when `stores` is absent is deliberate: an unrelated admin save
@@ -67,10 +69,11 @@ export async function validateContentManagerOfferStore(
   action: string,
   data: unknown,
   documentId?: string,
+  translationWrite = false,
 ): Promise<void> {
   if (
     !['create', 'update', 'clone'].includes(action) ||
-    !isContentManagerWrite(strapi)
+    (!isContentManagerWrite(strapi) && !translationWrite)
   ) {
     return;
   }

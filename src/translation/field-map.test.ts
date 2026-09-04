@@ -3,6 +3,7 @@ import {
   buildLocalizedData,
   collectRelationTargets,
   collectTranslatableLeaves,
+  resolveRelationDependencies,
   resolveRelationExistence,
 } from './field-map';
 import { sourceContentHash } from './source-hash';
@@ -20,6 +21,10 @@ const MODELS: Record<string, any> = {
       name: {
         type: 'string',
         pluginOptions: { i18n: { localized: true } },
+      },
+      tagline: {
+        type: 'string',
+        pluginOptions: { i18n: { localized: true }, translation: { identity: true } },
       },
       slug: { type: 'string' },
       websiteUrl: { type: 'text' },
@@ -82,7 +87,13 @@ const MODELS: Record<string, any> = {
     uid: 'api::coupon.coupon',
     kind: 'collectionType',
     pluginOptions: { i18n: { localized: true } },
-    attributes: {},
+    attributes: {
+      stores: {
+        type: 'relation',
+        relation: 'manyToMany',
+        target: 'api::store.store',
+      },
+    },
   },
 };
 
@@ -110,6 +121,7 @@ const ENTRY = {
   websiteUrl: 'https://www.amazon.ae/',
   code: 'SAVE20',
   affiliateLink: 'https://tracking.example/amazon?campaign=ae',
+  tagline: 'Golden Scent',
   shortDescription: 'Top online store',
   description: '<p>Shop <strong>everything</strong></p>',
   isVerified: true,
@@ -148,7 +160,12 @@ describe('collectTranslatableLeaves', () => {
       'seo.metaDescription',
       'seo.metaTitle',
       'shortDescription',
+      'tagline',
     ]);
+    // Only the actual entity name gets the proper-name exemption. A schema
+    // flag on promotional copy cannot make it legal to retain English.
+    expect(byPath.get('tagline')?.identity).toBeUndefined();
+    expect(byPath.get('name')?.identity).toBe(true);
     // Non-localized scalars, the shared slug, URLs and media never leak in.
     expect(byPath.has('slug')).toBe(false);
     expect(byPath.has('websiteUrl')).toBe(false);
@@ -204,6 +221,28 @@ describe('relation collection and existence', () => {
     expect(existence.present.has('api::coupon.coupon:coupon-a')).toBe(true);
     expect(existence.present.has('api::coupon.coupon:coupon-b')).toBe(false);
   });
+
+  it('blocks offer taxonomy but treats entity forward curation as repairable', async () => {
+    const strapi = fakeStrapi();
+    const offer = await resolveRelationDependencies(
+      strapi,
+      'api::coupon.coupon',
+      { stores: [{ documentId: 'store-1' }] },
+      'ar',
+    );
+    const entity = await resolveRelationDependencies(
+      strapi,
+      'api::store.store',
+      ENTRY,
+      'ar',
+    );
+
+    expect(offer.required).toEqual([
+      expect.objectContaining({ path: 'stores', documentId: 'store-1', required: true }),
+    ]);
+    expect(entity.required).toEqual([]);
+    expect(entity.optional).toHaveLength(2);
+  });
 });
 
 describe('buildLocalizedData', () => {
@@ -216,6 +255,7 @@ describe('buildLocalizedData', () => {
     );
     const translations = new Map<string, string>([
       ['name', 'أمازون'],
+      ['tagline', 'Golden Scent'],
       ['shortDescription', 'متجر إلكتروني رائد'],
       ['description', '<p>تسوّق <strong>كل شيء</strong></p>'],
       ['seo.metaTitle', 'كوبونات أمازون'],
@@ -279,7 +319,10 @@ describe('buildLocalizedData', () => {
         fakeStrapi(),
         'api::store.store',
         ENTRY,
-        new Map([['name', 'أمازون']]),
+        new Map([
+          ['name', 'أمازون'],
+          ['tagline', 'Golden Scent'],
+        ]),
         { present: new Set() },
       ),
     ).toThrow(/TRANSLATION_QUALITY_GATE_FAILED.*shortDescription/);

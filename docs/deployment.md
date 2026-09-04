@@ -315,7 +315,7 @@ TRANSLATION_OUTBOX_MAX_BACKOFF_MS=21600000
 TRANSLATION_OUTBOX_RETENTION_DAYS=30
 TRANSLATION_OUTBOX_ALERT_AFTER_ATTEMPTS=5
 TRANSLATION_OUTBOX_BACKLOG_ALERT_MS=3600000
-TRANSLATION_RELATION_RETRY_MAX=5
+TRANSLATION_NIGHTLY_CONSISTENCY_ENABLED=false
 
 # Persistent-ISR transactional outbox
 # The dispatcher safely retries while the gateway is unavailable. Enable it on
@@ -409,6 +409,20 @@ they drive both the dry-run estimate and the concurrency-safe daily stop.
 The adapter uses OpenAI Responses with `store: false`, omits temperature, and
 disables AI SDK retries; the existing dispatcher remains the sole owner of
 timeouts, retries, attempt accounting and budget enforcement.
+
+Translation-generated ISR work is locale-scoped: ordinary Arabic content
+writes refresh only `/ar/...` consumers and do not rebuild the default-only
+sitemap. Route inventory refreshes only when a localized row is created or
+removed. A repeated hash-current backfill first compares the full persisted
+locale plan and emits no CMS write or ISR event when it is already current.
+The full nightly consistency pass is opt-in with
+`TRANSLATION_NIGHTLY_CONSISTENCY_ENABLED=true`; when enabled, it does not retry
+a terminally failed unchanged source. Edit the English source or run an
+explicit manual backfill when a deliberate retry is required. This is
+load-bearing for large catalogues; if a deployment
+shows repeated `routes` refreshes for every translated Coupon or steadily
+advancing versions after the translation queue is empty, the CMS image is
+older than this contract.
 
 Defaults and every queue/cost control are defined in the cross-system
 [environment guide](https://github.com/vickydalmia/cguru-ui/blob/main/docs/environment.md#cms-translation-engine).

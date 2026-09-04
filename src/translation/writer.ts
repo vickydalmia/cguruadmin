@@ -5,14 +5,28 @@
 // ISR outbox event that revalidates the localized paths. The locale upsert
 // semantics are core's (repository.js: update with a locale that has no row
 // CREATES it, copying non-localized fields).
+import { isDeepStrictEqual } from 'node:util';
 import type { Core } from '@strapi/strapi';
 import {
   buildLocalizedData,
-  collectRelationTargets,
-  resolveRelationExistence,
+  collectTranslatableLeaves,
+  resolveRelationDependencies,
+  type RelationDependency,
   type LocalizedWritePlan,
 } from './field-map';
-import { runWithTranslationWriteFlag } from './write-flag';
+import { runWithTranslationWriteContext } from './write-flag';
+
+export class TranslationDependencyBlockedError extends Error {
+  readonly dependencies: RelationDependency[];
+
+  constructor(dependencies: RelationDependency[]) {
+    super(
+      `${dependencies.length} required relation target(s) missing before localized write`,
+    );
+    this.name = 'TranslationDependencyBlockedError';
+    this.dependencies = dependencies;
+  }
+}
 
 /**
  * Deeply-populated source entry — everything the walker needs: components
@@ -48,24 +62,134 @@ export async function writeLocaleVersion(
   targetLocale: string,
   sourceEntry: any,
   translations: ReadonlyMap<string, string>,
-): Promise<LocalizedWritePlan['skippedRelations']> {
-  const targets = collectRelationTargets(strapi, uid, sourceEntry);
-  const existence = await resolveRelationExistence(strapi, targets, targetLocale);
+): Promise<{
+  skippedRelations: LocalizedWritePlan['skippedRelations'];
+  missingDependencies: RelationDependency[];
+  created: boolean;
+}> {
+  const relations = await resolveRelationDependencies(
+    strapi,
+    uid,
+    sourceEntry,
+    targetLocale,
+  );
+  // Resolve again at the writer boundary so a relation removed between the
+  // dispatcher's preflight and publication cannot create a partial locale row.
+  if (relations.required.length > 0) {
+    throw new TranslationDependencyBlockedError(relations.required);
+  }
   const plan = buildLocalizedData(
     strapi,
     uid,
     sourceEntry,
     translations,
-    existence,
+    relations.existence,
   );
-  await runWithTranslationWriteFlag(() =>
+  const existing = await loadPopulatedEntry(
+    strapi,
+    uid,
+    documentId,
+    targetLocale,
+  );
+  await runWithTranslationWriteContext({
+    sourceEntry,
+    targetLocale,
+    plan,
+    targetRowExisted: Boolean(existing),
+    operation: 'upsert',
+  }, () =>
     strapi.documents(uid as any).update({
       documentId,
       locale: targetLocale,
       data: plan.data as any,
     } as any),
   );
-  return plan.skippedRelations;
+  return {
+    skippedRelations: plan.skippedRelations,
+    missingDependencies: relations.missing,
+    created: !existing,
+  };
+}
+
+export type LocaleVersionInspection = {
+  /** True only when the persisted locale row already matches the full write plan. */
+  current: boolean;
+  /** Relations absent from the target locale and therefore omitted from the plan. */
+  skippedRelations: LocalizedWritePlan['skippedRelations'];
+};
+
+/**
+ * Determine whether a locale write would change anything, without running the
+ * documents update pipeline (and therefore without emitting an ISR event).
+ *
+ * Comparing translation_state hashes alone is insufficient: relations and
+ * component structure are intentionally outside the paid-text hash. Build the
+ * exact desired write plan, normalize the populated target row through the
+ * same schema walker, then compare those two payload shapes. This preserves
+ * the nightly relation-repair guarantee while making a truly current backfill
+ * a database/ISR no-op.
+ */
+export async function inspectLocaleVersion(
+  strapi: Core.Strapi,
+  uid: string,
+  documentId: string,
+  targetLocale: string,
+  sourceEntry: any,
+  translations: ReadonlyMap<string, string>,
+): Promise<LocaleVersionInspection> {
+  const relations = await resolveRelationDependencies(
+    strapi,
+    uid,
+    sourceEntry,
+    targetLocale,
+  );
+  const desired = buildLocalizedData(
+    strapi,
+    uid,
+    sourceEntry,
+    translations,
+    relations.existence,
+  );
+  const targetEntry = await loadPopulatedEntry(
+    strapi,
+    uid,
+    documentId,
+    targetLocale,
+  );
+  if (!targetEntry) {
+    return { current: false, skippedRelations: desired.skippedRelations };
+  }
+
+  const targetTranslations = new Map(
+    collectTranslatableLeaves(strapi, uid, targetEntry).map((leaf) => [
+      leaf.path,
+      leaf.value,
+    ]),
+  );
+  // Every populated relation on the persisted target row necessarily exists;
+  // using this local set avoids a second batch of existence queries merely to
+  // normalize the row into buildLocalizedData's comparison shape.
+  const targetRelations = await resolveRelationDependencies(
+    strapi,
+    uid,
+    targetEntry,
+    targetLocale,
+  );
+  const targetExistence = {
+    present: new Set([...targetRelations.existence.present]),
+  };
+  const persisted = buildLocalizedData(
+    strapi,
+    uid,
+    targetEntry,
+    targetTranslations,
+    targetExistence,
+  );
+
+  return {
+    current: isDeepStrictEqual(desired.data, persisted.data),
+    skippedRelations: desired.skippedRelations,
+  };
 }
 
 /** Remove a generated locale when its English source document is deleted. */
@@ -75,7 +199,20 @@ export async function deleteLocaleVersion(
   documentId: string,
   targetLocale: string,
 ): Promise<void> {
-  await runWithTranslationWriteFlag(() =>
+  const existing = await loadPopulatedEntry(
+    strapi,
+    uid,
+    documentId,
+    targetLocale,
+  );
+  if (!existing) return;
+  await runWithTranslationWriteContext({
+    sourceEntry: null,
+    targetLocale,
+    plan: null,
+    targetRowExisted: true,
+    operation: 'delete',
+  }, () =>
     strapi.documents(uid as any).delete({
       documentId,
       locale: targetLocale,

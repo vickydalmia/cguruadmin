@@ -186,7 +186,7 @@ describe('ISR offer route inventory', () => {
       expect.objectContaining({
         locale: 'en',
         status: 'published',
-        fields: ['updatedAt'],
+        fields: ['documentId', 'updatedAt'],
         start: 0,
         limit: 1_000,
       }),
@@ -224,6 +224,36 @@ describe('ISR offer route inventory', () => {
           updatedAt: '2026-07-24T11:00:00.000Z',
         },
       ]),
+    });
+  });
+
+  it('admits only localized rows while preserving the English numeric route id', async () => {
+    const harness = createHarness();
+    setEnabledContentLocaleCodesForTest(['ar']);
+    harness.ctx.query = { locale: 'ar' } as any;
+    harness.couponFindMany.mockResolvedValue([
+      {
+        id: 912,
+        documentId: 'coupon-doc',
+        updatedAt: '2026-09-04T10:00:00.000Z',
+      },
+    ]);
+    harness.couponPublicIdFindMany.mockResolvedValue([
+      { id: 123, documentId: 'coupon-doc' },
+    ]);
+
+    await harness.controller.getIsrOfferRoutes(harness.ctx);
+
+    expect(harness.couponFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ locale: 'ar' }),
+    );
+    expect(harness.ctx.send).toHaveBeenCalledWith({
+      data: [
+        {
+          path: '/coupon/123/',
+          updatedAt: '2026-09-04T10:00:00.000Z',
+        },
+      ],
     });
   });
 });

@@ -232,4 +232,19 @@ describe('optional single-Store validation scope', () => {
     ).resolves.toBeUndefined();
     expect(findOne).not.toHaveBeenCalled();
   });
+
+  it('enforces the invariant for an explicit translation publication', async () => {
+    const { strapi } = harness({ path: null });
+
+    await expect(
+      validateContentManagerOfferStore(
+        strapi,
+        uid,
+        'create',
+        { stores: [STORE_ONE, STORE_TWO] },
+        undefined,
+        true,
+      ),
+    ).rejects.toThrow('currently has 2 Stores');
+  });
 });

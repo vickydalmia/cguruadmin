@@ -4,6 +4,7 @@ import {
   createOutboxPayload,
   expandPayloadPathsForLocales,
   hasOutboxWork,
+  localizeTranslationPayload,
   mergeScope,
 } from './payload';
 
@@ -187,6 +188,44 @@ describe('mergeScope', () => {
 
   it('returns null only when neither scope exists', () => {
     expect(mergeScope(null, null)).toBeNull();
+  });
+});
+
+describe('localizeTranslationPayload', () => {
+  it('invalidates only target-locale pages and drops default-only route/sitemap work', () => {
+    expect(
+      localizeTranslationPayload(
+        {
+          paths: ['/', '/sitemap_index.xml', '/amazon-coupons/', '/amazon-deals/'],
+          optionalPaths: ['/amazon-deals/'],
+          scopes: ['sitemap', 'routes', 'insights'],
+          offerInvalidations: [
+            { entityType: 'coupon', documentId: 'coupon-1' },
+          ],
+        },
+        'ar',
+      ),
+    ).toEqual({
+      localePrefix: '/ar',
+      paths: ['/', '/amazon-coupons/', '/amazon-deals/'],
+      optionalPaths: ['/amazon-deals/'],
+      scopes: ['insights'],
+    });
+  });
+
+  it('does not add the locale prefix twice', () => {
+    expect(
+      localizeTranslationPayload({ paths: ['/ar/', '/ar/amazon/'] }, '/ar/'),
+    ).toEqual({ localePrefix: '/ar', paths: ['/ar/', '/ar/amazon/'] });
+  });
+
+  it('constrains global chrome invalidations to a locale prefix', () => {
+    const payload = { all: true as const, scopes: ['chrome'] };
+    expect(localizeTranslationPayload(payload, 'ar')).toEqual({
+      all: true,
+      localePrefix: '/ar',
+      scopes: ['chrome'],
+    });
   });
 });
 

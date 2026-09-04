@@ -4,7 +4,10 @@ import { runContentTransaction } from './transaction';
 function transactionHarness(options: { failInsert?: boolean } = {}) {
   const rows: any[] = [];
   let commitCallback: (() => void) | null = null;
-  const trx = vi.fn(() => ({
+  const builder: any = {
+    where: () => builder,
+    forUpdate: () => builder,
+    first: async () => undefined,
     insert: (row: any) => {
       rows.push(row);
       return {
@@ -14,7 +17,9 @@ function transactionHarness(options: { failInsert?: boolean } = {}) {
         },
       };
     },
-  }));
+  };
+  const trx: any = vi.fn(() => builder);
+  trx.raw = vi.fn(async () => undefined);
   const strapi = {
     db: {
       transaction: async (callback: any) => {

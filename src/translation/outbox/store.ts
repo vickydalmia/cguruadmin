@@ -7,6 +7,7 @@ import type { Core } from '@strapi/strapi';
 import type { TranslationConfig } from '../config';
 import { usdForTokens } from '../cost';
 import { TranslationError } from '../errors';
+import { TRANSLATION_NIGHTLY_CONSISTENCY_REASON } from './reasons';
 import type {
   CompletionAttemptContext,
   CompletionAttemptHooks,
@@ -20,6 +21,13 @@ export const TRANSLATION_USAGE_TABLE = 'translation_usage';
 type Transaction = any;
 
 export type TranslationJobKind = 'translate' | 'relation-sync';
+
+export type TranslationDependency = {
+  path: string;
+  targetUid: string;
+  documentId: string;
+  required: boolean;
+};
 
 export type TranslationJob = {
   id: string;
@@ -79,7 +87,8 @@ export async function insertTranslationJob(
       `OR ${TRANSLATION_OUTBOX_TABLE}.kind = 'translate' ` +
       `THEN 'translate' ELSE 'relation-sync' END, ` +
       `force = ${TRANSLATION_OUTBOX_TABLE}.force OR excluded.force, ` +
-      `reason = excluded.reason`,
+      `reason = CASE WHEN excluded.reason = ? ` +
+      `THEN ${TRANSLATION_OUTBOX_TABLE}.reason ELSE excluded.reason END`,
     [
       eventKey,
       input.uid,
@@ -90,6 +99,7 @@ export async function insertTranslationJob(
       new Date(),
       input.reason.slice(0, 255),
       new Date(),
+      TRANSLATION_NIGHTLY_CONSISTENCY_REASON,
     ],
   );
 }
@@ -136,8 +146,9 @@ export async function insertTranslationJobsBulk(
         `OR ${TRANSLATION_OUTBOX_TABLE}.kind = 'translate' ` +
         `THEN 'translate' ELSE 'relation-sync' END, ` +
         `force = ${TRANSLATION_OUTBOX_TABLE}.force OR excluded.force, ` +
-        `reason = excluded.reason`,
-      bindings,
+        `reason = CASE WHEN excluded.reason = ? ` +
+        `THEN ${TRANSLATION_OUTBOX_TABLE}.reason ELSE excluded.reason END`,
+      [...bindings, TRANSLATION_NIGHTLY_CONSISTENCY_REASON],
     );
   }
 }
@@ -203,6 +214,7 @@ function parseStoredTranslations(
 
 export type TranslationOutboxSummary = {
   counts: Record<string, number>;
+  historicalFailures: number;
   oldestUndeliveredAt: string | null;
   expiredProcessing: number;
   deliveredToday: number;
@@ -272,6 +284,7 @@ export class TranslationOutboxStore {
       locked_at: null,
       lock_token: null,
       last_error: null,
+      blocked_on: null,
     });
     return Number(updated) === 1;
   }
@@ -283,8 +296,59 @@ export class TranslationOutboxStore {
       locked_at: null,
       lock_token: null,
       last_error: error.slice(0, 4_000),
+      blocked_on: null,
     });
     return Number(updated) === 1;
+  }
+
+  /** Dependency stop: terminal until one of the named locale rows succeeds. */
+  async markBlocked(
+    job: TranslationJob,
+    dependencies: readonly TranslationDependency[],
+    error: string,
+  ): Promise<boolean> {
+    const updated = await this.ownedUpdate(job).update({
+      status: 'blocked',
+      locked_at: null,
+      lock_token: null,
+      last_error: error.slice(0, 4_000),
+      blocked_on: JSON.stringify(dependencies),
+    });
+    return Number(updated) === 1;
+  }
+
+  /**
+   * A newly available locale row wakes only parents that named it in their
+   * structured dependency list. The blocked row remains immutable history; a
+   * coalesced relation-sync row becomes the parent's latest operational state.
+   */
+  async enqueueBlockedDependents(job: TranslationJob): Promise<number> {
+    if (job.uid === 'ui-dictionary') return 0;
+    return this.strapi.db.transaction(async ({ trx }: any) => {
+      const dependency = JSON.stringify([
+        { targetUid: job.uid, documentId: job.documentId },
+      ]);
+      const rows: any[] = await trx(TRANSLATION_OUTBOX_TABLE)
+        .where({ status: 'blocked', target_locale: job.targetLocale })
+        .whereRaw('blocked_on @> ?::jsonb', [dependency])
+        .select(['uid', 'document_id', 'target_locale']);
+      const inputs = [
+        ...new Map(
+          rows.map((row) => {
+            const input: TranslationJobInsert = {
+              uid: String(row.uid),
+              documentId: String(row.document_id),
+              targetLocale: String(row.target_locale),
+              kind: 'relation-sync',
+              reason: `dependency ${job.uid}:${job.documentId} delivered`,
+            };
+            return [translationEventKey(input), input];
+          }),
+        ).values(),
+      ];
+      if (inputs.length > 0) await insertTranslationJobsBulk(trx, inputs);
+      return inputs.length;
+    });
   }
 
   async scheduleRetry(
@@ -537,11 +601,13 @@ export class TranslationOutboxStore {
     const expiredLease = new Date(Date.now() - this.leaseMs);
     const midnight = new Date();
     midnight.setUTCHours(0, 0, 0, 0);
-    const [countRows, oldestRow, expiredRow, todayRow, usageRow] = await Promise.all([
-      connection(TRANSLATION_OUTBOX_TABLE)
-        .select('status')
-        .count({ count: '*' })
-        .groupBy('status'),
+    const [latestRows, oldestRow, expiredRow, todayRow, usageRow, historyRow] = await Promise.all([
+      connection.raw(
+        `SELECT status, COUNT(*)::bigint AS count FROM (` +
+          `SELECT DISTINCT ON (event_key) event_key, status ` +
+          `FROM ${TRANSLATION_OUTBOX_TABLE} ORDER BY event_key, id DESC` +
+          `) latest GROUP BY status`,
+      ),
       connection(TRANSLATION_OUTBOX_TABLE)
         .whereIn('status', ['pending', 'processing'])
         .min({ oldest: 'created_at' })
@@ -565,7 +631,12 @@ export class TranslationOutboxStore {
           ),
         )
         .first(),
+      connection(TRANSLATION_OUTBOX_TABLE)
+        .where({ status: 'failed' })
+        .count({ count: '*' })
+        .first(),
     ]);
+    const countRows = (latestRows as any)?.rows ?? latestRows ?? [];
     const counts = Object.fromEntries(
       (countRows as any[]).map((row) => [
         String(row.status),
@@ -575,6 +646,7 @@ export class TranslationOutboxStore {
     const oldest = (oldestRow as any)?.oldest;
     return {
       counts,
+      historicalFailures: Number((historyRow as any)?.count ?? 0),
       oldestUndeliveredAt: oldest ? new Date(oldest).toISOString() : null,
       expiredProcessing: Number((expiredRow as any)?.count ?? 0),
       deliveredToday: Number((todayRow as any)?.count ?? 0),
@@ -660,6 +732,28 @@ export class TranslationOutboxStore {
       status: String(row.status),
       attemptCount: Number(row.attempt_count),
       lastError: row.last_error ?? null,
+    };
+  }
+
+  /**
+   * Newest older attempt for this event key. The nightly repair sweep uses
+   * this to avoid buying the same terminal failure again when its English
+   * source has not changed. A newly claimed row is excluded by id.
+   */
+  async previousJob(
+    job: TranslationJob,
+  ): Promise<{ status: string; createdAt: Date } | null> {
+    const row: any = await this.strapi.db
+      .connection(TRANSLATION_OUTBOX_TABLE)
+      .where({ event_key: job.eventKey })
+      .where('id', '<', job.id)
+      .orderBy('id', 'desc')
+      .select(['status', 'created_at'])
+      .first();
+    if (!row) return null;
+    return {
+      status: String(row.status),
+      createdAt: new Date(row.created_at),
     };
   }
 }
