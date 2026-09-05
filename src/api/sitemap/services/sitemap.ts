@@ -107,6 +107,10 @@ async function fetchEntities(
 
   while (true) {
     const items: any[] = await strapi.documents(config.uid).findMany({
+      // Shared document identities decorate both sitemap trees. Pin this read
+      // to the same source rows as the offer aggregates; otherwise the request
+      // locale middleware substitutes Arabic numeric IDs and every count is zero.
+      locale: DEFAULT_CONTENT_LOCALE,
       fields: ['slug', 'updatedAt'] as any,
       populate: { [config.imageField]: { fields: ['url'] } } as any,
       sort: [{ id: 'asc' }] as any,

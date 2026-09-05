@@ -79,6 +79,26 @@ describe('listSitemapEntities liveOfferCount', () => {
     mocks.cachedSiteConfiguration.mockResolvedValue(INDIA_DEFAULT_CONFIGURATION);
   });
 
+
+  it('keeps source offer counts for all four entity kinds under an Arabic request', async () => {
+    const sources = Object.fromEntries(['stores', 'brands', 'categories', 'banks'].map((table) => [
+      `coupons_${table}_lnk`,
+      { rows: [{ entity_id: 7, last_modified: null, live_count: 3 }] },
+    ]));
+    const strapi = fakeStrapi(sources);
+    const reads = vi.fn(async (params: any) => [{
+      // Model the public read middleware: an unpinned read inherits Arabic.
+      id: params.locale === 'en' ? 7 : 70,
+      documentId: 'shared-document', slug: 'example-coupons',
+    }]);
+    (strapi as any).documents = () => ({ findMany: reads });
+    const rows = await sitemapService({ strapi }).listSitemapEntities();
+    expect(rows.map((row) => [row.kind, row.liveOfferCount])).toEqual([
+      ['store', 3], ['brand', 3], ['category', 3], ['bank', 3],
+    ]);
+    expect(reads.mock.calls.every(([params]) => params.locale === 'en')).toBe(true);
+  });
+
   it('publishes the summed count when both source queries run', async () => {
     const row = await storeRow({
       coupons_stores_lnk: {
