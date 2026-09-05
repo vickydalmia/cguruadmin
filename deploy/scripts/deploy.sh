@@ -149,16 +149,22 @@ wait_for_healthy() {
 # differed across Compose versions, and removing the sibling container mid
 # deploy is not worth the hygiene. Run `docker compose ... down
 # --remove-orphans` by hand if a service is ever renamed or dropped.
+# All retained callback state must die before replacement workers start.
+# Compose bounds graceful shutdown and then stops only these worker roles.
+# Durable rows/checkpoints survive; the old read role remains available.
+log "Pausing background roles (at most 60s graceful shutdown) ..."
+compose stop --timeout 60 "${MAINTENANCE_SERVICE}" "${ADMIN_SERVICE}"
+
 log "Starting ${ADMIN_SERVICE} ..."
-compose up -d "${ADMIN_SERVICE}"
+compose up -d --force-recreate --timeout 60 "${ADMIN_SERVICE}"
 wait_for_healthy "${ADMIN_SERVICE}"
 
 log "Starting ${RENDER_SERVICE} ..."
-compose up -d "${RENDER_SERVICE}"
+compose up -d --force-recreate --timeout 60 "${RENDER_SERVICE}"
 wait_for_healthy "${RENDER_SERVICE}"
 
 log "Starting ${MAINTENANCE_SERVICE} ..."
-compose up -d "${MAINTENANCE_SERVICE}"
+compose up -d --force-recreate --timeout 60 "${MAINTENANCE_SERVICE}"
 wait_for_healthy "${MAINTENANCE_SERVICE}"
 
 # ── Verify health endpoints ─────────────────────────────────────────────────

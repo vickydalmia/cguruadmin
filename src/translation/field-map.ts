@@ -16,6 +16,7 @@
 import type { Core } from '@strapi/strapi';
 import { TranslationError } from './errors';
 import { heroOfferIdentityName } from './hero-offer-identity';
+import { manualFooterStoreName } from './manual-footer-store-names';
 
 /** Dot-joined path of a translatable value inside one entry. */
 export type LeafPath = string;
@@ -213,7 +214,9 @@ export function collectTranslatableLeaves(
             && typeof value?.store?.documentId === 'string'
             && typeof value?.store?.name === 'string'
             && fieldValue.trim() === value.store.name.trim()
-            ? value.store.name.trim() : undefined;
+            ? value.store.name.trim()
+            : uid === 'api::footer.footer' && schemaUid === 'nav.link' && key === 'label'
+              ? manualFooterStoreName(value) : undefined;
           const linkedOfferName = uid === 'api::homepage.homepage'
             && schemaUid === 'home.hero-product' && key === 'titleOverride'
             ? heroOfferIdentityName(value, fieldValue) : undefined;

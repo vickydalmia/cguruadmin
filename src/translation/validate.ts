@@ -370,7 +370,11 @@ function keepsMaskedFacts(maskedSource: string, output: string): boolean {
 }
 
 function hasEnglishText(value: string): boolean {
-  const text = value.replace(/<[^>]+>/gu, ' ');
+  // Judge prose, not immutable facts. An email-only label must stay verbatim:
+  // requiring Arabic here contradicts the protected-value check above.
+  // Use the same tokenizer as masking so URLs, placeholders and HTML do not
+  // accidentally count as English words; surrounding prose still does.
+  const text = stripMarkers(maskProtectedValues(value).masked);
   const words = text.match(/[a-z]+(?:['’-][a-z]+)?/giu) ?? [];
   // A one-word promotional label ("Sale", "Offers", "Apply") still needs
   // translation. Only actual entity `name` leaves receive the identity

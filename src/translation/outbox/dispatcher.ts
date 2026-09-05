@@ -1,3 +1,5 @@
+import { runInBackground } from '../../background/execution-context';
+import { randomUUID } from 'node:crypto';
 // Translation DISPATCHER: claims jobs from translation_outbox and runs the
 // per-document pipeline — enablement check, editor-lock deference, budget
 // stop, source load, hash gate, LLM translation, locale write, state
@@ -115,6 +117,8 @@ export class TranslationDispatcher {
   private timer: NodeJS.Timeout | null = null;
   private running: Promise<void> | null = null;
   private stopped = false;
+  private started = false;
+  private readonly instanceId = randomUUID();
   private nextCleanupAt = 0;
   private nextDependencyReconcileAt = 0;
   private readonly store: TranslationOutboxStore;
@@ -139,11 +143,14 @@ export class TranslationDispatcher {
   }
 
   start(): void {
-    this.stopped = false;
+    if (this.started || this.stopped) return;
+    this.started = true;
     this.schedule(0);
     logTranslation(this.strapi, 'info', 'translation.dispatcher_started', {
       provider: this.provider.name,
       model: this.config.model,
+      instanceId: this.instanceId,
+      pid: process.pid,
       pollMs: this.outboxConfig.pollMs,
       batchSize: this.outboxConfig.batchSize,
     });
@@ -200,13 +207,13 @@ export class TranslationDispatcher {
   private schedule(delayMs: number): void {
     if (this.stopped) return;
     if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => {
+    this.timer = runInBackground(() => setTimeout(() => {
       this.timer = null;
-      this.running = this.runCycle().finally(() => {
+      this.running = runInBackground(() => this.runCycle()).finally(() => {
         this.running = null;
         this.schedule(this.outboxConfig.pollMs);
       });
-    }, delayMs);
+    }, delayMs));
     this.timer.unref?.();
   }
 
@@ -252,6 +259,7 @@ export class TranslationDispatcher {
   }
 
   private async dispatchOne(): Promise<boolean> {
+    if (this.stopped) return false;
     const job = await this.store.claim();
     if (!job) return false;
     let leaseLost = false;

@@ -1,3 +1,5 @@
+import { runInBackground } from '../../background/execution-context';
+import { onceOnCommit } from '../../utils/once-on-commit';
 // Translation RUNTIME: singleton lifecycle (start/wake/stop/status) wired
 // from src/index.ts, plus the enqueue helpers the middleware, admin routes
 // and crons share. Mirrors src/isr-outbox/runtime.ts.
@@ -17,6 +19,7 @@ import {
 } from './store';
 
 let dispatcher: TranslationDispatcher | null = null;
+let pendingStops = 0;
 
 /**
  * Is the subsystem live on this deployment? Both gates must hold: the site
@@ -32,10 +35,23 @@ export async function translationRuntimeActive(
 
 /** True while this process runs a dispatcher (started at boot or by hot-apply). */
 export function translationOutboxRunning(): boolean {
-  return dispatcher !== null;
+  return dispatcher !== null && pendingStops === 0;
 }
 
-export async function startTranslationOutbox(strapi: Core.Strapi): Promise<void> {
+let lifecycle: Promise<void> = Promise.resolve();
+
+function serializeLifecycle(work: () => Promise<void>): Promise<void> {
+  const operation = lifecycle.then(() => runInBackground(work));
+  lifecycle = operation.catch(() => {});
+  return operation;
+}
+
+export function startTranslationOutbox(strapi: Core.Strapi): Promise<void> {
+  return serializeLifecycle(() => startDispatcher(strapi));
+}
+
+async function startDispatcher(strapi: Core.Strapi): Promise<void> {
+  if (dispatcher) return;
   const outboxConfig = readTranslationOutboxConfig();
   if (!outboxConfig.enabled) {
     logTranslation(strapi, 'info', 'translation.dispatcher_disabled', {
@@ -80,9 +96,12 @@ export function wakeTranslationOutbox(): void {
   dispatcher?.wake();
 }
 
-export async function stopTranslationOutbox(): Promise<void> {
-  await dispatcher?.stop();
-  dispatcher = null;
+export function stopTranslationOutbox(): Promise<void> {
+  pendingStops += 1;
+  return serializeLifecycle(async () => {
+    await dispatcher?.stop();
+    dispatcher = null;
+  }).finally(() => { pendingStops -= 1; });
 }
 
 export async function getTranslationStatus() {
@@ -122,7 +141,7 @@ export async function enqueueStandaloneTranslationJob(
   await strapi.db.transaction(
     async ({ trx, onCommit }: { trx: any; onCommit: (fn: () => void) => void }) => {
       await insertTranslationJob(trx, input);
-      onCommit(() => wakeTranslationOutbox());
+      onCommit(onceOnCommit(strapi, () => wakeTranslationOutbox()));
     },
   );
 }

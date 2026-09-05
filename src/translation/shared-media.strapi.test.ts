@@ -1,3 +1,4 @@
+import { runContentTransaction } from '../isr-outbox/transaction';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -32,7 +33,10 @@ integration('shared media inheritance through real Strapi documents', () => {
     };
     symlinkSync(join(process.cwd(), 'node_modules'), join(root, 'node_modules'), 'dir');
     put('package.json', { name: 'translation-media-test', version: '1.0.0', dependencies: {} });
-    put('config/database.js', `module.exports = { connection: { client: 'sqlite', connection: { filename: ${JSON.stringify(join(root, 'data.db'))} }, useNullAsDefault: true } };`);
+    const postgres = process.env.STRAPI_TRANSACTION_TEST_DATABASE_URL;
+    put('config/database.js', postgres
+      ? `module.exports = { connection: { client: 'postgres', connection: { connectionString: ${JSON.stringify(postgres)} }, pool: { min: 0, max: 5 } } };`
+      : `module.exports = { connection: { client: 'sqlite', connection: { filename: ${JSON.stringify(join(root, 'data.db'))} }, useNullAsDefault: true } };`);
     put('config/server.js', "module.exports = { host: '127.0.0.1', port: 0, app: { keys: ['isolated-test-key'] }, logger: { updates: { enabled: false } } };");
     put('config/admin.js', "module.exports = { auth: { secret: 'isolated-test-admin-secret' }, apiToken: { salt: 'isolated-test-api-salt' }, transfer: { token: { salt: 'isolated-test-transfer-salt' } }, secrets: { encryptionKey: 'isolated-test-encryption-key' } };");
     put('config/plugins.js', "module.exports = { email: { enabled: false }, 'content-releases': { enabled: false }, 'review-workflows': { enabled: false } };");
@@ -124,6 +128,46 @@ integration('shared media inheritance through real Strapi documents', () => {
       removeListeners.mockRestore();
     }
     if (root) rmSync(root, { recursive: true, force: true });
+  });
+
+  it('commits nested content/outbox writes atomically and never replays delayed callbacks', async () => {
+    const db = strapi.db.connection;
+    for (const file of [
+      '2026.07.24T00.00.00.create-isr-outbox.js',
+      '2026.07.25T00.00.00.harden-isr-outbox.js',
+      '2026.07.29T12.00.00.add-isr-delivery-receipt.js',
+      '2026.09.05T00.00.00.translation-isr-reliability.js',
+    ]) await require(`../../database/migrations/${file}`).up(db);
+    const effects = vi.fn();
+    const write = (name: string) => runContentTransaction(
+      strapi,
+      () => strapi.documents('api::store.store').create({ data: { name }, locale: 'en' }),
+      async () => ({ reason: name, payload: { paths: [`/${name}/`] } }),
+      effects,
+    );
+    await expect(strapi.db.transaction(async () => {
+      await write('rollback-store');
+      expect(effects).not.toHaveBeenCalled();
+      throw new Error('abort outer');
+    })).rejects.toThrow('abort outer');
+    expect(await db('isr_outbox').where({ reason: 'rollback-store' })).toHaveLength(0);
+    expect(await db('stores').where({ name: 'rollback-store' })).toHaveLength(0);
+    expect(effects).not.toHaveBeenCalled();
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let delayed!: Promise<void>;
+    await strapi.db.transaction(async () => {
+      await write('committed-store');
+      delayed = (async () => { await gate; await write('delayed-store'); })();
+      expect(effects).not.toHaveBeenCalled();
+    });
+    expect(effects).toHaveBeenCalledTimes(1);
+    release();
+    await delayed;
+    expect(effects).toHaveBeenCalledTimes(2);
+    expect(await db('isr_outbox').where({ reason: 'committed-store' })).toHaveLength(1);
+    expect(await db('stores').where({ name: 'committed-store' })).toHaveLength(1);
   });
 
   it('creates Arabic with the shared English icon and rejects an unloaded icon', async () => {

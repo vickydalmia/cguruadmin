@@ -1,3 +1,4 @@
+import { initializeBackgroundContext } from './background/execution-context';
 import type { Core } from '@strapi/strapi';
 import { DOTD_SECTION_LABELS, DOTD_UID } from './constants/deal-of-the-day-sections';
 import {
@@ -168,6 +169,7 @@ export default {
   },
 
   async bootstrap({ strapi }: { strapi: Core.Strapi }) {
+    initializeBackgroundContext();
     await seedEditorCouponLayoutPermission(strapi);
     // Offer response walkers are synchronous; load the site localization they
     // read before the first public request is served.
@@ -311,7 +313,6 @@ export default {
 
   async destroy() {
     stopTranslationBackfillRecovery();
-    await stopIsrOutbox();
-    await stopTranslationOutbox();
+    await Promise.all([stopIsrOutbox(), stopTranslationOutbox()]);
   },
 };

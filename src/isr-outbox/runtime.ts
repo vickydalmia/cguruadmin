@@ -1,3 +1,4 @@
+import { onceOnCommit } from '../utils/once-on-commit';
 import type { Core } from '@strapi/strapi';
 import { readIsrOutboxConfig } from './config';
 import { IsrOutboxDispatcher } from './dispatcher';
@@ -11,10 +12,19 @@ import { expandPayloadPathsForLocales } from './payload';
 import { enabledContentLocaleCodesSync } from '../translation/locales/registry';
 
 let dispatcher: IsrOutboxDispatcher | null = null;
+let lifecycleGeneration = 0;
 
 export const MINIMUM_PRODUCTION_ADMIN_SECRET_LENGTH = 16;
 
 export function startIsrOutbox(strapi: Core.Strapi): void {
+  const generation = ++lifecycleGeneration;
+  if (stopping) {
+    void stopping.then(() => {
+      if (generation === lifecycleGeneration) startIsrOutbox(strapi);
+    });
+    return;
+  }
+  if (dispatcher) return;
   const config = readIsrOutboxConfig();
   if (!config.enabled) {
     logIsrOutbox(strapi, 'info', 'isr.outbox.dispatcher_disabled', {
@@ -52,9 +62,17 @@ export function wakeIsrOutbox(): void {
   dispatcher?.wake();
 }
 
-export async function stopIsrOutbox(): Promise<void> {
-  await dispatcher?.stop();
-  dispatcher = null;
+let stopping: Promise<void> | null = null;
+
+export function stopIsrOutbox(): Promise<void> {
+  lifecycleGeneration += 1;
+  if (stopping) return stopping;
+  const current = dispatcher;
+  stopping = (async () => {
+    await current?.stop();
+    dispatcher = null;
+  })().finally(() => { stopping = null; });
+  return stopping;
 }
 
 export async function getIsrOutboxStatus() {
@@ -92,7 +110,7 @@ export async function enqueueStandaloneIsrEvent(
   return strapi.db.transaction(
     async ({ trx, onCommit }: { trx: any; onCommit: (fn: () => void) => void }) => {
       const event = await insertIsrOutboxEvent(trx, localizedInput);
-      onCommit(() => {
+      onCommit(onceOnCommit(strapi, () => {
         // Standalone events are used after cron/Query Engine writes, which do
         // not pass through the document middleware's after-commit purge. Wake
         // only after clearing API responses so ISR cannot rebuild durable HTML
@@ -100,7 +118,7 @@ export async function enqueueStandaloneIsrEvent(
         purgeResponseCaches();
         purgeEntityPopularSearchCatalog();
         wakeIsrOutbox();
-      });
+      }));
       return event;
     },
   );
@@ -130,7 +148,7 @@ export async function enqueueCoalescedIsrSweep(
         .select('id', 'event_key')
         .first();
       if (pending) {
-        onCommit(() => purgeResponseCaches());
+        onCommit(onceOnCommit(strapi, () => purgeResponseCaches()));
         return {
           skipped: true as const,
           id: String(pending.id),
@@ -144,11 +162,11 @@ export async function enqueueCoalescedIsrSweep(
         },
         reason: input.reason,
       });
-      onCommit(() => {
+      onCommit(onceOnCommit(strapi, () => {
         purgeResponseCaches();
         purgeEntityPopularSearchCatalog();
         wakeIsrOutbox();
-      });
+      }));
       return { skipped: false as const, id: event.id, eventKey: event.eventKey };
     },
   );

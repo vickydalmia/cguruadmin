@@ -20,6 +20,7 @@ import { runWithTranslationWriteContext } from './write-flag';
 import { sanitizeRichtextData } from '../utils/sanitize-richtext';
 import { normaliseTextFields } from '../utils/text-field-validation';
 import { translationPopulate } from './populate';
+import { verifyManualFooterStoreNames } from './manual-footer-store-names';
 
 /**
  * The write pipeline's mutators (richtext allowlist, trim/collapse) change
@@ -67,11 +68,13 @@ export async function loadPopulatedEntry(
   documentId: string,
   locale: string,
 ): Promise<any | null> {
-  return strapi.documents(uid as any).findOne({
+  const entry = await strapi.documents(uid as any).findOne({
     documentId,
     locale,
     populate: translationPopulate(strapi, uid),
   } as any);
+  await verifyManualFooterStoreNames(strapi, uid, [entry], locale);
+  return entry;
 }
 
 /** Bounded batch loader used by catalogue scans. */
@@ -82,13 +85,15 @@ export async function loadPopulatedEntries(
   locale: string,
 ): Promise<any[]> {
   if (documentIds.length === 0) return [];
-  return (await strapi.db.query(uid as any).findMany({
+  const entries = (await strapi.db.query(uid as any).findMany({
     where: {
       locale,
       documentId: { $in: [...documentIds] },
     },
     populate: translationPopulate(strapi, uid),
   } as any)) ?? [];
+  await verifyManualFooterStoreNames(strapi, uid, entries, locale);
+  return entries;
 }
 
 export async function writeLocaleVersion(

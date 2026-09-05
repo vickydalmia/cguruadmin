@@ -1,3 +1,4 @@
+import { onceOnCommit } from '../../../utils/once-on-commit';
 import { randomUUID } from 'node:crypto';
 import type { Core } from '@strapi/strapi';
 
@@ -359,11 +360,11 @@ export function createEntityCouponLayoutService({
               });
             }
           }
-          onCommit(() => {
+          onCommit(onceOnCommit(strapi, () => {
             purgeResponseCaches(cachePaths);
             wakeIsrOutbox();
             wakeTranslationOutbox();
-          });
+          }));
           return event;
         },
       );

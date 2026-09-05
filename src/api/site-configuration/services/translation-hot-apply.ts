@@ -62,7 +62,8 @@ export async function applyTranslationSettings(
   // running paid dispatcher alive until the process restarted.
   if (enabledContentLocaleCodesSync().length === 0) {
     const wasRunning = translationOutboxRunning();
-    if (wasRunning) await stopTranslationOutbox();
+    // Also serialize behind a boot/start whose locale read is still pending.
+    await stopTranslationOutbox();
     const outbox = wasRunning ? 'stopped' : 'not-started';
     logTranslation(strapi, 'info', 'translation.hot_apply', { outbox });
     return { ok: true, outbox };

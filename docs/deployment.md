@@ -810,3 +810,50 @@ first, then Strapi.
 
 Do not restore PostgreSQL or rotate secrets merely to roll back application
 code.
+
+## Transaction callback replay rollout
+
+This release fixes retained transaction callbacks; replacing files in a running
+process cannot remove its old callback state. Restart every Strapi role.
+Production CPU improvement is an acceptance check, not an inference from tests.
+
+1. Resolve actual container names and roles from the target deployment's Compose
+   configuration and non-secret worker flags. The repository roles are `strapi`
+   (admin/dispatch), `strapi-render` (reads), and `strapi-maintenance` (backfill).
+   Capture immutable image IDs/revisions, recent logs, active backfill IDs,
+   checkpoints, queue counts/oldest work, container CPU, traffic volume, and two
+   query-counter snapshots 60 seconds apart. Use `pg_stat_statements` total calls
+   if available; `pg_stat_database` transaction deltas are not query counts.
+2. Pull the verified immutable image before the approved brief background pause.
+   Stop admin/dispatch and maintenance with a **60-second maximum graceful
+   timeout**, then let deployment tooling stop those containers if still busy.
+   A six-hour scan must not delay rollout. Do not terminate database sessions,
+   clear queues/checkpoints, reset leases, or use Queue all.
+3. Replace sequentially behind existing health gates: admin first, render next,
+   maintenance last. Keep the old render service available during admin recovery.
+   A brief admin/search/redeem interruption is possible. `deploy.sh` now stops
+   the old workers with `--timeout 60` and force-recreates all three roles.
+4. Let interrupted work recover using existing leases: backfill becomes stale
+   after five minutes; translation defaults to fifteen minutes. Never manually
+   reset a lease while its former process is alive.
+5. Observe for **15 minutes after lease recovery**. Old payload sequences must
+   stop replaying; startup logs (instance ID/PID for dispatchers, PID/generation
+   for backfill) must match configured roles. Jobs must advance checkpoints or
+   reach an explicit terminal state. Duplicate suppression diagnostics are
+   aggregated at most once per minute; normal invalidation logs remain intact.
+6. Compare CPU and 60-second query deltas under comparable traffic. If load
+   stays high, leave bulk maintenance paused and investigate active work. Do
+   not declare the CPU incident resolved solely because callback tests pass.
+
+Useful read-only database snapshots (preserve complete checkpoints privately):
+
+```sql
+SELECT id, status, locked_at, checkpoint, progress, finished_at
+FROM translation_backfill_runs WHERE status IN ('pending', 'running');
+SELECT status, count(*), min(created_at) FROM translation_outbox GROUP BY status;
+SELECT status, count(*), min(created_at) FROM isr_outbox GROUP BY status;
+SELECT sum(calls) AS query_calls FROM pg_stat_statements;
+```
+
+Keep before/after evidence with the release record, including observation times,
+image revision, traffic, query rates, CPU, and outstanding terminal failures.

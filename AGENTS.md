@@ -243,3 +243,36 @@ Re-confirm `qb.transacting(transactionCtx.get())` is still in
 `@strapi/database`'s query builder. If a Strapi release ever stops auto-joining
 the ambient transaction, `fillHomepageOverrides` and every other in-callback
 `db.query` write silently becomes this same deadlock.
+
+### `patches/@strapi+database+5.50.0.patch`
+
+Patches both `dist/transaction-context.js` and `.mjs`. Only an active nested
+transaction using the same Knex transactor shares lifecycle state. Finalization
+marks that state inactive and drains both callback arrays before awaiting the
+commit/rollback or invoking callbacks. Completed async descendants, callbacks
+that open new transactions, repeated finalization, and callback exceptions must
+never replay registrations. Application `onceOnCommit` guards each registration
+as defense in depth; do not deduplicate by a coalesced outbox row ID.
+
+On every Strapi upgrade, compare upstream lifecycle semantics, regenerate both
+build patches only if still required, and run:
+
+- `yarn test` and `yarn tsc --noEmit`;
+- `yarn test:translation-integration` (throwaway SQLite Strapi app);
+- `UNIQUE_CODE_TEST_DATABASE_URL=<isolated-db> yarn test:postgres`;
+- `STRAPI_TRANSACTION_TEST_DATABASE_URL=<separate-isolated-db> yarn test:translation-integration`;
+- `yarn build` and a clean Docker build, checking the install output explicitly
+  reports `@strapi/database` patched successfully.
+
+The opt-in integration databases must be disposable: the tests create schemas
+and mutate fixture rows. `src/utils/transaction-context.test.ts` loads the actual
+installed CommonJS and ESM modules, not a substitute implementation. If upstream
+fixes the defect, remove this patch only after these regressions pass unpatched.
+The Dockerfile must still copy `patches/` before dependency installation.
+
+Production pruning may restore pristine package files even if the first install
+was patched. `patch-package` must remain a production dependency, and the final
+Docker install must run `yarn postinstall` after pruning. Verify both installed
+transaction-context modules in the **final runtime image**, not only the build
+stage. Removing `--ignore-scripts` alone changes all dependency lifecycle scripts;
+keep the explicit postinstall step.

@@ -1,3 +1,4 @@
+import { runInBackground } from '../background/execution-context';
 // Durable, resumable catalogue scans. The runner role is independent from
 // the paid translation dispatcher so deployments can isolate scans in a
 // CPU-limited maintenance container.
@@ -211,18 +212,26 @@ function launchRun(
   input: StartBackfillInput,
   checkpoint: BackfillCheckpoint | null,
 ): void {
-  void executeRun(strapi, id, lockToken, input, checkpoint).finally(() => {
+  void runInBackground(() => executeRun(strapi, id, lockToken, input, checkpoint)).finally(() => {
     void tickRunner();
   });
 }
 
-async function tickRunner(): Promise<void> {
+function tickRunner(): Promise<void> {
+  return runInBackground(tickRunnerClean);
+}
+
+let runnerGeneration = 0;
+
+async function tickRunnerClean(): Promise<void> {
   if (!runnerStrapi || runnerTicking || runningIds.size > 0) return;
   runnerTicking = true;
+  const strapi = runnerStrapi;
+  const generation = runnerGeneration;
   try {
-    await resumeTranslationBackfillRun(runnerStrapi);
+    await resumeTranslationBackfillRun(strapi, () => runnerGeneration === generation && runnerStrapi === strapi);
   } catch (cause) {
-    runnerStrapi.log.error(
+    strapi.log.error(
       `[translation] backfill runner failed: ${cause instanceof Error ? cause.message : String(cause)}`,
     );
   } finally {
@@ -235,9 +244,12 @@ export function startTranslationBackfillRunner(strapi: Core.Strapi): void {
     strapi.log.info('[translation] backfill runner disabled on this process');
     return;
   }
+  if (runnerStrapi === strapi) return;
+  runnerGeneration += 1;
   runnerStrapi = strapi;
+  strapi.log.info(`[translation] backfill runner started pid=${process.pid} generation=${runnerGeneration}`);
   if (!runnerTimer) {
-    runnerTimer = setInterval(() => void tickRunner(), RUNNER_POLL_MS);
+    runnerTimer = runInBackground(() => setInterval(() => void tickRunner(), RUNNER_POLL_MS));
     runnerTimer.unref?.();
   }
   void tickRunner();
@@ -348,9 +360,14 @@ export async function cancelTranslationBackfill(
 }
 
 /** Claim a pending or stale run. Checkpoints make stale recovery incremental. */
-export async function resumeTranslationBackfillRun(
+export function resumeTranslationBackfillRun(
   strapi: Core.Strapi,
+  mayLaunch: () => boolean = () => true,
 ): Promise<boolean> {
+  return runInBackground(() => resumeRun(strapi, mayLaunch));
+}
+
+async function resumeRun(strapi: Core.Strapi, mayLaunch: () => boolean): Promise<boolean> {
   const claimed = await strapi.db.transaction(async ({ trx }: any) => {
     const cutoff = new Date(Date.now() - STALE_RUN_MS);
     let query = trx(TRANSLATION_BACKFILL_RUNS_TABLE)
@@ -380,7 +397,7 @@ export async function resumeTranslationBackfillRun(
       checkpoint: json<BackfillCheckpoint | null>(row.checkpoint, null),
     };
   });
-  if (!claimed) return false;
+  if (!claimed || !mayLaunch()) return false;
   launchRun(
     strapi,
     claimed.id,
@@ -392,10 +409,10 @@ export async function resumeTranslationBackfillRun(
 }
 
 export function stopTranslationBackfillRecovery(): void {
+  runnerGeneration += 1;
   if (runnerTimer) clearInterval(runnerTimer);
   runnerTimer = null;
   runnerStrapi = null;
-  runnerTicking = false;
 }
 
 /** Tests only. */

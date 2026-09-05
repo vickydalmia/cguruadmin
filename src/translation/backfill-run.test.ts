@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { isTranslationWrite, runWithTranslationWriteFlag } from './write-flag';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import knexFactory, { type Knex } from 'knex';
 
@@ -151,6 +153,37 @@ describe('startTranslationBackfill', () => {
     expect(stopped).toMatchObject({ cancelled: true, run: { status: 'cancelled' } });
     expect(await backfillRunActive(strapi)).toBe(false);
     expect(mocks.enqueueTranslationBackfill).not.toHaveBeenCalled();
+  });
+
+  it('recovers work claimed during shutdown through the existing stale lease', async () => {
+    const { run } = await startTranslationBackfill(strapi, { mode: 'repair' });
+    expect(await resumeTranslationBackfillRun(strapi, () => false)).toBe(false);
+    expect(mocks.enqueueTranslationBackfill).not.toHaveBeenCalled();
+    const claimed = await knex('translation_backfill_runs').where({ id: run.id }).first();
+    expect(claimed.status).toBe('running');
+    expect(await resumeTranslationBackfillRun(strapi)).toBe(false);
+    await knex('translation_backfill_runs').where({ id: run.id }).update({
+      locked_at: new Date(Date.now() - 6 * 60_000),
+    });
+    mocks.enqueueTranslationBackfill.mockResolvedValueOnce(result);
+    expect(await resumeTranslationBackfillRun(strapi)).toBe(true);
+    await waitFor('done');
+    expect(mocks.enqueueTranslationBackfill).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts backfill work without the waking request or translation context', async () => {
+    const request = new AsyncLocalStorage<string>();
+    mocks.enqueueTranslationBackfill.mockImplementationOnce(async () => {
+      expect(request.getStore()).toBeUndefined();
+      expect(isTranslationWrite()).toBe(false);
+      return result;
+    });
+    await startTranslationBackfill(strapi, { mode: 'repair' });
+    await request.run('editor', () => runWithTranslationWriteFlag(async () => {
+      expect(await resumeTranslationBackfillRun(strapi)).toBe(true);
+    }));
+    await waitFor('done');
+    expect(mocks.enqueueTranslationBackfill).toHaveBeenCalledTimes(1);
   });
 
   it('resumes a stale run from its durable page checkpoint', async () => {

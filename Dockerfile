@@ -34,7 +34,9 @@ COPY . .
 RUN NODE_ENV=test yarn test
 RUN yarn build
 
-RUN yarn install --production --frozen-lockfile --ignore-scripts
+# Yarn pruning can restore pristine dependency files. Keep patch-package in
+# production dependencies and reapply explicitly after the final install.
+RUN yarn install --production --frozen-lockfile --ignore-scripts && yarn postinstall
 
 # ---------------------------------------------------------------------------
 # Runtime stage
