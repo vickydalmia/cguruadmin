@@ -20,7 +20,7 @@ import { runWithTranslationWriteContext } from './write-flag';
 import { sanitizeRichtextData } from '../utils/sanitize-richtext';
 import { normaliseTextFields } from '../utils/text-field-validation';
 import { translationPopulate } from './populate';
-import { verifyManualFooterStoreNames } from './manual-footer-store-names';
+import { verifyManualFooterEntityNames } from './manual-footer-entity-names';
 
 /**
  * The write pipeline's mutators (richtext allowlist, trim/collapse) change
@@ -73,7 +73,7 @@ export async function loadPopulatedEntry(
     locale,
     populate: translationPopulate(strapi, uid),
   } as any);
-  await verifyManualFooterStoreNames(strapi, uid, [entry], locale);
+  await verifyManualFooterEntityNames(strapi, uid, [entry], locale);
   return entry;
 }
 
@@ -92,7 +92,7 @@ export async function loadPopulatedEntries(
     },
     populate: translationPopulate(strapi, uid),
   } as any)) ?? [];
-  await verifyManualFooterStoreNames(strapi, uid, entries, locale);
+  await verifyManualFooterEntityNames(strapi, uid, entries, locale);
   return entries;
 }
 

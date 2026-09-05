@@ -439,16 +439,16 @@ export function validateTranslatedBatch(
       // Only true entity names or exact names verified through linked entities
       // may remain in Latin script. Promotional copy still requires translation.
       const actualEntityName = leaf.identity === true && leaf.path === 'name';
-      const exactLinkedStoreName = /^sections\.\d+\.links\.\d+\.label$/u.test(leaf.path)
-        && Boolean(leaf.linkedStoreName)
-        && leaf.value.trim() === leaf.linkedStoreName
-        && value.trim() === leaf.linkedStoreName;
+      const exactLinkedEntityName = /^sections\.\d+\.links\.\d+\.label$/u.test(leaf.path)
+        && Boolean(leaf.linkedEntityName)
+        && leaf.value.trim() === leaf.linkedEntityName
+        && value.trim() === leaf.linkedEntityName;
       const exactLinkedOfferName = /^hero\.products\.\d+\.titleOverride$/u.test(leaf.path)
         && Boolean(leaf.linkedOfferName)
         && leaf.value.trim() === leaf.linkedOfferName
         && value.trim() === leaf.linkedOfferName;
       const enforceTranslatedProse =
-        !actualEntityName && !exactLinkedStoreName && !exactLinkedOfferName
+        !actualEntityName && !exactLinkedEntityName && !exactLinkedOfferName
         && hasEnglishText(leaf.value);
       if (enforceTranslatedProse && sameVisibleText(leaf.value, value)) {
         problems.push('untranslated-source');

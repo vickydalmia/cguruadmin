@@ -16,7 +16,7 @@
 import type { Core } from '@strapi/strapi';
 import { TranslationError } from './errors';
 import { heroOfferIdentityName } from './hero-offer-identity';
-import { manualFooterStoreName } from './manual-footer-store-names';
+import { manualFooterEntityName } from './manual-footer-entity-names';
 
 /** Dot-joined path of a translatable value inside one entry. */
 export type LeafPath = string;
@@ -42,8 +42,8 @@ export type TranslatableLeaf = {
    * are waived. Promotional headings never receive this flag.
    */
   identity?: boolean;
-  /** Exact English name of a populated store linked by a footer nav label. */
-  linkedStoreName?: string;
+  /** Exact English name of a verified entity linked by a footer nav label. */
+  linkedEntityName?: string;
   /** Official store/brand name on the homepage hero's selected offer. */
   linkedOfferName?: string;
 };
@@ -209,14 +209,14 @@ export function collectTranslatableLeaves(
       if (TEXT_TYPES.has(definition.type)) {
         if (insideComponent && COPY_ONLY_SUBFIELDS.has(key)) continue;
         if (typeof fieldValue === 'string' && fieldValue.trim()) {
-          const linkedStoreName = uid === 'api::footer.footer'
+          const linkedEntityName = uid === 'api::footer.footer'
             && schemaUid === 'nav.link' && key === 'label'
             && typeof value?.store?.documentId === 'string'
             && typeof value?.store?.name === 'string'
             && fieldValue.trim() === value.store.name.trim()
             ? value.store.name.trim()
             : uid === 'api::footer.footer' && schemaUid === 'nav.link' && key === 'label'
-              ? manualFooterStoreName(value) : undefined;
+              ? manualFooterEntityName(value) : undefined;
           const linkedOfferName = uid === 'api::homepage.homepage'
             && schemaUid === 'home.hero-product' && key === 'titleOverride'
             ? heroOfferIdentityName(value, fieldValue) : undefined;
@@ -226,9 +226,9 @@ export function collectTranslatableLeaves(
             maxLength: leafBudget(definition),
             validationMaxLength: leafValidationBudget(definition),
             value: fieldValue,
-            ...(linkedStoreName ? {
-              linkedStoreName,
-              note: 'This label is the linked store’s official name; it may retain its original spelling.',
+            ...(linkedEntityName ? {
+              linkedEntityName,
+              note: 'This label is the linked entity’s official name; it may retain its original spelling.',
             } : {}),
             ...(linkedOfferName ? {
               linkedOfferName,

@@ -31,7 +31,7 @@ import {
   localizedPlanHash,
 } from './writer';
 import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
-import { verifyManualFooterStoreNames } from './manual-footer-store-names';
+import { verifyManualFooterEntityNames } from './manual-footer-entity-names';
 import { sourceContentHash } from './source-hash';
 import { translationPromptFingerprint } from './prompts';
 import { unicodeScriptPattern, type ContentLocale } from './locales/resolve';
@@ -105,7 +105,7 @@ async function* defaultLocaleEntries(
       populate: translationPopulate(strapi, uid),
     } as any);
     if (!rows?.length) return;
-    await verifyManualFooterStoreNames(strapi, uid, rows, DEFAULT_CONTENT_LOCALE);
+    await verifyManualFooterEntityNames(strapi, uid, rows, DEFAULT_CONTENT_LOCALE);
     lastId = Number(rows[rows.length - 1].id);
     yield { entries: rows, lastId };
     if (rows.length < PAGE_SIZE) return;
