@@ -48,6 +48,16 @@ beforeEach(() => {
 });
 
 describe('translateEntryLeaves', () => {
+  it('reports bounded source and rejected text for terminal quality failures', async () => {
+    const complete = vi.fn(async () => ({
+      text: JSON.stringify({ title: 'English offer' }),
+      inputTokens: 1, outputTokens: 1, model: 'test',
+    }));
+    await expect(translateEntryLeaves(strapi, { complete } as any, CONFIG, LOCALE, [
+      leaf('title', 'English offer'),
+    ])).rejects.toThrow('source="English offer", rejected="English offer"');
+    expect(complete).toHaveBeenCalledTimes(2);
+  });
   it('converts restored schema ceilings to exact marker-visible ceilings', () => {
     const shortFact = maskProtectedValues('Save AED 20 today');
     const longFact = maskProtectedValues(

@@ -1,5 +1,6 @@
 import knexFactory, { type Knex } from 'knex';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { enqueueBlockedDependentsForAvailableTarget, TranslationOutboxStore } from './outbox/store';
 
 const createIsr = require('../../database/migrations/2026.07.24T00.00.00.create-isr-outbox.js');
 const hardenIsr = require('../../database/migrations/2026.07.25T00.00.00.harden-isr-outbox.js');
@@ -117,5 +118,43 @@ postgresDescribe('translation/ISR reliability migrations on PostgreSQL', () => {
     await expect(
       run('22222222-2222-4222-8222-222222222222'),
     ).rejects.toMatchObject({ code: '23505' });
+  });
+
+  it('wakes the 20 category dependents once and resumes claims after a worker restart', async () => {
+    const target = { uid: 'api::category.category', documentId: 'exclusive', targetLocale: 'ar' };
+    const now = new Date();
+    await knex('translation_outbox').insert(Array.from({ length: 20 }, (_, index) => ({
+      event_key: `api::coupon.coupon:coupon-${index}:ar`, uid: 'api::coupon.coupon',
+      document_id: `coupon-${index}`, target_locale: 'ar', kind: 'translate',
+      force: false, status: 'blocked', attempt_count: 0, reason: 'test',
+      created_at: now, next_attempt_at: now, blocked_on: JSON.stringify([{
+        path: 'categories', required: true, targetUid: target.uid, documentId: target.documentId,
+      }]),
+    })));
+    await knex.transaction(async (trx) => {
+      expect(await enqueueBlockedDependentsForAvailableTarget(trx, target)).toBe(20);
+    });
+    expect(await enqueueBlockedDependentsForAvailableTarget(knex, target)).toBe(0);
+    const createStore = () => new TranslationOutboxStore({ db: {
+      connection: knex, transaction: (callback: any) => knex.transaction((trx) => callback({ trx })),
+    } } as any, 120_000, 300_000);
+    const first = await createStore().claim();
+    expect(first?.kind).toBe('relation-sync');
+    // Simulate a crashed worker's expired lease; a fresh store reclaims it.
+    await knex('translation_outbox').where({ id: first!.id })
+      .update({ locked_at: new Date(0) });
+    const restarted = createStore();
+    const reclaimed = await restarted.claim();
+    expect(reclaimed?.id).toBe(first!.id);
+    expect(reclaimed?.lockToken).not.toBe(first!.lockToken);
+    await restarted.markDelivered(reclaimed!);
+    for (let index = 1; index < 20; index += 1) {
+      const job = await restarted.claim();
+      expect(job).not.toBeNull();
+      await restarted.markDelivered(job!);
+    }
+    expect(await restarted.claim()).toBeNull();
+    expect(await enqueueBlockedDependentsForAvailableTarget(knex, target)).toBe(0);
+    expect((await restarted.statusSummary()).counts).toEqual({ delivered: 20 });
   });
 });

@@ -319,8 +319,18 @@ export async function translateEntryLeaves(
       const detail = verdicts
         .map(({ path, problems }) => `${path}: ${problems.join(', ')}`)
         .join('; ');
+      // Only failed fields, bounded to fit the existing last_error column
+      // budget. Never store a whole provider response or request envelope.
+      const excerpt = (value: unknown) => typeof value === 'string'
+        ? JSON.stringify([...value].slice(0, 160).join('')) : '[missing/non-string]';
+      const samples = verdicts.slice(0, 3).map(({ path }) => {
+        const source = chunk.find((leaf) => leaf.path === path)?.value;
+        const raw = batch[path];
+        const rejected = typeof raw === 'string' ? masks.get(path)?.restore(raw) ?? raw : raw;
+        return `${path}: source=${excerpt(source)}, rejected=${excerpt(rejected)}`;
+      }).join('; ');
       throw new TranslationError('TRANSLATION_QUALITY_GATE_FAILED', {
-        detail: `${stage} output failed validation after correction (${detail})`,
+        detail: `${stage} output failed validation after correction (${detail.slice(0, 2000)}); ${samples}`,
       });
     }
     return batch;

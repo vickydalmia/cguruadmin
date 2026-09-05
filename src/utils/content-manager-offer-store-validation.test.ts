@@ -9,6 +9,35 @@ const STORE_ONE = { id: 1, documentId: 'store-1' };
 const STORE_TWO = { id: 2, documentId: 'store-2' };
 const STORE_THREE = { id: 3, documentId: 'store-3' };
 
+describe('translation source store preservation', () => {
+  it.each(['create', 'update'])('preserves the two source stores on %s', async (action) => {
+    const { strapi } = harness({ path: null });
+    await expect(validateContentManagerOfferStore(
+      strapi, 'api::coupon.coupon', action,
+      { stores: { set: [{ documentId: 'store-1' }, { documentId: 'store-2' }] } },
+      'coupon-1', true, { stores: [STORE_ONE, STORE_TWO] }, 'ar',
+    )).resolves.toBeUndefined();
+  });
+
+  it('rejects a changed multi-store list even with translation context', async () => {
+    const { strapi } = harness({ path: null });
+    await expect(validateContentManagerOfferStore(
+      strapi, 'api::coupon.coupon', 'create',
+      { stores: { set: [STORE_ONE, STORE_THREE] } },
+      'coupon-1', true, { stores: [STORE_ONE, STORE_TWO] }, 'ar',
+    )).rejects.toThrow('At most one Store');
+  });
+
+  it('reads the Arabic target for updates and does not forgive target-only legacy stores', async () => {
+    const { strapi, findOne } = harness({ path: null, currentStores: [STORE_ONE, STORE_TWO] });
+    await expect(validateContentManagerOfferStore(
+      strapi, 'api::coupon.coupon', 'update', {}, 'coupon-1', true,
+      { stores: [STORE_ONE] }, 'ar',
+    )).rejects.toThrow('At most one Store');
+    expect(findOne).toHaveBeenCalledWith(expect.objectContaining({ locale: 'ar' }));
+  });
+});
+
 function harness({
   path = '/content-manager/collection-types/api::coupon.coupon/coupon-1',
   currentStores = [],

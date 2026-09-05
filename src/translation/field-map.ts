@@ -15,6 +15,7 @@
 // relations through an existence map and reports what it had to skip).
 import type { Core } from '@strapi/strapi';
 import { TranslationError } from './errors';
+import { heroOfferIdentityName } from './hero-offer-identity';
 
 /** Dot-joined path of a translatable value inside one entry. */
 export type LeafPath = string;
@@ -40,6 +41,10 @@ export type TranslatableLeaf = {
    * are waived. Promotional headings never receive this flag.
    */
   identity?: boolean;
+  /** Exact English name of a populated store linked by a footer nav label. */
+  linkedStoreName?: string;
+  /** Official store/brand name on the homepage hero's selected offer. */
+  linkedOfferName?: string;
 };
 
 /**
@@ -192,6 +197,7 @@ export function collectTranslatableLeaves(
     value: any,
     prefix: string,
     insideComponent: boolean,
+    schemaUid: string = uid,
   ) => {
     for (const [key, definition] of Object.entries(schema.attributes ?? {})) {
       if (INTERNAL_FIELDS.has(key)) continue;
@@ -202,12 +208,29 @@ export function collectTranslatableLeaves(
       if (TEXT_TYPES.has(definition.type)) {
         if (insideComponent && COPY_ONLY_SUBFIELDS.has(key)) continue;
         if (typeof fieldValue === 'string' && fieldValue.trim()) {
+          const linkedStoreName = uid === 'api::footer.footer'
+            && schemaUid === 'nav.link' && key === 'label'
+            && typeof value?.store?.documentId === 'string'
+            && typeof value?.store?.name === 'string'
+            && fieldValue.trim() === value.store.name.trim()
+            ? value.store.name.trim() : undefined;
+          const linkedOfferName = uid === 'api::homepage.homepage'
+            && schemaUid === 'home.hero-product' && key === 'titleOverride'
+            ? heroOfferIdentityName(value, fieldValue) : undefined;
           leaves.push({
             path,
             kind: leafKind(definition),
             maxLength: leafBudget(definition),
             validationMaxLength: leafValidationBudget(definition),
             value: fieldValue,
+            ...(linkedStoreName ? {
+              linkedStoreName,
+              note: 'This label is the linked store’s official name; it may retain its original spelling.',
+            } : {}),
+            ...(linkedOfferName ? {
+              linkedOfferName,
+              note: 'This title is the linked offer’s official store or brand name; it may retain its original spelling.',
+            } : {}),
             ...(path === 'name' && ENTITY_NAME_UIDS.has(uid)
               ? { identity: true }
               : {}),
@@ -219,10 +242,10 @@ export function collectTranslatableLeaves(
         const child = componentSchema(strapi, definition.component);
         if (definition.repeatable && Array.isArray(fieldValue)) {
           fieldValue.forEach((item, index) =>
-            walkText(child, item, `${path}.${index}`, true),
+            walkText(child, item, `${path}.${index}`, true, definition.component),
           );
         } else if (fieldValue && typeof fieldValue === 'object') {
-          walkText(child, fieldValue, path, true);
+          walkText(child, fieldValue, path, true, definition.component);
         }
         continue;
       }
@@ -234,6 +257,7 @@ export function collectTranslatableLeaves(
               item,
               `${path}.${index}`,
               true,
+              item.__component,
             );
           }
         });

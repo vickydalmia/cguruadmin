@@ -327,7 +327,7 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
   {
     name: 'validateContentManagerOfferStore',
     applies: isOfferStoreUid,
-    run: ({ strapi, uid, action, data, documentId, translation }) =>
+    run: ({ strapi, uid, action, data, documentId, translation, locale }) =>
       isOfferStoreUid(uid)
         ? validateContentManagerOfferStore(
             strapi,
@@ -336,6 +336,9 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
             data,
             documentId,
             Boolean(translation),
+            translation?.operation === 'upsert' && translation.targetLocale === locale
+              ? translation.sourceEntry : undefined,
+            locale,
           )
         : undefined,
   },
@@ -422,7 +425,7 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     // card slots.
     name: 'validateOfferFieldsForWrite',
     applies: (uid) => uid === 'api::coupon.coupon' || uid === 'api::deal.deal',
-    run: ({ strapi, uid, action, data, documentId, strict, locale }) =>
+    run: ({ strapi, uid, action, data, documentId, strict, locale, translation }) =>
       validateOfferFieldsForWrite(
         strapi,
         uid,
@@ -431,6 +434,8 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
         documentId,
         strict,
         locale,
+        translation?.operation === 'upsert' && translation.targetLocale === locale
+          ? translation.sourceEntry : undefined,
       ),
   },
   {

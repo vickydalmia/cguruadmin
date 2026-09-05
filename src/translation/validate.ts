@@ -432,12 +432,20 @@ export function validateTranslatedBatch(
       if (!factsKept) {
         problems.push('protected-value-changed');
       }
-      // Only leaves identified by the schema walker as true entity names may
-      // remain in Latin script. Promotional headings/descriptions — including
-      // homepage title overrides — never receive this exemption.
+      // Only true entity names or exact names verified through linked entities
+      // may remain in Latin script. Promotional copy still requires translation.
       const actualEntityName = leaf.identity === true && leaf.path === 'name';
+      const exactLinkedStoreName = /^sections\.\d+\.links\.\d+\.label$/u.test(leaf.path)
+        && Boolean(leaf.linkedStoreName)
+        && leaf.value.trim() === leaf.linkedStoreName
+        && value.trim() === leaf.linkedStoreName;
+      const exactLinkedOfferName = /^hero\.products\.\d+\.titleOverride$/u.test(leaf.path)
+        && Boolean(leaf.linkedOfferName)
+        && leaf.value.trim() === leaf.linkedOfferName
+        && value.trim() === leaf.linkedOfferName;
       const enforceTranslatedProse =
-        !actualEntityName && hasEnglishText(leaf.value);
+        !actualEntityName && !exactLinkedStoreName && !exactLinkedOfferName
+        && hasEnglishText(leaf.value);
       if (enforceTranslatedProse && sameVisibleText(leaf.value, value)) {
         problems.push('untranslated-source');
       }

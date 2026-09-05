@@ -36,8 +36,13 @@ edits made there.
   shared documentId, so uniqueness checks recognise the English row as the
   same document. The only source-parity exceptions are the documented legacy
   cases: translated short descriptions do not inherit English's 160-character
-  minimum, exact source homepage media IDs may preserve legacy dimensions, and
-  a legacy source offer with no taxonomy may mirror that empty taxonomy. The
+  minimum, exact source homepage media IDs may preserve legacy dimensions,
+  and a legacy source offer with no taxonomy may mirror that empty taxonomy.
+  Automated translations may also preserve an exact ordered English store
+  list and an unchanged Deal `discount`/`discountPrefix` pair. These exceptions
+  do not relax normal editor validation or permit target-only changes.
+  The bounded source loader includes shared media so required icons/logos are
+  available to validation before Strapi creates and populates a locale row. The
   offer lifecycle guards (schedule/expiry dates) are not applied to a locale
   write at all: every lifecycle field is non-localized and copied from the
   English row, so an already-expired offer is a stored state, not a target
@@ -68,8 +73,13 @@ edits made there.
   `AED 749`.) Alphabetic labels avoid Arabic-Indic digit normalization;
   marker spelling is strict. The marker brief is part of the per-request user
   message, not the fingerprinted system prompt. The proper-name exemption is
-  limited to actual entity `name` fields; promotional titles, overrides and
-  descriptions must be translated. If an SEO field exceeds its exact schema
+  limited to actual entity `name` fields and footer navigation labels matching
+  their explicitly linked store's English name exactly. Homepage hero title
+  overrides may likewise retain an exact store/brand name from the selected
+  Coupon or Deal. The source loader fetches only shallow store/brand names for
+  those hero relations. URL-only labels, unmatched overrides, promotional
+  titles and descriptions must be translated.
+  If an SEO field exceeds its exact schema
   maximum, the focused correction asks the provider to compact only that
   field without truncating rich text or removing protected values.
   Output that still fails is NEVER published: the current locale version is
@@ -80,6 +90,8 @@ edits made there.
   still require the target script. The source hash includes a prompt
   fingerprint, so editing a prompt file deliberately re-translates affected
   content on the next sweep (mind the daily budget when you tune prompts).
+  Terminal quality errors include bounded source/rejected excerpts for up to
+  three failing fields, in addition to their paths and validation reasons.
 - **Prompts** — `src/translation/locales/prompts/default.md` and
   `default-editor.md` are generic templates rendered with the locale's facts
   (`{{languageName}} {{nativeName}} {{countryName}} {{countryCode}} {{script}}

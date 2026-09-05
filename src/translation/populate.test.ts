@@ -8,6 +8,7 @@ describe('translationPopulate', () => {
         attributes: {
           name: { type: 'string', pluginOptions: { i18n: { localized: true } } },
           slug: { type: 'string' },
+          logo: { type: 'media', multiple: false },
           coupons: {
             type: 'relation',
             relation: 'manyToMany',
@@ -42,6 +43,7 @@ describe('translationPopulate', () => {
     const strapi = { getModel: vi.fn((uid: string) => schemas[uid]) } as any;
 
     expect(translationPopulate(strapi, 'api::store.store')).toEqual({
+      logo: true,
       topPickCoupons: true,
       seo: { populate: { shareImage: true } },
     });

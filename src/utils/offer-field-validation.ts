@@ -101,6 +101,7 @@ export function validateOfferFields(
   strict = false,
   uid?: string,
   skipWordRules = false,
+  translationSource?: Record<string, unknown>,
 ): void {
   if (!data || typeof data !== 'object') return;
 
@@ -119,6 +120,13 @@ export function validateOfferFields(
     message: string,
     comparisonFields: readonly string[] = path,
   ) => {
+    // The shared discount pair may retain its exact legacy source value in
+    // machine translations. Other fields and changed pairs stay strict.
+    if (uid === DEAL_UID && translationSource
+      && comparisonFields.length === DEAL_DISCOUNT_FIELDS.length
+      && comparisonFields.every((field) => DEAL_DISCOUNT_FIELD_SET.has(field))
+      && DEAL_DISCOUNT_FIELDS.every((field) =>
+        Object.is(data[field], translationSource[field]))) return;
     if (!unchanged(comparisonFields)) problems.push({ path, message });
   };
 
@@ -199,6 +207,7 @@ export async function validateOfferFieldsForWrite(
   documentId?: string,
   strict = false,
   locale?: string,
+  translationSource?: Record<string, unknown>,
 ): Promise<void> {
   if (!data || typeof data !== 'object') return;
   const isClone = action === 'clone';
@@ -246,5 +255,5 @@ export async function validateOfferFieldsForWrite(
   // Word caps are English editorial rules; localized text skips them (see
   // fieldRulesForUid). Amount rules always run — those fields are shared.
   const skipWordRules = Boolean(locale) && locale !== DEFAULT_CONTENT_LOCALE;
-  validateOfferFields(effective, action, stored, strict, uid, skipWordRules);
+  validateOfferFields(effective, action, stored, strict, uid, skipWordRules, translationSource);
 }

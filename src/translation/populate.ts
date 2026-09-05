@@ -31,11 +31,26 @@ function buildPopulate(
   const populate: Record<string, unknown> = {};
 
   for (const [key, definition] of Object.entries(schema.attributes ?? {})) {
-    const included = insideComponent || localized(definition) || ownerRelation(definition);
+    // Shared media is inherited by Strapi, but must already be present in the
+    // English source used to validate a first localized row before persistence.
+    const included = insideComponent || localized(definition) || ownerRelation(definition)
+      || definition.type === 'media';
     if (!included) continue;
 
     if (definition.type === 'relation') {
-      if (ownerRelation(definition) && definition.target) populate[key] = true;
+      if (ownerRelation(definition) && definition.target) {
+        // Hero overrides may be official store/brand names. Read only their
+        // names on the linked offer; never expand their inverse offer lists.
+        const heroOffer = uid === 'home.hero-product'
+          && ((key === 'coupon' && definition.target === 'api::coupon.coupon')
+            || (key === 'deal' && definition.target === 'api::deal.deal'));
+        populate[key] = heroOffer ? {
+          populate: {
+            stores: { fields: ['name'] },
+            brands: { fields: ['name'] },
+          },
+        } : true;
+      }
       continue;
     }
     if (definition.type === 'media') {

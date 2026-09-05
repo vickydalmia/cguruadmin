@@ -44,8 +44,9 @@ import {
  * run this same pipeline, with only the documented source-parity exceptions:
  * locale short descriptions do not inherit the English 160-character minimum,
  * exact source homepage media IDs may retain legacy dimensions, and an already
- * orphaned source offer may mirror that empty taxonomy. No target-only defect
- * is grandfathered.
+ * orphaned source offer may mirror that empty taxonomy. Legacy store lists and
+ * Deal discount pairs may also be copied exactly from English. No target-only
+ * defect is grandfathered.
  * Both are rare enough that the extra round trip costs an editor far less than
  * the lock contention or the credit would.
  *
