@@ -300,7 +300,9 @@ and hydrate localized records. UI chrome text comes from
 translations, falling back per key to the storefront's bundled English — and
 every dictionary write triggers one coalesced full ISR sweep. Localized
 sitemap membership remains separate from route serving and page-level
-hreflang.
+hreflang. The storefront publishes one tree per language: English at
+`/sitemap_index.xml` and Arabic at `/ar/sitemap_index.xml`, each containing
+only routes admitted for that language.
 
 Content translation writes use locale-scoped ISR invalidation. For example,
 an Arabic Coupon update invalidates `/ar/`, its `/ar/<entity>/` consumers and

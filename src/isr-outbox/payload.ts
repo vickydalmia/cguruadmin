@@ -122,8 +122,8 @@ export function createOutboxPayload(
 /**
  * Narrow a localized content invalidation to the locale that was written.
  * Existing locale rows keep route membership, while creation/removal retains
- * `routes` and the root sitemap work so the inventory and canonical sitemap
- * can admit or remove that exact localized path atomically.
+ * `routes` and the sitemap template path; the gateway applies `localePrefix`
+ * so that language's index and shards admit or remove the path atomically.
  */
 export function localizeTranslationPayload(
   payload: IsrOutboxPayload,

@@ -222,7 +222,7 @@ describe('localizeTranslationPayload', () => {
     ).toEqual({ localePrefix: '/ar', paths: ['/ar/', '/ar/amazon/'] });
   });
 
-  it('keeps the canonical sitemap when localized route membership changes', () => {
+  it('keeps the sitemap template for localized route membership changes', () => {
     expect(
       localizeTranslationPayload(
         {
