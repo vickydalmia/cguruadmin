@@ -209,7 +209,9 @@ export function mergeOutboxPayloads(
   before: IsrOutboxPayload,
   after: IsrOutboxPayload,
 ): IsrOutboxPayload {
-  if (before.localePrefix !== after.localePrefix) {
+  if (before.manualRefresh !== after.manualRefresh ||
+      JSON.stringify(before.excludeLocalePrefixes) !== JSON.stringify(after.excludeLocalePrefixes) ||
+      before.localePrefix !== after.localePrefix) {
     throw new Error('cannot coalesce ISR payloads for different locales');
   }
   const paths = [...new Set([...(before.paths ?? []), ...(after.paths ?? [])])];
@@ -234,7 +236,10 @@ export function mergeOutboxPayloads(
     ).values(),
   ];
   return {
+    ...(before.manualRefresh ? { manualRefresh: true as const } : {}),
+    ...(before.excludeLocalePrefixes !== undefined ? { excludeLocalePrefixes: before.excludeLocalePrefixes } : {}),
     ...(before.all || after.all ? { all: true as const } : {}),
+    ...(before.inventoryLocale === 'en' && after.inventoryLocale === 'en' ? { inventoryLocale: 'en' as const } : {}),
     ...(before.localePrefix ? { localePrefix: before.localePrefix } : {}),
     ...(paths.length ? { paths } : {}),
     ...(optionalPaths.length ? { optionalPaths } : {}),
@@ -258,7 +263,11 @@ export function boundOutboxPayload(
   ) {
     return payload;
   }
+  if (payload.manualRefresh && !payload.all) throw new Error("Manual page refresh exceeds queue limits");
   const full: IsrOutboxPayload = {
+    ...(payload.manualRefresh ? { manualRefresh: true as const } : {}),
+    ...(payload.excludeLocalePrefixes !== undefined ? { excludeLocalePrefixes: payload.excludeLocalePrefixes } : {}),
+    ...(payload.inventoryLocale ? { inventoryLocale: payload.inventoryLocale } : {}),
     all: true,
     ...(payload.localePrefix ? { localePrefix: payload.localePrefix } : {}),
     ...(payload.scopes?.length ? { scopes: payload.scopes } : {}),

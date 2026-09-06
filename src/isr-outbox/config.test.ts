@@ -9,8 +9,8 @@ describe('ISR outbox configuration', () => {
     vi.stubEnv('ISR_OUTBOX_LEASE_MS', '');
     const config = readIsrOutboxConfig();
     expect(config.enabled).toBe(true);
-    expect(config.requestTimeoutMs).toBe(90_000);
-    expect(config.leaseMs).toBe(120_000);
+    expect(config.requestTimeoutMs).toBe(330_000);
+    expect(config.leaseMs).toBe(360_000);
     expect(config.maxPaths).toBe(5_000);
     expect(config.maxPayloadBytes).toBe(900_000);
   });

@@ -23,13 +23,13 @@ export type CommittedIsrOutboxEvent = Readonly<{
  */
 export async function runContentTransaction<T>(
   strapi: Core.Strapi,
-  executeWrite: () => Promise<T>,
+  executeWrite: (trx: any) => Promise<T>,
   createEvent: (result: T, trx: any) => Promise<IsrOutboxInsert | null>,
   afterCommit: (event: CommittedIsrOutboxEvent | null) => void,
 ): Promise<T> {
   return strapi.db.transaction(
     async ({ trx, onCommit }: { trx: any; onCommit: (fn: () => void) => void }) => {
-      const result = await executeWrite();
+      const result = await executeWrite(trx);
       const input = await createEvent(result, trx);
       const inserted =
         input && hasOutboxWork(input.payload)

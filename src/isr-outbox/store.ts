@@ -56,6 +56,13 @@ export function parseIsrOutboxPayload(value: unknown): IsrOutboxPayload {
     'payload.optionalPaths',
   );
   const scopes = stringArray(input.scopes, 'payload.scopes');
+  if (input.inventoryLocale !== undefined && input.inventoryLocale !== 'en') throw new Error('Invalid inventoryLocale');
+  if (input.manualRefresh !== undefined && input.manualRefresh !== true) throw new Error('Invalid manualRefresh');
+  const excludeLocalePrefixes = stringArray(input.excludeLocalePrefixes, 'excludeLocalePrefixes');
+  if (excludeLocalePrefixes !== undefined && (
+    input.manualRefresh !== true || input.localePrefix !== undefined ||
+    excludeLocalePrefixes.some((prefix) => !/^\/[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/iu.test(prefix))
+  )) throw new Error('Invalid English language scope');
   const localePrefix = input.localePrefix;
   if (
     localePrefix !== undefined &&
@@ -91,6 +98,9 @@ export function parseIsrOutboxPayload(value: unknown): IsrOutboxPayload {
     });
   }
   const payload: IsrOutboxPayload = {
+    ...(input.manualRefresh === true ? { manualRefresh: true as const } : {}),
+    ...(excludeLocalePrefixes !== undefined ? { excludeLocalePrefixes } : {}),
+    ...(input.inventoryLocale === 'en' ? { inventoryLocale: 'en' as const } : {}),
     ...(input.all === true ? { all: true as const } : {}),
     ...(typeof localePrefix === 'string' ? { localePrefix } : {}),
     ...(paths?.length ? { paths } : {}),
@@ -239,7 +249,7 @@ export class IsrOutboxStore {
         await trx(ISR_OUTBOX_TABLE)
           .where({ id: row.id })
           .update({
-            status: 'invalid',
+            status: String(row.reason ?? '').startsWith('manual-refresh:') ? 'failed' : 'invalid',
             invalid_at: now,
             locked_at: null,
             lock_token: null,
@@ -297,6 +307,15 @@ export class IsrOutboxStore {
     error: string,
   ): Promise<{ owned: boolean; attemptCount: number; delayMs: number }> {
     const attemptCount = event.attemptCount + 1;
+    // Manual commands must not poison content delivery or later deployment
+    // gates. Preserve the failed command for diagnosis and an explicit retry.
+    if (event.payload.manualRefresh && (attemptCount >= 12 || /gateway returned (400|401|403|404|413)\b/.test(error))) {
+      const updated = await this.strapi.db.connection(ISR_OUTBOX_TABLE)
+        .where({ id: event.id, status: 'processing', lock_token: event.lockToken })
+        .update({ status: 'failed', attempt_count: attemptCount, invalid_at: new Date(),
+          locked_at: null, lock_token: null, last_error: error.slice(0, 4000) });
+      return { owned: Number(updated) === 1, attemptCount, delayMs: 0 };
+    }
     const delayMs = Math.min(
       this.maxBackoffMs,
       1_000 * 2 ** Math.min(attemptCount - 1, 12),
@@ -375,6 +394,8 @@ export class IsrOutboxStore {
   }
 
   async deleteDeliveredBefore(cutoff: Date): Promise<number> {
+    await this.strapi.db.connection(ISR_OUTBOX_TABLE)
+      .where({ status: 'failed' }).where('invalid_at', '<', cutoff).delete();
     return this.strapi.db.connection(ISR_OUTBOX_TABLE)
       .whereIn('status', ['delivered', 'superseded'])
       .where('delivered_at', '<', cutoff)
@@ -391,10 +412,12 @@ export class IsrOutboxStore {
         .groupBy('status'),
       connection(ISR_OUTBOX_TABLE)
         .whereIn('status', ['pending', 'processing'])
+        .whereNot('reason', 'like', 'manual-refresh:%')
         .min({ oldest: 'created_at' })
         .first(),
       connection(ISR_OUTBOX_TABLE)
         .where({ status: 'processing' })
+        .whereNot('reason', 'like', 'manual-refresh:%')
         .where('locked_at', '<=', expiredLease)
         .count({ count: '*' })
         .first(),

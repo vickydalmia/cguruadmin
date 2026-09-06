@@ -20,6 +20,12 @@ export interface OfferInvalidation {
 }
 
 export interface IsrOutboxPayload {
+  /** Manual regeneration protocol, delivered only to gateways supporting it. */
+  manualRefresh?: true;
+  /** Presence selects unprefixed English routes, excluding these locale trees. */
+  excludeLocalePrefixes?: string[];
+  /** English-only membership refresh; omission retains the full-scan protocol. */
+  inventoryLocale?: 'en';
   all?: true;
   /** Constrain this invalidation to routes beneath one localized prefix. */
   localePrefix?: string;

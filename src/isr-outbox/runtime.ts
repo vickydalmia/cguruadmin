@@ -98,7 +98,7 @@ export async function enqueueStandaloneIsrEvent(
   // (ratings and curated relation cleanup). Give their explicit paths the
   // same locale twins as a normal shared-field write. `all` already covers
   // every locale and a locale-scoped command must never be widened.
-  const localizedInput = input.payload.localePrefix
+  const localizedInput = input.payload.manualRefresh || input.payload.localePrefix
     ? input
     : {
         ...input,
