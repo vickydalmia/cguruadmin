@@ -606,7 +606,7 @@ async function seedGlobal(summary: string[]): Promise<void> {
     published_at: now,
     created_at: now,
     updated_at: now,
-    locale: null,
+    locale: 'en',
   };
 
   // Only write columns that actually exist (schema drift safety)
@@ -930,7 +930,7 @@ async function seedHomepage(
     published_at: now,
     created_at: now,
     updated_at: now,
-    locale: null,
+    locale: 'en',
   });
 
   const sectionCounts = await buildHomepageTree(homepageId, data, true);
@@ -2030,7 +2030,7 @@ async function seedMenu(
     published_at: now,
     created_at: now,
     updated_at: now,
-    locale: null,
+    locale: 'en',
   });
 
   // ── topStores relation (same list as popularStores, max 18) ──
@@ -2217,7 +2217,7 @@ async function seedFooter(summary: string[]): Promise<void> {
     published_at: now,
     created_at: now,
     updated_at: now,
-    locale: null,
+    locale: 'en',
   });
 
   const navLinkStoreLnk = await detectLnk("components_nav_links", "store", "store");

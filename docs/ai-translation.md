@@ -192,25 +192,22 @@ edits made there.
    `TRANSLATION_OUTPUT_COST_PER_MTOK` to the model's current official prices
    before enabling a positive daily budget—model pricing can change, so verify
    it at deployment time rather than copying an old estimate.
-   Keep `TRANSLATION_OUTBOX_DISPATCHER_ENABLED=true` only on the admin
-   `strapi` service and `false` on `strapi-render`. Backfill ownership is
-   independently enabled only on `strapi-maintenance`. The shared database lease
+   Keep `TRANSLATION_OUTBOX_DISPATCHER_ENABLED=true` only on
+   `strapi-maintenance`, which also owns backfill. Set it to `false` on both
+   `strapi` and `strapi-render`. The admin service owns the separate ISR outbox. The shared database lease
    is safe with multiple workers, but per-process provider concurrency would
    otherwise multiply paid throughput and make the intended limit misleading.
 2. In **Settings → Country Setup** turn **Translation enabled** on and pick
    the target languages in the multi-select (it lists every language ICU can
    name, with native name, `RTL` badge, script and the `/xx/` prefix). Save.
-   Turning the switch off later immediately stops the dispatcher on the CMS
-   instance handling the save; pending rows remain durable. Restart sibling
-   CMS processes so their locale mirrors follow the disabled configuration.
-3. The save **hot-applies to the CMS instance that handled it**: the i18n
-   locale rows are created, the locale registry is re-primed and the
-   dispatcher starts (only if the env block parses — an
-   incomplete block is logged as `translation.hot_apply … env-missing` and
-   nothing starts). **Restart every other CMS container** — locale mirrors
-   are per process; only the designated admin process starts
-   the dispatcher. A hot-apply failure never fails the save;
-   it is logged as `translation.hot_apply_failed` and a restart retries it.
+   Turning the switch off stops new translation work on the process handling
+   the save; pending rows remain durable. Sibling processes observe the saved
+   configuration through their watcher within 15 seconds.
+3. The save hot-applies locally; the watcher creates locale rows and refreshes
+   each process's locale mirror. Only `strapi-maintenance` starts the translation
+   dispatcher/backfill runner, and only when its provider configuration is valid.
+   A hot-apply failure does not fail the save; it is logged and retried by the
+   watcher. Country Setup's worker status reports maintenance liveness.
 4. Grant editor roles the new locale (Settings → Roles → Content Manager →
    locales) and, if editors may trigger paid translations, the
    "Trigger AI translations" permission; grant "Edit storefront UI text" to
@@ -251,13 +248,13 @@ edits made there.
    `GET /translation/outbox-status`. Successful results publish automatically.
 
 For a temporary initial backfill while the site has no visitor traffic, keep
-the single admin-owned dispatcher and begin with
-`TRANSLATION_CONCURRENCY=5`, `TRANSLATION_OUTBOX_BATCH_SIZE=10` and
+the single maintenance-owned translation dispatcher and begin with
+`TRANSLATION_CONCURRENCY=2`, `TRANSLATION_OUTBOX_BATCH_SIZE=2` and
 `TRANSLATION_OUTBOX_POLL_MS=1000`. If ten minutes of status and logs show no
 provider rate limits, timeouts, database pressure or rising failures, increase
-to `8` / `16`; provider quotas still apply even when the storefront is idle.
-Recreate the `strapi` container after changing env values (`restart` does not
-reload them). Return to the conservative `2` / `5` / `5000` defaults when the
+only after measuring provider and database headroom; provider quotas still apply even when the storefront is idle.
+Recreate the `strapi-maintenance` container after changing env values (`restart` does not
+reload them). Return to the Compose limits of `2` / `2` and the `5000` ms polling default when the
 backfill is complete.
 
 India/USA: nothing to do — with the Country Setup switch off the subsystem
@@ -269,8 +266,8 @@ No deploy is needed:
 
 1. **Country Setup** → add the language in the multi-select → **Save**. The
    instance that took the save creates the locale row, re-primes its mirror
-   and (if not already running) starts the dispatcher; restart the other CMS
-   containers.
+   while sibling watchers apply it within 15 seconds. The maintenance role
+   starts the dispatcher when enabled; no sibling restart is required.
 2. `languages[]` in `/api/site-settings` now carries the new code. `<html dir>`
    and localized fetching are available immediately, while individual
    routes, hreflang alternates and switcher destinations appear only after the
@@ -298,7 +295,7 @@ file and regenerating the fixture with
 that the whole Arabic catalogue will be re-translated at real cost.
 
 Removing a language: untick it, Save (the mirror drops it at once, pending
-jobs for it are skipped as `locale no longer enabled`), restart the other
+jobs for it are skipped as `locale no longer enabled`), let the watchers update the other
 containers. Locale rows and stored translations are kept.
 
 ## Storefront behavior
@@ -341,7 +338,7 @@ change:
    the storefront serving existing rows.
 2. Back up `translation_outbox`, `translation_state`, `translation_usage`,
    `ui_catalogue` and `ui_translations`.
-3. Deploy the CMS migrations/code, enabling the dispatcher only on the admin
+3. Deploy the CMS migrations/code, enabling the translation dispatcher only on the maintenance
    Strapi process. Deploy the matching storefront SSR and ISR gateway release.
 4. While the dispatcher is still stopped, verify idle ISR version counters do
    not advance. Then resume the single dispatcher.
