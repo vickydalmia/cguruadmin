@@ -14,7 +14,11 @@ dist
 coverage
 
 docs
-deploy
+deploy/*
+!deploy/scripts
+deploy/scripts/*
+!deploy/scripts/check-country.cjs
+!deploy/scripts/deploy.sh
 wordpress
 # The Strapi sanitizer parity test imports the migration sanitizer. Keep only
 # that source file in the build context so production tests remain meaningful

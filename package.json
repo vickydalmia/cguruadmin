@@ -12,7 +12,7 @@
     "deploy": "strapi deploy",
     "dev": "strapi develop",
     "develop": "strapi develop",
-    "postinstall": "patch-package",
+    "postinstall": "patch-package --error-on-fail",
     "start": "strapi start",
     "strapi": "strapi",
     "test": "vitest run",

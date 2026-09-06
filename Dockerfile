@@ -31,7 +31,7 @@ COPY . .
 # catalogue-scan fixtures do not wait on the production documents-per-second
 # limiter. This override applies only to this layer; the build and final image
 # remain production.
-RUN NODE_ENV=test yarn test
+RUN apk add --no-cache bash && NODE_ENV=test yarn test --maxWorkers=2
 RUN yarn build
 
 # Yarn pruning can restore pristine dependency files. Keep patch-package in
@@ -43,7 +43,14 @@ RUN yarn install --production --frozen-lockfile --ignore-scripts && yarn postins
 # ---------------------------------------------------------------------------
 FROM node:22-alpine
 
-RUN apk add --no-cache vips
+# postgresql18-client provides pg_dump / pg_restore for the database-backup
+# runner (src/database-backup/). The image is country-neutral, so the client
+# major MUST be >= the newest PostgreSQL server of ANY country stack (India is
+# PG 18; a newer client can dump an older server, never the reverse). The
+# version assertion below fails the build if the floating alpine base ever
+# drops or downgrades the package.
+RUN apk add --no-cache vips postgresql18-client ca-certificates \
+  && pg_dump --version | grep -q 'PostgreSQL) 18\.'
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
@@ -60,6 +67,9 @@ RUN mkdir -p .tmp .cache .config \
   && chown strapi:strapi .tmp .cache .config
 
 USER strapi
+
+# Fail the image build if a deployment preflight dependency was excluded.
+RUN node deploy/scripts/check-country.cjs --verify-package
 
 EXPOSE 1337
 

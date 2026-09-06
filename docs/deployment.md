@@ -131,6 +131,11 @@ bundle, and one immutable image may be promoted to every country stack.
 
 ## 2. Back up PostgreSQL
 
+Once the Database Backups feature is configured (`BACKUP_S3_*`, runbook
+`deployment/docs/16-database-backups.md`), the pre-deploy backup is one click:
+Settings → Database Backups → **Back up now**, wait for the row to show
+**Stored**, and press **Verify**. The steps below still apply.
+
 Before replacing Strapi:
 
 - create a complete PostgreSQL backup;
@@ -209,6 +214,13 @@ replace every angle-bracket placeholder.
 APP_IMAGE=ghcr.io/vickydalmia/cguruadmin
 APP_IMAGE_TAG=<IMMUTABLE_CMS_TAG>
 
+# This host's country (IN, US or AE). Must equal the persisted Country Setup
+# and the storefront's DEPLOYMENT_COUNTRY_CODE; deploy.sh refuses to run
+# without it. Optional role/rollout knobs are listed in the table below.
+DEPLOYMENT_COUNTRY_CODE=<IN|US|AE>
+MAINTENANCE_SERVICE_ENABLED=true
+DATABASE_CONNECTION_BUDGET=22
+
 # Strapi runtime
 NODE_ENV=production
 HOST=0.0.0.0
@@ -275,6 +287,22 @@ S3_CHECKSUM_ALGORITHM=CRC64NVME
 S3_MULTIPART_PART_SIZE=10485760
 S3_MULTIPART_QUEUE_SIZE=4
 
+# Database backups → S3 (Settings → Database Backups). REQUIRED on every host:
+# deploy.sh refuses empty or change-me values. Separate bucket + IAM user from
+# the media bucket, one per country; see deployment/docs/16-database-backups.md.
+# BACKUP_RUNNER_ENABLED: docker.compose.yml pins it per service (true on
+# strapi-maintenance, or on strapi when MAINTENANCE_SERVICE_ENABLED=false) and
+# Compose `environment` overrides this file, so a value here only matters for
+# `yarn develop` outside Compose.
+BACKUP_S3_BUCKET=changeme-backup-bucket
+BACKUP_S3_REGION=ap-south-1
+BACKUP_S3_ACCESS_KEY_ID=changeme-backup-access-key
+BACKUP_S3_ACCESS_SECRET=changeme-backup-secret-key
+BACKUP_S3_PREFIX=db-backups
+BACKUP_S3_SSE=AES256
+BACKUP_TIMEOUT_MINUTES=60
+BACKUP_PG_DUMP_COMPRESSION=zstd:3
+
 # Required for Product Deal image uploads.
 FAL_KEY=<FAL_API_KEY>
 FAL_BACKGROUND_REMOVAL_CONCURRENCY=2
@@ -327,8 +355,8 @@ ISR_ADMIN_SECRET=<SHARED_ISR_SECRET>
 ISR_OUTBOX_DISPATCHER_ENABLED=true
 ISR_OUTBOX_POLL_MS=2000
 ISR_OUTBOX_BATCH_SIZE=25
-ISR_OUTBOX_REQUEST_TIMEOUT_MS=90000
-ISR_OUTBOX_LEASE_MS=120000
+ISR_OUTBOX_REQUEST_TIMEOUT_MS=330000
+ISR_OUTBOX_LEASE_MS=360000
 ISR_OUTBOX_MAX_BACKOFF_MS=300000
 ISR_OUTBOX_ALERT_AFTER_ATTEMPTS=5
 ISR_OUTBOX_BACKLOG_ALERT_MS=1800000
@@ -365,6 +393,17 @@ chmod 600 /opt/couponzguru/.env.production
 | `FLAG_PROMOTE_EE` | Optional | Shows or hides Strapi Enterprise promotion in the admin UI. |
 | `SEARCH_SLOW_LOG_MS` | Optional | Emits structured slow-search timing at or above this duration. Set `0` to disable it. |
 
+#### Country, deploy roles and upgrade migrations
+
+| Variable | Requirement | Purpose |
+| --- | --- | --- |
+| `DEPLOYMENT_COUNTRY_CODE` | Required | Two-letter ISO code of THIS host (`IN`, `US`, `AE`). `deploy.sh` refuses to run without it, the preflight compares it with the persisted Country Setup, and every configuration read asserts it at runtime. The example file ships it blank on purpose. Must match the storefront's `DEPLOYMENT_COUNTRY_CODE`. |
+| `MAINTENANCE_SERVICE_ENABLED` | Optional | `true` (default) starts `strapi-maintenance` (translation dispatcher + backfill + database backups). `false` omits it on an English-only host: no translation work; the admin container then takes the database backups, and a maintenance container left by an earlier release is still stopped. Any other value fails `deploy.sh`. |
+| `DATABASE_CONNECTION_BUDGET` | Optional | Managed-DB backend connection ceiling the deploy checks the per-service pools (5 + 5 + 4) plus rollout headroom against. Default `22`; values below `18` are rejected. |
+| `MIGRATION_LOCK_TIMEOUT_MS` | Optional | Transaction-local `lock_timeout` applied to every September 2026 upgrade migration so a long read on the old render container cannot block the rollout indefinitely; the migration fails safely and the deploy stops. Default `15000`. |
+| `WRITE_SERIALIZATION_TIMEOUT_MS` | Optional | How long an editor's save waits for the per-domain advisory lock before failing with "Another editor is saving related content". Default `8000`. |
+| `COUNTRY_SETUP_BOOTSTRAP_JSON` | Fresh databases only | Temporary identity that lets a Super Admin open Country Setup on an empty database. Remove after the first save. |
+
 #### Strapi secrets
 
 | Variable | Requirement | Purpose |
@@ -391,8 +430,8 @@ for a Chat-Completions gateway, or `anthropic` for native Messages;
 requires positive input/output per-million-token prices. An incomplete block
 stays safely disabled and logs the configuration problem.
 Run the paid dispatcher on exactly one CMS process. Current Compose forces
-`TRANSLATION_OUTBOX_DISPATCHER_ENABLED=true` on `strapi` and `false` on
-`strapi-render`; when the dedicated variable is absent it inherits
+`TRANSLATION_OUTBOX_DISPATCHER_ENABLED=true` on `strapi-maintenance` and `false` on
+`strapi` and `strapi-render`; when the dedicated variable is absent it inherits
 `CRON_ENABLED`, so older Compose files retain the same single-process role.
 
 For AE with Luna, the provider-specific portion is:
@@ -462,8 +501,8 @@ The operating workflow is in [AI content translation](./ai-translation.md).
 | `DATABASE_SSL_CAPATH` | Optional | Directory of trusted CA certificates. |
 | `DATABASE_SSL_CIPHER` | Optional | Explicit TLS cipher selection. |
 | `DATABASE_SSL_REJECT_UNAUTHORIZED` | Optional | Verifies the database certificate. Keep `true` with the correct CA. |
-| `DATABASE_POOL_MIN` | Optional | Minimum PostgreSQL pool size per Strapi process. |
-| `DATABASE_POOL_MAX` | Optional | Maximum PostgreSQL pool size per Strapi process. |
+| `DATABASE_POOL_MIN` | Managed | Minimum PostgreSQL pool size per Strapi process. `docker.compose.yml` pins `0` on every service; the env-file value only applies outside Compose. |
+| `DATABASE_POOL_MAX` | Managed | Maximum PostgreSQL pool size per Strapi process. `docker.compose.yml` pins `5` (admin), `5` (render) and `4` (maintenance); the env-file value only applies outside Compose. |
 | `DATABASE_CONNECTION_TIMEOUT` | Optional | Maximum time in milliseconds to acquire a database connection. |
 
 #### S3 media and browser policy
@@ -490,6 +529,23 @@ The operating workflow is in [AI content translation](./ai-translation.md).
 | `CORS_ORIGINS` | Optional | Browser origins permitted to call Strapi directly. Keep empty when all public browser requests use Fastify. |
 | `PUBLIC_SITE_URL` | Required runtime | Storefront origin returned by the authenticated admin runtime-config endpoint for Coupon/Deal public-link actions and used server-side to derive the registrable first-party domain for rich-text links. It is not compiled into the image, so the same image serves every country. There is no separate `INTERNAL_HOSTS` list. |
 
+#### Database backups to S3
+
+| Variable | Required | Description |
+|---|---|---|
+| `BACKUP_RUNNER_ENABLED` | Per service | `true` on exactly ONE container: compose sets it on `strapi-maintenance`, or on `strapi` through `ADMIN_BACKUP_RUNNER_ENABLED` when the maintenance service is disabled. That process takes every scheduled and on-demand backup; every other container only queues rows. Defaults to `false`. |
+| `BACKUP_S3_BUCKET` | Required | Dedicated backup bucket — never the media bucket, never behind the CDN. `deploy.sh` refuses an empty or `change-me` value on every host. |
+| `BACKUP_S3_REGION` | Required | Bucket region. Optional only with `BACKUP_S3_ENDPOINT`. |
+| `BACKUP_S3_ACCESS_KEY_ID` / `BACKUP_S3_ACCESS_SECRET` | Required | Dedicated IAM user with the least-privilege policy in `deployment/docs/16-database-backups.md`. Never stored in the database. `deploy.sh` refuses empty or `change-me` values. |
+| `BACKUP_S3_PREFIX` | Optional | Key prefix; `<CC>/<YYYY>/<MM>/<DD>/` and the file name are appended. Defaults to `db-backups`. |
+| `BACKUP_S3_SSE` | Optional | `AES256` (default, SSE-S3), `aws:kms` (needs `BACKUP_S3_KMS_KEY_ID`), or `none` (local MinIO only). |
+| `BACKUP_S3_KMS_KEY_ID` | Required with `aws:kms` | KMS key the IAM user may `GenerateDataKey`/`Decrypt` with. |
+| `BACKUP_S3_ENDPOINT` / `BACKUP_S3_FORCE_PATH_STYLE` | Local dev only | Point at MinIO; leave unset on AWS. |
+| `BACKUP_TIMEOUT_MINUTES` | Optional | Kill a dump that runs longer than this. Defaults to `60`. |
+| `BACKUP_PG_DUMP_PATH` / `BACKUP_PG_RESTORE_PATH` | Optional | Binaries; the image ships PostgreSQL 18 clients on `PATH`. |
+| `BACKUP_PG_DUMP_COMPRESSION` | Optional | `pg_dump --compress` value. Defaults to `zstd:3`. |
+| `DEPLOYMENT_COUNTRY_CODE` | Required | Already required by deploy.sh; also names the backup folder and file. |
+
 #### Persistent-ISR outbox
 
 | Variable | Requirement | Purpose |
@@ -499,7 +555,7 @@ The operating workflow is in [AI content translation](./ai-translation.md).
 | `ISR_OUTBOX_DISPATCHER_ENABLED` | Optional | Starts the durable delivery loop. When omitted, it inherits `CRON_ENABLED`, preserving the existing single-process role on older host Compose files. Keep it enabled on exactly one production process; current Compose also forces `false` on `strapi-render`, while content writes on either process may continue inserting rows into the shared table. |
 | `ISR_OUTBOX_POLL_MS` | Optional | Time between outbox dispatcher polls. |
 | `ISR_OUTBOX_BATCH_SIZE` | Optional | Maximum rows leased in one dispatcher poll. |
-| `ISR_OUTBOX_REQUEST_TIMEOUT_MS` | Optional | HTTP timeout for one delivery attempt to Fastify. Defaults to 90 seconds. |
+| `ISR_OUTBOX_REQUEST_TIMEOUT_MS` | Optional | HTTP timeout for one delivery attempt to Fastify. Defaults to 330 seconds. |
 | `ISR_OUTBOX_LEASE_MS` | Optional | Row lease duration before another dispatcher can reclaim an interrupted delivery. It must exceed the request timeout by at least 30 seconds. |
 | `ISR_OUTBOX_MAX_BACKOFF_MS` | Optional | Maximum exponential retry delay. |
 | `ISR_OUTBOX_ALERT_AFTER_ATTEMPTS` | Optional | Attempt count at which failures become alert-level logs. |
@@ -857,3 +913,30 @@ SELECT sum(calls) AS query_calls FROM pg_stat_statements;
 
 Keep before/after evidence with the release record, including observation times,
 image revision, traffic, query rates, CPU, and outstanding terminal failures.
+
+
+### Shared-country upgrade prerequisites
+
+Deploy CMS first, then the storefront/gateway/worker. Set
+`DEPLOYMENT_COUNTRY_CODE` to the persisted country's ISO code in every tier;
+the preflight checks `DATABASE_SCHEMA` as well as database identity. Keep the
+production Compose file aligned with the release. The default DB budget is 22,
+with 14 possible application connections and at least four reserved for rollout.
+`MAINTENANCE_SERVICE_ENABLED=false` can omit the translation container on an
+English-only host; restore it before enabling translations. Default is true.
+Database backups are mandatory on every host regardless: `deploy.sh` refuses
+to run without `BACKUP_S3_*`, and when the maintenance container is omitted the
+admin container takes the backups (`ADMIN_BACKUP_RUNNER_ENABLED`, exported by
+`deploy.sh`). See `docs/database-backups.md`.
+
+September upgrade migrations acquire locks with a transaction-local
+`MIGRATION_LOCK_TIMEOUT_MS` (default 15000), failing safely if a lock cannot be
+obtained. This is not a query-duration limit. Editor advisory locks retain the
+separate `WRITE_SERIALIZATION_TIMEOUT_MS` default of 8000; continuing a save
+without its required lock would violate write consistency.
+
+For the serialized inventory background lane, delivery timeout/lease defaults
+are now 330000/360000 ms. Update explicit older environment overrides when
+using the corresponding gateway's 300-second inventory budget. Manual refresh
+failures are bounded separately; ordinary content invalidations retain durable
+retry. See [website refresh](website-refresh.md) for status semantics.

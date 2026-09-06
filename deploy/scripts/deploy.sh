@@ -49,6 +49,13 @@ compose() {
   docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" "$@"
 }
 
+# Same, with the profiled maintenance service resolvable by name on every
+# Compose version (explicit service names only enable profiles for some
+# subcommands on older releases).
+compose_all_roles() {
+  COMPOSE_PROFILES=translation docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" "$@"
+}
+
 # ── Read image name from env file or shell ───────────────────────────────────
 
 if [ -z "${APP_IMAGE:-}" ]; then
@@ -80,6 +87,10 @@ ADMIN_SERVICE="strapi"
 RENDER_SERVICE="strapi-render"
 MAINTENANCE_SERVICE="strapi-maintenance"
 SERVICES="${ADMIN_SERVICE} ${RENDER_SERVICE} ${MAINTENANCE_SERVICE}"
+MAINTENANCE_ENABLED=$(read_env MAINTENANCE_SERVICE_ENABLED)
+MAINTENANCE_ENABLED=${MAINTENANCE_ENABLED:-true}
+case "$MAINTENANCE_ENABLED" in true|false) ;; *) err "MAINTENANCE_SERVICE_ENABLED must be true or false"; exit 1 ;; esac
+if [ "$MAINTENANCE_ENABLED" = false ]; then SERVICES="${ADMIN_SERVICE} ${RENDER_SERVICE}"; fi
 # APP_BIND (the extra VPC-private-IP publish) is read straight from ${ENV_FILE}
 # by `docker compose --env-file` interpolation — the compose `:?` guard aborts
 # the deploy if it is missing — so deploy.sh does not need to handle it here.
@@ -92,6 +103,47 @@ export APP_IMAGE
 export APP_IMAGE_TAG="${TAG}"
 export ENV_FILE
 
+DEPLOYMENT_COUNTRY_CODE=$(read_env DEPLOYMENT_COUNTRY_CODE)
+if [[ ! "$DEPLOYMENT_COUNTRY_CODE" =~ ^[A-Z]{2}$ ]]; then
+  err "Set DEPLOYMENT_COUNTRY_CODE to the persisted CMS country before deploying"
+  exit 1
+fi
+CONNECTION_BUDGET=$(read_env DATABASE_CONNECTION_BUDGET)
+CONNECTION_BUDGET=${CONNECTION_BUDGET:-22}
+if [[ ! "$CONNECTION_BUDGET" =~ ^[0-9]+$ ]] || [ "$CONNECTION_BUDGET" -lt 18 ]; then
+  err "Database budget must cover admin 5 + render 5 + maintenance 4 + headroom 4"
+  exit 1
+fi
+
+# Database backups are mandatory on every country host. Refuse to deploy a
+# stack that would run without them; the runtime check (databaseBackupProblems)
+# validates the rest, this catches the empty/placeholder case before anything
+# is pulled or stopped.
+BACKUP_PROBLEMS=""
+for KEY in BACKUP_S3_BUCKET BACKUP_S3_ACCESS_KEY_ID BACKUP_S3_ACCESS_SECRET; do
+  VALUE=$(read_env "$KEY")
+  case "$VALUE" in
+    ""|change-me*) BACKUP_PROBLEMS="${BACKUP_PROBLEMS} ${KEY}" ;;
+  esac
+done
+if [ -z "$(read_env BACKUP_S3_REGION)" ] && [ -z "$(read_env BACKUP_S3_ENDPOINT)" ]; then
+  BACKUP_PROBLEMS="${BACKUP_PROBLEMS} BACKUP_S3_REGION"
+fi
+if [ -n "$BACKUP_PROBLEMS" ]; then
+  err "Database backups are mandatory on every host; set in ${ENV_FILE}:${BACKUP_PROBLEMS}"
+  err "  (a dedicated bucket and IAM user per country; see docs/database-backups.md)"
+  exit 1
+fi
+# Exactly one process takes backups: strapi-maintenance when it runs, else the
+# admin container. Compose reads this through --env-file interpolation.
+if [ "$MAINTENANCE_ENABLED" = true ]; then
+  export ADMIN_BACKUP_RUNNER_ENABLED=false
+else
+  export ADMIN_BACKUP_RUNNER_ENABLED=true
+  log "Maintenance service disabled: the admin container takes database backups"
+fi
+# The old main image may not expose /api/site-settings. Verify the target
+# database using the new image below instead of requiring a new API on main.
 compose config -q
 log "Compose config valid"
 
@@ -99,6 +151,8 @@ log "Compose config valid"
 
 log "Pulling ${APP_IMAGE}:${TAG} ..."
 compose pull ${SERVICES}
+log "Checking the target database identity before any Strapi migration ..."
+compose run --rm --no-deps --entrypoint node "$ADMIN_SERVICE" deploy/scripts/check-country.cjs
 
 # ── Health helpers ───────────────────────────────────────────────────────────
 
@@ -152,8 +206,12 @@ wait_for_healthy() {
 # All retained callback state must die before replacement workers start.
 # Compose bounds graceful shutdown and then stops only these worker roles.
 # Durable rows/checkpoints survive; the old read role remains available.
+# The maintenance role is stopped whatever MAINTENANCE_SERVICE_ENABLED says: a
+# host that just switched it to false still has the previous release's
+# container running (old image, its own dispatcher and backup runner), and a
+# stop of a service without a container is a no-op.
 log "Pausing background roles (at most 60s graceful shutdown) ..."
-compose stop --timeout 60 "${MAINTENANCE_SERVICE}" "${ADMIN_SERVICE}"
+compose_all_roles stop --timeout 60 "${MAINTENANCE_SERVICE}" "${ADMIN_SERVICE}"
 
 log "Starting ${ADMIN_SERVICE} ..."
 compose up -d --force-recreate --timeout 60 "${ADMIN_SERVICE}"
@@ -163,9 +221,11 @@ log "Starting ${RENDER_SERVICE} ..."
 compose up -d --force-recreate --timeout 60 "${RENDER_SERVICE}"
 wait_for_healthy "${RENDER_SERVICE}"
 
-log "Starting ${MAINTENANCE_SERVICE} ..."
-compose up -d --force-recreate --timeout 60 "${MAINTENANCE_SERVICE}"
-wait_for_healthy "${MAINTENANCE_SERVICE}"
+if [ "$MAINTENANCE_ENABLED" = true ]; then
+  log "Starting ${MAINTENANCE_SERVICE} ..."
+  compose up -d --force-recreate --timeout 60 "${MAINTENANCE_SERVICE}"
+  wait_for_healthy "${MAINTENANCE_SERVICE}"
+fi
 
 # ── Verify health endpoints ─────────────────────────────────────────────────
 
