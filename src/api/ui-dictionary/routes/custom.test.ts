@@ -17,18 +17,18 @@ describe('ui-dictionary routes', () => {
     });
   });
 
-  it('leaves catalogue sync on Strapi token auth (auto scope) with a tight rate limit', () => {
+  it('keeps catalogue sync on Strapi token auth (auto scope) but admits only Custom tokens', () => {
     const push = routes.routes.find((route) => route.path === '/ui-dictionary/catalogue');
     expect(push).toMatchObject({
       method: 'POST',
       handler: 'ui-dictionary.syncCatalogue',
       config: {
+        policies: ['global::content-api-custom-token-only'],
         middlewares: [
           { name: 'global::rate-limit', config: { maxRequests: 12, windowMs: 60_000 } },
         ],
       },
     });
     expect(push?.config).not.toHaveProperty('auth');
-    expect(push?.config).not.toHaveProperty('policies');
   });
 });

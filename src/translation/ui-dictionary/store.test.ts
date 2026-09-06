@@ -68,6 +68,7 @@ function fakeDb(tables: Record<string, Row[]>) {
     return chain;
   };
   const db: any = (table: string) => builder(table);
+  db.transaction = vi.fn(async (callback: any) => callback(db));
   db.raw = vi.fn(async (sql: string, bindings: any[]) => {
     raws.push({ sql, bindings });
     return { rowCount: rawRowCount(sql, bindings) };
@@ -360,6 +361,7 @@ describe('UiDictionaryStore.publicMessages', () => {
     const { store: bare } = makeStore({ ui_catalogue: [catalogue('common.viewAll', 'View all')] });
     await expect(bare.publicDictionary('en')).resolves.toEqual({
       locale: 'en',
+      ready: true,
       version: null,
       updatedAt: null,
       messages: {},
@@ -373,6 +375,7 @@ describe('UiDictionaryStore.publicMessages', () => {
     );
     await expect(store.publicDictionary('ar')).resolves.toEqual({
       locale: 'ar',
+      ready: false,
       version: VERSION,
       updatedAt: '2026-09-01T12:00:00.000Z',
       messages: {
@@ -386,6 +389,48 @@ describe('UiDictionaryStore.publicMessages', () => {
       'common.home': 'Start',
       'common.viewAll': 'सभी देखें',
     });
+  });
+});
+
+describe('UiDictionaryStore.publicDictionary readiness', () => {
+  const current = (key: string, text: string) => ({ source_hash: catalogueEntryHash(text, null) });
+
+  // A catalogue push that rewords an existing key bumps the version while the
+  // old translation stays: the dictionary must NOT report ready for the new
+  // version until that key is retranslated (deploy gates key on this flag).
+  it('is ready only when every entry is translated for the current source text', async () => {
+    const rows = [
+      catalogue('common.visit', 'Visit {store}'),
+      catalogue('common.home', 'Home'),
+      catalogue('offers.count.one', '{count} offer', { plural_of: 'offers.count' }),
+      catalogue('offers.count.other', '{count} offers', { plural_of: 'offers.count' }),
+    ];
+    const meta = { version: 'v2', pushedAt: '2026-09-06T09:00:00.000Z', counts: { total: 4, added: 0, changed: 1, removed: 0 } };
+    const staleVisit = translation('ar', 'common.visit', 'زيارة {merchant}', current('common.visit', 'Visit {merchant}'));
+    const rest = [
+      translation('ar', 'common.home', 'الرئيسية', current('common.home', 'Home')),
+      translation('ar', 'offers.count.zero', 'لا عروض', current('offers.count.other', '{count} offers')),
+      translation('ar', 'offers.count.one', 'عرض', current('offers.count.one', '{count} offer')),
+      translation('ar', 'offers.count.two', 'عرضان', current('offers.count.other', '{count} offers')),
+      translation('ar', 'offers.count.few', '{count} عروض', current('offers.count.other', '{count} offers')),
+      translation('ar', 'offers.count.many', '{count} عرضًا', current('offers.count.other', '{count} offers')),
+      translation('ar', 'offers.count.other', '{count} عرض', current('offers.count.other', '{count} offers')),
+    ];
+    const { store: stale } = makeStore({ ui_catalogue: rows, ui_translations: [staleVisit, ...rest] }, meta);
+    await expect(stale.publicDictionary('ar')).resolves.toMatchObject({
+      version: 'v2', ready: false, messages: expect.objectContaining({ 'common.visit': 'زيارة {merchant}' }),
+    });
+
+    const retranslated = translation('ar', 'common.visit', 'زيارة {store}', current('common.visit', 'Visit {store}'));
+    const { store: fresh } = makeStore({ ui_catalogue: rows, ui_translations: [retranslated, ...rest] }, meta);
+    await expect(fresh.publicDictionary('ar')).resolves.toMatchObject({ version: 'v2', ready: true });
+
+    // A current manual row counts; a current row with blank text does not.
+    const manual = { ...retranslated, origin: 'manual' };
+    const { store: edited } = makeStore({ ui_catalogue: rows, ui_translations: [manual, ...rest] }, meta);
+    await expect(edited.publicDictionary('ar')).resolves.toMatchObject({ ready: true });
+    const { store: blank } = makeStore({ ui_catalogue: rows, ui_translations: [{ ...retranslated, text: ' ' }, ...rest] }, meta);
+    await expect(blank.publicDictionary('ar')).resolves.toMatchObject({ ready: false });
   });
 });
 
