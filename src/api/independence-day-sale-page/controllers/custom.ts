@@ -24,13 +24,20 @@ import {
 
 import { PAGE_POPULATE } from './independence-day-sale-populate';
 import { fillSections, sectionActive } from './independence-day-sale-transforms';
-import { attachStablePublicOfferIdsForRequest } from '../../coupon/services/public-offer-ids';
+import {
+  attachStablePublicOfferIdsForRequest,
+  requestedOfferTargetLocale,
+} from '../../coupon/services/public-offer-ids';
+import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   async independenceDaySaleFull(ctx: any) {
+    // Same contract as the homepage: the storefront sends ?locale= for a
+    // localized render and the default-locale row serves everything else.
+    const locale = requestedOfferTargetLocale(ctx) ?? DEFAULT_CONTENT_LOCALE;
     const page = await strapi
       .documents(INDEPENDENCE_DAY_SALE_UID as any)
-      .findFirst({ populate: PAGE_POPULATE as any });
+      .findFirst({ locale, populate: PAGE_POPULATE as any });
 
     if (!page) return ctx.notFound('Independence Day sale page not found');
 

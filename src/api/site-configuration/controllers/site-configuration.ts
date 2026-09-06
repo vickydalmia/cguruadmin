@@ -12,7 +12,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const service = strapi.service(
       'api::site-configuration.site-configuration',
     ) as any;
-    return ctx.send({ data: await service.publicSettings() });
+    return ctx.send({ data: await service.adminSettings() });
   },
 
   async adminLanguages(ctx: any) {

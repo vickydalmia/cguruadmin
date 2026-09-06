@@ -25,7 +25,11 @@ import {
 // editor's order for its unlimited carousel.
 
 import { DOTD_POPULATE } from './deal-of-the-day-populate';
-import { attachStablePublicOfferIdsForRequest } from '../../coupon/services/public-offer-ids';
+import {
+  attachStablePublicOfferIdsForRequest,
+  requestedOfferTargetLocale,
+} from '../../coupon/services/public-offer-ids';
+import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
 import {
   attachDealCounts,
   capCuratedLists,
@@ -37,10 +41,13 @@ import {
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   async dealOfTheDayFull(ctx) {
     // The single type has draftAndPublish disabled — the entry is live once
-    // saved; findFirst returns null until an admin creates it.
+    // saved; findFirst returns null until an admin creates it. Like the
+    // homepage, the storefront asks for the request language via ?locale=
+    // so an /ar/ render gets the translated row, not English copy.
+    const locale = requestedOfferTargetLocale(ctx) ?? DEFAULT_CONTENT_LOCALE;
     const page = await strapi
       .documents('api::deal-of-the-day-page.deal-of-the-day-page')
-      .findFirst({ populate: DOTD_POPULATE as any });
+      .findFirst({ locale, populate: DOTD_POPULATE as any });
 
     if (!page) {
       return ctx.notFound('Deal of the day page not found');

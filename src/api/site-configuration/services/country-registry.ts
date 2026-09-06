@@ -25,6 +25,7 @@ export const FEATURE_FIELDS = [
 export type FeatureField = (typeof FEATURE_FIELDS)[number];
 
 export type SiteConfiguration = {
+  configurationRevision?: number;
   documentId?: string;
   siteName: string;
   countryName: string;
@@ -152,6 +153,7 @@ export const TRANSLATION_FIELDS = [
 export const OFFER_COUNTRY_FIELDS = ['offerCountries'] as const;
 
 export const SITE_CONFIGURATION_FIELDS = [
+  'configurationRevision',
   ...IDENTITY_FIELDS,
   ...TRANSLATION_FIELDS,
   ...OFFER_COUNTRY_FIELDS,
