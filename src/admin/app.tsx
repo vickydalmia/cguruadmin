@@ -221,6 +221,24 @@ export default {
         return { default: page.default };
       },
     });
+    // Super-Admin-only. `permissions: []` gates nothing by itself: every
+    // endpoint behind the page requires global::super-admin-only, and the
+    // page renders NoPermissions for any other role / on a 403.
+    app.addSettingsLink('global', {
+      id: 'database-backups',
+      to: '/settings/database-backups',
+      permissions: [],
+      intlLabel: {
+        id: 'database-backups.settings.label',
+        defaultMessage: 'Database Backups',
+      },
+      Component: async () => {
+        const page = await import(
+          './features/database-backups/components/database-backups-page'
+        );
+        return { default: page.default };
+      },
+    });
     installRecordLockLeaseInterceptor();
     const contentManager = app.getPlugin('content-manager') as any;
     const apis = contentManager.apis;

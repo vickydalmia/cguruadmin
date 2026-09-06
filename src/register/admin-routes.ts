@@ -1,5 +1,6 @@
 import type { Core } from '@strapi/strapi';
 import { CSV_EXPORT_ROUTE_PREFIX } from '../constants/csv-export';
+import { DATABASE_BACKUP_ROUTE_PREFIX } from '../constants/database-backup';
 
 // Entity Deal-page settings endpoints, mounted on the ADMIN router rather
 // than under src/api/entity-deal-page/routes.
@@ -330,6 +331,32 @@ export function registerWebsiteRefreshRoutes(strapi: Core.Strapi): void {
       { method: 'GET', path: '/options', handler: 'api::website-refresh.website-refresh.options', config: { policies } },
       { method: 'POST', path: '/refresh', handler: 'api::website-refresh.website-refresh.refresh', config: { policies } },
       { method: 'GET', path: '/status/:id', handler: 'api::website-refresh.website-refresh.status', config: { policies } },
+    ],
+  } as any);
+}
+
+/**
+ * Database backups: a full copy of every table leaves the server, so this is
+ * a Super Admin tool by decision (same reasoning as CSV export). PUT for the
+ * settings save because `useFetchClient` exposes no PATCH.
+ */
+export function registerDatabaseBackupRoutes(strapi: Core.Strapi): void {
+  const policies = ['admin::isAuthenticatedAdmin', 'global::super-admin-only'];
+  const handler = (action: string) => `api::database-backup.database-backup.${action}`;
+  strapi.server.routes({
+    type: 'admin',
+    prefix: DATABASE_BACKUP_ROUTE_PREFIX,
+    routes: [
+      { method: 'GET', path: '/overview', handler: handler('overview'), config: { policies } },
+      { method: 'PUT', path: '/settings', handler: handler('updateSettings'), config: { policies } },
+      { method: 'POST', path: '/test-connection', handler: handler('testConnection'), config: { policies } },
+      { method: 'GET', path: '/runs', handler: handler('listRuns'), config: { policies } },
+      { method: 'POST', path: '/runs', handler: handler('createRun'), config: { policies } },
+      { method: 'GET', path: '/runs/:id', handler: handler('getRun'), config: { policies } },
+      { method: 'DELETE', path: '/runs/:id', handler: handler('deleteRun'), config: { policies } },
+      { method: 'POST', path: '/runs/:id/cancel', handler: handler('cancelRun'), config: { policies } },
+      { method: 'POST', path: '/runs/:id/verify', handler: handler('verifyRun'), config: { policies } },
+      { method: 'GET', path: '/runs/:id/download-url', handler: handler('downloadUrl'), config: { policies } },
     ],
   } as any);
 }
