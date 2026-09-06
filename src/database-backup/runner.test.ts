@@ -9,7 +9,8 @@ const mocks = vi.hoisted(() => ({
   buildPgInvocation: vi.fn(() => ({ childEnv: {}, caPem: null, caPath: null, ssl: { mode: 'disable' } })),
   removeCaFiles: vi.fn(async () => undefined),
   materialiseCaFile: vi.fn(async () => undefined),
-  reclaimStaleRuns: vi.fn(async () => [] as any[]),
+  findStaleRuns: vi.fn(async () => [] as any[]),
+  handBackStaleRun: vi.fn(async () => 'pending' as const),
   reclaimStaleVerifications: vi.fn(async () => [] as any[]),
   claimNextRun: vi.fn(async () => null),
   claimVerify: vi.fn(async () => null),
@@ -35,7 +36,8 @@ vi.mock('./s3-client', () => ({ createBackupS3Client: mocks.createBackupS3Client
 vi.mock('./pg-connection', () => ({ buildPgInvocation: mocks.buildPgInvocation }));
 vi.mock('./pg-dump', () => ({ removeCaFiles: mocks.removeCaFiles, materialiseCaFile: mocks.materialiseCaFile }));
 vi.mock('./store', () => ({
-  reclaimStaleRuns: mocks.reclaimStaleRuns,
+  findStaleRuns: mocks.findStaleRuns,
+  handBackStaleRun: mocks.handBackStaleRun,
   reclaimStaleVerifications: mocks.reclaimStaleVerifications,
   claimNextRun: mocks.claimNextRun,
   claimVerify: mocks.claimVerify,
@@ -165,7 +167,8 @@ describe('database backup runner stale-run reclaim', () => {
     mocks.runBackupPreflight.mockResolvedValue({
       ok: true, problems: [], pgDumpVersion: '18.0', pgRestoreVersion: '18.0', serverVersion: '18.0',
     });
-    mocks.reclaimStaleRuns.mockReset();
+    mocks.findStaleRuns.mockReset();
+    mocks.handBackStaleRun.mockClear();
     mocks.abortMultipartUploads.mockClear();
     mocks.deleteBackupObject.mockClear();
     mocks.headBackupObject.mockReset();
@@ -173,6 +176,7 @@ describe('database backup runner stale-run reclaim', () => {
     mocks.readSidecarSha256.mockReset();
     mocks.readSidecarSha256.mockResolvedValue(null);
     mocks.reconcileRunSucceeded.mockClear();
+    mocks.claimNextRun.mockClear();
   });
 
   afterEach(() => {
@@ -184,13 +188,16 @@ describe('database backup runner stale-run reclaim', () => {
   const events = (strapi: any, level: 'info' | 'warn', event: string) => strapi.log[level].mock.calls
     .map(([line]: [string]) => JSON.parse(line))
     .filter((entry: any) => entry.event === event);
+  const stale = (id: string, extra: Record<string, unknown>) =>
+    ({ id, worker_id: 'w1', lock_token: `tok-${id}`, attempt_count: 1, ...extra });
 
   // Every archive carries its own run row as `running`; after a restore the
-  // reclaim sees exactly a crashed run. The committed object must become a
-  // success (in the bucket recorded on the row), never be deleted.
-  it('reconciles a reclaimed run whose archive is committed instead of deleting it', async () => {
-    mocks.reclaimStaleRuns
-      .mockResolvedValueOnce([{ id: 'run-1', worker_id: 'w1', s3_bucket: 'previous-bucket', s3_key: 'k/IN/run-1.dump' }])
+  // reclaim sees exactly a crashed run. The committed object must turn the
+  // row into a success straight from `running` (in the bucket recorded on
+  // the row), never be deleted, and never pass through pending first.
+  it('reconciles a stale run whose archive is committed straight from running, without handing it back', async () => {
+    mocks.findStaleRuns
+      .mockResolvedValueOnce([stale('run-1', { s3_bucket: 'previous-bucket', s3_key: 'k/IN/run-1.dump' })])
       .mockResolvedValue([]);
     mocks.headBackupObject.mockResolvedValueOnce({ exists: true, sizeBytes: 4096, etag: '"e1"' });
     mocks.readSidecarSha256.mockResolvedValueOnce('a'.repeat(64));
@@ -199,11 +206,11 @@ describe('database backup runner stale-run reclaim', () => {
     await settle(0);
     const client = mocks.createBackupS3Client.mock.results[0]!.value;
     expect(mocks.headBackupObject).toHaveBeenCalledWith(client, 'previous-bucket', 'k/IN/run-1.dump');
-    expect(mocks.readSidecarSha256).toHaveBeenCalledWith(client, 'previous-bucket', 'k/IN/run-1.dump');
-    expect(mocks.reconcileRunSucceeded).toHaveBeenCalledWith(strapi, 'run-1', {
+    expect(mocks.reconcileRunSucceeded).toHaveBeenCalledWith(strapi, 'run-1', 'tok-run-1', {
       s3_bucket: 'previous-bucket', s3_key: 'k/IN/run-1.dump', size_bytes: 4096, sha256: 'a'.repeat(64), etag: '"e1"',
       verify_state: null,
     });
+    expect(mocks.handBackStaleRun).not.toHaveBeenCalled();
     expect(mocks.deleteBackupObject).not.toHaveBeenCalled();
     expect(mocks.abortMultipartUploads).not.toHaveBeenCalled();
     expect(events(strapi, 'info', 'backup.reclaimed_reconciled')).toEqual([
@@ -211,56 +218,69 @@ describe('database backup runner stale-run reclaim', () => {
     ]);
   });
 
-  it('aborts only the open multipart when nothing was committed, in the current bucket for a legacy row', async () => {
-    mocks.reclaimStaleRuns
+  it('aborts the open multipart and hands back when nothing was committed; a keyless row is handed back directly', async () => {
+    mocks.findStaleRuns
       .mockResolvedValueOnce([
-        { id: 'run-2', worker_id: 'w1', s3_bucket: null, s3_key: 'k/IN/run-2.dump' },
-        { id: 'run-3', worker_id: 'w1', s3_bucket: null, s3_key: null },
+        stale('run-2', { s3_bucket: null, s3_key: 'k/IN/run-2.dump' }),
+        stale('run-3', { s3_bucket: null, s3_key: null, attempt_count: 2 }),
       ])
       .mockResolvedValue([]);
+    mocks.handBackStaleRun.mockResolvedValueOnce('pending').mockResolvedValueOnce('failed');
     const strapi = fakeStrapi();
     await startDatabaseBackupRunner(strapi);
     await settle(0);
     const client = mocks.createBackupS3Client.mock.results[0]!.value;
     expect(mocks.headBackupObject.mock.calls).toEqual([[client, 'current-bucket', 'k/IN/run-2.dump']]);
     expect(mocks.abortMultipartUploads.mock.calls).toEqual([[client, 'current-bucket', 'k/IN/run-2.dump']]);
+    expect(mocks.handBackStaleRun.mock.calls.map(([, row]: any) => row.id)).toEqual(['run-2', 'run-3']);
     expect(mocks.deleteBackupObject).not.toHaveBeenCalled();
     expect(mocks.reconcileRunSucceeded).not.toHaveBeenCalled();
-    expect(events(strapi, 'warn', 'backup.stale_reclaimed').map((entry: any) => entry.runId)).toEqual(['run-2', 'run-3']);
+    expect(events(strapi, 'warn', 'backup.stale_reclaimed').map((entry: any) => [entry.runId, entry.next]))
+      .toEqual([['run-2', 'pending'], ['run-3', 'failed']]);
   });
 
   it('reconciles without a checksum when the sidecar is missing and honours auto-verify', async () => {
     mocks.readBackupSettings.mockResolvedValueOnce({ scheduleEnabled: true, intervalHours: 6, deleteAfterDays: 7, autoVerify: true, alertEmail: null } as any);
-    mocks.reclaimStaleRuns
-      .mockResolvedValueOnce([{ id: 'run-4', worker_id: 'w1', s3_bucket: 'b', s3_key: 'k/IN/run-4.dump' }])
+    mocks.findStaleRuns
+      .mockResolvedValueOnce([stale('run-4', { s3_bucket: 'b', s3_key: 'k/IN/run-4.dump' })])
       .mockResolvedValue([]);
     mocks.headBackupObject.mockResolvedValueOnce({ exists: true, sizeBytes: 10, etag: null });
     const strapi = fakeStrapi();
     await startDatabaseBackupRunner(strapi);
     await settle(0);
-    expect(mocks.reconcileRunSucceeded).toHaveBeenCalledWith(strapi, 'run-4', expect.objectContaining({
+    expect(mocks.reconcileRunSucceeded).toHaveBeenCalledWith(strapi, 'run-4', 'tok-run-4', expect.objectContaining({
       sha256: null, size_bytes: 10, verify_state: 'pending',
     }));
     expect(events(strapi, 'info', 'backup.reclaimed_reconciled')[0]).toMatchObject({ sidecar: false });
     expect(mocks.deleteBackupObject).not.toHaveBeenCalled();
   });
 
-  it('touches nothing in the bucket when the reclaim cannot inspect the object, and keeps ticking', async () => {
-    mocks.reclaimStaleRuns
-      .mockResolvedValueOnce([{ id: 'run-5', worker_id: 'w1', s3_bucket: 'b', s3_key: 'k/IN/run-5.dump' }])
+  // The archive named on the row has not been accounted for, so the row must
+  // stay `running` (unclaimable): handing it back would let the retry stamp a
+  // new key over the only reference to a possibly committed archive.
+  it('leaves a stale run untouched when the bucket cannot be inspected, and re-inspects next tick', async () => {
+    mocks.findStaleRuns
+      .mockResolvedValueOnce([stale('run-5', { s3_bucket: 'b', s3_key: 'k/IN/run-5.dump' })])
+      .mockResolvedValueOnce([stale('run-5', { s3_bucket: 'b', s3_key: 'k/IN/run-5.dump' })])
       .mockResolvedValue([]);
-    mocks.headBackupObject.mockRejectedValueOnce(new Error('AccessDenied'));
+    mocks.headBackupObject
+      .mockRejectedValueOnce(new Error('AccessDenied'))
+      .mockResolvedValueOnce({ exists: true, sizeBytes: 7, etag: null });
     const strapi = fakeStrapi();
     await startDatabaseBackupRunner(strapi);
     await settle(0);
     expect(events(strapi, 'warn', 'backup.reclaim_inspect_failed')).toEqual([
       expect.objectContaining({ runId: 'run-5', key: 'k/IN/run-5.dump', error: 'AccessDenied' }),
     ]);
+    expect(mocks.handBackStaleRun).not.toHaveBeenCalled();
     expect(mocks.abortMultipartUploads).not.toHaveBeenCalled();
     expect(mocks.deleteBackupObject).not.toHaveBeenCalled();
     expect(mocks.reconcileRunSucceeded).not.toHaveBeenCalled();
     expect(strapi.log.error.mock.calls.some(([line]: [string]) => line.includes('backup.tick_failed'))).toBe(false);
+
     await settle(30_000);
-    expect(mocks.reclaimStaleRuns).toHaveBeenCalledTimes(2);
+    expect(mocks.findStaleRuns).toHaveBeenCalledTimes(2);
+    expect(mocks.reconcileRunSucceeded).toHaveBeenCalledWith(strapi, 'run-5', 'tok-run-5', expect.objectContaining({ size_bytes: 7 }));
+    expect(mocks.handBackStaleRun).not.toHaveBeenCalled();
   });
 });

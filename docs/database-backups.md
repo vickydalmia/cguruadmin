@@ -46,14 +46,18 @@ database that is being backed up. The endpoints are enforced by
    `pg_dump`, aborts the multipart, and marks the row `cancelled`. A timeout
    (`BACKUP_TIMEOUT_MINUTES`) does the same with `failed`. A container stop
    mid-run hands the row back (`pending`, one retry); a worker that stops
-   heartbeating for 3 minutes is reclaimed the same way by the next tick,
-   which then inspects the bucket recorded on the row: a committed object
+   heartbeating for 3 minutes is handled by the next tick, which inspects the
+   bucket recorded on the row BEFORE touching the row: a committed object
    (the worker died between the S3 commit and the database write, or the
    database was restored FROM this archive, whose dump carries its own row as
-   `running`) turns the row into a normal `succeeded` entry with the size,
-   ETag and sidecar checksum, so retention and the admin own it; otherwise
-   only the open multipart is aborted. The reclaim path never deletes an
-   object. Cancel locks the row for its decision, so a run claimed in the
+   `running`) turns the row straight into a normal `succeeded` entry with the
+   size, ETag and sidecar checksum, so retention and the admin own it; an
+   absent object means the open multipart is aborted and the row is handed
+   back for its retry; and a bucket that cannot be inspected leaves the row
+   `running` under its dead lease, unclaimable, until a later tick can look —
+   handing it back first would let the retry stamp a new key over the only
+   reference to a possibly committed archive. The reclaim path never deletes
+   an object. Cancel locks the row for its decision, so a run claimed in the
    same instant is flagged rather than reported cancelled while it continues.
 
 Schedule slots are UTC multiples of the interval (every 6 h = 00/06/12/18
@@ -165,7 +169,7 @@ off. For the bucket use a real dev bucket or MinIO
 | `src/database-backup/store.ts` / `store-rows.ts` | lease-guarded lifecycle writes; row mapping and reads |
 | `src/database-backup/execute-run.ts` | one backup / one verification from claim to terminal row |
 | `src/database-backup/runner.ts` | start/stop/wake, preflight, the 30 s tick |
-| `src/database-backup/reclaim.ts` | what happens to the bucket side of a reclaimed run (reconcile a committed archive, else abort the multipart; never delete) |
+| `src/database-backup/reclaim.ts` | a stale run's fate, bucket first: reconcile a committed archive, else abort the multipart and hand back, else (uninspectable) leave it running; never delete |
 | `src/database-backup/alerts.ts` / `status.ts` / `log.ts` | emails + staleness gate; overview for the page; JSON log lines |
 | `src/api/database-backup/controllers/database-backup.ts` | admin endpoints (overview, settings, runs, cancel/verify/delete/download, test connection) |
 | `src/register/admin-routes.ts` → `registerDatabaseBackupRoutes` | `/database-backups/*` on the admin router, Super Admin policy |

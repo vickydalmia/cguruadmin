@@ -34,6 +34,11 @@ import {
   isValidAffiliateDestination,
 } from "../utils/offer-quality.js";
 import { isAcfTrue } from "../utils/acf.js";
+import {
+  normaliseOfferMeta,
+  offerMetaKeys,
+  sqlMetaKeyList,
+} from "../utils/wp-source-fields.js";
 import { reconcileMigratedOfferInventory } from "../utils/offer-inventory.js";
 import {
   getImportExclusions,
@@ -584,6 +589,23 @@ export async function runCoupons(): Promise<void> {
 
 // ── Bulk data fetchers ──────────────────────────────────────────────
 
+// `code` / `link` / `image` are read through their source aliases (the
+// Singapore site stores them as `_cmb_coupon_code` etc.); every downstream
+// reader keeps using the canonical key.
+const COUPON_META_KEYS = sqlMetaKeyList(
+  offerMetaKeys([
+    "popular_coupon",
+    "is_deal",
+    "unique_coupon",
+    "unique_coupon_name",
+    "_action_manager_date",
+    "_expiration-date",
+    "_expiration-date-status",
+    "expiration-date",
+    "_edit_last",
+  ]),
+);
+
 async function getPostMetaBulk(postIds: number[]): Promise<Map<number, PostMeta>> {
   const map = new Map<number, PostMeta>();
   const batchSize = 5_000;
@@ -598,18 +620,16 @@ async function getPostMetaBulk(postIds: number[]): Promise<Map<number, PostMeta>
       `SELECT post_id, meta_key, meta_value
        FROM wp_postmeta
        WHERE post_id IN (${placeholders})
-       AND meta_key IN (
-         'code', 'link', 'popular_coupon', 'image',
-         'is_deal', 'unique_coupon', 'unique_coupon_name',
-         '_action_manager_date', '_expiration-date', '_expiration-date-status', 'expiration-date',
-         '_edit_last'
-       )`,
+       AND meta_key IN (${COUPON_META_KEYS})`,
       ids,
     );
     for (const row of rows) {
       if (!map.has(row.post_id)) map.set(row.post_id, {});
       map.get(row.post_id)![row.meta_key] = row.meta_value;
     }
+  }
+  for (const [postId, meta] of map) {
+    map.set(postId, normaliseOfferMeta(meta));
   }
   return map;
 }

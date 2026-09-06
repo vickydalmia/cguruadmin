@@ -13,12 +13,12 @@ import { logDatabaseBackup } from './log';
 import { buildPgInvocation, type PgInvocation } from './pg-connection';
 import { materialiseCaFile, removeCaFiles } from './pg-dump';
 import { runBackupPreflight } from './preflight';
-import { reconcileReclaimedRun } from './reclaim';
+import { reconcileStaleRun } from './reclaim';
 import { applyRetention } from './retention';
 import { createBackupS3Client } from './s3-client';
 import { currentSlot, isBackupStale, isSlotSatisfied } from './schedule';
 import { readBackupSettings, readRunnerRecord, writeRunnerRecord, type RunnerRecord } from './settings';
-import { claimNextRun, claimVerify, enqueueRun, reclaimStaleRuns, reclaimStaleVerifications } from './store';
+import { claimNextRun, claimVerify, enqueueRun, findStaleRuns, reclaimStaleVerifications } from './store';
 import { lastSuccessfulRunRow, oldestRunRow, scheduledSlotExists } from './store-rows';
 
 /**
@@ -217,11 +217,11 @@ async function tickClean(): Promise<void> {
     if (!state.ready || !state.client || myGeneration !== generation) return;
 
     const bucket = state.config.s3.bucket!;
-    for (const row of await reclaimStaleRuns(state.strapi, now)) {
-      logDatabaseBackup(state.strapi, 'warn', 'backup.stale_reclaimed', { runId: row.id, worker: row.worker_id });
-      // Committed archive → the row becomes a success; nothing committed →
-      // abort the multipart and retry. Never a delete (see reclaim.ts).
-      await reconcileReclaimedRun(context(state), row, settings.autoVerify);
+    // Bucket first, row second: a stale run is only handed back for retry
+    // once its archive has been accounted for (reconciled as a success, or
+    // proven absent). Never a delete (see reclaim.ts).
+    for (const row of await findStaleRuns(state.strapi, now)) {
+      await reconcileStaleRun(context(state), row, settings.autoVerify, now);
     }
     for (const row of await reclaimStaleVerifications(state.strapi, now)) {
       logDatabaseBackup(state.strapi, 'warn', 'backup.verify_stale_reclaimed', { runId: row.id, key: row.s3_key });

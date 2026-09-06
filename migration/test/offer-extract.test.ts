@@ -244,6 +244,46 @@ test("offerText: USA commerce phrases and locale-aware bare amounts", () => {
   );
 });
 
+test("offerText: Singapore dollar amounts keep the S$ marker", () => {
+  const sg = { currencyCode: "SGD" };
+  assert.equal(
+    extractOfferText("Flight Bookings Starting At S$34", null, sg),
+    "STARTING S$34",
+  );
+  assert.equal(extractOfferText("Gadgets Under S$100", null, sg), "UNDER S$100");
+  assert.equal(
+    extractOfferText("Flat S$25 Off On Sitewide Orders", null, sg),
+    "FLAT S$25 OFF",
+  );
+  assert.equal(extractOfferText("S$10 Off Your First Order", null, sg), "S$10 OFF");
+  assert.equal(extractOfferText("Save SGD 15 Off Bags", null, sg), "S$15 OFF");
+  // Bare amount: the SG profile's default symbol, not the India rupee.
+  assert.equal(extractOfferText("Flat 250 Off", null, sg), "FLAT S$250 OFF");
+});
+
+test("cashback fields: Singapore dollar cashback and bank offers", () => {
+  assert.deepEqual(
+    extractCashbackFields("S$10 Cashback + S$20 DBS Bank Off", null, {
+      currencyCode: "SGD",
+    }),
+    { cashbackText: "S$10", bankOfferText: "S$20", prepaidText: null },
+  );
+});
+
+test("offerText: US$ and letter-adjacent s$ still read as a plain dollar", () => {
+  // UAE/India titles write "US$"; the S must not be mistaken for S$. (The
+  // qualifier is lost here exactly as before this change: "US$" never matched
+  // the qualifier-then-currency pattern.)
+  assert.equal(extractOfferText("Upto US$20 Off Hotel Stays"), "$20 OFF");
+  assert.equal(extractOfferText("US$10 Off Sitewide", null, { currencyCode: "AED" }), "$10 OFF");
+  assert.equal(extractOfferText("Upto $20 Off"), "UPTO $20 OFF");
+  assert.equal(extractOfferText("Flat 250 Off"), "FLAT ₹250 OFF");
+  assert.equal(
+    extractOfferText("Flat 25 Off", null, { currencyCode: "USD" }),
+    "FLAT $25 OFF",
+  );
+});
+
 test("offerText: a non-discount % is not a badge", () => {
   assert.equal(extractOfferText("100% Whey Protein"), null);
   assert.equal(extractOfferText("Welcome Bonus: 100% Match On Deposit"), null);

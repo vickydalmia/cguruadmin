@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import knexFactory, { type Knex } from 'knex';
 
-import { claimNextRun, reclaimStaleRuns, reconcileRunSucceeded, requestCancel } from './store';
+import { claimNextRun, findStaleRuns, handBackStaleRun, reconcileRunSucceeded, requestCancel } from './store';
 import { STALE_RUN_MS } from './constants';
 
 const createRuns = require('../../database/migrations/2026.09.10T00.00.00.create-database-backup-runs.js');
@@ -76,22 +76,25 @@ describe('requestCancel', () => {
   });
 
   // The row a restore brings back: `running` under a dead lease, key set.
-  it('reconciles a reclaimed run into a success only while it has no lease', async () => {
+  const goStale = async () => {
     const claim = await claimNextRun(strapi, 'worker-1');
     await knex('database_backup_runs').where({ id: 'run-1' }).update({
       s3_bucket: 'b', s3_key: 'db/IN/run-1.dump', heartbeat_at: new Date(Date.now() - STALE_RUN_MS - 1000),
     });
-    // Still leased (from the row's point of view): not eligible.
-    expect(await reconcileRunSucceeded(strapi, 'run-1', {
+    return claim!;
+  };
+
+  it('reconciles a stale run straight from running by its dead lease, and never twice', async () => {
+    const claim = await goStale();
+    const [staleRow] = await findStaleRuns(strapi, new Date());
+    expect(staleRow?.id).toBe('run-1');
+    expect(staleRow?.lock_token).toBe(claim.lockToken);
+
+    // A wrong token (another lease) cannot reconcile it.
+    expect(await reconcileRunSucceeded(strapi, 'run-1', 'someone-else', {
       s3_bucket: 'b', s3_key: 'db/IN/run-1.dump', size_bytes: 1, sha256: null, etag: null, verify_state: null,
     })).toBe(false);
-    expect(claim?.lockToken).toBeTruthy();
-
-    const reclaimed = await reclaimStaleRuns(strapi, new Date());
-    expect(reclaimed.map((r) => r.id)).toEqual(['run-1']);
-    expect((await row()).status).toBe('pending');
-
-    expect(await reconcileRunSucceeded(strapi, 'run-1', {
+    expect(await reconcileRunSucceeded(strapi, 'run-1', claim.lockToken, {
       s3_bucket: 'b', s3_key: 'db/IN/run-1.dump', size_bytes: 4096, sha256: 'f'.repeat(64), etag: '"e"', verify_state: 'pending',
     })).toBe(true);
     const after = await row();
@@ -101,10 +104,50 @@ describe('requestCancel', () => {
     expect(after.verify_state).toBe('pending');
     expect(after.error).toBeNull();
     expect(after.lock_token).toBeNull();
-    // A success is never reconciled twice, and it is not claimable.
-    expect(await reconcileRunSucceeded(strapi, 'run-1', {
+    expect(after.s3_key).toBe('db/IN/run-1.dump');
+    expect(await reconcileRunSucceeded(strapi, 'run-1', claim.lockToken, {
       s3_bucket: 'b', s3_key: 'db/IN/run-1.dump', size_bytes: 1, sha256: null, etag: null, verify_state: null,
     })).toBe(false);
+    expect(await findStaleRuns(strapi, new Date())).toEqual([]);
+    expect(await claimNextRun(strapi, 'worker-2')).toBeNull();
+  });
+
+  // The failure mode being prevented: while the archive is unaccounted for,
+  // the row must stay `running`, so nothing claims it and re-keys it.
+  it('keeps an uninspected stale run unclaimable until it is handed back, then retries under a new key', async () => {
+    const claim = await goStale();
+    // Inspection failed: the reclaim touched nothing.
+    expect(await claimNextRun(strapi, 'worker-2')).toBeNull();
+    expect((await row()).s3_key).toBe('db/IN/run-1.dump');
+
+    // Next tick: inspected, nothing committed, handed back for its retry.
+    const [staleRow] = await findStaleRuns(strapi, new Date());
+    expect(await handBackStaleRun(strapi, staleRow!, new Date())).toBe('pending');
+    expect((await row()).status).toBe('pending');
+    expect(await handBackStaleRun(strapi, staleRow!, new Date())).toBe('lost');
+    // A hand-back cannot be reconciled any more (the retry owns the key now).
+    expect(await reconcileRunSucceeded(strapi, 'run-1', claim.lockToken, {
+      s3_bucket: 'b', s3_key: 'db/IN/run-1.dump', size_bytes: 1, sha256: null, etag: null, verify_state: null,
+    })).toBe(false);
+    const retry = await claimNextRun(strapi, 'worker-2');
+    expect(retry?.id).toBe('run-1');
+    expect(retry?.row.attempt_count).toBe(2);
+  });
+
+  it('fails a stale run that already used its retry and refuses to hand back a re-leased row', async () => {
+    await goStale();
+    await knex('database_backup_runs').where({ id: 'run-1' }).update({ attempt_count: 2 });
+    const [staleRow] = await findStaleRuns(strapi, new Date());
+    // The worker came back and heartbeated under a NEW lease before we acted.
+    await knex('database_backup_runs').where({ id: 'run-1' }).update({ lock_token: 'renewed', heartbeat_at: new Date() });
+    expect(await handBackStaleRun(strapi, staleRow!, new Date())).toBe('lost');
+    expect((await row()).status).toBe('running');
+
+    await knex('database_backup_runs').where({ id: 'run-1' }).update({ lock_token: staleRow!.lock_token });
+    expect(await handBackStaleRun(strapi, staleRow!, new Date())).toBe('failed');
+    const after = await row();
+    expect(after.status).toBe('failed');
+    expect(after.error).toBe('runner lost its lease');
     expect(await claimNextRun(strapi, 'worker-2')).toBeNull();
   });
 

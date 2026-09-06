@@ -99,42 +99,56 @@ export async function claimNextRun(strapi: Core.Strapi, workerId: string): Promi
 }
 
 /**
- * Running rows whose worker stopped heartbeating. Each goes back to pending
- * (one retry) or to failed. Returns what was reclaimed so the caller can
- * abort any multipart upload left behind.
+ * Running rows whose worker stopped heartbeating. Read only: the caller
+ * inspects the bucket first and only then hands a row back (or reconciles
+ * it), so a run whose archive cannot be inspected right now stays `running`
+ * under its dead lease — unclaimable — until a later tick can look.
  */
-export async function reclaimStaleRuns(strapi: Core.Strapi, now: Date): Promise<RunRow[]> {
+export async function findStaleRuns(strapi: Core.Strapi, now: Date): Promise<RunRow[]> {
   const cutoff = new Date(now.getTime() - STALE_RUN_MS);
-  const stale: RunRow[] = await strapi.db
+  return strapi.db
     .connection(TABLE)
     .where({ status: 'running' })
-    .where('heartbeat_at', '<', cutoff);
-  const reclaimed: RunRow[] = [];
-  for (const row of stale) {
-    const retry = Number(row.attempt_count ?? 0) < MAX_RUN_ATTEMPTS;
-    const updated = await strapi.db
-      .connection(TABLE)
-      .where({ id: row.id, status: 'running', lock_token: row.lock_token })
-      .update(
-        retry
-          ? { status: 'pending', lock_token: null, locked_at: null, heartbeat_at: null, error: 'runner lost its lease; retrying' }
-          : { status: 'failed', lock_token: null, locked_at: null, finished_at: now, error: 'runner lost its lease' },
-      );
-    if (Number(updated) === 1) reclaimed.push(row);
-  }
-  return reclaimed;
+    .where('heartbeat_at', '<', cutoff)
+    .orderBy('created_at', 'asc');
 }
 
 /**
- * A reclaimed run whose archive turned out to be committed in the bucket (the
+ * Give a stale run back: pending (one retry) or failed. Guarded by the dead
+ * lease's token, so a worker that resumed and re-heartbeated meanwhile, or a
+ * reconcile that already turned the row into a success, is left alone.
+ */
+export async function handBackStaleRun(
+  strapi: Core.Strapi,
+  row: RunRow,
+  now: Date,
+): Promise<'pending' | 'failed' | 'lost'> {
+  const retry = Number(row.attempt_count ?? 0) < MAX_RUN_ATTEMPTS;
+  const updated = await strapi.db
+    .connection(TABLE)
+    .where({ id: row.id, status: 'running', lock_token: row.lock_token })
+    .update(
+      retry
+        ? { status: 'pending', lock_token: null, locked_at: null, heartbeat_at: null, error: 'runner lost its lease; retrying' }
+        : { status: 'failed', lock_token: null, locked_at: null, finished_at: now, error: 'runner lost its lease' },
+    );
+  if (Number(updated) !== 1) return 'lost';
+  return retry ? 'pending' : 'failed';
+}
+
+/**
+ * A stale run whose archive turned out to be committed in the bucket (the
  * worker died between the S3 commit and `finishRun`, or the database was
  * restored FROM this very archive, which carries its own row as `running`)
- * becomes a normal success so retention and the admin own the object. Only a
- * row the reclaim just handed back (pending/failed, no lease) qualifies.
+ * becomes a normal success so retention and the admin own the object. It goes
+ * straight from `running` under the dead lease to `succeeded`, matched by
+ * that lease's token: the row is never handed back to pending first, so no
+ * retry can re-key it before the archive has been accounted for.
  */
 export async function reconcileRunSucceeded(
   strapi: Core.Strapi,
   id: string,
+  lockToken: string,
   patch: {
     s3_bucket: string;
     s3_key: string;
@@ -146,12 +160,12 @@ export async function reconcileRunSucceeded(
 ): Promise<boolean> {
   const updated = await strapi.db
     .connection(TABLE)
-    .where({ id, lock_token: null })
-    .whereIn('status', ['pending', 'failed'])
+    .where({ id, status: 'running', lock_token: lockToken })
     .update({
       ...patch,
       status: 'succeeded',
       finished_at: new Date(),
+      lock_token: null,
       locked_at: null,
       heartbeat_at: null,
       cancel_requested_at: null,

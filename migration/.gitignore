@@ -1,6 +1,8 @@
 backups/
 background-removed-deal-images/
 .state/
-uae/
-usa/
-sg/
+# Raw WordPress dumps, uploads and workbooks per source country live at the
+# migration root and never ship. Anchored: profiles/<country>/ must stay tracked.
+/uae/
+/usa/
+/sg/

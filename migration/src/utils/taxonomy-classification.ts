@@ -15,6 +15,11 @@ const USA_CLASSIFICATION_WORKBOOK =
   "usa/CouponzGuru_USA_Taxonomy_Classification (1).xlsx";
 const UAE_CLASSIFICATION_WORKBOOK =
   "uae/CouponzGuru_UAE_Taxonomy_Classification.xlsx";
+// Singapore has no ACF `choose_type` either; the operator builds this workbook
+// from `sg/sg-stores.csv`. Defaulting the path makes a missing file fail
+// loudly instead of silently classifying every term as Store.
+const SG_CLASSIFICATION_WORKBOOK =
+  "sg/CouponzGuru_SG_Taxonomy_Classification.xlsx";
 
 export interface TaxonomyClassificationRow {
   name: string;
@@ -70,6 +75,9 @@ export function taxonomyClassificationFile(
   }
   if (profile === "ae") {
     return path.resolve(migrationRoot(), UAE_CLASSIFICATION_WORKBOOK);
+  }
+  if (profile === "sg") {
+    return path.resolve(migrationRoot(), SG_CLASSIFICATION_WORKBOOK);
   }
   return null;
 }

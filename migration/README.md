@@ -45,10 +45,10 @@ Optional WordPress tables: `wp_uc_coupons`, `wp_uc_codes` (unique coupon plugin)
 
 ## Setup & Configuration
 
-1. Copy the environment template and fill in your values. For USA or UAE,
-   overlay `.env.migration.usa.example` or `.env.migration.ae.example`; each
-   pins its profile, source identity, classification workbook and isolated
-   state directory:
+1. Copy the environment template and fill in your values. For USA, UAE or
+   Singapore, overlay `.env.migration.usa.example`, `.env.migration.ae.example`
+   or `.env.migration.sg.example`; each pins its profile, source identity,
+   classification workbook and isolated state directory:
 
 ```bash
 cp .env.migration.example .env.migration
@@ -601,7 +601,7 @@ Content HTML srcsets are frozen at migration time, so rich-text `<img>` tags don
 ### Taxonomies (Phase 03)
 
 WordPress stores all taxonomy terms in `wp_terms` with `taxonomy='category'`.
-For USA and UAE, `MIGRATION_CLASSIFICATION_FILE` points to the approved Excel workbook;
+For USA, UAE and Singapore, `MIGRATION_CLASSIFICATION_FILE` points to the approved Excel workbook;
 its `Classification` value is matched to the SQL term by exact normalized
 slug. Excel is authoritative, and SQL slugs absent from the workbook default
 to Store. Other profiles use ACF `choose_type` with the same fallback. The UAE
@@ -637,7 +637,8 @@ applied in phases 03/07/08 and mirrored by phase 10's expected counts:
    Brand/Bank/Category sharing a name is never swallowed). The repo
    intentionally ships no historical retired-store CSV for India or USA. The
    UAE profile uses this same exclusion seam for its non-catalog `Expired`
-   bucket; an unset or missing file means zero listed exclusions.
+   bucket, and the Singapore profile for its `Deals` bucket; an unset or
+   missing file means zero listed exclusions.
 
 An excluded term is never imported, and every post filed under one is
 excluded from phases 07/08 — *before* the inventory reconciliation, so a
@@ -663,8 +664,8 @@ deletes, plus a row per listed name that matched no WP term), and
 | `slug` | `slug` | Deduplicated per table (appends `-1`, `-2`, etc.) |
 | `description` | `description` | |
 | `store_short_description` (termmeta) | `short_description` | |
-| `store_cat_image` (termmeta) | `logo` / `icon` | Media link via `files_related_mph` |
-| `store_image_alt` (termmeta) | `logo_alt` | Stores, brands, banks only |
+| `store_cat_image` (termmeta), alias `store_image` | `logo` / `icon` | Media link via `files_related_mph`. Singapore stores the logo as `store_image`; the canonical key wins when both exist |
+| `store_image_alt` (termmeta) | `logo_alt` | Stores, brands, banks only; falls back to the entity name (Singapore has no alt key) |
 | `enable_faq_schema` (termmeta) | `faq_enabled` | Boolean (`'1'` → true) |
 | Excel `Brand` classification | `is_affiliate_store` | Seeded `true` on the imported Brand; fill-only on re-import so an editor's panel toggle wins |
 
@@ -685,8 +686,9 @@ are then split:
 | `post_title` | `title` | |
 | `post_name` | `slug` | Deduplicated |
 | `post_content` | `content` | Shortcodes stripped; Deal rows additionally reject price/code values and empty rich-text wrappers |
-| `code` (postmeta) | `code` | Coupon code string |
-| `link` (postmeta) | `affiliate_link` | |
+| `code` (postmeta), alias `_cmb_coupon_code` | `code` | Coupon code string |
+| `link` (postmeta), alias `_cmb_affiliate_link` | `affiliate_link` | A post without a valid http(s) destination under either key is quarantined |
+| `image` (postmeta), alias `_cmb_coupon_image` | (Logo Store match, homepage art) | Upload URL matched against Store logos |
 | `popular_coupon` (postmeta) | `is_popular` | `'1'` → true |
 | `unique_coupon` (postmeta) | `coupon_type` | `'1'`/`'true'` → `"unique"`, else `"static"` |
 | `unique_coupon_name` (postmeta) | `uniqueCouponPool` relation | Resolved by pool name for unique coupons |
@@ -695,6 +697,24 @@ are then split:
 | Related Excel-classified Brand | `is_for_affiliate_brand` + `brands` | Coupon flag is `true`, Brand relation is retained, and mutually-exclusive Store/Logo Store relations are cleared; Coupons without Brands are explicitly `false` |
 
 *Expiration checked in order: `_action_manager_date`, `_expiration-date`, `expiration-date`.
+
+**Source-field aliases.** The Singapore site kept its legacy CMB2 field names
+inside ACF, so `src/utils/wp-source-fields.ts` owns an ordered alias list per
+logical field (canonical key first): `code`/`_cmb_coupon_code`,
+`link`/`_cmb_affiliate_link`, `image`/`_cmb_coupon_image`, and the term logo
+`store_cat_image`/`store_image`. Phases 03, 07, 08, 10 and 13 select every
+alias and resolve the first non-blank value, so India/USA/UAE (which hold no
+alias keys) import exactly as before while Singapore imports its codes, links
+and logos. Phase 00 logs which key supplied each field (`Source schema: …`).
+Known limitation shared by every workbook-classified profile: the Logo-Store
+fallback index in `offer-logo-store.ts` still requires a `choose_type = Store`
+term, so it is empty on USA/UAE/SG; their Coupons link Stores through
+`wp_term_relationships` only.
+
+**Currency markers.** Offer badges keep the source currency: `Rs.`/`₹`/`INR`
+→ `₹`, `$`/`USD` → `$`, and Singapore `S$`/`SGD` → `S$` (`"Starting At S$34"`
+→ `STARTING S$34`). `US$` stays a plain `$`. A bare amount ("Flat 250 Off")
+takes the profile currency: `₹` by default, `$` for USD, `S$` for SGD.
 
 **Deal-specific fields:**
 

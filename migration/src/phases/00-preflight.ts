@@ -25,6 +25,11 @@ import {
 } from "../utils/taxonomy-classification.js";
 import { loadProfileOfferCountries } from "../utils/offer-country-extract.js";
 import { DEFAULT_CONTENT_LOCALE } from "../utils/content-locale.js";
+import {
+  OFFER_META_ALIASES,
+  TERM_META_ALIASES,
+  sqlMetaKeyList,
+} from "../utils/wp-source-fields.js";
 
 type PreflightTaxonomyTerm = {
   term_id: number;
@@ -162,6 +167,50 @@ async function validateSourceDataExceptions(): Promise<void> {
       `Deal count exception: expected ${config.source.expectedDeals}, found ${dealCount?.c ?? 0}`,
     );
   }
+}
+
+/**
+ * Informational only: which source key supplies each aliased field. The
+ * Singapore site stores coupon code/link/image and the store logo under legacy
+ * CMB2 names; every other site uses the canonical ACF names. Seeing the
+ * counts here makes a mis-pointed or unexpected source obvious before phase 03.
+ */
+async function reportSourceSchemaVariant(): Promise<void> {
+  const groups: Array<{
+    label: string;
+    table: "wp_postmeta" | "wp_termmeta";
+    aliases: readonly string[];
+  }> = [
+    { label: "code", table: "wp_postmeta", aliases: OFFER_META_ALIASES.code },
+    { label: "link", table: "wp_postmeta", aliases: OFFER_META_ALIASES.link },
+    { label: "image", table: "wp_postmeta", aliases: OFFER_META_ALIASES.image },
+    { label: "store logo", table: "wp_termmeta", aliases: TERM_META_ALIASES.image },
+    { label: "store logo alt", table: "wp_termmeta", aliases: TERM_META_ALIASES.imageAlt },
+  ];
+  const parts: string[] = [];
+  for (const group of groups) {
+    const rows = await wpQuery<{ meta_key: string; c: number }>(
+      `SELECT meta_key, COUNT(*) AS c
+       FROM ${group.table}
+       WHERE meta_key IN (${sqlMetaKeyList(group.aliases)})
+         AND meta_value <> ''
+       GROUP BY meta_key`,
+    );
+    const counts = new Map(rows.map((row) => [row.meta_key, Number(row.c)]));
+    const [canonical, ...rest] = group.aliases;
+    const aliasHits = rest
+      .filter((key) => (counts.get(key) ?? 0) > 0)
+      .map((key) => `${key} (${counts.get(key)})`);
+    const canonicalHits = counts.get(canonical) ?? 0;
+    if (aliasHits.length > 0) {
+      parts.push(
+        `${group.label}←${aliasHits.join("+")}${canonicalHits > 0 ? ` +${canonical} (${canonicalHits})` : ""}`,
+      );
+    } else {
+      parts.push(`${group.label}←${canonical} (${canonicalHits})`);
+    }
+  }
+  logger.info(`  Source schema: ${parts.join(", ")}`);
 }
 
 export async function runPreflight(): Promise<void> {
@@ -403,6 +452,10 @@ export async function runPreflight(): Promise<void> {
   for (const row of typeBreakdown) {
     logger.info(`    ${row.choose_type}: ${row.c}`);
   }
+  if (typeBreakdown.length === 0) {
+    logger.info("    (no choose_type term meta — classification comes from the workbook)");
+  }
+  await reportSourceSchemaVariant();
 
   const [postCount] = await wpQuery<{ c: number }>(
     "SELECT COUNT(*) AS c FROM wp_posts WHERE post_type='post' AND post_status='publish'"
