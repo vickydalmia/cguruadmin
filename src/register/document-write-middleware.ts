@@ -1,3 +1,4 @@
+import { fenceTranslationPublication } from '../translation/publication-fence';
 import type { Core } from '@strapi/strapi';
 import { purgeResponseCaches } from '../middlewares/cache';
 import {
@@ -75,6 +76,9 @@ import {
 export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
   strapi.documents.use(async (context: any, next: any) => {
     if (!DOCUMENT_WRITE_ACTIONS.has(context.action)) return next();
+    if (context.uid === 'api::site-configuration.site-configuration' && context.params?.data) {
+      delete context.params.data.configurationRevision;
+    }
 
     // Normalise the payload, then run every editor-facing validator and
     // report ALL of their problems in one error — see
@@ -92,12 +96,10 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
     // closing a cycle. A unique index on the NORMALIZED values cannot be
     // added over legacy duplicates (identity-validation.ts), so the pipeline
     // serializes that window with one advisory lock per invariant domain,
-    // and hands the release back here because the lock must stay held until
-    // the write below has COMMITTED. No-op on non-Postgres; on lock failure
-    // the save proceeds unserialized (the pre-existing rare race, never an
-    // outage).
-    const releaseWriteLock = await runWriteValidation(strapi, context);
-    try {
+    // inside the content transaction through commit. A lock failure aborts
+    // the save instead of weakening the uniqueness invariants.
+    const validateLockedWrite = await runWriteValidation(strapi, context);
+    {
       // Redirect `note` is editor-only metadata, but the redirect UID scopes
       // to a FULL sweep (scopes.ts). Read the material fields before the
       // write so a note-only edit can skip the rebuild entirely (redirects
@@ -250,8 +252,15 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
 
       return await runContentTransaction(
         strapi,
-        () => next(),
+        async (trx) => {
+          await validateLockedWrite?.(trx);
+          await fenceTranslationPublication(strapi, trx, context.uid, context.params?.documentId, translationWriteContext());
+          return next();
+        },
         async (result, trx) => {
+          if (context.uid === 'api::site-configuration.site-configuration' && (result as any)?.id) {
+            await trx('site_configurations').where({ id: (result as any).id }).increment('configuration_revision', 1);
+          }
           if (
             context.action === 'update' &&
             changesEntityOfferMembership(context.uid, context.params?.data)
@@ -336,8 +345,8 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
           // transaction — the job either commits with the content or not at
           // all. The dispatcher's own locale writes are excluded twice over
           // (non-default locale + the AsyncLocalStorage write flag). Fully
-          // inert unless the site opted in AND the env parses
-          // (translationRuntimeActive), so India/USA never see a row.
+          // inert unless the site opted in
+          // (translationRuntimeActive), independent of the local worker role.
           try {
             const writesDefaultLocale =
               !context.params?.locale ||
@@ -607,6 +616,7 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
                 : {}),
             };
           }
+          if (localizedType && !sharedChange && targetLocale === DEFAULT_CONTENT_LOCALE) payload.inventoryLocale = 'en';
           return {
             payload: sharedChange
               ? expandPayloadPathsForLocales(
@@ -636,8 +646,6 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
           wakeIsrOutbox();
         },
       );
-    } finally {
-      if (releaseWriteLock) await releaseWriteLock();
     }
   });
 }

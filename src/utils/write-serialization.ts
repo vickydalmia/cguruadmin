@@ -1,60 +1,40 @@
+import { errors } from '@strapi/utils';
 import type { Core } from '@strapi/strapi';
 
-// Cross-row invariants (one flat route slug across the four taxonomies,
-// redirect duplicate/cycle detection) are validated with plain reads before an
-// INDEPENDENT write commits, so two concurrent saves can both pass validation
-// against the same committed snapshot and both commit. A unique index on the
-// NORMALIZED values cannot be added over legacy duplicates (see
-// identity-validation.ts), so mutual exclusion has to come from a lock: one
-// Postgres transaction-scoped advisory lock per invariant domain, held on a
-// dedicated connection across validate + commit. Editor saves are rare enough
-// that domain-level (not per-key) serialization costs nothing, and it also
-// covers the name-uniqueness and cycle checks a per-slug key would miss.
-
-const LOCK_NAMESPACE = 'cguru:document-write';
-
 export type WriteLockDomain = 'identity' | 'redirect' | 'job';
+let timeout: number | undefined;
+export function readWriteSerializationTimeout(): number {
+  const configured = Number(process.env.WRITE_SERIALIZATION_TIMEOUT_MS ?? 8000);
+  if (!Number.isInteger(configured) || configured < 100 || configured > 60000) {
+    throw new Error('WRITE_SERIALIZATION_TIMEOUT_MS must be between 100 and 60000');
+  }
+  return timeout = configured;
+}
 
-export type WriteLockRelease = () => Promise<void>;
-
-/**
- * Serialize validate+commit for a write domain. Returns a release function,
- * or null when serialization is unavailable (non-Postgres dialect, lock
- * timeout, connection failure) — the caller proceeds unserialized, which is
- * the pre-existing rare race, never an outage.
- */
+/** The caller owns this transaction through validation, content and outbox commit. */
 export async function acquireWriteSerializationLock(
   strapi: Core.Strapi,
   domain: WriteLockDomain,
-): Promise<WriteLockRelease | null> {
-  const knex = (strapi.db as any)?.connection;
-  const client: string = knex?.client?.config?.client ?? '';
-  if (!['pg', 'postgres', 'postgresql'].includes(client)) return null;
-
-  let trx: any;
+  trx: any,
+): Promise<void> {
+  const client = (strapi.db as any)?.connection?.client?.config?.client ?? '';
+  if (!['pg', 'postgres', 'postgresql'].includes(client)) return;
+  if (!trx) throw new Error('Write serialization requires the content transaction');
+  // Lock errors must roll back, never weaken the cross-row invariants.
+  const configured = process.env.NODE_ENV === 'test' ? readWriteSerializationTimeout() : timeout ?? readWriteSerializationTimeout();
+  const previous = await trx.raw('SHOW lock_timeout');
+  await trx.raw("SELECT set_config('lock_timeout', ?, true)", [`${configured}ms`]);
   try {
-    trx = await knex.transaction();
-    // A wedged holder must not queue every later save behind it forever;
-    // advisory lock waits honor lock_timeout.
-    await trx.raw("SET LOCAL lock_timeout = '8000ms'");
-    // hashtext() keys the (int, int) advisory-lock form server-side, so the
-    // key space needs no coordination beyond these two strings.
     await trx.raw('SELECT pg_advisory_xact_lock(hashtext(?), hashtext(?))', [
-      LOCK_NAMESPACE,
-      domain,
+      'cguru:document-write', domain,
     ]);
-  } catch (err: any) {
-    strapi.log.warn(
-      `[write-lock] ${domain} advisory lock unavailable (${err?.message ?? err}) — proceeding unserialized`
-    );
-    if (trx) await trx.rollback().catch(() => {});
-    return null;
+  } catch (error) {
+    if ((error as { code?: string }).code === '55P03') {
+      throw new errors.ApplicationError('Another editor is saving related content. Your changes were not saved; please retry.');
+    }
+    throw error;
   }
-
-  return async () => {
-    // Commit ends the transaction, which releases the xact lock. Nothing was
-    // written on this connection, so commit vs rollback is equivalent —
-    // commit keeps rollback metrics clean.
-    await trx.commit().catch(() => {});
-  };
+  // Restore the caller's policy before content writes and outbox inserts.
+  // On acquisition failure PostgreSQL aborts the transaction; do not issue SQL.
+  await trx.raw("SELECT set_config('lock_timeout', ?, true)", [previous.rows[0].lock_timeout]);
 }

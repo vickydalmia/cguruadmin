@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Core } from '@strapi/strapi';
-import { runWriteValidation } from './run';
+import { runWriteValidation as prepareWriteValidation } from './run';
+
+// Exercise both phases as the document middleware does.
+async function runWriteValidation(...args: Parameters<typeof prepareWriteValidation>) {
+  const validateLocked = await prepareWriteValidation(...args);
+  await validateLocked?.({});
+  return null;
+}
 import { runWithTranslationWriteContext } from '../../translation/write-flag';
 import {
   COLLECTED_STEPS,

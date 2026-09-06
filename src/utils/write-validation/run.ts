@@ -7,7 +7,6 @@ import { translationWriteContext } from '../../translation/write-flag';
 import {
   acquireWriteSerializationLock,
   type WriteLockDomain,
-  type WriteLockRelease,
 } from '../write-serialization';
 
 import { ProblemCollector } from './problems';
@@ -39,6 +38,8 @@ import {
  *    away.
  *  - The deal-image step calls a paid background-removal provider. Same
  *    reasoning, with money attached.
+ *  Both are rare enough that the extra round trip costs an editor far less
+ *  than the lock contention or the credit would.
  *
  * Translation writes carry an explicit source/target/write-plan context. They
  * run this same pipeline, with only the documented source-parity exceptions:
@@ -47,14 +48,9 @@ import {
  * orphaned source offer may mirror that empty taxonomy. Legacy store lists and
  * Deal discount pairs may also be copied exactly from English. No target-only
  * defect is grandfathered.
- * Both are rare enough that the extra round trip costs an editor far less than
- * the lock contention or the credit would.
  *
- * Returns the lock release handle, or null when no lock was taken. THE CALLER
- * MUST release it in a `finally` after the write commits — the lock's whole
- * purpose is to span validate + commit, so this function cannot release it
- * itself. If anything after acquisition throws, the lock is released here
- * before the error propagates, so a rejected save never leaks it.
+ * Returns the locked validation phase. Execute it inside the content
+ * transaction immediately before the write; preparation never holds a lock.
  */
 export async function runWriteValidation(
   strapi: Core.Strapi,
@@ -63,7 +59,7 @@ export async function runWriteValidation(
     action: string;
     params?: { data?: any; documentId?: string; locale?: string };
   },
-): Promise<WriteLockRelease | null> {
+): Promise<((trx: any) => Promise<void>) | null> {
   const { uid, action } = context;
   if (!WRITE_ACTIONS.includes(action as (typeof WRITE_ACTIONS)[number])) return null;
 
@@ -136,26 +132,11 @@ export async function runWriteValidation(
     await step.run(ctx);
   }
 
-  // --- Group C: cross-row invariants, under the advisory lock.
-  const domain = lockDomainFor(uid);
-  if (!domain) {
-    // No lock needed, but the two validators still run for every uid — each
-    // no-ops internally on a type it does not own. Unchanged from the original
-    // middleware, which also called both unconditionally.
+  return async (trx: any) => {
+    const domain = lockDomainFor(uid);
+    if (domain) await acquireWriteSerializationLock(strapi, domain, trx);
     await collectLockedSteps(validationCtx);
-    return null;
-  }
-
-  const release = await acquireWriteSerializationLock(strapi, domain);
-  try {
-    await collectLockedSteps(validationCtx);
-  } catch (error) {
-    // Only on the failure path. On success the caller owns the release, because
-    // the lock must still be held while the write commits.
-    if (release) await release();
-    throw error;
-  }
-  return release;
+  };
 }
 
 function applicable(
