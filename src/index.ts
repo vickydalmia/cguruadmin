@@ -1,3 +1,7 @@
+import { WEBSITE_REFRESH_ACTION_ATTRIBUTES } from './api/website-refresh/controllers/website-refresh';
+import { installMigrationLockTimeout } from './register/migration-lock-timeout';
+import { readWriteSerializationTimeout } from './utils/write-serialization';
+import { startTranslationConfigurationWatcher, stopTranslationConfigurationWatcher } from './translation/configuration-watcher';
 import { initializeBackgroundContext } from './background/execution-context';
 import type { Core } from '@strapi/strapi';
 import { DOTD_SECTION_LABELS, DOTD_UID } from './constants/deal-of-the-day-sections';
@@ -65,17 +69,21 @@ import {
   registerAdminRuntimeConfigRoutes,
   registerCsvExportRoutes,
   registerCountrySetupRoutes,
+  registerDatabaseBackupRoutes,
   registerEntityCouponLayoutRoutes,
   registerEntityDealPageRoutes,
   registerOfferCountryRoutes,
   registerRecordLockRoutes,
   registerTranslationRoutes,
   registerUiDictionaryRoutes,
+  registerWebsiteRefreshRoutes,
 } from './register/admin-routes';
 import { TRANSLATION_ACTION_ATTRIBUTES } from './api/translation/controllers/translation';
 import { UI_DICTIONARY_ACTION_ATTRIBUTES } from './api/ui-dictionary/controllers/ui-dictionary-admin';
-import { ensureContentLocales } from './translation/ensure-locales';
-import { primeEnabledContentLocales } from './translation/locales/registry';
+import {
+  bootstrapContentLocales,
+  stopContentLocaleBootstrapRetry,
+} from './translation/locales/bootstrap';
 import {
   startTranslationOutbox,
   stopTranslationOutbox,
@@ -84,9 +92,15 @@ import {
   startTranslationBackfillRunner,
   stopTranslationBackfillRecovery,
 } from './translation/backfill-run';
+import {
+  startDatabaseBackupRunner,
+  stopDatabaseBackupRunner,
+} from './database-backup/runner';
 
 export default {
   async register({ strapi }: { strapi: Core.Strapi }) {
+    readWriteSerializationTimeout();
+    installMigrationLockTimeout(strapi);
     // The Checkout Merchant custom field, which is what lets ONE dropdown
     // offer Stores and Brands together in the main edit form (a relation can
     // only target one content type — src/constants/checkout-merchant.ts has
@@ -147,6 +161,7 @@ export default {
       // on every restart by cleanPermissionsInDatabase().
       TRANSLATION_ACTION_ATTRIBUTES,
       UI_DICTIONARY_ACTION_ATTRIBUTES,
+      WEBSITE_REFRESH_ACTION_ATTRIBUTES,
     ]);
 
     registerEntityCouponLayoutRoutes(strapi);
@@ -157,6 +172,8 @@ export default {
     registerAdminRuntimeConfigRoutes(strapi);
     registerTranslationRoutes(strapi);
     registerUiDictionaryRoutes(strapi);
+    registerWebsiteRefreshRoutes(strapi);
+    registerDatabaseBackupRoutes(strapi);
 
     // Document-service middlewares. Registration order = execution order:
     // the record-lock guard must run before the document-write pipeline
@@ -292,27 +309,27 @@ export default {
     // locale mirror the ISR path expansion reads, then start the job
     // dispatcher. All BEFORE startIsrOutbox so every event created after
     // boot carries its locale path twins. Fail safe throughout: a broken
-    // TRANSLATION_* env logs loudly and stays off.
-    let translationBootstrapReady = false;
-    try {
-      await ensureContentLocales(strapi);
-      await primeEnabledContentLocales(strapi);
-      translationBootstrapReady = true;
-    } catch (err: any) {
-      strapi.log.error(
-        `[translation] content-locale bootstrap failed: ${err?.message ?? err}`,
-      );
-    }
-    if (translationBootstrapReady) {
-      await startTranslationOutbox(strapi);
-      startTranslationBackfillRunner(strapi);
-    }
+    // TRANSLATION_* env logs loudly and stays off, and a database hiccup here
+    // is retried in the background (60 s doubling to 10 min) instead of
+    // leaving the locale mirror empty for the life of the process.
+    await bootstrapContentLocales(strapi, {
+      onReady: async () => {
+        await startTranslationOutbox(strapi);
+        startTranslationBackfillRunner(strapi);
+      },
+    });
 
+    startTranslationConfigurationWatcher(strapi);
     startIsrOutbox(strapi);
+    // Last: only the container with BACKUP_RUNNER_ENABLED=true takes backups;
+    // everywhere else this logs "disabled" and returns.
+    await startDatabaseBackupRunner(strapi);
   },
 
   async destroy() {
+    stopContentLocaleBootstrapRetry();
+    stopTranslationConfigurationWatcher();
     stopTranslationBackfillRecovery();
-    await Promise.all([stopIsrOutbox(), stopTranslationOutbox()]);
+    await Promise.all([stopIsrOutbox(), stopTranslationOutbox(), stopDatabaseBackupRunner()]);
   },
 };
