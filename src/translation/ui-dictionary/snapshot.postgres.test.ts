@@ -47,7 +47,10 @@ const alignRevision = require('../../../database/migrations/2026.09.09T00.00.00.
     const reader = new UiDictionaryStore(strapi);
     const writer = new UiDictionaryStore(strapi);
     await writer.syncCatalogue({ version: 'old', entries: { 'common.old': { text: 'Old' } } } as any);
-    await db('ui_translations').insert({ locale: 'ar', key: 'common.old', text: 'قديم', source_hash: 'hash', origin: 'manual' });
+    await writer.writeManualTranslation('ar', 'common.old', 'قديم', null);
+    await expect(reader.publicDictionary('ar')).resolves.toMatchObject({
+      version: 'old', ready: true, messages: { 'common.old': 'قديم' },
+    });
     const original = reader.readMeta.bind(reader);
     const interception = vi.spyOn(reader, 'readMeta').mockImplementationOnce(async (trx) => {
       expect((await trx.raw('SHOW transaction_isolation')).rows[0].transaction_isolation).toBe('repeatable read');
@@ -58,9 +61,12 @@ const alignRevision = require('../../../database/migrations/2026.09.09T00.00.00.
       } } as any);
       return meta;
     });
-    const duringUpdate = await reader.publicDictionary('ar');
-    expect(duringUpdate).toMatchObject({ version: 'old', ready: true, messages: { 'common.old': 'قديم' } });
-    interception.mockRestore();
+    try {
+      const duringUpdate = await reader.publicDictionary('ar');
+      expect(duringUpdate).toMatchObject({ version: 'old', ready: true, messages: { 'common.old': 'قديم' } });
+    } finally {
+      interception.mockRestore();
+    }
     expect(await reader.publicDictionary('ar')).toMatchObject({ version: 'new', ready: false });
   });
 });
