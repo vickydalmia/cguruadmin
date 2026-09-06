@@ -5,6 +5,7 @@ import {
   registerCountrySetupRoutes,
   registerOfferCountryRoutes,
   registerUiDictionaryRoutes,
+  registerWebsiteRefreshRoutes,
 } from './admin-routes';
 
 describe('admin runtime config route', () => {
@@ -113,4 +114,14 @@ describe('ui dictionary routes', () => {
       ],
     });
   });
+});
+
+
+it('protects all manual refresh endpoints with admin session and refresh permission', () => {
+  const routes = vi.fn();
+  registerWebsiteRefreshRoutes({ server: { routes } } as any);
+  const registration = routes.mock.calls[0][0];
+  expect(registration.type).toBe('admin');
+  expect(registration.routes).toHaveLength(3);
+  for (const route of registration.routes) expect(route.config.policies).toEqual(['admin::isAuthenticatedAdmin', 'global::website-refresh-manage-only']);
 });

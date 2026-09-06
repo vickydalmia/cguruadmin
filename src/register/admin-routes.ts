@@ -320,3 +320,16 @@ export function registerUiDictionaryRoutes(strapi: Core.Strapi): void {
     ],
   } as any);
 }
+
+/** Cache controls use admin sessions and an assignable permission. */
+export function registerWebsiteRefreshRoutes(strapi: Core.Strapi): void {
+  const policies = ['admin::isAuthenticatedAdmin', 'global::website-refresh-manage-only'];
+  strapi.server.routes({
+    type: 'admin', prefix: '/website-refresh',
+    routes: [
+      { method: 'GET', path: '/options', handler: 'api::website-refresh.website-refresh.options', config: { policies } },
+      { method: 'POST', path: '/refresh', handler: 'api::website-refresh.website-refresh.refresh', config: { policies } },
+      { method: 'GET', path: '/status/:id', handler: 'api::website-refresh.website-refresh.status', config: { policies } },
+    ],
+  } as any);
+}

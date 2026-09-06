@@ -1,3 +1,4 @@
+import { WebsiteRefreshPanel } from './features/website-refresh/components/website-refresh-panel';
 import Logo from './extensions/logo-icon.svg';
 
 import type { StrapiApp } from '@strapi/strapi/admin';
@@ -181,6 +182,12 @@ export default {
   },
   bootstrap(app: StrapiApp) {
     app.addSettingsLink('global', {
+      id: 'website-refresh', to: '/settings/website-refresh',
+      permissions: [{ action: 'admin::website-refresh.manage', subject: null }],
+      intlLabel: { id: 'website-refresh.settings.label', defaultMessage: 'Website refresh' },
+      Component: async () => import('./features/website-refresh/components/website-refresh-page'),
+    });
+    app.addSettingsLink('global', {
       id: 'country-setup',
       to: '/settings/country-setup',
       permissions: [],
@@ -248,6 +255,7 @@ export default {
       // Self-hides unless this deployment translates content (Country
       // Setup + TRANSLATION_* env) and the model is localized.
       TranslationPanel,
+      WebsiteRefreshPanel,
     ]);
 
     // Registered after every plugin's bootstrap, so this sees (and preserves)
