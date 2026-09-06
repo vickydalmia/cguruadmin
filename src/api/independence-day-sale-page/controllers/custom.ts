@@ -24,6 +24,7 @@ import {
 
 import { PAGE_POPULATE } from './independence-day-sale-populate';
 import { fillSections, sectionActive } from './independence-day-sale-transforms';
+import { attachStablePublicOfferIdsForRequest } from '../../coupon/services/public-offer-ids';
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   async independenceDaySaleFull(ctx: any) {
@@ -42,6 +43,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     await fillSections(strapi, ctx, sanitized);
     arrayizeOfferText(sanitized);
     await attachFestiveOffers(strapi, sanitized);
+    await attachStablePublicOfferIdsForRequest(strapi, ctx, sanitized);
 
     return ctx.send({ data: sanitized });
   },

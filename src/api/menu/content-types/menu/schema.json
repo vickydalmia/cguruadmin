@@ -13,12 +13,22 @@
   "attributes": {
     "title": {
       "type": "string",
-      "default": "Header Settings"
+      "default": "Header Settings",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "notification": {
       "type": "component",
       "component": "header.notification",
-      "repeatable": false
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "topStores": {
       "type": "relation",
@@ -28,11 +38,21 @@
     },
     "topStoresLabel": {
       "type": "string",
-      "default": "Top Stores"
+      "default": "Top Stores",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "topStoresTitle": {
       "type": "string",
-      "default": "All Stores"
+      "default": "All Stores",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "topStoresViewAllUrl": {
       "type": "string",
@@ -46,11 +66,21 @@
     },
     "topBrandsLabel": {
       "type": "string",
-      "default": "Top Brands"
+      "default": "Top Brands",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "topBrandsTitle": {
       "type": "string",
-      "default": "All Brands"
+      "default": "All Brands",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "topBrandsViewAllUrl": {
       "type": "string",
@@ -60,24 +90,49 @@
       "type": "component",
       "repeatable": true,
       "component": "header.search-top-store",
-      "max": 8
+      "max": 8,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "searchSuggestions": {
       "type": "component",
       "repeatable": true,
-      "component": "header.search-suggestion"
+      "component": "header.search-suggestion",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "categoriesLabel": {
       "type": "string",
-      "default": "Categories"
+      "default": "Categories",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "categoriesTitle": {
       "type": "string",
-      "default": "All Categories"
+      "default": "All Categories",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "categoriesPopularStoresTitle": {
       "type": "string",
-      "default": "Popular Stores"
+      "default": "Popular Stores",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "categoriesViewAllUrl": {
       "type": "string",
@@ -88,12 +143,27 @@
     "categorySections": {
       "type": "component",
       "repeatable": true,
-      "component": "nav.category-section"
+      "component": "nav.category-section",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "extraItems": {
       "type": "component",
       "repeatable": true,
-      "component": "nav.link"
+      "component": "nav.link",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    }
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
     }
   }
 }

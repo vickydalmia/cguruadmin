@@ -39,6 +39,7 @@ export async function validateHomepagePopularStores(
   strapi: Core.Strapi,
   data: unknown,
   documentId?: string,
+  locale?: string,
 ): Promise<void> {
   if (
     !data ||
@@ -53,7 +54,8 @@ export async function validateHomepagePopularStores(
 
   const current: any = documentId
     ? await strapi.documents(HOMEPAGE_UID).findOne({
-        documentId,
+      documentId,
+      ...(locale ? { locale } : {}),
         fields: ['documentId'],
         populate: {
           popularStores: {

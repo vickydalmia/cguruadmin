@@ -1,0 +1,272 @@
+diff --git a/node_modules/@strapi/database/dist/transaction-context.js b/node_modules/@strapi/database/dist/transaction-context.js
+--- a/node_modules/@strapi/database/dist/transaction-context.js
++++ b/node_modules/@strapi/database/dist/transaction-context.js
+@@ -2,86 +2,66 @@
+-
++
+ var node_async_hooks = require('node:async_hooks');
+-
++
+-/**
+- * After the user calls the Knex transactor’s `commit` or `rollback` (e.g. via
+- * the callback object returned from `Database#transaction`, or after the
+- * container’s promise has settled in Knex), a second finalisation is invalid
+- * and can throw (e.g. "Transaction query already complete"). Knex exposes
+- * `isCompleted()` for this; optional for mocks that omit it.
+- */ const isTransactorComplete = (trx)=>{
+-    const t = trx;
+-    return typeof t.isCompleted === 'function' && t.isCompleted();
++const isTransactorComplete = (trx) =>
++    typeof trx.isCompleted === 'function' && trx.isCompleted();
++const storage = new node_async_hooks.AsyncLocalStorage();
++const active = (store) => store?.trx && !store.finalized && !isTransactorComplete(store.trx);
++const drain = (store) => {
++    if (!store) return { commit: [], rollback: [] };
++    store.finalized = true;
++    store.trx = null;
++    return {
++        commit: store.commitCallbacks.splice(0),
++        rollback: store.rollbackCallbacks.splice(0)
++    };
+ };
+-const storage = new node_async_hooks.AsyncLocalStorage();
+ const transactionCtx = {
+-    async run (trx, cb) {
++    async run(trx, cb) {
++        const parent = storage.getStore();
++        // Only Strapi's active, same-transactor nesting shares lifecycle state.
++        const store = active(parent) && parent.trx === trx ? parent : {
++            trx, finalized: false, commitCallbacks: [], rollbackCallbacks: []
++        };
++        return storage.run(store, cb);
++    },
++    get() {
+         const store = storage.getStore();
+-        return storage.run({
+-            trx,
+-            // Fill with existing callbacks if nesting transactions
+-            commitCallbacks: store?.commitCallbacks || [],
+-            rollbackCallbacks: store?.rollbackCallbacks || []
+-        }, cb);
++        return active(store) ? store.trx : undefined;
+     },
+-    get () {
++    async commit(trx) {
+         const store = storage.getStore();
+-        return store?.trx;
+-    },
+-    async commit (trx) {
+-        const store = storage.getStore();
+-        if (isTransactorComplete(trx)) {
+-            if (store?.trx) {
+-                store.trx = null;
+-            }
++        if (store?.finalized || isTransactorComplete(trx)) {
++            drain(store);
+             return;
+         }
+-        // Clear transaction from store
+-        if (store?.trx) {
+-            store.trx = null;
++        // Detach both queues before awaiting or invoking user code. Descendants
++        // can never observe an active transaction or replay these registrations.
++        const callbacks = drain(store);
++        try {
++            await trx.commit();
++        } catch (error) {
++            if (!isTransactorComplete(trx)) await trx.rollback();
++            callbacks.rollback.forEach((cb) => cb());
++            throw error;
+         }
+-        // Commit transaction
+-        await trx.commit();
+-        if (!store?.commitCallbacks.length) {
+-            return;
+-        }
+-        // Run callbacks
+-        store.commitCallbacks.forEach((cb)=>cb());
+-        store.commitCallbacks = [];
++        callbacks.commit.forEach((cb) => cb());
+     },
+-    async rollback (trx) {
++    async rollback(trx) {
+         const store = storage.getStore();
+-        if (isTransactorComplete(trx)) {
+-            if (store?.trx) {
+-                store.trx = null;
+-            }
+-            return;
+-        }
+-        // Clear transaction from store
+-        if (store?.trx) {
+-            store.trx = null;
+-        }
+-        // Rollback transaction
++        const finalized = store?.finalized;
++        const callbacks = drain(store);
++        if (finalized || isTransactorComplete(trx)) return;
+         await trx.rollback();
+-        if (!store?.rollbackCallbacks.length) {
+-            return;
+-        }
+-        // Run callbacks
+-        store.rollbackCallbacks.forEach((cb)=>cb());
+-        store.rollbackCallbacks = [];
++        callbacks.rollback.forEach((cb) => cb());
+     },
+-    onCommit (cb) {
++    onCommit(cb) {
+         const store = storage.getStore();
+-        if (store?.commitCallbacks) {
+-            store.commitCallbacks.push(cb);
+-        }
++        if (active(store)) store.commitCallbacks.push(cb);
+     },
+-    onRollback (cb) {
++    onRollback(cb) {
+         const store = storage.getStore();
+-        if (store?.rollbackCallbacks) {
+-            store.rollbackCallbacks.push(cb);
+-        }
++        if (active(store)) store.rollbackCallbacks.push(cb);
+     }
+ };
+-
++
+ exports.transactionCtx = transactionCtx;
+-//# sourceMappingURL=transaction-context.js.map
+diff --git a/node_modules/@strapi/database/dist/transaction-context.mjs b/node_modules/@strapi/database/dist/transaction-context.mjs
+--- a/node_modules/@strapi/database/dist/transaction-context.mjs
++++ b/node_modules/@strapi/database/dist/transaction-context.mjs
+@@ -1,85 +1,65 @@
+ import { AsyncLocalStorage } from 'node:async_hooks';
+-
++
+-/**
+- * After the user calls the Knex transactor’s `commit` or `rollback` (e.g. via
+- * the callback object returned from `Database#transaction`, or after the
+- * container’s promise has settled in Knex), a second finalisation is invalid
+- * and can throw (e.g. "Transaction query already complete"). Knex exposes
+- * `isCompleted()` for this; optional for mocks that omit it.
+- */ const isTransactorComplete = (trx)=>{
+-    const t = trx;
+-    return typeof t.isCompleted === 'function' && t.isCompleted();
++const isTransactorComplete = (trx) =>
++    typeof trx.isCompleted === 'function' && trx.isCompleted();
++const storage = new AsyncLocalStorage();
++const active = (store) => store?.trx && !store.finalized && !isTransactorComplete(store.trx);
++const drain = (store) => {
++    if (!store) return { commit: [], rollback: [] };
++    store.finalized = true;
++    store.trx = null;
++    return {
++        commit: store.commitCallbacks.splice(0),
++        rollback: store.rollbackCallbacks.splice(0)
++    };
+ };
+-const storage = new AsyncLocalStorage();
+ const transactionCtx = {
+-    async run (trx, cb) {
++    async run(trx, cb) {
++        const parent = storage.getStore();
++        // Only Strapi's active, same-transactor nesting shares lifecycle state.
++        const store = active(parent) && parent.trx === trx ? parent : {
++            trx, finalized: false, commitCallbacks: [], rollbackCallbacks: []
++        };
++        return storage.run(store, cb);
++    },
++    get() {
+         const store = storage.getStore();
+-        return storage.run({
+-            trx,
+-            // Fill with existing callbacks if nesting transactions
+-            commitCallbacks: store?.commitCallbacks || [],
+-            rollbackCallbacks: store?.rollbackCallbacks || []
+-        }, cb);
++        return active(store) ? store.trx : undefined;
+     },
+-    get () {
++    async commit(trx) {
+         const store = storage.getStore();
+-        return store?.trx;
+-    },
+-    async commit (trx) {
+-        const store = storage.getStore();
+-        if (isTransactorComplete(trx)) {
+-            if (store?.trx) {
+-                store.trx = null;
+-            }
++        if (store?.finalized || isTransactorComplete(trx)) {
++            drain(store);
+             return;
+         }
+-        // Clear transaction from store
+-        if (store?.trx) {
+-            store.trx = null;
++        // Detach both queues before awaiting or invoking user code. Descendants
++        // can never observe an active transaction or replay these registrations.
++        const callbacks = drain(store);
++        try {
++            await trx.commit();
++        } catch (error) {
++            if (!isTransactorComplete(trx)) await trx.rollback();
++            callbacks.rollback.forEach((cb) => cb());
++            throw error;
+         }
+-        // Commit transaction
+-        await trx.commit();
+-        if (!store?.commitCallbacks.length) {
+-            return;
+-        }
+-        // Run callbacks
+-        store.commitCallbacks.forEach((cb)=>cb());
+-        store.commitCallbacks = [];
++        callbacks.commit.forEach((cb) => cb());
+     },
+-    async rollback (trx) {
++    async rollback(trx) {
+         const store = storage.getStore();
+-        if (isTransactorComplete(trx)) {
+-            if (store?.trx) {
+-                store.trx = null;
+-            }
+-            return;
+-        }
+-        // Clear transaction from store
+-        if (store?.trx) {
+-            store.trx = null;
+-        }
+-        // Rollback transaction
++        const finalized = store?.finalized;
++        const callbacks = drain(store);
++        if (finalized || isTransactorComplete(trx)) return;
+         await trx.rollback();
+-        if (!store?.rollbackCallbacks.length) {
+-            return;
+-        }
+-        // Run callbacks
+-        store.rollbackCallbacks.forEach((cb)=>cb());
+-        store.rollbackCallbacks = [];
++        callbacks.rollback.forEach((cb) => cb());
+     },
+-    onCommit (cb) {
++    onCommit(cb) {
+         const store = storage.getStore();
+-        if (store?.commitCallbacks) {
+-            store.commitCallbacks.push(cb);
+-        }
++        if (active(store)) store.commitCallbacks.push(cb);
+     },
+-    onRollback (cb) {
++    onRollback(cb) {
+         const store = storage.getStore();
+-        if (store?.rollbackCallbacks) {
+-            store.rollbackCallbacks.push(cb);
+-        }
++        if (active(store)) store.rollbackCallbacks.push(cb);
+     }
+ };
+-
++
+ export { transactionCtx };
+-//# sourceMappingURL=transaction-context.mjs.map

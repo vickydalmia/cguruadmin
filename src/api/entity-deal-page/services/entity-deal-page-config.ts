@@ -100,6 +100,8 @@ export const DEAL_FIELDS = [
   'checkoutMerchant',
   // Affiliate-brand offers render the BRAND logo in their merchant chip.
   'isForAffiliateBrand',
+  // Csv of offer-country registry codes — flag tags on the cards.
+  'offerCountries',
   // Consumed and removed by arrayizeOfferText after it derives the final
   // Amazon Creator Connections condition.
   AMAZON_AFFILIATE_DISCLOSURE_FIELD,

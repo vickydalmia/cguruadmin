@@ -10,67 +10,131 @@
   "options": {
     "draftAndPublish": false
   },
-  "pluginOptions": {},
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
+  },
   "attributes": {
     "title": {
       "type": "string",
-      "default": "About Page"
+      "default": "About Page",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "breadcrumbAriaLabel": {
       "type": "string",
       "default": "Breadcrumb",
-      "maxLength": 60
+      "maxLength": 60,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "breadcrumbItems": {
       "type": "component",
       "repeatable": true,
       "component": "shared.breadcrumb-item",
-      "max": 5
+      "max": 5,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "hero": {
       "type": "component",
       "repeatable": false,
-      "component": "about.hero"
+      "component": "about.hero",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "ourStory": {
       "type": "component",
       "repeatable": false,
-      "component": "about.our-story"
+      "component": "about.our-story",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "journey": {
       "type": "component",
       "repeatable": false,
-      "component": "about.journey"
+      "component": "about.journey",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "missionVision": {
       "type": "component",
       "repeatable": false,
-      "component": "about.mission-vision"
+      "component": "about.mission-vision",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "trust": {
       "type": "component",
       "repeatable": false,
-      "component": "about.trust"
+      "component": "about.trust",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "founder": {
       "type": "component",
       "repeatable": false,
-      "component": "about.founder"
+      "component": "about.founder",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "press": {
       "type": "component",
       "repeatable": false,
-      "component": "about.press"
+      "component": "about.press",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "international": {
       "type": "component",
       "repeatable": false,
-      "component": "about.international"
+      "component": "about.international",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "seo": {
       "type": "component",
       "repeatable": false,
-      "component": "shared.seo"
+      "component": "shared.seo",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     }
   }
 }

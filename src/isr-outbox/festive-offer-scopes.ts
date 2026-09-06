@@ -5,6 +5,7 @@ import type { Core } from '@strapi/strapi';
 import type { ScopeRequest } from './types';
 import { entityTemplateOwnerSlugs } from '../api/site-configuration/services/entity-template-owners';
 import { entityDealPageSlug } from '../api/entity-deal-page/services/entity-deal-route';
+import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
 import {
   CHECKOUT_MERCHANT_FIELD,
   formatCheckoutMerchant,
@@ -140,6 +141,7 @@ export async function festiveMerchantScope(
 
   for (const offerUid of OFFER_UID_LIST) {
     const offers: any[] = await strapi.documents(offerUid as any).findMany({
+      locale: DEFAULT_CONTENT_LOCALE,
       filters: { [CHECKOUT_MERCHANT_FIELD]: merchant } as any,
       fields: ['documentId'] as any,
       populate: {
@@ -193,6 +195,7 @@ export async function festiveMerchantScope(
         membership.push({ deals: { documentId: { $in: dealIds } } });
       }
       const entities: any[] = await strapi.documents(entityUid as any).findMany({
+        locale: DEFAULT_CONTENT_LOCALE,
         filters: { $or: membership } as any,
         fields: ['name', 'slug'] as any,
         limit: FESTIVE_OFFER_SCAN_LIMIT,

@@ -40,7 +40,7 @@ const makeTrx = () => {
 };
 
 describe('touchEntityPageUpdatedAt', () => {
-  it('touches the entity row without a recursive Document Service update', async () => {
+  it('touches every locale row of the document without a recursive Document Service update', async () => {
     const trx = makeTrx();
     const documents = vi.fn();
     const now = new Date('2026-07-26T12:00:00.000Z');
@@ -59,7 +59,9 @@ describe('touchEntityPageUpdatedAt', () => {
     );
 
     expect(trx).toHaveBeenCalledWith('stores');
-    expect(trx.where).toHaveBeenCalledWith({ id: 42 });
+    // document_id addressing: the en row AND its locale twins all move, so
+    // the public timestamp never goes stale on a translated page.
+    expect(trx.where).toHaveBeenCalledWith({ document_id: 'store-1' });
     expect(trx.update).toHaveBeenCalledWith({ updated_at: now });
     expect(documents).not.toHaveBeenCalled();
     expect(connection).not.toHaveBeenCalled();
@@ -81,6 +83,7 @@ describe('touchEntityPageUpdatedAt', () => {
 
     expect(connection).not.toHaveBeenCalled();
     expect(trx).toHaveBeenCalledWith('banks');
+    expect(trx.where).toHaveBeenCalledWith({ document_id: 'bank-1' });
   });
 
   it('refuses to run without a transaction', async () => {
@@ -93,12 +96,12 @@ describe('touchEntityPageUpdatedAt', () => {
     ).rejects.toThrow(/requires the write transaction/);
   });
 
-  it('resolves the numeric row when the write result omits id', async () => {
+  it('addresses by documentId even when the write result omits id', async () => {
     const trx = makeTrx();
-    const findOne = vi.fn(async () => ({ id: 73 }));
+    const documents = vi.fn();
     const strapi = {
       db: { connection: vi.fn() },
-      documents: vi.fn(() => ({ findOne })),
+      documents,
     } as any;
 
     await touchEntityPageUpdatedAt(
@@ -109,9 +112,22 @@ describe('touchEntityPageUpdatedAt', () => {
       'category-1',
     );
 
-    expect(findOne).toHaveBeenCalledWith({
-      documentId: 'category-1',
-      fields: ['documentId'],
-    });
+    expect(documents).not.toHaveBeenCalled();
+    expect(trx.where).toHaveBeenCalledWith({ document_id: 'category-1' });
+  });
+
+  it('falls back to the written row id when no documentId is known', async () => {
+    const trx = makeTrx();
+    const strapi = { db: { connection: vi.fn() }, documents: vi.fn() } as any;
+
+    await touchEntityPageUpdatedAt(
+      strapi,
+      trx,
+      'api::category.category',
+      { id: 73 },
+      undefined,
+    );
+
+    expect(trx.where).toHaveBeenCalledWith({ id: 73 });
   });
 });

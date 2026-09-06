@@ -2,6 +2,7 @@
 // version derivation. Split out of the service coordinator (see
 // ./entity-coupon-layout.ts).
 import type { Core } from '@strapi/strapi';
+import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
 import {
   CouponLayoutError,
   configFor,
@@ -60,8 +61,11 @@ export function versionOf(entity: any): string {
 export async function readEntity(strapi: Core.Strapi, kind: unknown, rawDocumentId: unknown) {
   const config = configFor(kind);
   const resolvedDocumentId = documentId(rawDocumentId);
+  // The layout tool edits the DEFAULT locale's curated relations; locale
+  // twins share the documentId, so the read must pin the locale or findOne
+  // resolves an arbitrary row (and its relations) once i18n is enabled.
   const entity = await strapi.db.query(config.uid as any).findOne({
-    where: { documentId: resolvedDocumentId },
+    where: { documentId: resolvedDocumentId, locale: DEFAULT_CONTENT_LOCALE },
     select: ['id', 'documentId', 'slug', 'updatedAt'],
     populate: {
       topPickCoupons: {

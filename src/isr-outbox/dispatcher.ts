@@ -1,3 +1,5 @@
+import { runInBackground } from '../background/execution-context';
+import { randomUUID } from 'node:crypto';
 import type { Core } from '@strapi/strapi';
 import type { IsrOutboxConfig } from './config';
 import { logIsrOutbox } from './log';
@@ -70,6 +72,11 @@ export interface OutboxDeliveryStore {
   ): Promise<{ owned: boolean; attemptCount: number; delayMs: number }>;
 }
 
+/** Per-row gateway key: UUID-stable across retries, unique across DB restores. */
+export function deliveryEventKey(event: Pick<IsrOutboxEvent, 'deliveryKey'>): string {
+  return event.deliveryKey;
+}
+
 export async function deliverOutboxEvent(
   event: IsrOutboxEvent,
   config: Pick<
@@ -89,7 +96,14 @@ export async function deliverOutboxEvent(
       'content-type': 'application/json',
       accept: 'application/json',
     },
-    body: JSON.stringify({ eventKey: event.eventKey, ...event.payload }),
+    // The gateway derives its 31-day idempotency keys (and the route-inventory
+    // refresh token) from `eventKey`. Coalesced rows reuse one LOGICAL key
+    // (`translation-isr:<locale>`, the sweep reasons), so the delivery key must
+    // be per row: unique for every pending row, stable across retries of it.
+    body: JSON.stringify({
+      eventKey: deliveryEventKey(event),
+      ...event.payload,
+    }),
     signal: AbortSignal.timeout(config.requestTimeoutMs),
   });
   if (!response.ok) {
@@ -208,6 +222,8 @@ export class IsrOutboxDispatcher {
   private timer: NodeJS.Timeout | null = null;
   private running: Promise<void> | null = null;
   private stopped = false;
+  private started = false;
+  private readonly instanceId = randomUUID();
   private nextCleanupAt = 0;
   private nextBacklogCheckAt = 0;
   private readonly store: IsrOutboxStore;
@@ -232,9 +248,12 @@ export class IsrOutboxDispatcher {
   }
 
   start(): void {
-    this.stopped = false;
+    if (this.started || this.stopped) return;
+    this.started = true;
     this.schedule(0);
     logIsrOutbox(this.strapi, 'info', 'isr.outbox.dispatcher_started', {
+      instanceId: this.instanceId,
+      pid: process.pid,
       pollMs: this.config.pollMs,
       batchSize: this.config.batchSize,
     });
@@ -255,13 +274,13 @@ export class IsrOutboxDispatcher {
   private schedule(delayMs: number): void {
     if (this.stopped) return;
     if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => {
+    this.timer = runInBackground(() => setTimeout(() => {
       this.timer = null;
-      this.running = this.runCycle().finally(() => {
+      this.running = runInBackground(() => this.runCycle()).finally(() => {
         this.running = null;
         this.schedule(this.config.pollMs);
       });
-    }, delayMs);
+    }, delayMs));
     this.timer.unref?.();
   }
 
@@ -395,7 +414,7 @@ export class IsrOutboxDispatcher {
       }
     }
 
-    for (let count = 0; count < this.config.batchSize; count += 1) {
+    for (let count = 0; !this.stopped && count < this.config.batchSize; count += 1) {
       const found = await dispatchOne(
         this.store,
         (event) => deliverOutboxEvent(event, this.config, this.fetchImpl),

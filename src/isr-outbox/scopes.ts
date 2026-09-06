@@ -3,6 +3,7 @@ import type { ScopeRequest } from './types';
 import { mergeScope } from './payload';
 import { toRouteSlug } from '../utils/route-normalization';
 import { entityDealPageSlug } from '../api/entity-deal-page/services/entity-deal-route';
+import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
 import { DOCUMENT_WRITE_ACTIONS } from '../constants/document-write';
 import {
   ABOUT_PAGE_SLUG,
@@ -269,6 +270,7 @@ export async function computeScope(
     if (!documentId) return { full: true, refreshScopes: ['routes'] };
     const doc: any = await strapi.documents(uid as any).findOne({
       documentId,
+      locale: DEFAULT_CONTENT_LOCALE,
       fields: ['name', 'slug'] as any,
     });
     const slug = publicSlug(doc?.slug, kind);

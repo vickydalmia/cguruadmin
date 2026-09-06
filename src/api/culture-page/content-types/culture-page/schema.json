@@ -7,24 +7,125 @@
     "displayName": "Culture Page",
     "description": "Editable copy, stats, values, team photo gallery, testimonials, timeline and hiring banner for the public /culture/ page."
   },
-  "options": { "draftAndPublish": false },
-  "pluginOptions": {},
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
+  },
   "attributes": {
-    "title": { "type": "string", "default": "Culture" },
-    "breadcrumbAriaLabel": { "type": "string", "default": "Breadcrumb", "maxLength": 60 },
+    "title": {
+      "type": "string",
+      "default": "Culture",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "breadcrumbAriaLabel": {
+      "type": "string",
+      "default": "Breadcrumb",
+      "maxLength": 60,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
     "breadcrumbItems": {
       "type": "component",
       "repeatable": true,
       "component": "shared.breadcrumb-item",
-      "max": 5
+      "max": 5,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
-    "hero": { "type": "component", "repeatable": false, "component": "culture.hero" },
-    "stats": { "type": "component", "repeatable": true, "component": "culture.stat", "max": 6 },
-    "values": { "type": "component", "repeatable": false, "component": "culture.values" },
-    "gallery": { "type": "component", "repeatable": false, "component": "culture.gallery" },
-    "testimonials": { "type": "component", "repeatable": false, "component": "culture.testimonials" },
-    "journey": { "type": "component", "repeatable": false, "component": "culture.journey" },
-    "recruitment": { "type": "component", "repeatable": false, "component": "culture.recruitment" },
-    "seo": { "type": "component", "repeatable": false, "component": "shared.seo" }
+    "hero": {
+      "type": "component",
+      "repeatable": false,
+      "component": "culture.hero",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "stats": {
+      "type": "component",
+      "repeatable": true,
+      "component": "culture.stat",
+      "max": 6,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "values": {
+      "type": "component",
+      "repeatable": false,
+      "component": "culture.values",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "gallery": {
+      "type": "component",
+      "repeatable": false,
+      "component": "culture.gallery",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "testimonials": {
+      "type": "component",
+      "repeatable": false,
+      "component": "culture.testimonials",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "journey": {
+      "type": "component",
+      "repeatable": false,
+      "component": "culture.journey",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "recruitment": {
+      "type": "component",
+      "repeatable": false,
+      "component": "culture.recruitment",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "seo": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.seo",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    }
   }
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Core } from '@strapi/strapi';
 import { runWriteValidation } from './run';
+import { runWithTranslationWriteContext } from '../../translation/write-flag';
 import {
   COLLECTED_STEPS,
   LOCKED_STEPS,
@@ -49,6 +50,7 @@ describe('write-validation step order', () => {
       'validateAffiliateOfferForWrite',
       'validateAffiliateBrandFlip',
       'validateCheckoutMerchantForWrite',
+      'validateOfferCountriesForWrite',
       'validateEntityTopPickCoupons',
       'validateEntityOrderedCoupons',
       'validateOfferFieldsForWrite',
@@ -381,5 +383,186 @@ describe('runWriteValidation — the cron stays grandfathered', () => {
     );
 
     expect(error.details?.errors?.length).toBeGreaterThan(0);
+  });
+});
+
+describe('runWriteValidation — translation writes use narrow source-parity exceptions', () => {
+  // The Arabic copy of an entry that already passed every rule. Read against
+  // the English stored row, its denser text fails the 160-char minimum and
+  // its not-yet-translated relations read as "orphaned" — the two rejections
+  // that dead-lettered the UAE backfill. Group A still runs on it.
+  const translated = {
+    name: 'أمازون',
+    shortDescription: '  متجر إلكتروني رائد  ',
+    logo: { documentId: 'logo-1' },
+    logoAlt: 'شعار أمازون',
+    seo: { metaTitle: 'كوبونات أمازون', metaDescription: 'وفّر باستخدام الأكواد.' },
+  };
+
+  // The writer always targets a content locale: documents().update({ locale }).
+  const arabicWrite = (data: any) => ({
+    ...write('api::store.store', data, 'update'),
+    params: { data, locale: 'ar' },
+  });
+
+  const englishSource = {
+    ...translated,
+    name: 'Amazon',
+    slug: 'amazon',
+    shortDescription: 'x'.repeat(200),
+    logoAlt: 'Amazon logo',
+    seo: { metaTitle: 'Amazon coupons', metaDescription: 'Save with verified codes.' },
+  };
+
+  const asTranslation = (data: any, targetRowExisted = false) =>
+    runWithTranslationWriteContext(
+      {
+        sourceEntry: englishSource,
+        targetLocale: 'ar',
+        plan: { data, skippedRelations: [] },
+        targetRowExisted,
+        operation: 'upsert',
+      },
+      () => runWriteValidation(fakeStrapi({ human: false }), arabicWrite(data)),
+    );
+
+  it('allows the locale-specific short description rule while validators still run', async () => {
+    const payload = arabicWrite({ ...translated });
+    await expect(
+      runWithTranslationWriteContext(
+        {
+          sourceEntry: englishSource,
+          targetLocale: 'ar',
+          plan: { data: payload.params.data, skippedRelations: [] },
+          targetRowExisted: false,
+          operation: 'upsert',
+        },
+        () => runWriteValidation(fakeStrapi({ human: false }), payload),
+      ),
+    ).resolves.toBeNull();
+    // Mutators still normalise the payload the write will persist.
+    expect(payload.params.data.shortDescription).toBe('متجر إلكتروني رائد');
+  });
+
+  it('rejects a target-only defect even under the translation flag', async () => {
+    const error = await caught(() =>
+      asTranslation({ ...translated, logoAlt: '' }),
+    );
+    expect(error.details?.errors?.map((e) => e.path.join('.'))).toContain('logoAlt');
+  });
+
+  it('validates shared source values without adding them to the locale plan', async () => {
+    const localizedPlan = { ...translated };
+    const invalidSource = {
+      ...englishSource,
+      slug: 'Bad_Slug',
+    };
+    const error = await caught(() =>
+      runWithTranslationWriteContext(
+        {
+          sourceEntry: invalidSource,
+          targetLocale: 'ar',
+          plan: { data: localizedPlan, skippedRelations: [] },
+          targetRowExisted: false,
+          operation: 'upsert',
+        },
+        () =>
+          runWriteValidation(
+            fakeStrapi({ human: false }),
+            arabicWrite(localizedPlan),
+          ),
+      ),
+    );
+
+    // Arabic does not own the route slug, but schema/SEO rules still inspect
+    // the effective source+plan record. The provider-facing plan remains
+    // locale-only throughout.
+    expect(error.details?.errors?.length).toBeGreaterThan(0);
+    expect(localizedPlan).not.toHaveProperty('slug');
+  });
+
+  it('lets a first locale version keep its own English row out of uniqueness checks', async () => {
+    // A job's slug is shared across locales. Its first Arabic write validates
+    // as a create (no target row yet) but with the shared documentId, so the
+    // English row it finds is the same document — not a collision.
+    // The only job with this slug is the document being translated.
+    const findFirst = vi.fn(async ({ filters }: any) =>
+      filters?.documentId?.$ne === 'job-1'
+        ? null
+        : { documentId: 'job-1', slug: 'senior-editor', title: 'Senior editor' },
+    );
+    const strapi = fakeStrapi({ human: false }) as any;
+    strapi.documents = () => ({
+      findOne: async () => null,
+      findFirst,
+      findMany: async () => [],
+      count: async () => 0,
+    });
+    const plan = { title: 'محرر أول', category: 'التحرير' };
+    const source = { ...plan, documentId: 'job-1', title: 'Senior editor', slug: 'senior-editor', category: 'Editorial' };
+    await expect(
+      runWithTranslationWriteContext(
+        {
+          sourceEntry: source,
+          targetLocale: 'ar',
+          plan: { data: plan, skippedRelations: [] },
+          targetRowExisted: false,
+          operation: 'upsert',
+        },
+        () =>
+          runWriteValidation(strapi, {
+            uid: 'api::job.job',
+            action: 'update',
+            params: { data: plan, locale: 'ar', documentId: 'job-1' },
+          }),
+      ),
+    ).resolves.toBeNull();
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filters: expect.objectContaining({ documentId: { $ne: 'job-1' } }),
+      }),
+    );
+  });
+
+  it('does not judge the source offer lifecycle on a translation write', async () => {
+    // Every lifecycle field is non-localized and copied from English; an
+    // already-expired offer is a stored state, not a target defect.
+    const lifecycle = COLLECTED_STEPS.find((s) => s.name === 'validateOfferLifecycle')!;
+    const base = {
+      strapi: {
+        ...(fakeStrapi({ human: false }) as any),
+        contentType: () => ({ attributes: {} }),
+      },
+      uid: 'api::coupon.coupon',
+      action: 'create',
+      data: { title: 'عرض منتهي', expiresAt: '2020-01-01T00:00:00.000Z' },
+      documentId: 'coupon-1',
+      strict: true,
+      locale: 'ar',
+    } as any;
+    await expect(lifecycle.run({ ...base, translation: null })).rejects.toThrow(
+      /Expires at must be in the future/u,
+    );
+    // The step short-circuits synchronously: no validator call at all.
+    expect(
+      lifecycle.run({
+        ...base,
+        translation: {
+          sourceEntry: { expiresAt: '2020-01-01T00:00:00.000Z' },
+          targetLocale: 'ar',
+          plan: { data: base.data, skippedRelations: [] },
+          targetRowExisted: false,
+          operation: 'upsert',
+        },
+      }),
+    ).toBeUndefined();
+  });
+
+  it('rejects the same short description outside the flag', async () => {
+    const error = await caught(() =>
+      runWriteValidation(fakeStrapi({ human: false }), arabicWrite({ ...translated })),
+    );
+    const paths = error.details?.errors?.map((e) => e.path.join('.'));
+    expect(paths).toContain('shortDescription');
   });
 });

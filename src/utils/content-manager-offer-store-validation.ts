@@ -52,8 +52,10 @@ const rejectStoreCount = (count: number): never => {
 };
 
 /**
- * Enforces the editor-only at-most-one-Store contract while leaving the schema and
- * every non-Content-Manager write path many-to-many compatible.
+ * Enforces the editor-only at-most-one-Store contract while leaving the schema
+ * and ordinary non-Content-Manager write paths many-to-many compatible.
+ * Translation publication opts in, with an exception only for the exact
+ * English source list of an existing legacy multi-store offer.
  *
  * Updates and clones resolve their relation command against the stored row.
  * Reading even when `stores` is absent is deliberate: an unrelated admin save
@@ -67,10 +69,13 @@ export async function validateContentManagerOfferStore(
   action: string,
   data: unknown,
   documentId?: string,
+  translationWrite = false,
+  translationSource?: Record<string, any>,
+  locale?: string,
 ): Promise<void> {
   if (
     !['create', 'update', 'clone'].includes(action) ||
-    !isContentManagerWrite(strapi)
+    (!isContentManagerWrite(strapi) && !translationWrite)
   ) {
     return;
   }
@@ -79,6 +84,7 @@ export async function validateContentManagerOfferStore(
   if ((action === 'update' || action === 'clone') && documentId) {
     const current: unknown = await strapi.documents(uid).findOne({
       documentId,
+      ...(locale ? { locale } : {}),
       fields: ['documentId'],
       populate: { stores: { fields: ['documentId'] } },
     });
@@ -99,5 +105,19 @@ export async function validateContentManagerOfferStore(
       : resultingRelations(normalizeRelationShorthand(incomingStores), currentStores);
   const count = stores?.length ?? 0;
 
-  if (count > 1) rejectStoreCount(count);
+  if (count > 1) {
+    // Only the exact English relationship list may cross the translation
+    // boundary. Row IDs differ between locales; compare document identity.
+    const sourceStores = translationSource?.stores;
+    const ids = (items: any[]) => items.map((item) =>
+      typeof item === 'string' ? item : item?.documentId,
+    );
+    const sourceIds = Array.isArray(sourceStores) ? ids(sourceStores) : [];
+    const targetIds = ids(stores ?? []);
+    const preservesSource = translationWrite && sourceIds.length === count
+      && sourceIds.every((id, index) => typeof id === 'string' && id.length > 0
+        && id === targetIds[index])
+      && new Set(sourceIds).size === sourceIds.length;
+    if (!preservesSource) rejectStoreCount(count);
+  }
 }

@@ -52,6 +52,11 @@ import {
 } from "../utils/coupon-batch.js";
 import { persistBatchWithIsolation } from "../utils/batch-isolation.js";
 import { ensureMigrationRegistry } from "../utils/migration-registry.js";
+import {
+  extractOfferCountries,
+  loadProfileOfferCountries,
+} from "../utils/offer-country-extract.js";
+import { DEFAULT_CONTENT_LOCALE } from "../utils/content-locale.js";
 
 interface WpPost {
   ID: number;
@@ -232,6 +237,9 @@ export async function runCoupons(): Promise<void> {
   // earlier phase having created the ownership registry before the batched
   // raw upsert below runs.
   await ensureMigrationRegistry();
+  const enabledOfferCountries = loadProfileOfferCountries(
+    config.siteConfigurationFile,
+  );
 
   const sourcePosts = await wpQuery<WpPost>(`
     SELECT p.ID, p.post_title, p.post_name, p.post_content,
@@ -412,6 +420,11 @@ export async function runCoupons(): Promise<void> {
       content,
       { currencyCode: config.source.currencyCode },
     );
+    const offerCountries = extractOfferCountries(
+      title,
+      content,
+      enabledOfferCountries,
+    );
     const affiliateLink = clean(meta.link);
     const corruptedCode = corruptedNoCodeReason(meta.code);
     const normalizedCode = corruptedCode ? null : cleanCode(meta.code);
@@ -482,6 +495,7 @@ export async function runCoupons(): Promise<void> {
         cashbackText,
         bankOfferText,
         prepaidText,
+        offerCountries,
         content,
         normalizedCode,
         isUnique ? "unique" : "static",
@@ -495,7 +509,7 @@ export async function runCoupons(): Promise<void> {
         contentStatus.publishedAt ? createdAt : null,
         createdAt,
         updatedAt,
-        null,
+        DEFAULT_CONTENT_LOCALE,
         authorId,
         editorId,
       ],

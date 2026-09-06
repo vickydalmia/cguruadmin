@@ -1,3 +1,4 @@
+import { onceOnCommit } from '../utils/once-on-commit';
 import type { Core } from '@strapi/strapi';
 import { hasOutboxWork } from './payload';
 import { insertIsrOutboxEvent } from './store';
@@ -42,7 +43,7 @@ export async function runContentTransaction<T>(
               payload: inserted.payload,
             }
           : null;
-      onCommit(() => afterCommit(event));
+      onCommit(onceOnCommit(strapi, () => afterCommit(event)));
       return result;
     },
   );

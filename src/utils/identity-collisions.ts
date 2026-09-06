@@ -10,6 +10,7 @@ import {
   type IdentityKind,
 } from './route-normalization';
 import { entityDealPageSlug } from '../api/entity-deal-page/services/entity-deal-route';
+import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
 import { IDENTITY_UIDS, KIND_BY_UID, type IdentityUid } from './identity-uids';
 import { readString } from './row-fields';
 
@@ -48,6 +49,7 @@ export async function findDuplicateName(
   uid: IdentityUid,
   name: string,
   documentId: string | undefined,
+  locale = DEFAULT_CONTENT_LOCALE,
 ): Promise<string | null> {
   const key = toNameKey(name);
   if (!key) return null;
@@ -59,6 +61,7 @@ export async function findDuplicateName(
   // it save (#8). The exact key comparison then confirms each candidate in JS.
   for (let page = 0; page < NAME_SCAN_MAX_PAGES; page += 1) {
     const rows: unknown = await strapi.documents(uid).findMany({
+      locale,
       filters: { name: { $containsi: name.trim() } },
       fields: ['documentId', 'name'],
       limit: NAME_SCAN_PAGE,
@@ -99,6 +102,7 @@ export async function findSlugCollision(
   uid: IdentityUid,
   route: string,
   documentId: string | undefined,
+  locale = DEFAULT_CONTENT_LOCALE,
 ): Promise<{ kind: IdentityKind; name: string; slug: string } | null> {
   for (const targetUid of IDENTITY_UIDS) {
     const targetKind = KIND_BY_UID[targetUid];
@@ -108,6 +112,7 @@ export async function findSlugCollision(
     const candidates = routeSlugCandidates(route, targetKind);
 
     const rows: unknown = await strapi.documents(targetUid).findMany({
+      locale,
       filters: {
         $or: candidates.map((candidate) => ({ slug: { $eqi: candidate } })),
       } as any,
@@ -137,11 +142,13 @@ export async function findDealPageCollision(
   uid: IdentityUid,
   dealRoute: string,
   documentId: string | undefined,
+  locale = DEFAULT_CONTENT_LOCALE,
 ): Promise<{ kind: IdentityKind; name: string } | null> {
   for (const targetUid of IDENTITY_UIDS) {
     const targetKind = KIND_BY_UID[targetUid];
     for (let page = 0; page < NAME_SCAN_MAX_PAGES; page += 1) {
       const rows: unknown = await strapi.documents(targetUid).findMany({
+        locale,
         fields: ['documentId', 'name'],
         sort: [{ id: 'asc' }],
         limit: NAME_SCAN_PAGE,

@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import type { TranslationWriteContext } from '../../translation/write-flag';
 
 import {
   normaliseAffiliateOfferFields,
@@ -44,6 +45,8 @@ import { validateIdentity } from '../identity-validation';
 import { validateJobSlug } from '../job-slug-validation';
 import { MENU_UID, validateMenuCategorySections } from '../menu-category-validation';
 import { validateMenuNotification } from '../menu-notification-validation';
+import { validateOfferCountriesForWrite } from '../offer-countries-validation';
+import { isOfferCountriesOfferUid } from '../../constants/offer-countries';
 import { validateOfferFieldsForWrite } from '../offer-field-validation';
 import {
   isOfferLifecycleUid,
@@ -87,7 +90,30 @@ export type StepContext = {
    * own grandfathering, this pipeline never second-guesses them.
    */
   strict: boolean;
+  /**
+   * `context.params.locale` — set on writes that target a non-default content
+   * locale (a manual Arabic edit, the translation writer). Validators that
+   * read the STORED row to resolve a partial payload must read the row of the
+   * locale being written, or they would judge an `ar` save against the `en`
+   * document. Undefined means the default locale.
+   */
+  locale?: string;
+  /** Present only for the machine locale write being validated. */
+  translation?: TranslationWriteContext;
 };
+
+function sourceIsLegacyOrphan(ctx: StepContext): boolean {
+  if (
+    !ctx.translation?.sourceEntry ||
+    (ctx.uid !== 'api::coupon.coupon' && ctx.uid !== 'api::deal.deal')
+  ) {
+    return false;
+  }
+  return ['stores', 'brands', 'categories', 'banks'].every((field) => {
+    const value = ctx.translation?.sourceEntry?.[field];
+    return !Array.isArray(value) || value.length === 0;
+  });
+}
 
 export type ValidationStep = {
   /** Stable id. Asserted by run.test.ts so the order below cannot drift. */
@@ -204,16 +230,33 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
   {
     name: 'validateCouponTypeFields',
     applies: isCouponUid,
-    run: ({ strapi, uid, action, data, documentId, strict }) =>
-      validateCouponTypeFields(strapi, uid as any, action, data, documentId, strict),
+    run: ({ strapi, uid, action, data, documentId, strict, locale }) =>
+      validateCouponTypeFields(
+        strapi,
+        uid as any,
+        action,
+        data,
+        documentId,
+        strict,
+        locale,
+      ),
   },
   {
     // Constraints introduced on populated fields cannot live in the Strapi
     // schema: the admin sends a full form on update and schema validation
     // cannot grandfather an unchanged legacy value.
     name: 'validateChangedFields',
-    run: ({ strapi, uid, action, data, documentId, strict }) =>
-      validateChangedFields(strapi, uid, action, data, documentId, strict),
+    run: ({ strapi, uid, action, data, documentId, strict, locale, translation }) =>
+      validateChangedFields(
+        strapi,
+        uid,
+        action,
+        data,
+        documentId,
+        strict,
+        locale,
+        Boolean(translation && locale),
+      ),
   },
   {
     // SOFT check (never throws): an ogImage below 1200×630 logs a warning but
@@ -229,58 +272,62 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     name: 'validateHomepageImages',
     actions: CREATE_UPDATE,
     applies: (uid) => uid === HOMEPAGE_UID,
-    run: ({ strapi, data }) => validateHomepageImages(strapi, data),
+    run: ({ strapi, data, locale, translation }) =>
+      validateHomepageImages(strapi, data, translation?.sourceEntry, locale),
   },
   {
     name: 'validateHomepageHeroOffers',
     actions: CREATE_UPDATE,
     applies: (uid) => uid === HOMEPAGE_UID,
-    run: ({ strapi, data }) => validateHomepageHeroOffers(strapi, data),
+    run: ({ strapi, data, locale }) =>
+      validateHomepageHeroOffers(strapi, data, locale),
   },
   {
     name: 'validateHomepagePopularStores',
     actions: CREATE_UPDATE,
     applies: (uid) => uid === HOMEPAGE_UID,
-    run: ({ strapi, data, documentId }) =>
-      validateHomepagePopularStores(strapi, data, documentId),
+    run: ({ strapi, data, documentId, locale }) =>
+      validateHomepagePopularStores(strapi, data, documentId, locale),
   },
   {
     name: 'validateHomepagePopularSearches',
     actions: CREATE_UPDATE,
     applies: (uid) => uid === HOMEPAGE_UID,
-    run: ({ strapi, data, documentId }) =>
-      validateHomepagePopularSearches(strapi, data, documentId),
+    run: ({ strapi, data, documentId, locale }) =>
+      validateHomepagePopularSearches(strapi, data, documentId, locale),
   },
   {
     name: 'validateMenuCategorySections',
     actions: CREATE_UPDATE,
     applies: (uid) => uid === MENU_UID,
-    run: ({ strapi, data, documentId }) =>
-      validateMenuCategorySections(strapi, data, documentId),
+    run: ({ strapi, data, documentId, locale }) =>
+      validateMenuCategorySections(strapi, data, documentId, locale),
   },
   {
     name: 'validateMenuNotification',
     actions: CREATE_UPDATE,
     applies: (uid) => uid === MENU_UID,
-    run: ({ strapi, data, documentId }) =>
-      validateMenuNotification(strapi, data, documentId),
+    run: ({ strapi, data, documentId, locale }) =>
+      validateMenuNotification(strapi, data, documentId, locale),
   },
   {
     name: 'validateDealOfTheDaySectionLimits',
     actions: CREATE_UPDATE,
     applies: (uid) => uid === DOTD_UID,
-    run: ({ strapi, data }) => validateDealOfTheDaySectionLimits(strapi, data),
+    run: ({ strapi, data, locale }) =>
+      validateDealOfTheDaySectionLimits(strapi, data, locale),
   },
   {
     name: 'validateIndependenceDaySale',
     actions: CREATE_UPDATE,
     applies: (uid) => uid === INDEPENDENCE_DAY_SALE_UID,
-    run: ({ strapi, data }) => validateIndependenceDaySale(strapi, data),
+    run: ({ strapi, data, locale }) =>
+      validateIndependenceDaySale(strapi, data, locale),
   },
   {
     name: 'validateContentManagerOfferStore',
     applies: isOfferStoreUid,
-    run: ({ strapi, uid, action, data, documentId }) =>
+    run: ({ strapi, uid, action, data, documentId, translation, locale }) =>
       isOfferStoreUid(uid)
         ? validateContentManagerOfferStore(
             strapi,
@@ -288,18 +335,29 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
             action,
             data,
             documentId,
+            Boolean(translation),
+            translation?.operation === 'upsert' && translation.targetLocale === locale
+              ? translation.sourceEntry : undefined,
+            locale,
           )
         : undefined,
   },
   {
     // Affiliate-brand offers: toggle ON means zero Stores, only affiliate
-    // Brands, and no payload-explicit logoStore/checkoutMerchant. CM-gated
-    // inside, same as the one-Store rule above.
+    // Brands, and no payload-explicit logoStore/checkoutMerchant. Content
+    // Manager and explicit translation publications opt into the rule.
     name: 'validateAffiliateOfferForWrite',
     applies: isAffiliateOfferUid,
-    run: ({ strapi, uid, action, data, documentId }) =>
+    run: ({ strapi, uid, action, data, documentId, translation }) =>
       isAffiliateOfferUid(uid)
-        ? validateAffiliateOfferForWrite(strapi, uid, action, data, documentId)
+        ? validateAffiliateOfferForWrite(
+            strapi,
+            uid,
+            action,
+            data,
+            documentId,
+            Boolean(translation),
+          )
         : undefined,
   },
   {
@@ -327,23 +385,39 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
       ),
   },
   {
+    // offerCountries is a custom STRING csv, not an enumeration, so nothing
+    // at the schema level checks its tokens against the registry or the
+    // Country Setup enabled set. This is that check.
+    name: 'validateOfferCountriesForWrite',
+    applies: isOfferCountriesOfferUid,
+    run: ({ strapi, uid, action, data, documentId, strict }) =>
+      validateOfferCountriesForWrite(
+        strapi,
+        uid,
+        action,
+        data,
+        documentId,
+        strict,
+      ),
+  },
+  {
     name: 'validateEntityTopPickCoupons',
     actions: CREATE_UPDATE,
     applies: isEntityTopPickUid,
     // `applies` has already narrowed this; re-running the guard keeps the
     // narrowed uid type without a cast.
-    run: ({ strapi, uid, data, documentId }) =>
+    run: ({ strapi, uid, data, documentId, locale }) =>
       isEntityTopPickUid(uid)
-        ? validateEntityTopPickCoupons(strapi, uid, data, documentId)
+        ? validateEntityTopPickCoupons(strapi, uid, data, documentId, locale)
         : undefined,
   },
   {
     name: 'validateEntityOrderedCoupons',
     actions: CREATE_UPDATE,
     applies: isEntityOrderedCouponUid,
-    run: ({ strapi, uid, data, documentId }) =>
+    run: ({ strapi, uid, data, documentId, locale }) =>
       isEntityOrderedCouponUid(uid)
-        ? validateEntityOrderedCoupons(strapi, uid, data, documentId)
+        ? validateEntityOrderedCoupons(strapi, uid, data, documentId, locale)
         : undefined,
   },
   {
@@ -351,15 +425,33 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     // card slots.
     name: 'validateOfferFieldsForWrite',
     applies: (uid) => uid === 'api::coupon.coupon' || uid === 'api::deal.deal',
-    run: ({ strapi, uid, action, data, documentId, strict }) =>
-      validateOfferFieldsForWrite(strapi, uid, action, data, documentId, strict),
+    run: ({ strapi, uid, action, data, documentId, strict, locale, translation }) =>
+      validateOfferFieldsForWrite(
+        strapi,
+        uid,
+        action,
+        data,
+        documentId,
+        strict,
+        locale,
+        translation?.operation === 'upsert' && translation.targetLocale === locale
+          ? translation.sourceEntry : undefined,
+      ),
   },
   {
     // Taxonomy cross-field checks: rating range, FAQ-enabled-but-empty,
     // brand required SEO.
     name: 'validateEntityFieldsForWrite',
-    run: ({ strapi, uid, action, data, documentId, strict }) =>
-      validateEntityFieldsForWrite(strapi, uid, action, data, documentId, strict),
+    run: ({ strapi, uid, action, data, documentId, strict, locale }) =>
+      validateEntityFieldsForWrite(
+        strapi,
+        uid,
+        action,
+        data,
+        documentId,
+        strict,
+        locale,
+      ),
   },
   {
     // Hidden today, but still writable by the dedicated Super Admin API,
@@ -373,14 +465,31 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     // cron's partial {contentStatus} update as "no dates".
     name: 'validateOfferLifecycle',
     applies: isOfferLifecycleUid,
-    run: ({ strapi, uid, action, data, documentId, strict }) =>
-      validateOfferLifecycle(strapi, uid, action, data, documentId, strict),
+    // Every lifecycle field (scheduledAt, expiresAt, publishedOn,
+    // contentStatus) is non-localized and copied from the English row, so a
+    // locale write can carry no target-only lifecycle defect. Judging the
+    // source's dates as if they were new input rejected every offer that had
+    // already expired — a legitimate stored state, not a defect — after its
+    // translation had been paid for.
+    run: ({ strapi, uid, action, data, documentId, strict, translation }) =>
+      translation
+        ? undefined
+        : validateOfferLifecycle(strapi, uid, action, data, documentId, strict),
   },
   {
     // Blank-after-trim rejection and required-field enforcement.
     name: 'validateTextFieldsForWrite',
-    run: ({ strapi, uid, action, data, documentId, strict }) =>
-      validateTextFieldsForWrite(strapi, uid, action, data, documentId, strict),
+    run: (ctx) =>
+      validateTextFieldsForWrite(
+        ctx.strapi,
+        ctx.uid,
+        ctx.action,
+        ctx.data,
+        ctx.documentId,
+        ctx.strict,
+        ctx.locale,
+        sourceIsLegacyOrphan(ctx),
+      ),
   },
 ];
 
@@ -406,8 +515,16 @@ export const LOCKED_STEPS: readonly ValidationStep[] = [
     // Name unique per type, slug unique across all four taxonomies (the public
     // URL space is flat), and no collision with a reserved Astro route.
     name: 'validateIdentity',
-    run: ({ strapi, uid, action, data, documentId, strict }) =>
-      validateIdentity(strapi, uid, action, data, documentId, strict),
+    run: ({ strapi, uid, action, data, documentId, strict, locale }) =>
+      validateIdentity(
+        strapi,
+        uid,
+        action,
+        data,
+        documentId,
+        strict,
+        locale,
+      ),
   },
   {
     // Singleton campaign templates can have exactly one entity owner. This
@@ -451,6 +568,9 @@ export const SIDE_EFFECT_STEPS: readonly ValidationStep[] = [
   {
     name: 'ensureTransparentDealImageForWrite',
     applies: (uid) => uid === 'api::deal.deal',
-    run: ({ strapi, data }) => ensureTransparentDealImageForWrite(strapi, data),
+    run: ({ strapi, data, translation }) =>
+      translation
+        ? undefined
+        : ensureTransparentDealImageForWrite(strapi, data),
   },
 ];

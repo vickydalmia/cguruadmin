@@ -40,7 +40,15 @@ import {
   REDEEM_DOCUMENT_ID_PATTERN,
   REDEEM_UIDS,
   isRedeemResolverAuthorized,
+  requestedRedeemLocale,
+  resolveRedeemDocument,
 } from '../services/redeem-resolution';
+import { resolveOfferDetailIdentity } from '../services/offer-detail-resolution';
+import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
+import {
+  attachStablePublicOfferIdsForRequest,
+  requestedOfferTargetLocale,
+} from '../services/public-offer-ids';
 
 // The thin coupon controller action map: projections live in
 // ../services/offer-projections, detail-page builders in
@@ -53,9 +61,10 @@ import {
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
 
   async getIsrOfferRoutes(ctx) {
+    const locale = requestedOfferTargetLocale(ctx) ?? DEFAULT_CONTENT_LOCALE;
     const [coupons, deals] = await Promise.all([
-      listIsrOfferRoutes(strapi, 'api::coupon.coupon', 'coupon'),
-      listIsrOfferRoutes(strapi, 'api::deal.deal', 'deal'),
+      listIsrOfferRoutes(strapi, 'api::coupon.coupon', 'coupon', locale),
+      listIsrOfferRoutes(strapi, 'api::deal.deal', 'deal', locale),
     ]);
     return ctx.send({ data: [...coupons, ...deals] });
   },
@@ -66,12 +75,20 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const couponId = Number(rawId);
     if (!Number.isSafeInteger(couponId)) return ctx.notFound('Coupon not found');
 
+    const detailIdentity = await resolveOfferDetailIdentity(
+      strapi,
+      ctx,
+      'api::coupon.coupon',
+      couponId,
+    );
+    if (!detailIdentity) return ctx.notFound('Coupon not found');
+
     const couponQuery = await sanitizeDocumentQuery(
       strapi,
       ctx,
       'api::coupon.coupon',
       {
-        filters: { id: couponId, ...visibilityFilters() },
+        ...detailIdentity,
         fields: COUPON_PAGE_FIELDS,
         populate: COUPON_PUBLIC_POPULATE,
         limit: 1,
@@ -169,6 +186,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     // One pass over the whole body: the main coupon, its related coupons and
     // its related deals are all offers and all need their merchant resolved.
     await attachFestiveOffers(strapi, body);
+    await attachStablePublicOfferIdsForRequest(strapi, ctx, body);
 
     return ctx.send(body);
   },
@@ -179,12 +197,20 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const dealId = Number(rawId);
     if (!Number.isSafeInteger(dealId)) return ctx.notFound('Deal not found');
 
+    const detailIdentity = await resolveOfferDetailIdentity(
+      strapi,
+      ctx,
+      'api::deal.deal',
+      dealId,
+    );
+    if (!detailIdentity) return ctx.notFound('Deal not found');
+
     const dealQuery = await sanitizeDocumentQuery(
       strapi,
       ctx,
       'api::deal.deal',
       {
-        filters: { id: dealId, ...visibilityFilters() },
+        ...detailIdentity,
         fields: DEAL_PAGE_FIELDS,
         populate: DEAL_PUBLIC_POPULATE,
         limit: 1,
@@ -252,6 +278,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       similarStores,
     };
     await attachFestiveOffers(strapi, body);
+    await attachStablePublicOfferIdsForRequest(strapi, ctx, body, ['deal']);
 
     return ctx.send(body);
   },
@@ -268,33 +295,14 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       return ctx.notFound('Offer not found');
     }
 
-    const uid = REDEEM_UIDS[entityType as keyof typeof REDEEM_UIDS];
-    const commonFields = [
-      'title',
-      'code',
-      'affiliateLink',
-      'expiresAt',
-      'scheduledAt',
-      'contentStatus',
-      'updatedAt',
-    ];
-    // Both offer types can draw from a pool now, so neither branch is
-    // entity-specific any more.
-    const fields = [...commonFields, 'couponType'];
-    const namedRelation = { fields: ['name'] };
-    const populate = {
-      uniqueCouponPool: { fields: ['name'] },
-      stores: namedRelation,
-      brands: namedRelation,
-      banks: namedRelation,
-    };
+    const locale = requestedRedeemLocale(ctx.query?.locale);
+    if (!locale) return ctx.notFound('Offer not found');
 
-    const offer = await strapi.documents(uid as any).findOne({
+    const offer = await resolveRedeemDocument(strapi, {
+      entityType: entityType as keyof typeof REDEEM_UIDS,
       documentId,
-      status: 'published',
-      fields,
-      populate,
-    } as any);
+      locale,
+    });
     if (!offer) return ctx.notFound('Offer not found');
 
     // This route bypasses the sanitizers above, so apply the same redaction —
@@ -328,7 +336,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     );
     await attachFestiveOffers(strapi, coupons);
 
-    return ctx.send({
+    const body = {
       ...(page === 1 ? { [entityType]: result.sanitizedEntity } : {}),
       coupons,
       pagination: {
@@ -337,7 +345,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         total: result.total,
         pageCount: Math.ceil(result.total / pageSize),
       },
-    });
+    };
+    await attachStablePublicOfferIdsForRequest(strapi, ctx, body, ['coupon']);
+    return ctx.send(body);
   },
 
   async getDealsByEntity(ctx) {
@@ -365,7 +375,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     );
     await attachFestiveOffers(strapi, deals);
 
-    return ctx.send({
+    const body = {
       ...(page === 1 ? { [entityType]: result.sanitizedEntity } : {}),
       deals,
       pagination: {
@@ -374,7 +384,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         total: result.total,
         pageCount: Math.ceil(result.total / pageSize),
       },
-    });
+    };
+    await attachStablePublicOfferIdsForRequest(strapi, ctx, body, ['deal']);
+    return ctx.send(body);
   },
 
   // GET /api/offers — paginated list of ALL published coupons across the site.

@@ -1,3 +1,4 @@
+import { initializeBackgroundContext } from './background/execution-context';
 import type { Core } from '@strapi/strapi';
 import { DOTD_SECTION_LABELS, DOTD_UID } from './constants/deal-of-the-day-sections';
 import {
@@ -17,12 +18,14 @@ import { installDocumentWriteMiddleware } from './register/document-write-middle
 // this module has none — it would register 'global::record-lock-document' as
 // an undefined factory that throws the moment anything references it.
 import { installRecordLockDocumentMiddleware } from './register/record-lock-document';
+import { installContentLocaleReadMiddleware } from './register/content-locale-read-middleware';
 import { getCuratedOfferRelations } from './utils/curated-offer-relations';
 import { registerCuratedOfferRelationQueryFilter } from './utils/curated-offer-live-filter';
 import { primeOfferContentLocalization } from './utils/offer-content-localization';
 import { configuredPublicSiteUrl } from './utils/public-site-url';
 import { ENTITY_COUPON_LAYOUT_ACTION_ATTRIBUTES } from './api/entity-coupon-layout/services/entity-coupon-layout';
 import { CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME } from './constants/checkout-merchant';
+import { OFFER_COUNTRIES_CUSTOM_FIELD_NAME } from './constants/offer-countries';
 import {
   hideFieldsFromComponentManager,
   hideRelationsFromContentManager,
@@ -64,8 +67,23 @@ import {
   registerCountrySetupRoutes,
   registerEntityCouponLayoutRoutes,
   registerEntityDealPageRoutes,
+  registerOfferCountryRoutes,
   registerRecordLockRoutes,
+  registerTranslationRoutes,
+  registerUiDictionaryRoutes,
 } from './register/admin-routes';
+import { TRANSLATION_ACTION_ATTRIBUTES } from './api/translation/controllers/translation';
+import { UI_DICTIONARY_ACTION_ATTRIBUTES } from './api/ui-dictionary/controllers/ui-dictionary-admin';
+import { ensureContentLocales } from './translation/ensure-locales';
+import { primeEnabledContentLocales } from './translation/locales/registry';
+import {
+  startTranslationOutbox,
+  stopTranslationOutbox,
+} from './translation/outbox/runtime';
+import {
+  startTranslationBackfillRunner,
+  stopTranslationBackfillRecovery,
+} from './translation/backfill-run';
 
 export default {
   async register({ strapi }: { strapi: Core.Strapi }) {
@@ -85,6 +103,19 @@ export default {
     // src/admin/app.tsx.
     strapi.customFields.register({
       name: CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME,
+      type: 'string',
+      inputSize: { default: 6, isResizable: true },
+    });
+
+    // Offer Countries: the optional "valid in these countries" tag list on
+    // Coupon and Product Deal, stored as a csv of registry codes in one
+    // string column (src/constants/offer-countries.ts). A custom field for
+    // the same reason as checkoutMerchant: the option list is dynamic (the
+    // Country Setup subset), which a schema enumeration cannot express, and
+    // a custom field is the only supported seam in the main edit form. Same
+    // register-before-convertCustomFieldType rule as above.
+    strapi.customFields.register({
+      name: OFFER_COUNTRIES_CUSTOM_FIELD_NAME,
       type: 'string',
       inputSize: { default: 6, isResizable: true },
     });
@@ -112,23 +143,33 @@ export default {
     // bootstrap), so this is both early enough and allowed.
     await strapi.service('admin::permission').actionProvider.registerMany([
       ENTITY_COUPON_LAYOUT_ACTION_ATTRIBUTES,
+      // Same register-not-bootstrap rule as above, or its grants are wiped
+      // on every restart by cleanPermissionsInDatabase().
+      TRANSLATION_ACTION_ATTRIBUTES,
+      UI_DICTIONARY_ACTION_ATTRIBUTES,
     ]);
 
     registerEntityCouponLayoutRoutes(strapi);
     registerRecordLockRoutes(strapi);
     registerCsvExportRoutes(strapi);
     registerCountrySetupRoutes(strapi);
+    registerOfferCountryRoutes(strapi);
     registerAdminRuntimeConfigRoutes(strapi);
+    registerTranslationRoutes(strapi);
+    registerUiDictionaryRoutes(strapi);
 
     // Document-service middlewares. Registration order = execution order:
     // the record-lock guard must run before the document-write pipeline
     // (validation + integrity side-effects + ISR outbox), matching the order
-    // the two blocks had inline here.
+    // the two blocks had inline here. The content-locale read injector is
+    // read-only and order-independent of the two write guards.
+    installContentLocaleReadMiddleware(strapi);
     installRecordLockDocumentMiddleware(strapi);
     installDocumentWriteMiddleware(strapi);
   },
 
   async bootstrap({ strapi }: { strapi: Core.Strapi }) {
+    initializeBackgroundContext();
     await seedEditorCouponLayoutPermission(strapi);
     // Offer response walkers are synchronous; load the site localization they
     // read before the first public request is served.
@@ -247,10 +288,31 @@ export default {
       );
     }
 
+    // AI translation: create the opted-in content locales, prime the sync
+    // locale mirror the ISR path expansion reads, then start the job
+    // dispatcher. All BEFORE startIsrOutbox so every event created after
+    // boot carries its locale path twins. Fail safe throughout: a broken
+    // TRANSLATION_* env logs loudly and stays off.
+    let translationBootstrapReady = false;
+    try {
+      await ensureContentLocales(strapi);
+      await primeEnabledContentLocales(strapi);
+      translationBootstrapReady = true;
+    } catch (err: any) {
+      strapi.log.error(
+        `[translation] content-locale bootstrap failed: ${err?.message ?? err}`,
+      );
+    }
+    if (translationBootstrapReady) {
+      await startTranslationOutbox(strapi);
+      startTranslationBackfillRunner(strapi);
+    }
+
     startIsrOutbox(strapi);
   },
 
   async destroy() {
-    await stopIsrOutbox();
+    stopTranslationBackfillRecovery();
+    await Promise.all([stopIsrOutbox(), stopTranslationOutbox()]);
   },
 };

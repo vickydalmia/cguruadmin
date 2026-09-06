@@ -1,5 +1,9 @@
 import type { Core } from '@strapi/strapi';
 import { hasAuthorizedIsrCacheBypass } from '../utils/isr-cache-bypass';
+import {
+  enabledContentLocaleCodesSync,
+} from '../translation/locales/registry';
+import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
 
 /**
  * In-process TTL response cache for expensive public GET aggregate endpoints
@@ -69,20 +73,45 @@ export default (
   const store = new Map<string, CacheEntry>();
   allStores.add(store);
 
+  // The content locale is part of EVERY response identity once i18n serves
+  // localized payloads: /homepage-full and /homepage-full?locale=ar are
+  // different documents. Folded into all three keying modes here — including
+  // keyByPath, whose whole point is ignoring the query — so no route config
+  // can accidentally serve one language's cached body to the other.
+  // Length-bounded like any user-controlled key component.
+  const localeKeyPart = (ctx: any): string => {
+    const raw = ctx.query?.locale;
+    const value = Array.isArray(raw) ? raw[0] : raw;
+    return typeof value === 'string' &&
+      value !== DEFAULT_CONTENT_LOCALE &&
+      enabledContentLocaleCodesSync().includes(value)
+      ? `locale=${value}`
+      : '';
+  };
+
+  const canonicalOriginalUrl = (ctx: any, locale: string): string => {
+    const url = new URL(String(ctx.originalUrl ?? ctx.path), 'http://cache.local');
+    url.searchParams.delete('locale');
+    if (locale) url.searchParams.set('locale', locale.slice('locale='.length));
+    const query = url.searchParams.toString();
+    return `${url.pathname}${query ? `?${query}` : ''}`;
+  };
+
   const cacheKey = (ctx: any): string => {
     // Path-only key for query-agnostic endpoints, so arbitrary query strings
     // can't multiply distinct keys and bypass the cache (full-scan DoS).
-    if (keyByPath) return ctx.path;
-    if (!cacheKeyParams) return ctx.originalUrl;
+    const locale = localeKeyPart(ctx);
+    if (keyByPath) return locale ? `${ctx.path}?${locale}` : ctx.path;
+    if (!cacheKeyParams) return canonicalOriginalUrl(ctx, locale);
 
     // Allow-listed parameters only, in a fixed order, so `?a=1&b=2` and
     // `?b=2&a=1` share an entry and unknown parameters cannot mint new ones.
-    const parts = cacheKeyParams.map((name) => {
+    const parts = cacheKeyParams.filter((name) => name !== 'locale').map((name) => {
       const raw = ctx.query?.[name];
       const value = Array.isArray(raw) ? raw[0] : raw;
       return `${name}=${value === undefined ? '' : String(value)}`;
     });
-    return `${ctx.path}?${parts.join('&')}`;
+    return `${ctx.path}?${[...parts, ...(locale ? [locale] : [])].join('&')}`;
   };
 
   return async (ctx: any, next: () => Promise<void>) => {

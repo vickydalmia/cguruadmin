@@ -32,3 +32,12 @@ export async function cachedSiteConfiguration(
   }
   return cached.value;
 }
+
+/**
+ * Drop the memo so the next read hits the database. Called by the Country
+ * Setup write path so the locale bootstrap that follows a save (and every
+ * hot path behind it) sees the new row at once instead of up to one TTL later.
+ */
+export function invalidateCachedSiteConfiguration(): void {
+  cached = null;
+}

@@ -23,6 +23,8 @@ import {
   classifyTaxonomyTerms,
   formatTaxonomyClassificationReport,
 } from "../utils/taxonomy-classification.js";
+import { loadProfileOfferCountries } from "../utils/offer-country-extract.js";
+import { DEFAULT_CONTENT_LOCALE } from "../utils/content-locale.js";
 
 type PreflightTaxonomyTerm = {
   term_id: number;
@@ -103,6 +105,7 @@ function validateSiteConfigurationProfile(): void {
       throw new Error(`Profile site configuration requires boolean ${field}`);
     }
   }
+  loadProfileOfferCountries(config.siteConfigurationFile);
 }
 
 async function validateSourceDataExceptions(): Promise<void> {
@@ -288,13 +291,35 @@ export async function runPreflight(): Promise<void> {
     }
   }
 
-  // Ensure unique indexes on document_id for idempotent inserts
-  const tablesNeedingDocIdIndex = [
-    "stores", "brands", "categories", "banks",
-    "coupons", "deals", "unique_coupon_pools", "unique_codes", "files",
+  // Localized rows share one logical document_id across locales. A legacy
+  // unique(document_id) index blocks the very first translation; idempotent
+  // source imports instead conflict on the default-locale row only.
+  const localizedDocumentTables = [
+    "stores", "brands", "categories", "banks", "coupons", "deals",
   ];
-  logger.info("Ensuring document_id unique indexes...");
-  for (const table of tablesNeedingDocIdIndex) {
+  logger.info("Ensuring locale-aware document identity indexes...");
+  for (const table of localizedDocumentTables) {
+    await pgQuery(`DROP INDEX IF EXISTS "${table}_document_id_uq"`);
+    await pgQuery(
+      `UPDATE "${table}"
+          SET "locale" = $1
+        WHERE "document_id" IS NOT NULL
+          AND NULLIF(BTRIM("locale"), '') IS NULL`,
+      [DEFAULT_CONTENT_LOCALE],
+    );
+    await pgQuery(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "${table}_document_id_locale_uq" ` +
+        `ON "${table}" ("document_id", "locale")`,
+    );
+  }
+
+  // These types are not localized, so one physical row per document remains
+  // the correct invariant.
+  const sharedDocumentTables = [
+    "unique_coupon_pools", "unique_codes", "files",
+  ];
+  logger.info("Ensuring shared document_id unique indexes...");
+  for (const table of sharedDocumentTables) {
     await pgQuery(
       `CREATE UNIQUE INDEX IF NOT EXISTS "${table}_document_id_uq" ON "${table}" ("document_id")`
     );

@@ -120,11 +120,23 @@ function createKnex(initial: Tables) {
 
 describe('entity-page ratings', () => {
   it('writes and aggregates a Brand vote atomically, then deduplicates it', async () => {
+    // Two locale rows of one document: the slug lookup pins the default
+    // locale, the aggregate update must move BOTH rows (the knex write is
+    // invisible to the i18n non-localized sync).
     const db = createKnex({
       brands: [
         {
           id: 1,
           document_id: 'brand-1',
+          locale: 'en',
+          slug: 'nike',
+          rating_average: 4,
+          rating_count: 2,
+        },
+        {
+          id: 2,
+          document_id: 'brand-1',
+          locale: 'ar',
           slug: 'nike',
           rating_average: 4,
           rating_count: 2,
@@ -151,6 +163,8 @@ describe('entity-page ratings', () => {
       alreadyVoted: true,
     });
     expect(db.tables.entity_rating_votes).toHaveLength(1);
+    // Both locale rows of the document carry the new aggregate.
+    expect(db.tables.brands.map((row) => row.rating_count)).toEqual([3, 3]);
   });
 
   it('dual-writes Store votes while the legacy table remains deployed', async () => {
@@ -159,6 +173,7 @@ describe('entity-page ratings', () => {
         {
           id: 7,
           document_id: 'store-7',
+          locale: 'en',
           slug: 'amazon',
           rating_average: 5,
           rating_count: 10,

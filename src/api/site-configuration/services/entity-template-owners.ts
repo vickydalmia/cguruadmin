@@ -26,10 +26,12 @@ export type EntityTemplateOwner = {
 export async function findEntityTemplateOwners(
   strapi: Core.Strapi,
   pageTemplate: Exclude<EntityPageTemplate, 'default'>,
+  locale?: string,
 ): Promise<EntityTemplateOwner[]> {
   const groups = await Promise.all(
     ENTITY_COLLECTIONS.map(async ([uid, kind]) => {
       const rows: any[] = await strapi.documents(uid as any).findMany({
+        ...(locale ? { locale } : {}),
         filters: { pageTemplate } as any,
         fields: ['documentId', 'slug', 'updatedAt'] as any,
         // Deterministic first owner: readiness `path`, route metadata and the

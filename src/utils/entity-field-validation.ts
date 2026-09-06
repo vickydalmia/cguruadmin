@@ -292,6 +292,7 @@ export async function validateEntityFieldsForWrite(
   data: any,
   documentId?: string,
   strict: boolean = false,
+  locale?: string,
 ): Promise<void> {
   if (!ENTITY_UIDS.includes(uid as (typeof ENTITY_UIDS)[number])) return;
   if (!data || typeof data !== 'object') return;
@@ -341,6 +342,7 @@ export async function validateEntityFieldsForWrite(
 
     stored = await strapi.documents(uid as any).findOne({
       documentId,
+      ...(locale ? { locale } : {}),
       fields: [...new Set(fields)] as any,
       ...(Object.keys(populate).length > 0 ? { populate: populate as any } : {}),
     });

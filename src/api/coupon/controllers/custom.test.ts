@@ -4,11 +4,13 @@ import { validate } from '@strapi/utils';
 import couponSchema from '../content-types/coupon/schema.json';
 import dealSchema from '../../deal/content-types/deal/schema.json';
 import { AMAZON_AFFILIATE_DISCLOSURE_FIELD } from '../../../utils/amazon-affiliate-disclosure';
+import { setEnabledContentLocaleCodesForTest } from '../../../translation/locales/registry';
 import createCouponController from './custom';
 
 const REDEEM_TEST_SECRET = 'redeem-test-secret';
 
 afterEach(() => {
+  setEnabledContentLocaleCodesForTest([]);
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
@@ -22,6 +24,8 @@ function createHarness() {
   const dealFindMany = vi.fn().mockResolvedValue([]);
   const dealFindOne = vi.fn().mockResolvedValue(null);
   const dealCount = vi.fn().mockResolvedValue(0);
+  const couponPublicIdFindMany = vi.fn().mockResolvedValue([]);
+  const dealPublicIdFindMany = vi.fn().mockResolvedValue([]);
   const entityFindMany = vi.fn().mockResolvedValue([
     {
       documentId: 'store-amazon',
@@ -41,6 +45,14 @@ function createHarness() {
   const sanitizeQuery = vi.fn(async (query: any) => query);
   const strapi = {
     documents,
+    db: {
+      query: vi.fn((uid: string) => ({
+        findMany:
+          uid === 'api::coupon.coupon'
+            ? couponPublicIdFindMany
+            : dealPublicIdFindMany,
+      })),
+    },
     log: { warn: vi.fn() },
     service: vi.fn(() => ({
       relatedStores: vi.fn().mockResolvedValue({ stores: [] }),
@@ -77,6 +89,8 @@ function createHarness() {
     dealFindMany,
     dealFindOne,
     dealCount,
+    couponPublicIdFindMany,
+    dealPublicIdFindMany,
     entityFindMany,
     sanitizeQuery,
   };
@@ -170,8 +184,9 @@ describe('ISR offer route inventory', () => {
     });
     expect(harness.couponFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        locale: 'en',
         status: 'published',
-        fields: ['updatedAt'],
+        fields: ['documentId', 'updatedAt'],
         start: 0,
         limit: 1_000,
       }),
@@ -209,6 +224,36 @@ describe('ISR offer route inventory', () => {
           updatedAt: '2026-07-24T11:00:00.000Z',
         },
       ]),
+    });
+  });
+
+  it('admits only localized rows while preserving the English numeric route id', async () => {
+    const harness = createHarness();
+    setEnabledContentLocaleCodesForTest(['ar']);
+    harness.ctx.query = { locale: 'ar' } as any;
+    harness.couponFindMany.mockResolvedValue([
+      {
+        id: 912,
+        documentId: 'coupon-doc',
+        updatedAt: '2026-09-04T10:00:00.000Z',
+      },
+    ]);
+    harness.couponPublicIdFindMany.mockResolvedValue([
+      { id: 123, documentId: 'coupon-doc' },
+    ]);
+
+    await harness.controller.getIsrOfferRoutes(harness.ctx);
+
+    expect(harness.couponFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ locale: 'ar' }),
+    );
+    expect(harness.ctx.send).toHaveBeenCalledWith({
+      data: [
+        {
+          path: '/coupon/123/',
+          updatedAt: '2026-09-04T10:00:00.000Z',
+        },
+      ],
     });
   });
 });
@@ -267,6 +312,56 @@ describe('public Coupon detail aggregate', () => {
     expect(payload.relatedDeals).toHaveLength(6);
     expect(payload.relatedDeals[0].documentId).toBe('deal-document-1');
     expect(harness.dealFindMany.mock.calls[0][0].limit).toBe(40);
+  });
+
+  it('resolves an Arabic Coupon through the English public id and shared documentId', async () => {
+    setEnabledContentLocaleCodesForTest(['ar']);
+    const harness = createHarness();
+    harness.ctx.params = { id: '123' } as any;
+    harness.ctx.query = { locale: 'ar' };
+    harness.couponFindMany
+      .mockResolvedValueOnce([{ documentId: 'coupon-document-1' }])
+      .mockResolvedValueOnce([
+        {
+          id: 987,
+          documentId: 'coupon-document-1',
+          title: 'وفر 20٪',
+          couponType: 'static',
+          code: 'SAVE20',
+          affiliateLink: 'https://merchant.invalid/shared',
+        },
+      ]);
+    harness.couponPublicIdFindMany.mockResolvedValue([
+      { id: 123, documentId: 'coupon-document-1' },
+    ]);
+
+    const payload = await harness.controller.getCouponPage(harness.ctx as any);
+
+    expect(harness.couponFindMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        locale: 'en',
+        filters: expect.objectContaining({ id: 123 }),
+        fields: ['documentId'],
+        limit: 1,
+      }),
+    );
+    expect(harness.couponFindMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        locale: 'ar',
+        filters: expect.objectContaining({
+          documentId: 'coupon-document-1',
+        }),
+      }),
+    );
+    expect(harness.couponFindMany.mock.calls[1][0].filters).not.toHaveProperty('id');
+    expect(payload.coupon).toMatchObject({
+      id: 123,
+      documentId: 'coupon-document-1',
+      title: 'وفر 20٪',
+      code: 'SAVE20',
+    });
   });
 
   it.each(['coupon-document-1', '0', '-1', '01', '9007199254740992'])(
@@ -332,6 +427,58 @@ describe('public Deal detail aggregate', () => {
     expect(harness.dealFindMany.mock.calls[1][0].limit).toBe(40);
   });
 
+  it('resolves an Arabic Product Deal through the English public id and shared documentId', async () => {
+    setEnabledContentLocaleCodesForTest(['ar']);
+    const harness = createHarness();
+    harness.ctx.params = { id: '321' } as any;
+    harness.ctx.query = { locale: 'ar' };
+    harness.dealFindMany
+      .mockResolvedValueOnce([{ documentId: 'deal-document-1' }])
+      .mockResolvedValueOnce([
+        {
+          id: 654,
+          documentId: 'deal-document-1',
+          title: 'حاسوب محمول',
+          couponType: 'static',
+          code: 'LAPTOP10',
+          affiliateLink: 'https://merchant.invalid/shared',
+          salePrice: 55191,
+          dealImage: { url: '/uploads/thinkbook.webp' },
+        },
+      ]);
+    harness.dealPublicIdFindMany.mockResolvedValue([
+      { id: 321, documentId: 'deal-document-1' },
+    ]);
+
+    const payload = await harness.controller.getDealPage(harness.ctx as any);
+
+    expect(harness.dealFindMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        locale: 'en',
+        filters: expect.objectContaining({ id: 321 }),
+        fields: ['documentId'],
+        limit: 1,
+      }),
+    );
+    expect(harness.dealFindMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        locale: 'ar',
+        filters: expect.objectContaining({
+          documentId: 'deal-document-1',
+        }),
+      }),
+    );
+    expect(harness.dealFindMany.mock.calls[1][0].filters).not.toHaveProperty('id');
+    expect(payload.deal).toMatchObject({
+      id: 321,
+      documentId: 'deal-document-1',
+      title: 'حاسوب محمول',
+      code: 'LAPTOP10',
+    });
+  });
+
   it.each(['deal-document-1', '0', '-1', '01', '9007199254740992'])(
     'rejects invalid Deal id %s on the public route',
     async (id) => {
@@ -365,6 +512,7 @@ describe('private offer redeem resolver', () => {
     expect(harness.couponFindOne).toHaveBeenCalledWith(
       expect.objectContaining({
         documentId: 'coupon-document-1',
+        locale: 'en',
         status: 'published',
         fields: expect.arrayContaining(['title', 'code', 'couponType', 'affiliateLink']),
         populate: expect.objectContaining({
@@ -413,6 +561,136 @@ describe('private offer redeem resolver', () => {
     const payload = await harness.controller.getRedeemOffer(harness.ctx as any);
 
     expect(payload.data.code).toBe('SAVE20');
+  });
+
+  it('pins a unique Product Deal resolver to English and never exposes a stale shared code', async () => {
+    const harness = createHarness();
+    setEnabledContentLocaleCodesForTest(['ar']);
+    harness.ctx.params = {
+      entityType: 'deal',
+      documentId: 'deal-document-1',
+    } as any;
+    harness.ctx.query = { locale: 'ar' };
+    harness.dealFindOne.mockResolvedValue({
+      documentId: 'deal-document-1',
+      title: 'Product deal',
+      couponType: 'unique',
+      code: 'LEGACY-SHARED-CODE',
+      affiliateLink: 'https://merchant.invalid/shared',
+      uniqueCouponPool: { documentId: 'pool-1' },
+    });
+
+    const payload = await harness.controller.getRedeemOffer(harness.ctx as any);
+
+    expect(harness.dealFindOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: 'deal-document-1',
+        locale: 'en',
+        fields: expect.arrayContaining([
+          'code',
+          'couponType',
+          'affiliateLink',
+        ]),
+        populate: expect.objectContaining({
+          uniqueCouponPool: { fields: ['name'] },
+        }),
+      }),
+    );
+    expect(harness.couponFindOne).not.toHaveBeenCalled();
+    expect(payload.data.code).toBeNull();
+    expect(payload.data.affiliateLink).toBe(
+      'https://merchant.invalid/shared',
+    );
+  });
+
+  it('uses Arabic presentation fields but keeps English redemption data authoritative', async () => {
+    const harness = createHarness();
+    setEnabledContentLocaleCodesForTest(['ar']);
+    harness.ctx.params = {
+      entityType: 'coupon',
+      documentId: 'coupon-document-1',
+    } as any;
+    harness.ctx.query = { locale: 'ar' };
+    harness.couponFindOne
+      .mockResolvedValueOnce({
+        documentId: 'coupon-document-1',
+        title: 'Save 20%',
+        couponType: 'static',
+        code: 'SAVE20',
+        affiliateLink: 'https://merchant.invalid/english-target',
+        stores: [{ name: 'Amazon' }],
+      })
+      .mockResolvedValueOnce({
+        documentId: 'coupon-document-1',
+        title: 'وفّر 20٪',
+        code: 'WRONG-LOCALIZED-CODE',
+        affiliateLink: 'https://merchant.invalid/wrong-target',
+        stores: [{ name: 'أمازون' }],
+      });
+
+    const payload = await harness.controller.getRedeemOffer(harness.ctx as any);
+
+    expect(harness.couponFindOne).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        documentId: 'coupon-document-1',
+        locale: 'ar',
+        fields: ['title'],
+      }),
+    );
+    expect(payload.data).toMatchObject({
+      title: 'وفّر 20٪',
+      code: 'SAVE20',
+      affiliateLink: 'https://merchant.invalid/english-target',
+      stores: [{ name: 'أمازون' }],
+      locale: 'ar',
+      dir: 'rtl',
+    });
+  });
+
+  it('keeps an Arabic activation available while its localized row is missing', async () => {
+    const harness = createHarness();
+    setEnabledContentLocaleCodesForTest(['ar']);
+    harness.ctx.params = {
+      entityType: 'deal',
+      documentId: 'deal-document-1',
+    } as any;
+    harness.ctx.query = { locale: 'ar' };
+    harness.dealFindOne
+      .mockResolvedValueOnce({
+        documentId: 'deal-document-1',
+        title: 'English fallback deal',
+        couponType: 'static',
+        code: 'SAVE10',
+        affiliateLink: 'https://merchant.invalid/deal',
+        brands: [{ name: 'English brand' }],
+      })
+      .mockResolvedValueOnce(null);
+
+    const payload = await harness.controller.getRedeemOffer(harness.ctx as any);
+
+    expect(payload.data).toMatchObject({
+      title: 'English fallback deal',
+      code: 'SAVE10',
+      affiliateLink: 'https://merchant.invalid/deal',
+      brands: [{ name: 'English brand' }],
+      locale: 'ar',
+      dir: 'rtl',
+    });
+  });
+
+  it('rejects a disabled localized redeem route before reading an offer', async () => {
+    const harness = createHarness();
+    harness.ctx.params = {
+      entityType: 'coupon',
+      documentId: 'coupon-document-1',
+    } as any;
+    harness.ctx.query = { locale: 'ar' };
+
+    await harness.controller.getRedeemOffer(harness.ctx as any);
+
+    expect(harness.ctx.notFound).toHaveBeenCalledWith('Offer not found');
+    expect(harness.couponFindOne).not.toHaveBeenCalled();
   });
 
   it('never guesses the entity type from the document id', async () => {

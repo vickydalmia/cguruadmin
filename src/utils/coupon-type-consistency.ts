@@ -144,6 +144,7 @@ export async function validateCouponTypeFields(
   data: unknown,
   documentId?: string,
   strict: boolean = false,
+  locale?: string,
 ): Promise<void> {
   if (!data || typeof data !== 'object') return;
   const payload = data as Record<string, unknown>;
@@ -163,6 +164,7 @@ export async function validateCouponTypeFields(
       .documents(uid as any)
       .findOne({
         documentId,
+        ...(locale ? { locale } : {}),
         fields: ['documentId', 'couponType'] as any,
         populate: {
           uniqueCouponPool: { fields: ['documentId'] },

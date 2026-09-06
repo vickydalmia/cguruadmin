@@ -21,6 +21,7 @@ import {
   sanitizePublicDocumentOutput,
   sanitizePublicDocumentQuery,
 } from './offer-sanitizers';
+import { attachStablePublicOfferIdsForRequest } from './public-offer-ids';
 
 // Editors may promote any ten live, entity-scoped Coupons into an explicit
 // first-page order. This is deliberately separate from the mapped `coupons`
@@ -67,6 +68,12 @@ export async function listPublishedOffers(
   const total = await documents.count(countQuery);
   const data = arrayizeOfferText(await sanitizeDocumentOutput(strapi, ctx, uid, items));
   await attachFestiveOffers(strapi, data);
+  await attachStablePublicOfferIdsForRequest(
+    strapi,
+    ctx,
+    data,
+    [uid === 'api::coupon.coupon' ? 'coupon' : 'deal'],
+  );
 
   return {
     data,

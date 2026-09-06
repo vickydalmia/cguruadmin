@@ -230,6 +230,9 @@ export function mapOffer(document: any, type: "coupon" | "deal") {
     type,
     subtitle: ownerName,
     storeName: ownerName,
+    // Canonical csv selected from the deployment's enabled offer-country
+    // registry. Null keeps older rows and single-country deployments additive.
+    offerCountries: cleanText(document?.offerCountries, 128),
     // Product-deal cards must never disguise a store logo as product media.
     // Coupon records no longer own media, so their search result draws from
     // the first related entity carrying a logo/icon (site identity-media

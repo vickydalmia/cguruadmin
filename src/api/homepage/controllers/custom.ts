@@ -43,12 +43,19 @@ import { featureByPath } from '../../site-configuration/services/country-registr
 import { filterSiteChrome } from '../../site-configuration/services/site-chrome-filter';
 import { filterHomepage } from '../../site-configuration/services/homepage-filter';
 import { findEntityTemplateOwners } from '../../site-configuration/services/entity-template-owners';
+import {
+  attachStablePublicOfferIdsForRequest,
+  requestedOfferTargetLocale,
+} from '../../coupon/services/public-offer-ids';
+import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   async homepageFull(ctx) {
+    const locale = requestedOfferTargetLocale(ctx) ?? DEFAULT_CONTENT_LOCALE;
     // Homepage has draftAndPublish disabled — every entry is live; no status filter.
     const [homepage, siteSettings] = await Promise.all([
       strapi.documents('api::homepage.homepage').findFirst({
+        locale,
         populate: HOMEPAGE_POPULATE as any,
       }),
       (strapi.service('api::site-configuration.site-configuration') as any).publicSettings(),
@@ -75,15 +82,17 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     // database read, so it cannot ride the synchronous walker above; it walks
     // the same nested section tree.
     await attachFestiveOffers(strapi, sanitized);
+    await attachStablePublicOfferIdsForRequest(strapi, ctx, sanitized);
 
     return ctx.send({ data: sanitized, siteSettings });
   },
 
   async siteChrome(ctx) {
+    const locale = requestedOfferTargetLocale(ctx) ?? DEFAULT_CONTENT_LOCALE;
     const [menu, footer, global, siteSettings] = await Promise.all([
-      strapi.documents('api::menu.menu').findFirst({ populate: MENU_POPULATE as any }),
-      strapi.documents('api::footer.footer').findFirst({ populate: FOOTER_POPULATE as any }),
-      strapi.documents('api::global.global').findFirst({ populate: GLOBAL_POPULATE as any }),
+      strapi.documents('api::menu.menu').findFirst({ locale, populate: MENU_POPULATE as any }),
+      strapi.documents('api::footer.footer').findFirst({ locale, populate: FOOTER_POPULATE as any }),
+      strapi.documents('api::global.global').findFirst({ locale, populate: GLOBAL_POPULATE as any }),
       (strapi.service('api::site-configuration.site-configuration') as any).publicSettings(),
     ]);
 
@@ -108,6 +117,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       sanitizedFooter,
       siteSettings.features,
     );
+    await attachStablePublicOfferIdsForRequest(strapi, ctx, filtered);
 
     return ctx.send({
       menu: filtered.menu,
@@ -118,7 +128,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   async headerNotification(ctx) {
+    const locale = requestedOfferTargetLocale(ctx) ?? DEFAULT_CONTENT_LOCALE;
     const menu = await strapi.documents('api::menu.menu').findFirst({
+      locale,
       fields: ['documentId'] as any,
       populate: HEADER_NOTIFICATION_POPULATE as any,
     });
@@ -130,10 +142,12 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       'api::menu.menu',
       menu,
     );
+    await attachStablePublicOfferIdsForRequest(strapi, ctx, sanitizedMenu);
     return ctx.send({ data: headerNotificationPayload(sanitizedMenu) });
   },
 
   async publicRouteMetadata(ctx) {
+    const locale = requestedOfferTargetLocale(ctx) ?? DEFAULT_CONTENT_LOCALE;
     const siteSettings = await (
       strapi.service('api::site-configuration.site-configuration') as any
     ).publicSettings();
@@ -147,6 +161,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       Promise.all(
         liveManagedRoutes.map(([uid]) =>
           strapi.documents(uid as any).findFirst({
+            locale,
             fields: ['documentId', 'updatedAt'] as any,
             populate: {
               seo: { fields: ['noIndex'] },
@@ -155,6 +170,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         ),
       ),
       careersLive ? strapi.documents('api::job.job' as any).findMany({
+        locale,
         filters: { isActive: true } as any,
         fields: ['documentId', 'slug', 'updatedAt'] as any,
         populate: {
@@ -167,8 +183,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       ].map(async ([featureKey, pageTemplate, uid]) => {
         if (siteSettings.features[featureKey]?.live !== true) return [];
         const [owners, singleton]: [any[], any] = await Promise.all([
-          findEntityTemplateOwners(strapi, pageTemplate as any),
+          findEntityTemplateOwners(strapi, pageTemplate as any, locale),
           strapi.documents(uid as any).findFirst({
+            locale,
             fields: ['documentId', 'updatedAt'] as any,
             populate: { seo: { fields: ['noIndex'] } } as any,
           }),

@@ -241,7 +241,8 @@ function checkOfferTaxonomy(
   data: any,
   stored: any,
   problems: Problem[],
-  strict: boolean
+  strict: boolean,
+  allowSourceOrphan: boolean,
 ): void {
   if (!OFFER_UIDS.includes(uid)) return;
 
@@ -278,6 +279,7 @@ function checkOfferTaxonomy(
   }
 
   if (total > 0) return;
+  if (allowSourceOrphan) return;
   // The full Content Manager form re-sends relation arrays. An already
   // orphaned legacy offer remains saveable until the editor actually changes
   // its taxonomy state — unless this is a strict human write, which must clean
@@ -316,7 +318,8 @@ export function validateTextFields(
   action: string,
   data: any,
   stored: any = null,
-  strict: boolean = false
+  strict: boolean = false,
+  allowSourceOrphan: boolean = false,
 ): void {
   if (!isWriteAction(action)) return;
   if (!data || typeof data !== 'object') return;
@@ -373,7 +376,15 @@ export function validateTextFields(
     });
   }
 
-  checkOfferTaxonomy(uid, action, data, stored, problems, strict);
+  checkOfferTaxonomy(
+    uid,
+    action,
+    data,
+    stored,
+    problems,
+    strict,
+    allowSourceOrphan,
+  );
 
   if (problems.length) throwProblems(problems);
 }
@@ -422,7 +433,9 @@ export async function validateTextFieldsForWrite(
   action: string,
   data: any,
   documentId?: string,
-  strict: boolean = false
+  strict: boolean = false,
+  locale?: string,
+  allowSourceOrphan: boolean = false,
 ): Promise<void> {
   if (!isWriteAction(action)) return;
   if (!data || typeof data !== 'object') return;
@@ -465,10 +478,11 @@ export async function validateTextFieldsForWrite(
 
     stored = await strapi.documents(uid as any).findOne({
       documentId,
+      ...(locale ? { locale } : {}),
       fields: [...new Set(fields)],
       ...(Object.keys(populate).length > 0 ? { populate } : {}),
     } as any);
   }
 
-  validateTextFields(uid, action, data, stored, strict);
+  validateTextFields(uid, action, data, stored, strict, allowSourceOrphan);
 }

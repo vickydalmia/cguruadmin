@@ -31,6 +31,7 @@ import {
   routeConflictFor,
 } from './entity-deal-page-route-owners';
 import { resolveEntityDealPageSeo } from './entity-deal-page-seo';
+import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
 
 export function mapSettingItem(input: {
   config: EntityConfig;
@@ -180,22 +181,49 @@ export function settingsComparator(
 export async function loadSettingItems(
   strapi: Core.Strapi,
   configs: readonly EntityConfig[],
+  locale = DEFAULT_CONTENT_LOCALE,
 ) {
   const [perConfigEntities, activeRedirects] = await Promise.all([
     Promise.all(
-      configs.map(async (config) => ({
-        config,
-        entities: await findAllDocuments(
+      configs.map(async (config) => {
+        const entities = await findAllDocuments(
           strapi,
           config.uid,
           {
+            locale,
             fields: entityFields(config) as any,
             populate: entityPopulate(config) as any,
             sort: [{ id: 'asc' }],
           },
           ENTITY_BATCH_SIZE,
-        ),
-      })),
+        );
+        const sourceRows = locale === DEFAULT_CONTENT_LOCALE
+          ? entities
+          : entities.length > 0
+            ? await findAllDocuments(
+              strapi,
+              config.uid,
+              {
+                locale: DEFAULT_CONTENT_LOCALE,
+                filters: {
+                  documentId: {
+                    $in: entities.map((entity) => entity.documentId),
+                  },
+                },
+                fields: ['documentId', 'name'],
+                sort: [{ id: 'asc' }],
+              },
+              ENTITY_BATCH_SIZE,
+            )
+            : [];
+        return {
+          config,
+          entities,
+          routeNameByDocumentId: new Map(
+            sourceRows.map((entity) => [entity.documentId, entity.name]),
+          ),
+        };
+      }),
     ),
     // Paged, not `limit: 2_000` — past a flat cap the route-conflict blocker
     // silently stops firing for every redirect beyond the window.
@@ -211,10 +239,16 @@ export async function loadSettingItems(
     ),
   ]);
 
-  const allEntityRows = perConfigEntities.flatMap(({ config, entities }) =>
+  const allEntityRows = perConfigEntities.flatMap(({
+    config,
+    entities,
+    routeNameByDocumentId,
+  }) =>
     entities.flatMap((entity) => {
       const publicSlug = toRouteSlug(entity?.slug, config.kind);
-      const dealSlug = entityDealPageSlug(entity?.name);
+      const dealSlug = entityDealPageSlug(
+        routeNameByDocumentId.get(entity?.documentId),
+      );
       return publicSlug && dealSlug
         ? [{ config, entity, publicSlug, dealSlug }]
         : [];
@@ -244,6 +278,7 @@ export async function loadSettingItems(
     strapi,
     'api::deal.deal',
     {
+      locale,
       filters: {
         contentStatus,
         $and: publishedAnd,

@@ -2,7 +2,7 @@
 // contract, and its defensive parser. Shared by the acquisition hook.
 
 export const HEARTBEAT_MS = 20_000;
-/** Faster cadence while blocked so the modal lifts promptly after the holder
+/** Faster cadence while blocked so the scoped modal lifts promptly after the holder
  * leaves (their release lands immediately — see getFetchClient note below). */
 export const BLOCKED_RETRY_MS = 10_000;
 /** Abort a hung acquire well before the 90 s TTL: the next heartbeat is only

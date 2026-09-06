@@ -3,6 +3,7 @@ import type { Core } from '@strapi/strapi';
 import { isIdentityUid } from '../identity-uids';
 import { JOB_UID } from '../job-slug-validation';
 import { isHumanWrite } from '../write-origin';
+import { translationWriteContext } from '../../translation/write-flag';
 import {
   acquireWriteSerializationLock,
   type WriteLockDomain,
@@ -38,6 +39,14 @@ import {
  *    away.
  *  - The deal-image step calls a paid background-removal provider. Same
  *    reasoning, with money attached.
+ *
+ * Translation writes carry an explicit source/target/write-plan context. They
+ * run this same pipeline, with only the documented source-parity exceptions:
+ * locale short descriptions do not inherit the English 160-character minimum,
+ * exact source homepage media IDs may retain legacy dimensions, and an already
+ * orphaned source offer may mirror that empty taxonomy. Legacy store lists and
+ * Deal discount pairs may also be copied exactly from English. No target-only
+ * defect is grandfathered.
  * Both are rare enough that the extra round trip costs an editor far less than
  * the lock contention or the credit would.
  *
@@ -49,10 +58,16 @@ import {
  */
 export async function runWriteValidation(
   strapi: Core.Strapi,
-  context: { uid: string; action: string; params?: { data?: any; documentId?: string } },
+  context: {
+    uid: string;
+    action: string;
+    params?: { data?: any; documentId?: string; locale?: string };
+  },
 ): Promise<WriteLockRelease | null> {
   const { uid, action } = context;
   if (!WRITE_ACTIONS.includes(action as (typeof WRITE_ACTIONS)[number])) return null;
+
+  const translation = translationWriteContext() ?? undefined;
 
   const ctx: StepContext = {
     strapi,
@@ -66,7 +81,18 @@ export async function runWriteValidation(
     // {contentStatus} writes over possibly-dirty rows) has no HTTP request
     // context, so it stays grandfathered/touched-only and never throws on
     // migrated data. Computed once; passed to each validator.
-    strict: isHumanWrite(strapi),
+    // A translation write is a publication boundary, not a maintenance cron.
+    // Validate the complete effective record and permit only the explicit
+    // source-parity exceptions carried by its context.
+    strict: isHumanWrite(strapi) || Boolean(translation?.sourceEntry),
+    // Which locale version of the document this write targets (undefined =
+    // default). Validators that resolve partial payloads against the STORED
+    // row must read that locale's row, not whichever one db.query finds first.
+    locale:
+      typeof context.params?.locale === 'string'
+        ? context.params.locale
+        : undefined,
+    translation,
   };
 
   // --- Group A: mutators. Never throw; every validator below reads what they
@@ -75,12 +101,32 @@ export async function runWriteValidation(
     await step.run(ctx);
   }
 
+  // The localized write plan intentionally excludes shared identifiers,
+  // lifecycle values, URLs, coupon codes and other non-localized fields. They
+  // must stay outside the provider payload, but the write validators still
+  // need to judge the record Strapi will actually produce. Overlay the
+  // normalized locale plan on the populated English source for validation
+  // only. A first locale row is validated as a create so validators do not
+  // read a target row that does not exist yet, but it keeps the document's
+  // (locale-shared) documentId: uniqueness validators need it to recognise
+  // the English row as the same document rather than a colliding one, and
+  // relation-eligibility validators query the default locale by it.
+  const validationCtx: StepContext =
+    translation?.sourceEntry && ctx.data && typeof ctx.data === 'object'
+      ? {
+          ...ctx,
+          action: translation.targetRowExisted ? ctx.action : 'create',
+          data: { ...translation.sourceEntry, ...ctx.data },
+        }
+      : ctx;
+
   // --- Group B: every pure validator runs, and their problems are merged into
   // one error. This is the group that produces nearly everything an editor
-  // sees, and the reason this file exists.
+  // sees, and the reason this file exists. Translation writes run them too;
+  // each narrow source-parity exception is carried explicitly in `ctx`.
   const collector = new ProblemCollector();
-  for (const step of applicable(COLLECTED_STEPS, ctx)) {
-    await collector.run(() => step.run(ctx));
+  for (const step of applicable(COLLECTED_STEPS, validationCtx)) {
+    await collector.run(() => step.run(validationCtx));
   }
   collector.throwIfAny();
 
@@ -96,13 +142,13 @@ export async function runWriteValidation(
     // No lock needed, but the two validators still run for every uid — each
     // no-ops internally on a type it does not own. Unchanged from the original
     // middleware, which also called both unconditionally.
-    await collectLockedSteps(ctx);
+    await collectLockedSteps(validationCtx);
     return null;
   }
 
   const release = await acquireWriteSerializationLock(strapi, domain);
   try {
-    await collectLockedSteps(ctx);
+    await collectLockedSteps(validationCtx);
   } catch (error) {
     // Only on the failure path. On success the caller owns the release, because
     // the lock must still be held while the write commits.

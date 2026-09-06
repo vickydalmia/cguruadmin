@@ -2,6 +2,8 @@ import type { Core } from '@strapi/strapi';
 import { purgeResponseCaches } from '../middlewares/cache';
 import {
   createOutboxPayload,
+  expandPayloadPathsForLocales,
+  localizeTranslationPayload,
   mergeScope,
   offerEntityTypeFromUid,
   outboxPayloadSummary,
@@ -41,6 +43,27 @@ import { CHECKOUT_MERCHANT_FIELD } from '../constants/checkout-merchant';
 import { clearDeletedCheckoutMerchant } from '../utils/checkout-merchant-validation';
 import { fillHomepageOverrides } from '../utils/homepage-override-fill';
 import { DOCUMENT_WRITE_ACTIONS } from '../constants/document-write';
+import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
+import {
+  isTranslationWrite,
+  translationWriteContext,
+} from '../translation/write-flag';
+import {
+  translationRuntimeActive,
+  wakeTranslationOutbox,
+} from '../translation/outbox/runtime';
+import {
+  insertTranslationJob,
+  enqueueBlockedDependentsForAvailableTarget,
+  TRANSLATION_STATE_TABLE,
+} from '../translation/outbox/store';
+import { enabledContentLocales } from '../translation/locales/registry';
+import {
+  hasSharedFieldSelection,
+  loadSharedFieldSnapshot,
+  sharedFieldSelection,
+  sharedFieldSnapshotsDiffer,
+} from '../isr-outbox/localized-change';
 
 // The document-write pipeline: the one document-service middleware every
 // editor-facing write flows through. In order: pre-write validation
@@ -164,6 +187,7 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
       // this snapshot every Store/Brand save would escalate to a full-site
       // rebuild (see festiveOfferChanged in isr-outbox/scopes.ts). A failed
       // read stays null, which fails toward invalidation, never away.
+      let translationEnqueued = false;
       let festiveOfferBefore: FestiveOfferSnapshot | null = null;
       if (
         context.action === 'update' &&
@@ -171,8 +195,15 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
         context.params?.documentId
       ) {
         try {
+          // Same locale as the write: festive title/description are
+          // localized, so an `ar` save compared against the `en` snapshot
+          // would read as "festive edited" and wrongly escalate every
+          // translation write to a full-site rebuild.
           festiveOfferBefore = await strapi.documents(context.uid).findOne({
             documentId: context.params.documentId,
+            ...(context.params?.locale
+              ? { locale: context.params.locale }
+              : {}),
             fields: [
               'isFestiveOffer',
               'festiveOfferTitle',
@@ -181,6 +212,39 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
           });
         } catch {
           festiveOfferBefore = null;
+        }
+      }
+
+      // Content Manager updates resend the full form, including every shared
+      // slug/visibility/media field. Field presence is therefore not evidence
+      // of change: compare the persisted before/after values so an English
+      // title-only edit does not invalidate Arabic before its translation is
+      // ready. Unknown/read-failed state deliberately falls back to all-locale
+      // invalidation.
+      const localizedModel = strapi.getModel(context.uid as any) as any;
+      const localizedType =
+        localizedModel?.pluginOptions?.i18n?.localized === true;
+      const sharedSelection = sharedFieldSelection(
+        localizedModel,
+        context.params?.data,
+      );
+      let sharedBefore: Record<string, unknown> | null = null;
+      if (
+        localizedType &&
+        context.action === 'update' &&
+        context.params?.documentId &&
+        hasSharedFieldSelection(sharedSelection)
+      ) {
+        try {
+          sharedBefore = await loadSharedFieldSnapshot(
+            strapi,
+            context.uid,
+            context.params.documentId,
+            context.params?.locale,
+            sharedSelection,
+          );
+        } catch {
+          sharedBefore = null;
         }
       }
 
@@ -266,6 +330,128 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
 
           const documentId =
             (result as any)?.documentId ?? context.params?.documentId;
+
+          // AI translation: a default-locale write to a localized type
+          // enqueues one coalesced job per enabled target locale, in THIS
+          // transaction — the job either commits with the content or not at
+          // all. The dispatcher's own locale writes are excluded twice over
+          // (non-default locale + the AsyncLocalStorage write flag). Fully
+          // inert unless the site opted in AND the env parses
+          // (translationRuntimeActive), so India/USA never see a row.
+          try {
+            const writesDefaultLocale =
+              !context.params?.locale ||
+              context.params.locale === DEFAULT_CONTENT_LOCALE;
+            const localizedType =
+              (strapi.getModel(context.uid as any) as any)?.pluginOptions?.i18n
+                ?.localized === true;
+            if (localizedType && documentId) {
+              if (context.action === 'delete') {
+                const deletedLocale = String(
+                  context.params?.locale ?? DEFAULT_CONTENT_LOCALE,
+                );
+                const stateRows = trx(TRANSLATION_STATE_TABLE).where({
+                  uid: context.uid,
+                  document_id: documentId,
+                });
+                // Strapi deletes one locale unless the caller explicitly
+                // uses locale="*". A target-locale delete must therefore
+                // retain the source and every sibling locale's memory.
+                if (
+                  deletedLocale !== DEFAULT_CONTENT_LOCALE &&
+                  deletedLocale !== '*'
+                ) {
+                  stateRows.andWhere({ locale: deletedLocale });
+                }
+                await stateRows.delete();
+                if (
+                  deletedLocale === DEFAULT_CONTENT_LOCALE &&
+                  !isTranslationWrite() &&
+                  (await translationRuntimeActive(strapi))
+                ) {
+                  // Durable cleanup: the dispatcher sees that the English
+                  // source is gone and removes each generated locale through
+                  // the documents API, including all component/relation rows.
+                  for (const locale of await enabledContentLocales(strapi)) {
+                    await insertTranslationJob(trx, {
+                      uid: context.uid,
+                      documentId,
+                      targetLocale: locale.code,
+                      kind: 'translate',
+                      reason: `${context.uid} delete`,
+                    });
+                  }
+                  translationEnqueued = true;
+                }
+              } else if (
+                writesDefaultLocale &&
+                !isTranslationWrite() &&
+                ['create', 'update', 'clone', 'publish'].includes(context.action) &&
+                (await translationRuntimeActive(strapi))
+              ) {
+                for (const locale of await enabledContentLocales(strapi)) {
+                  await insertTranslationJob(trx, {
+                    uid: context.uid,
+                    documentId,
+                    targetLocale: locale.code,
+                    kind: 'translate',
+                    reason: `${context.uid} ${context.action}`,
+                  });
+                }
+                translationEnqueued = true;
+              }
+
+              // The row itself is the dependency signal. Enqueue exact
+              // blocked parents in the SAME transaction so an AI write or a
+              // human-created locale row cannot commit without its wakeup.
+              const writtenLocale = String(
+                context.params?.locale ?? DEFAULT_CONTENT_LOCALE,
+              );
+              if (
+                writtenLocale !== DEFAULT_CONTENT_LOCALE &&
+                writtenLocale !== '*' &&
+                context.action !== 'delete' &&
+                !isTranslationWrite()
+              ) {
+                // Human target-locale edits invalidate the proof recorded by
+                // the translation writer. The paid text memory remains, but
+                // the next repair must inspect/reconcile the actual row.
+                await trx(TRANSLATION_STATE_TABLE)
+                  .where({
+                    uid: context.uid,
+                    document_id: documentId,
+                    locale: writtenLocale,
+                  })
+                  .update({ published_plan_hash: null });
+              }
+              if (
+                writtenLocale !== DEFAULT_CONTENT_LOCALE &&
+                writtenLocale !== '*' &&
+                context.action !== 'delete'
+              ) {
+                const awakened = await enqueueBlockedDependentsForAvailableTarget(
+                  trx,
+                  {
+                    uid: context.uid,
+                    documentId,
+                    targetLocale: writtenLocale,
+                  },
+                );
+                if (awakened > 0) translationEnqueued = true;
+              }
+            }
+          } catch (err: any) {
+            // The job is the durable continuation of this English write.
+            // Failing the transaction is safer than committing content that
+            // can never be translated (the nightly audit is deliberately
+            // optional and is not a delivery mechanism).
+            strapi.log.error(
+              `[translation] enqueue failed for ${context.uid} ${documentId}: ` +
+                `${err?.message ?? err}`,
+            );
+            throw err;
+          }
+
           const afterScope =
             context.action === 'delete' && preScope
               ? null
@@ -366,12 +552,74 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
           }
 
           if (!scope && offerInvalidations.length === 0) return null;
+          const payload = createOutboxPayload(
+            scope ?? {},
+            offerInvalidations,
+          );
+          const targetLocale = String(
+            context.params?.locale ?? DEFAULT_CONTENT_LOCALE,
+          );
+          const translation = translationWriteContext();
+          const sharedChange = await (async () => {
+            if (!localizedType || isTranslationWrite()) return false;
+            if (targetLocale === '*') return true;
+            if (['publish', 'unpublish'].includes(context.action)) return true;
+            if (context.action !== 'update') return false;
+            if (sharedSelection.unknown) return true;
+            if (!hasSharedFieldSelection(sharedSelection)) return false;
+            try {
+              const after = documentId
+                ? await loadSharedFieldSnapshot(
+                    strapi,
+                    context.uid,
+                    documentId,
+                    context.params?.locale,
+                    sharedSelection,
+                  )
+                : null;
+              return sharedFieldSnapshotsDiffer(sharedBefore, after);
+            } catch {
+              return true;
+            }
+          })();
+          if (
+            localizedType &&
+            !sharedChange &&
+            targetLocale !== DEFAULT_CONTENT_LOCALE &&
+            targetLocale !== '*'
+          ) {
+            const localizedPayload = localizeTranslationPayload(
+              payload,
+              targetLocale,
+              {
+                routeMembershipChanged:
+                  translation
+                    ? !translation.targetRowExisted ||
+                      translation.operation === 'delete'
+                    : ['create', 'delete'].includes(context.action),
+              },
+            );
+            return {
+              payload: localizedPayload,
+              reason: `${context.uid} ${context.action}`,
+              ...(translation
+                ? { eventKey: `translation-isr:${targetLocale}` }
+                : {}),
+            };
+          }
           return {
-            payload: createOutboxPayload(scope ?? {}, offerInvalidations),
+            payload: sharedChange
+              ? expandPayloadPathsForLocales(
+                  payload,
+                  (await enabledContentLocales(strapi)).map((locale) => locale.code),
+                )
+              : payload,
             reason: `${context.uid} ${context.action}`,
           };
         },
         (event) => {
+          // Only after the database commit — the job row is durable now.
+          if (translationEnqueued) wakeTranslationOutbox();
           if (!event) return;
           // Only after the database commit: renderers must never observe
           // invalidation before the content and its durable outbox event.

@@ -5,6 +5,27 @@ import {
 } from './offer-field-validation';
 
 describe('validateOfferFields', () => {
+  it.each(['36% OFF', '20% Bank Discount', '40%'])(
+    'preserves the exact legacy source pair %s in translations only', (discount) => {
+      const source = { discount, discountPrefix: null };
+      expect(() => validateOfferFields(
+        { ...source }, 'create', null, true, 'api::deal.deal', true, source,
+      )).not.toThrow();
+      expect(() => validateOfferFields(
+        { ...source }, 'create', null, true, 'api::deal.deal', true,
+      )).toThrow();
+      expect(() => validateOfferFields(
+        { ...source, discount: '99% OFF' }, 'create', null, true, 'api::deal.deal', true, source,
+      )).toThrow();
+      expect(() => validateOfferFields(
+        { ...source, discountPrefix: 'invalid' }, 'create', null, true, 'api::deal.deal', true, source,
+      )).toThrow();
+      expect(() => validateOfferFields(
+        { ...source, bankOfferText: '20% Bank Discount' }, 'create', null, true,
+        'api::deal.deal', true, source,
+      )).toThrow('Bank');
+    },
+  );
   it('accepts a valid badge and bare benefit amounts', () => {
     expect(() =>
       validateOfferFields({

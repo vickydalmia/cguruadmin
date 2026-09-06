@@ -45,13 +45,14 @@ Optional WordPress tables: `wp_uc_coupons`, `wp_uc_codes` (unique coupon plugin)
 
 ## Setup & Configuration
 
-1. Copy the environment template and fill in your values. For USA, overlay
-   `.env.migration.usa.example`; it pins the source prefix, localization,
-   expected inventory and the isolated `.state/usa` directory:
+1. Copy the environment template and fill in your values. For USA or UAE,
+   overlay `.env.migration.usa.example` or `.env.migration.ae.example`; each
+   pins its profile, source identity, classification workbook and isolated
+   state directory:
 
 ```bash
 cp .env.migration.example .env.migration
-# USA only: merge the values from .env.migration.usa.example into .env.migration
+# Merge the matching country overlay into .env.migration
 ```
 
 2. Configure the following variables in `.env.migration`:
@@ -366,6 +367,10 @@ For each coupon:
   as `USD 15 Cashback`, `usd 15 cashback`, `$15 Cashback`, or `Cashback: $15`
   is stored as the bare `$15` value; the public API adds the `Cashback` suffix
   when rendering.
+- For profiles with enabled Offer Countries, extracts explicit country/region
+  names from the title and content into `offer_countries`. Ambiguous bare ISO
+  codes and merchant/product wording such as Air Jordan or Global Village are
+  intentionally not treated as country validity.
 - Resolves `coupon_type` ("static" or "unique") from ACF meta
 - Wires taxonomy relationships (store, brand, category, bank) from WordPress `wp_term_relationships`
 - Links the unique coupon pool and SEO component; Coupon records do not own a
@@ -486,13 +491,15 @@ The retired Deal-backed Homepage fields `exploreDeals` and `dealsByBrand` are
 not seeded, queried, or retained as compatibility fallbacks. Explore Offers
 and Offers By Brand use their Coupon-backed fields only.
 
-The USA profile imports five hero banners and resolves all eight curated
-featured Store URLs to Store slugs. The four old eight-store grids are reported
-and intentionally ignored. Recommended/Exclusive/Newly Added Coupon sections
-use their WordPress popularity and offer-type values, while sections requiring
-a disabled or unavailable catalog type are disabled. Header/footer tracking
-scripts are not copied unless `IMPORT_WP_TRACKING_SCRIPTS=true` is explicitly
-approved.
+The USA profile imports five hero banners. Curated Featured Store entries are
+linked only when they resolve to migrated Store rows; unmapped entries are
+skipped and no automatic replacement Stores are inserted, so Homepage and Menu
+store selections can be completed manually. The four old eight-store grids are
+reported and intentionally ignored. Recommended/Exclusive/Newly Added Coupon
+sections use their WordPress popularity and offer-type values, while sections
+requiring a disabled or unavailable catalog type are disabled. Header/footer
+tracking scripts are not copied unless `IMPORT_WP_TRACKING_SCRIPTS=true` is
+explicitly approved.
 
 All component and relation link table names are verified against `information_schema` before writing; anything missing (schema not migrated yet) is skipped with a clear warning. Each single type is skipped entirely if its table already has a row, so re-runs are safe.
 
@@ -594,10 +601,13 @@ Content HTML srcsets are frozen at migration time, so rich-text `<img>` tags don
 ### Taxonomies (Phase 03)
 
 WordPress stores all taxonomy terms in `wp_terms` with `taxonomy='category'`.
-For USA, `MIGRATION_CLASSIFICATION_FILE` points to the approved Excel workbook;
+For USA and UAE, `MIGRATION_CLASSIFICATION_FILE` points to the approved Excel workbook;
 its `Classification` value is matched to the SQL term by exact normalized
 slug. Excel is authoritative, and SQL slugs absent from the workbook default
-to Store. Other profiles use ACF `choose_type` with the same fallback.
+to Store. Other profiles use ACF `choose_type` with the same fallback. The UAE
+workbook contains 1,397 importable rows: 457 Stores, 862 Brands and 78
+Categories. Its one omitted SQL term, `Expired`, is excluded through the UAE
+profile because it is a WordPress lifecycle bucket rather than a catalog entity.
 
 | Classification / `choose_type` | Strapi table |
 |--------------------------------|-------------|
@@ -625,8 +635,9 @@ applied in phases 03/07/08 and mirrored by phase 10's expected counts:
    operator-supplied CSV, its store names are matched case/whitespace-
    insensitively against terms whose `choose_type` is `Store` or missing (a
    Brand/Bank/Category sharing a name is never swallowed). The repo
-   intentionally ships no historical retired-store CSV for India or USA; an
-   unset or missing file means zero listed-store exclusions.
+   intentionally ships no historical retired-store CSV for India or USA. The
+   UAE profile uses this same exclusion seam for its non-catalog `Expired`
+   bucket; an unset or missing file means zero listed exclusions.
 
 An excluded term is never imported, and every post filed under one is
 excluded from phases 07/08 — *before* the inventory reconciliation, so a
@@ -879,7 +890,11 @@ Maps are loaded at startup (`loadMaps()`, each file independently optional) and 
 
 ### Database-Level Idempotency
 
-- All main entity inserts use `ON CONFLICT (document_id) DO NOTHING`
+- Localized taxonomy, Coupon and Deal source rows are written with
+  `locale = 'en'` and upsert with `ON CONFLICT (document_id, locale)`. Their
+  database uniqueness is locale-aware because every translated row shares the
+  same logical `document_id`. Non-localized pools, unique codes and files keep
+  `ON CONFLICT (document_id)`.
 - `document_id` for migrated WordPress entities is deterministic and derived from stable source keys:
   - terms: `term:{table}:{wp_term_id}`
   - pools: `pool:{wp_pool_id}`

@@ -21,6 +21,8 @@ export interface OfferInvalidation {
 
 export interface IsrOutboxPayload {
   all?: true;
+  /** Constrain this invalidation to routes beneath one localized prefix. */
+  localePrefix?: string;
   paths?: string[];
   /** A normalized subset of paths whose absence must not fail delivery. */
   optionalPaths?: string[];
@@ -30,6 +32,8 @@ export interface IsrOutboxPayload {
 
 export interface IsrOutboxEvent {
   id: string;
+  /** Unique delivery attempt identity, stable across retries of this row. */
+  deliveryKey: string;
   eventKey: string;
   lockToken: string;
   payload: IsrOutboxPayload;

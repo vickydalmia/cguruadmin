@@ -24,6 +24,7 @@ function searchService({
     code: null,
     couponType: "static",
     affiliateLink: "https://track.example.com/coupon",
+    offerCountries: "AE,SA",
     // A stale pre-migration property must never become public search media.
     image: { url: "https://cdn.example.com/legacy-coupon.webp" },
     stores: [{ name: "Fashion Store", slug: "fashion-store-coupons" }],
@@ -39,6 +40,7 @@ function searchService({
     discount: "40%",
     discountPrefix: "upTo",
     expiresAt: "2026-12-31T00:00:00.000Z",
+    offerCountries: "AE,GCC",
     dealImage: {
       url: "https://cdn.example.com/shoes.webp",
       width: 600,
@@ -85,6 +87,21 @@ function searchService({
   };
 
   const strapi = {
+    db: {
+      query(uid: string) {
+        return {
+          async findMany() {
+            if (uid === "api::coupon.coupon") {
+              return [{ id: 123, documentId: coupon.documentId }];
+            }
+            if (uid === "api::deal.deal") {
+              return [{ id: 321, documentId: deal.documentId }];
+            }
+            return [];
+          },
+        };
+      },
+    },
     documents(uid: string) {
       return {
         async findMany(options: any) {
@@ -330,6 +347,7 @@ describe("public search entity boundaries", () => {
       documentId: "coupon-no-code",
       couponId: 987,
       codeMode: "none",
+      offerCountries: "AE,SA",
       type: "coupon",
       name: "No-code fashion offer",
       media: null,
@@ -339,6 +357,40 @@ describe("public search entity boundaries", () => {
     );
     expect(JSON.stringify(couponFind?.options.filters)).not.toContain("couponType");
     expect(couponFind?.options.populate).not.toHaveProperty("image");
+    expect(couponFind?.options.fields).toContain("offerCountries");
+  });
+
+  it("keeps translated search hits on the default-locale numeric detail routes", async () => {
+    const { service } = searchService();
+    const [couponResponse, dealResponse] = await Promise.all([
+      service.search({
+        query: "fashion",
+        mode: "group",
+        group: "coupons",
+        page: 1,
+        pageSize: 20,
+        locale: "ar",
+      }),
+      service.search({
+        query: "shoes",
+        mode: "group",
+        group: "deals",
+        page: 1,
+        pageSize: 20,
+        locale: "ar",
+      }),
+    ]);
+
+    expect(couponResponse.coupons[0]).toMatchObject({
+      couponId: 123,
+      documentId: "coupon-no-code",
+      link: "https://track.example.com/coupon",
+    });
+    expect(dealResponse.deals[0]).toMatchObject({
+      dealId: 321,
+      documentId: "product-deal",
+      link: "https://track.example.com/shoes",
+    });
   });
 
   it("returns a product Deal without requiring MRP and includes owner metadata", async () => {
@@ -362,6 +414,7 @@ describe("public search entity boundaries", () => {
       originalPrice: null,
       discount: "Up To 40% OFF",
       expiresAt: "2026-12-31T00:00:00.000Z",
+      offerCountries: "AE,GCC",
       owner: {
         name: "Shoe Store",
         logo: {
@@ -376,6 +429,7 @@ describe("public search entity boundaries", () => {
     expect(JSON.stringify(dealFind?.options.filters)).not.toContain('"mrp"');
     expect(dealFind?.options.fields).toContain("expiresAt");
     expect(dealFind?.options.fields).toContain("discountPrefix");
+    expect(dealFind?.options.fields).toContain("offerCountries");
     expect(response.deals[0]).not.toHaveProperty("discountPrefix");
   });
 
@@ -853,7 +907,11 @@ describe("ranked SQL path (Postgres)", () => {
         /FROM (?:coupons|deals) o/u.test(sql),
       );
       expect(offerSql).toHaveLength(3);
-      expect(offerSql.every(([, bindings]) => bindings?.[0] === nowIso)).toBe(
+      // The locale pin binds first, the shared request cutoff right after it.
+      expect(offerSql.every(([, bindings]) => bindings?.[0] === "en")).toBe(
+        true,
+      );
+      expect(offerSql.every(([, bindings]) => bindings?.[1] === nowIso)).toBe(
         true,
       );
       const hydrate = calls.find(

@@ -23,6 +23,7 @@ import {
   entityPopulate,
   findAllDocuments,
 } from './entity-deal-page-loaders';
+import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
 
 type EntityRouteOwner = {
   config: EntityConfig;
@@ -35,44 +36,74 @@ const ENTITY_ROUTE_OWNER_TTL_MS = 60_000;
 
 const entityRouteOwnerCache = new WeakMap<
   Core.Strapi,
-  { expiresAt: number; owners: Map<string, EntityRouteOwner | null> }
+  Map<string, { expiresAt: number; owners: Map<string, EntityRouteOwner | null> }>
 >();
 
 export async function entityRouteOwners(
   strapi: Core.Strapi,
+  locale = DEFAULT_CONTENT_LOCALE,
 ): Promise<Map<string, EntityRouteOwner | null>> {
-  const cached = entityRouteOwnerCache.get(strapi);
+  const localeCache = entityRouteOwnerCache.get(strapi);
+  const cached = localeCache?.get(locale);
   if (cached && cached.expiresAt > Date.now()) return cached.owners;
 
   const perConfig = await Promise.all(
-    ENTITY_DEAL_PAGE_CONFIGS.map(async (config) => ({
-      config,
-      entities: await findAllDocuments(
+    ENTITY_DEAL_PAGE_CONFIGS.map(async (config) => {
+      const entities = await findAllDocuments(
         strapi,
         config.uid,
         {
+          locale,
           fields: ['documentId', 'name', 'slug'],
           sort: [{ id: 'asc' }],
         },
         ENTITY_BATCH_SIZE,
-      ),
-    })),
+      );
+      const sourceRows = locale === DEFAULT_CONTENT_LOCALE
+        ? entities
+        : entities.length > 0
+          ? await findAllDocuments(
+            strapi,
+            config.uid,
+            {
+              locale: DEFAULT_CONTENT_LOCALE,
+              filters: {
+                documentId: { $in: entities.map((entity) => entity.documentId) },
+              },
+              fields: ['documentId', 'name'],
+              sort: [{ id: 'asc' }],
+            },
+            ENTITY_BATCH_SIZE,
+          )
+          : [];
+      return {
+        config,
+        entities,
+        routeNameByDocumentId: new Map(
+          sourceRows.map((entity) => [entity.documentId, entity.name]),
+        ),
+      };
+    }),
   );
   const owners = new Map<string, EntityRouteOwner | null>();
-  for (const { config, entities } of perConfig) {
+  for (const { config, entities, routeNameByDocumentId } of perConfig) {
     for (const entity of entities) {
       const documentId = cleanText(entity?.documentId);
       const publicSlug = toRouteSlug(entity?.slug, config.kind);
-      const dealSlug = entityDealPageSlug(entity?.name);
+      const dealSlug = entityDealPageSlug(
+        routeNameByDocumentId.get(entity?.documentId),
+      );
       if (!documentId || !publicSlug || !dealSlug) continue;
       const owner = { config, documentId, publicSlug, dealSlug };
       owners.set(dealSlug, owners.has(dealSlug) ? null : owner);
     }
   }
-  entityRouteOwnerCache.set(strapi, {
+  const nextCache = localeCache ?? new Map();
+  nextCache.set(locale, {
     expiresAt: Date.now() + ENTITY_ROUTE_OWNER_TTL_MS,
     owners,
   });
+  entityRouteOwnerCache.set(strapi, nextCache);
   return owners;
 }
 
@@ -113,6 +144,7 @@ export async function hasRouteConflict(
       ENTITY_DEAL_PAGE_CONFIGS.map(async (config) => {
         const candidates = routeSlugCandidates(dealSlug, config.kind);
         const rows: any[] = await strapi.documents(config.uid).findMany({
+          locale: DEFAULT_CONTENT_LOCALE,
           filters: {
             $or: candidates.map((candidate) => ({ slug: { $eqi: candidate } })),
           } as any,
@@ -130,6 +162,7 @@ export async function hasRouteConflict(
           strapi,
           config.uid,
           {
+            locale: DEFAULT_CONTENT_LOCALE,
             fields: ['documentId', 'name'],
             sort: [{ id: 'asc' }],
           },
@@ -166,19 +199,25 @@ export async function hasRouteConflict(
 export async function resolveEntityByDealSlug(
   strapi: Core.Strapi,
   requestedDealSlug: string,
+  locale = DEFAULT_CONTENT_LOCALE,
 ): Promise<ResolvedEntity | null> {
-  const owner = (await entityRouteOwners(strapi)).get(requestedDealSlug);
+  const owner = (await entityRouteOwners(strapi, locale)).get(requestedDealSlug);
   if (!owner) return null;
 
   const entity: any = await strapi.documents(owner.config.uid).findOne({
     documentId: owner.documentId,
+    locale,
     fields: entityFields(owner.config) as any,
     populate: entityPopulate(owner.config) as any,
   } as any);
   const publicSlug = toRouteSlug(entity?.slug, owner.config.kind);
-  const dealSlug = entityDealPageSlug(entity?.name);
-  if (!entity || publicSlug !== owner.publicSlug || dealSlug !== requestedDealSlug) {
+  if (!entity || publicSlug !== owner.publicSlug) {
     return null;
   }
-  return { config: owner.config, entity, publicSlug, dealSlug };
+  return {
+    config: owner.config,
+    entity,
+    publicSlug,
+    dealSlug: owner.dealSlug,
+  };
 }

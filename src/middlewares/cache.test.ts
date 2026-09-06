@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import cacheMiddleware from "./cache";
 import { ISR_CACHE_BYPASS_HEADER } from "../utils/isr-cache-bypass";
+import { setEnabledContentLocaleCodesForTest } from "../translation/locales/registry";
 
 const SECRET = "shared-render-secret";
 const NONCE = "fixed_nonce_1234567890";
@@ -15,15 +16,21 @@ function signedToken(timestampMs = Date.now()): string {
   return `${payload}.${signature}`;
 }
 
-function requestContext(token?: string, remoteAddress = "127.0.0.1") {
+function requestContext(
+  token?: string,
+  remoteAddress = "127.0.0.1",
+  locale?: string,
+) {
   const responseHeaders = new Map<string, string>();
   const requestHeaders = new Map<string, string>();
   if (token) requestHeaders.set(ISR_CACHE_BYPASS_HEADER, token);
   return {
     method: "GET",
     path: "/api/deal-of-the-day-full",
-    originalUrl: "/api/deal-of-the-day-full",
-    query: {},
+    originalUrl: locale
+      ? `/api/deal-of-the-day-full?locale=${encodeURIComponent(locale)}`
+      : "/api/deal-of-the-day-full",
+    query: locale ? { locale } : {},
     status: 200,
     body: undefined as unknown,
     // The bypass is honoured only for sockets that originate inside the
@@ -47,6 +54,7 @@ describe("response cache ISR bypass", () => {
   });
 
   afterEach(() => {
+    setEnabledContentLocaleCodesForTest([]);
     vi.unstubAllEnvs();
     if (originalSecret === undefined) delete process.env.ISR_ADMIN_SECRET;
     else process.env.ISR_ADMIN_SECRET = originalSecret;
@@ -121,5 +129,36 @@ describe("response cache ISR bypass", () => {
     expect(next).not.toHaveBeenCalled();
     expect(external.body).toEqual({ title: "cached" });
     expect(external.responseHeader("x-cache")).toBe("HIT");
+  });
+
+  it("separates enabled locale responses and canonicalizes unknown locales to English", async () => {
+    setEnabledContentLocaleCodesForTest(["ar"]);
+    const middleware = cacheMiddleware(
+      { ttlMs: 60_000, keyByPath: true },
+      { strapi: {} as any },
+    );
+
+    const english = requestContext();
+    await middleware(english, async () => {
+      english.body = { title: "English" };
+    });
+
+    const unknown = requestContext(undefined, "127.0.0.1", "fr");
+    const unknownNext = vi.fn();
+    await middleware(unknown, unknownNext);
+    expect(unknownNext).not.toHaveBeenCalled();
+    expect(unknown.body).toEqual({ title: "English" });
+
+    const arabic = requestContext(undefined, "127.0.0.1", "ar");
+    await middleware(arabic, async () => {
+      arabic.body = { title: "العربية" };
+    });
+    expect(arabic.responseHeader("x-cache")).toBe("MISS");
+
+    const arabicHit = requestContext(undefined, "127.0.0.1", "ar");
+    const arabicNext = vi.fn();
+    await middleware(arabicHit, arabicNext);
+    expect(arabicNext).not.toHaveBeenCalled();
+    expect(arabicHit.body).toEqual({ title: "العربية" });
   });
 });

@@ -12,6 +12,10 @@ import {
 } from "./search-sql";
 
 const NOW = "2026-07-19T00:00:00.000Z";
+// Search is locale-scoped: every builder pins rows to one content locale so
+// locale twins (en + ar rows of the same document) can never double up in
+// results. Bound immediately before the clause it precedes.
+const LOCALE = "en";
 
 function needles(
   variants: string[],
@@ -48,14 +52,17 @@ describe("search-sql builders", () => {
       "stores",
       needles(["boots"], ["boots"]),
       { limit: 7, offset: 0 },
+      LOCALE,
     );
 
-    // WHERE first: name containment + slug prefix use the same deterministic
-    // translate(A-Z, a-z) expression as their trigram indexes.
-    expect(query.bindings.slice(0, 2)).toEqual(["%boots%", "boots%"]);
+    // WHERE first: the locale pin, then name containment + slug prefix using
+    // the same deterministic translate(A-Z, a-z) expression as their trigram
+    // indexes.
+    expect(query.sql).toContain("WHERE locale = ? AND published_at IS NOT NULL");
+    expect(query.bindings.slice(0, 3)).toEqual([LOCALE, "%boots%", "boots%"]);
     // Tier CASE next, in ascending-tier pattern order (mirrors
     // relevanceForNeedle): exact, prefix, word-boundary, substring.
-    expect(query.bindings.slice(2, 6)).toEqual([
+    expect(query.bindings.slice(3, 7)).toEqual([
       "boots",
       "boots%",
       "% boots%",
@@ -81,6 +88,7 @@ describe("search-sql builders", () => {
       "categories",
       { variants: ["Mobiles", "Mobile"], whereNeedles: ["Mobile"], slugNeedles: [] },
       { limit: 20, offset: 20 },
+      LOCALE,
     );
 
     expect(query.sql).toContain("LEAST(CASE WHEN");
@@ -99,6 +107,7 @@ describe("search-sql builders", () => {
       "stores",
       { variants: [hostile], whereNeedles: [hostile], slugNeedles: [] },
       { limit: 7, offset: 0 },
+      LOCALE,
     );
 
     expect(query.sql).not.toContain("drop");
@@ -109,10 +118,12 @@ describe("search-sql builders", () => {
       "stores",
       { variants: ["50%_off\\"], whereNeedles: ["50%_off\\"], slugNeedles: [] },
       { limit: 7, offset: 0 },
+      LOCALE,
     );
-    expect(wildcards.bindings[0]).toBe("%50\\%\\_off\\\\%");
+    expect(wildcards.bindings[0]).toBe(LOCALE);
+    expect(wildcards.bindings[1]).toBe("%50\\%\\_off\\\\%");
     // Exact-match equality binding stays unescaped (no wildcards in =).
-    expect(wildcards.bindings[1]).toBe("50%_off\\");
+    expect(wildcards.bindings[2]).toBe("50%_off\\");
   });
 
   it("binds exactly one value per placeholder in every builder", () => {
@@ -122,12 +133,12 @@ describe("search-sql builders", () => {
       slugNeedles: ["watch"],
     };
     const queries = [
-      entityRankedQuery("banks", multi, { limit: 20, offset: 40 }),
-      entityCountQuery("banks", multi),
-      offerRankedQuery("coupon", multi, { limit: 12, offset: 0 }, NOW),
-      offerCountQuery("coupon", multi, NOW),
-      offerRankedQuery("deal", multi, { limit: 12, offset: 24 }, NOW),
-      offerCountQuery("deal", multi, NOW),
+      entityRankedQuery("banks", multi, { limit: 20, offset: 40 }, LOCALE),
+      entityCountQuery("banks", multi, LOCALE),
+      offerRankedQuery("coupon", multi, { limit: 12, offset: 0 }, NOW, LOCALE),
+      offerCountQuery("coupon", multi, NOW, LOCALE),
+      offerRankedQuery("deal", multi, { limit: 12, offset: 24 }, NOW, LOCALE),
+      offerCountQuery("deal", multi, NOW, LOCALE),
     ];
     for (const query of queries) {
       expect(query.bindings.length).toBe(placeholders(query.sql));
@@ -140,6 +151,7 @@ describe("search-sql builders", () => {
       needles(["fashion"], ["fashion"]),
       { limit: 12, offset: 0 },
       NOW,
+      LOCALE,
     );
 
     expect(query.sql).toContain("FROM coupons o");
@@ -155,10 +167,13 @@ describe("search-sql builders", () => {
       expect(query.sql).toContain(link);
     }
     expect(query.sql).not.toContain("primary_store");
-    // Visibility mirrors publishedOnlyFilters, with the timestamp bound first.
+    // Visibility mirrors publishedOnlyFilters, with the locale pin bound
+    // first and the timestamp right after it.
+    expect(query.sql).toContain("o.locale = ? AND o.published_at IS NOT NULL");
     expect(query.sql).toContain("o.content_status = 'published'");
     expect(query.sql).toContain("(o.expires_at IS NULL OR o.expires_at > ?)");
-    expect(query.bindings[0]).toBe(NOW);
+    expect(query.bindings[0]).toBe(LOCALE);
+    expect(query.bindings[1]).toBe(NOW);
     // Relation-name tiers rank below every direct tier.
     expect(query.sql).toContain("+ 8)");
     expect(query.sql).toContain(
@@ -175,6 +190,7 @@ describe("search-sql builders", () => {
       needles(["shoes"], ["shoes"]),
       { limit: 12, offset: 0 },
       NOW,
+      LOCALE,
     );
 
     expect(query.sql).toContain("FROM deals o");
@@ -202,11 +218,13 @@ describe("search-sql builders", () => {
       },
       { limit: 12, offset: 24 },
       NOW,
+      LOCALE,
     );
 
-    // One [name-contains, slug-prefix] pair per link table, in declaration
+    // Each membership arm pins its own rows' locale, then one
+    // [name-contains, slug-prefix] pair per link table, in declaration
     // order: stores, brands, categories, banks.
-    const relationWhere = ["%watch%", "watch%"];
+    const relationWhere = [LOCALE, "%watch%", "watch%"];
     // Literal variant tiers 0-3 then the derived variant shifted +4, each in
     // exact/prefix/word-boundary/substring pattern order.
     const nameTier = [
@@ -222,7 +240,9 @@ describe("search-sql builders", () => {
     // The full ordered array: any transposition against the placeholder
     // sequence fails loudly instead of silently binding the wrong value.
     expect(query.bindings).toEqual([
-      NOW, // WHERE: expires_at visibility cutoff binds first
+      LOCALE, // WHERE: the offer row's locale pin binds first
+      NOW, // WHERE: expires_at visibility cutoff
+      LOCALE, // WHERE: direct arm locale pin
       "%watch%", // WHERE: title containment
       ...relationWhere, // WHERE: stores link
       ...relationWhere, // WHERE: brands link
@@ -243,14 +263,16 @@ describe("search-sql builders", () => {
       "stores",
       { variants: ["İX"], whereNeedles: ["İX"], slugNeedles: [] },
       { limit: 7, offset: 0 },
+      LOCALE,
     );
 
     expect(query.sql).toContain(
       "translate(name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') LIKE ?",
     );
     expect(query.sql).not.toContain("lower(");
-    expect(query.bindings[0]).toBe("%İx%");
-    expect(query.bindings[1]).toBe("İx");
+    expect(query.bindings[0]).toBe(LOCALE);
+    expect(query.bindings[1]).toBe("%İx%");
+    expect(query.bindings[2]).toBe("İx");
     expect(query.bindings.length).toBe(placeholders(query.sql));
   });
 
@@ -258,16 +280,16 @@ describe("search-sql builders", () => {
     const shared = needles(["fashion"], ["fashion"]);
     for (const [ranked, count] of [
       [
-        entityRankedQuery("stores", shared, { limit: 20, offset: 0 }),
-        entityCountQuery("stores", shared),
+        entityRankedQuery("stores", shared, { limit: 20, offset: 0 }, LOCALE),
+        entityCountQuery("stores", shared, LOCALE),
       ],
       [
-        offerRankedQuery("coupon", shared, { limit: 20, offset: 0 }, NOW),
-        offerCountQuery("coupon", shared, NOW),
+        offerRankedQuery("coupon", shared, { limit: 20, offset: 0 }, NOW, LOCALE),
+        offerCountQuery("coupon", shared, NOW, LOCALE),
       ],
       [
-        offerRankedQuery("deal", shared, { limit: 20, offset: 0 }, NOW),
-        offerCountQuery("deal", shared, NOW),
+        offerRankedQuery("deal", shared, { limit: 20, offset: 0 }, NOW, LOCALE),
+        offerCountQuery("deal", shared, NOW, LOCALE),
       ],
     ] as const) {
       const rankedWhere = ranked.sql.slice(

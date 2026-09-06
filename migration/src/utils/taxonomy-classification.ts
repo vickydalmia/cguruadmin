@@ -1,6 +1,8 @@
 import fs from "node:fs";
+import fsPromises from "node:fs/promises";
 import path from "node:path";
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 import { migrationProfile, migrationRoot } from "./profile-state.js";
 
 export const TAXONOMY_TYPES = ["Store", "Brand", "Category", "Bank"] as const;
@@ -11,6 +13,8 @@ const TAXONOMY_TYPE_BY_KEY = new Map(
 );
 const USA_CLASSIFICATION_WORKBOOK =
   "usa/CouponzGuru_USA_Taxonomy_Classification (1).xlsx";
+const UAE_CLASSIFICATION_WORKBOOK =
+  "uae/CouponzGuru_UAE_Taxonomy_Classification.xlsx";
 
 export interface TaxonomyClassificationRow {
   name: string;
@@ -60,8 +64,14 @@ export function taxonomyClassificationFile(
 ): string | null {
   const configured = environment.MIGRATION_CLASSIFICATION_FILE?.trim();
   if (configured) return path.resolve(migrationRoot(), configured);
-  if (migrationProfile(environment) !== "usa") return null;
-  return path.resolve(migrationRoot(), USA_CLASSIFICATION_WORKBOOK);
+  const profile = migrationProfile(environment);
+  if (profile === "usa") {
+    return path.resolve(migrationRoot(), USA_CLASSIFICATION_WORKBOOK);
+  }
+  if (profile === "ae") {
+    return path.resolve(migrationRoot(), UAE_CLASSIFICATION_WORKBOOK);
+  }
+  return null;
 }
 
 /**
@@ -128,6 +138,85 @@ const workbookCache = new Map<
   Promise<TaxonomyClassificationWorkbook>
 >();
 
+async function readClassificationRowsWithStreamingExcelJs(
+  file: string,
+): Promise<string[][] | null> {
+  const workbook = new ExcelJS.stream.xlsx.WorkbookReader(file, {
+    entries: "emit",
+    sharedStrings: "cache",
+    hyperlinks: "ignore",
+    styles: "ignore",
+    worksheets: "emit",
+  });
+  for await (const sheet of workbook) {
+    // ExcelJS exposes the streaming worksheet name at runtime but omits it
+    // from WorksheetReader's public TypeScript declaration.
+    const sheetName = (sheet as typeof sheet & { name: string }).name;
+    if (sheetName !== "Classification") continue;
+    const rows: string[][] = [];
+    for await (const row of sheet) {
+      const values: string[] = [];
+      for (let column = 1; column <= Math.max(8, row.cellCount); column++) {
+        values.push(row.getCell(column).text);
+      }
+      rows.push(values);
+    }
+    return rows;
+  }
+  return null;
+}
+
+/**
+ * Some workbook generators emit the SpreadsheetML namespace through an `x:`
+ * prefix. That is valid OOXML, but ExcelJS 4's readers silently expose those
+ * sheets as empty `Sheet1`/`Sheet2` placeholders. Normalize only that prefix
+ * in memory and discard table metadata (classification consumes cell values,
+ * not the presentation table) before giving the archive back to ExcelJS.
+ */
+async function readClassificationRowsFromPrefixedOoxml(
+  file: string,
+): Promise<string[][] | null> {
+  const zip = await JSZip.loadAsync(await fsPromises.readFile(file));
+  let normalized = false;
+  for (const [name, entry] of Object.entries(zip.files)) {
+    if (entry.dir || !name.endsWith(".xml")) continue;
+    let xml = await entry.async("string");
+    if (xml.includes("<x:")) {
+      xml = xml
+        .replace(
+          /xmlns:x="([^"]+)"/u,
+          (_match, namespace: string) => `xmlns="${namespace}"`,
+        )
+        .replaceAll("<x:", "<")
+        .replaceAll("</x:", "</");
+      normalized = true;
+    }
+    if (name.startsWith("xl/worksheets/")) {
+      xml = xml.replace(/<tableParts[\s\S]*?<\/tableParts>/gu, "");
+    }
+    zip.file(name, xml);
+  }
+  if (!normalized) return null;
+  for (const name of Object.keys(zip.files)) {
+    if (name.startsWith("xl/tables/")) zip.remove(name);
+  }
+
+  const workbook = new ExcelJS.Workbook();
+  const archive = await zip.generateAsync({ type: "nodebuffer" });
+  await workbook.xlsx.load(archive as any);
+  const sheet = workbook.getWorksheet("Classification");
+  if (!sheet) return null;
+  const rows: string[][] = [];
+  sheet.eachRow({ includeEmpty: false }, (row) => {
+    const values: string[] = [];
+    for (let column = 1; column <= Math.max(8, row.cellCount); column++) {
+      values.push(row.getCell(column).text);
+    }
+    rows.push(values);
+  });
+  return rows;
+}
+
 export function loadTaxonomyClassificationWorkbook(
   file: string,
 ): Promise<TaxonomyClassificationWorkbook> {
@@ -141,30 +230,10 @@ export function loadTaxonomyClassificationWorkbook(
           "Copy the approved Excel file or set MIGRATION_CLASSIFICATION_FILE.",
       );
     }
-    const workbook = new ExcelJS.stream.xlsx.WorkbookReader(resolved, {
-      entries: "emit",
-      sharedStrings: "cache",
-      hyperlinks: "ignore",
-      styles: "ignore",
-      worksheets: "emit",
-    });
-    const rows: string[][] = [];
-    let foundClassificationSheet = false;
-    for await (const sheet of workbook) {
-      // ExcelJS exposes the streaming worksheet name at runtime but omits it
-      // from WorksheetReader's public TypeScript declaration.
-      const sheetName = (sheet as typeof sheet & { name: string }).name;
-      if (sheetName !== "Classification") continue;
-      foundClassificationSheet = true;
-      for await (const row of sheet) {
-        const values: string[] = [];
-        for (let column = 1; column <= Math.max(8, row.cellCount); column++) {
-          values.push(row.getCell(column).text);
-        }
-        rows.push(values);
-      }
-    }
-    if (!foundClassificationSheet) {
+    const rows =
+      (await readClassificationRowsWithStreamingExcelJs(resolved)) ??
+      (await readClassificationRowsFromPrefixedOoxml(resolved));
+    if (!rows) {
       throw new Error(
         `Taxonomy classification workbook has no 'Classification' sheet: ${resolved}`,
       );

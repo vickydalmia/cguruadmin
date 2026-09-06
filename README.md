@@ -4,7 +4,7 @@ The backend for CouponzGuru: a Strapi 5 application that is simultaneously the
 editorial CMS, the public read API the website consumes, and the producer of
 durable persistent-ISR invalidation events.
 
-It does three jobs:
+It does four jobs:
 
 1. **CMS** — editors manage stores, brands, categories, banks, coupons, deals
    and the curated homepage/menu/footer through a customized admin panel.
@@ -20,6 +20,10 @@ It does three jobs:
 3. **ISR producer** — content changes commit a transactional outbox event in
    PostgreSQL; the dispatcher delivers it to the gateway for targeted
    regeneration.
+4. **Localization control plane** — Country Setup defines target languages;
+   the translation outbox localizes CMS content, while **Settings → UI Text**
+   manages the storefront's code-owned English catalogue, overrides and
+   translated UI chrome.
 
 Media lives in S3 behind a CDN, with responsive variants (and AVIF twins)
 generated at upload time from the shared knobs in
@@ -52,6 +56,12 @@ lifecycle state.
 
 Schemas live at `src/api/*/content-types/*/schema.json`; reusable components at
 [`src/components/`](./src/components).
+
+The UI-text catalogue is deliberately not a Strapi content type. Core tables
+`ui_catalogue` and `ui_translations` retain stable code-owned keys, English
+overrides and per-language translations. The immutable storefront image
+synchronizes its catalogue once during deployment; visitor requests are
+read-only.
 
 ## Local development
 
@@ -116,6 +126,8 @@ before running it against anything you care about.
 | Document | What it covers |
 |---|---|
 | [docs/country-setup.md](./docs/country-setup.md) | Plain-language Country Setup, feature readiness, campaign templates, localization, India compatibility, USA initialization and migration safety |
+| [docs/ai-translation.md](./docs/ai-translation.md) | Translation provider, locale registry, quality pipeline, jobs, cost controls, enablement and language lifecycle |
+| [docs/ui-dictionary.md](./docs/ui-dictionary.md) | Storefront UI catalogue sync, Settings → UI Text, overrides/translations, imports/exports, caches and troubleshooting |
 | [docs/deployment.md](./docs/deployment.md) | Strapi production environment, legacy-variable removal, immutable-image deployment, verification, outbox checks, and rollback |
 | [docs/public-api.md](./docs/public-api.md) | The public read contract: search params/groups/envelope, directory, page aggregates, offer listings, ratings, redeem and unique-coupon endpoints, with each route's auth, rate limit and cache |
 | [docs/search-operations.md](./docs/search-operations.md) | Operator reference for search: execution modes, the 11 expected trigram indexes, `/api/search/status`, and automatic migration/bootstrap reconciliation |

@@ -55,6 +55,7 @@ export async function validateEntityOrderedCoupons(
   uid: EntityTopPickUid,
   data: unknown,
   documentId?: string,
+  locale?: string,
 ): Promise<void> {
   if (!data || typeof data !== 'object') return;
   if (!Object.prototype.hasOwnProperty.call(data, 'orderedCoupons')) return;
@@ -62,6 +63,7 @@ export async function validateEntityOrderedCoupons(
   const current: unknown = documentId
     ? await strapi.documents(uid).findOne({
         documentId,
+        ...(locale ? { locale } : {}),
         fields: ['documentId'],
         populate: { orderedCoupons: { fields: ['documentId'] } },
       })

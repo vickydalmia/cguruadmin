@@ -90,6 +90,20 @@ route projections without `pageTemplate`. This protection keeps the site up;
 it does not remove the requirement to verify Country Setup before completing
 the release. See [Country Setup and Multi-Country Sites](./country-setup.md).
 
+### Localization and UI Text release note
+
+The translation outbox/state/usage tables and the UI catalogue/translation
+tables are additive. Deploy this CMS image before the localized storefront so
+`GET /api/ui-dictionary`, `POST /api/ui-dictionary/catalogue`, Settings → UI
+Text, the language registry and localized read middleware all exist when the
+frontend activates.
+
+After the CMS is healthy, create a dedicated **Custom** Strapi API token with
+only **Ui-dictionary → syncCatalogue**. Give that token only to the frontend
+host's `env/catalogue-sync.env`; it is not a CMS runtime variable and must not
+be shared with the SSR read token. The first frontend deployment performs the
+catalogue sync. Normal page traffic never writes the catalogue.
+
 ## 1. Publish an immutable image
 
 Run the CMS checks before creating the GitHub Release:
@@ -278,6 +292,33 @@ CORS_ORIGINS=
 # first-party registrable domain from the same value.
 PUBLIC_SITE_URL=https://www.couponzguru.com
 
+# Conditional AI translation. Leave provider/key/model empty when Country
+# Setup translation is disabled. A partial block never starts the dispatcher.
+TRANSLATION_PROVIDER=
+TRANSLATION_API_KEY=
+TRANSLATION_BASE_URL=
+TRANSLATION_MODEL=
+TRANSLATION_REASONING_EFFORT=none
+TRANSLATION_CONCURRENCY=2
+TRANSLATION_TIMEOUT_MS=120000
+TRANSLATION_MAX_ATTEMPTS=3
+TRANSLATION_MAX_OUTPUT_TOKENS=8192
+TRANSLATION_CHUNK_CHARS=12000
+TRANSLATION_DAILY_BUDGET_USD=0
+TRANSLATION_INPUT_COST_PER_MTOK=0
+TRANSLATION_OUTPUT_COST_PER_MTOK=0
+TRANSLATION_OUTBOX_DISPATCHER_ENABLED=true
+TRANSLATION_OUTBOX_POLL_MS=5000
+TRANSLATION_OUTBOX_BATCH_SIZE=5
+TRANSLATION_OUTBOX_LEASE_MS=900000
+TRANSLATION_OUTBOX_MAX_BACKOFF_MS=21600000
+TRANSLATION_OUTBOX_RETENTION_DAYS=30
+TRANSLATION_OUTBOX_ALERT_AFTER_ATTEMPTS=5
+TRANSLATION_OUTBOX_BACKLOG_ALERT_MS=3600000
+TRANSLATION_BACKFILL_RUNNER_ENABLED=true
+TRANSLATION_BACKFILL_MAX_DOCS_PER_SECOND=20
+TRANSLATION_NIGHTLY_CONSISTENCY_ENABLED=false
+
 # Persistent-ISR transactional outbox
 # The dispatcher safely retries while the gateway is unavailable. Enable it on
 # the admin process only; docker.compose.yml disables it on strapi-render.
@@ -315,7 +356,7 @@ chmod 600 /opt/couponzguru/.env.production
 | `PORT` | Managed | Strapi container port, normally `1337`. |
 | `APP_PORT` | Optional | Host-side port mapped to container port `1337`; defaults to `1337`. |
 | `APP_BIND` | Required | CMS host VPC/private address for the additional private publish. Never use `0.0.0.0`. |
-| `RATE_LIMIT_TRUSTED_IPS` | Required for warming and fresh ISR reads | Comma-separated exact socket IPs or prefixes allowed to bypass CMS per-IP limits and present the signed ISR response-cache credential. Use the frontend private source IP. |
+| `RATE_LIMIT_TRUSTED_IPS` | Required for warming and fresh ISR reads | Comma-separated exact socket IPs or prefixes allowed to bypass CMS per-IP limits and present the signed ISR response-cache credential. Use the frontend private source IP. The render container needs no entry: it sets `RATE_LIMIT_TRUST_PRIVATE_SOCKETS=true` in the compose file, trusting every private socket — required on single-server deployments, where the frontend's requests hairpin through Docker NAT and arrive as a per-host bridge-gateway address no fixed allowlist entry can name. Never set that flag on the admin container: proxied visitor traffic reaches it from the same private gateway and would bypass the public limiter. |
 | `PUBLIC_URL` | Required | External HTTPS CMS/admin origin used by Strapi-generated URLs. |
 | `TRUST_PROXY` | Required behind a proxy | Enables Koa proxy awareness when Nginx or another trusted proxy terminates HTTPS. |
 | `TRANSFER_REMOTE_ENABLED` | Optional | Enables Strapi remote transfer. Keep `false` unless a controlled transfer is in progress. |
@@ -337,6 +378,69 @@ chmod 600 /opt/couponzguru/.env.production
 
 Every value must be independent. Retain existing production values during
 normal deployments.
+
+#### AI translation
+
+The `TRANSLATION_*` block is conditional on Country Setup's translation switch
+and target-language list. Provider, API key and model must be configured
+together. Choose `openai` for the official Responses API, `openai-compatible`
+for a Chat-Completions gateway, or `anthropic` for native Messages;
+`openai-compatible` also requires a base URL. Official OpenAI accepts
+`TRANSLATION_REASONING_EFFORT=none|low|medium|high|xhigh|max` and defaults to
+`none`; the setting is ignored by other providers. A positive daily budget
+requires positive input/output per-million-token prices. An incomplete block
+stays safely disabled and logs the configuration problem.
+Run the paid dispatcher on exactly one CMS process. Current Compose forces
+`TRANSLATION_OUTBOX_DISPATCHER_ENABLED=true` on `strapi` and `false` on
+`strapi-render`; when the dedicated variable is absent it inherits
+`CRON_ENABLED`, so older Compose files retain the same single-process role.
+
+For AE with Luna, the provider-specific portion is:
+
+```dotenv
+TRANSLATION_PROVIDER=openai
+TRANSLATION_API_KEY=<SERVER_SIDE_OPENAI_KEY>
+TRANSLATION_BASE_URL=
+TRANSLATION_MODEL=gpt-5.6-luna
+TRANSLATION_REASONING_EFFORT=none
+```
+
+Use the current official Luna per-million-token rates for the two cost
+variables at deployment time. Do not run a paid backfill with stale rates:
+they drive both the dry-run estimate and the concurrency-safe daily stop.
+The adapter uses OpenAI Responses with `store: false`, omits temperature, and
+disables AI SDK retries; the existing dispatcher remains the sole owner of
+timeouts, retries, attempt accounting and budget enforcement.
+
+Translation-generated ISR work is locale-scoped: ordinary Arabic content
+writes refresh only `/ar/...` consumers and do not rebuild the default-only
+sitemap. Route inventory refreshes only when a localized row is created or
+removed. A repeated hash-current backfill first compares the full persisted
+locale plan and emits no CMS write or ISR event when it is already current.
+The nightly durable repair scan is opt-in with
+`TRANSLATION_NIGHTLY_CONSISTENCY_ENABLED=true`; when enabled, it does not retry
+a terminally failed unchanged source. Edit the English source or run an
+explicit manual backfill when a deliberate retry is required. This is
+load-bearing for large catalogues; if a deployment
+shows repeated `routes` refreshes for every translated Coupon or steadily
+advancing versions after the translation queue is empty, the CMS image is
+older than this contract.
+
+Catalogue backfills and dry-run estimates are database-backed background runs,
+not request-bound scans. Only one `translation_backfill_runs` row may be active
+for the shared database. Production Compose runs the scanner only in the
+CPU-limited `strapi-maintenance` service; `strapi` and `strapi-render` explicitly
+disable it. The scanner reads 50-document pages with a translation-only
+population graph, caps its default pace at 20 documents/second and resumes from
+the last committed cursor after restart. A `202` means the scan was accepted,
+while progress and the final selection/cost result are read from
+`/translation/outbox-status`. Super Admins can stop only the scan with
+`POST /translation/backfill/:id/cancel`; jobs committed by earlier pages remain
+queued.
+
+Defaults and every queue/cost control are defined in the cross-system
+[environment guide](https://github.com/vickydalmia/cguru-ui/blob/main/docs/environment.md#cms-translation-engine).
+The operating workflow is in [AI content translation](./ai-translation.md).
 
 #### PostgreSQL and TLS
 
@@ -480,11 +584,12 @@ waits for its health check, verifies `/_health`, and prints the final service
 state.
 
 Database migrations run during Strapi startup. The ISR outbox creation
-migration and the legacy optional-path reconciliation migration must complete
-before production content writes resume. The reconciliation changes only the
-payload of matching pending/processing legacy rows; it preserves their lease,
-attempt counter, and next-attempt schedule so a rolling deploy cannot steal
-work from the previous container.
+migration, translation tables, UI dictionary tables and the legacy
+optional-path reconciliation migration must complete before production content
+writes resume. The reconciliation changes only the payload of matching
+pending/processing legacy rows; it preserves their lease, attempt counter, and
+next-attempt schedule so a rolling deploy cannot steal work from the previous
+container.
 
 ## 9. Verify the deployment
 
@@ -527,6 +632,9 @@ There must be no startup error involving:
 Also confirm the startup migration added `page_template` to Store, Brand,
 Category and Bank without removing existing fields, and that the hidden Site
 Configuration single type is available through the Country Setup service.
+Confirm `ui_catalogue`, `ui_translations`, `translation_outbox`,
+`translation_state` and `translation_usage` exist before enabling translation
+or deploying the localized storefront.
 Country Setup, migration profiles and runtime settings no longer use campaign
 booleans: campaign activation is the selected entity `pageTemplate`. The two
 old columns remain private and ignored for rollback compatibility with the
@@ -575,8 +683,11 @@ where status <> 'delivered'
 order by id;
 ```
 
-Do not manually recreate outbox rows. Their stable event keys provide
-idempotent delivery and the dispatcher retries them automatically.
+Do not manually recreate outbox rows. The dispatcher delivers each row under
+`<event_key>#<row id>` — stable across that row's retries, so the gateway's
+idempotency window de-duplicates a redelivery, and unique per row, so the
+coalesced keys (`translation-isr:<locale>`, the sweep reasons) are not
+mistaken for an already-accepted event — and retries failures automatically.
 
 Targeted payloads may include `optionalPaths`, always as a subset of `paths`.
 These are conditionally generated entity Deal pages. The gateway still
@@ -598,6 +709,12 @@ Verify:
 - search status and indexes;
 - scheduled Coupon/Deal state processing.
 - `GET /api/site-settings` identity, localization and feature readiness;
+- **Settings → UI Text** loads and shows “no catalogue synced yet” before the
+  first frontend sync, rather than failing the page;
+- a dedicated Custom token can call `POST /api/ui-dictionary/catalogue` while
+  a Read-only token receives `403`;
+- `GET /api/ui-dictionary?locale=en` returns the dictionary envelope with
+  `Cache-Control: public, max-age=60`;
 - the expected `dealTemplate` and `independenceDayTemplate` owner paths;
 - the Content Manager sidebar omits disabled country features and campaign
   singletons without a template owner;
@@ -693,3 +810,50 @@ first, then Strapi.
 
 Do not restore PostgreSQL or rotate secrets merely to roll back application
 code.
+
+## Transaction callback replay rollout
+
+This release fixes retained transaction callbacks; replacing files in a running
+process cannot remove its old callback state. Restart every Strapi role.
+Production CPU improvement is an acceptance check, not an inference from tests.
+
+1. Resolve actual container names and roles from the target deployment's Compose
+   configuration and non-secret worker flags. The repository roles are `strapi`
+   (admin/dispatch), `strapi-render` (reads), and `strapi-maintenance` (backfill).
+   Capture immutable image IDs/revisions, recent logs, active backfill IDs,
+   checkpoints, queue counts/oldest work, container CPU, traffic volume, and two
+   query-counter snapshots 60 seconds apart. Use `pg_stat_statements` total calls
+   if available; `pg_stat_database` transaction deltas are not query counts.
+2. Pull the verified immutable image before the approved brief background pause.
+   Stop admin/dispatch and maintenance with a **60-second maximum graceful
+   timeout**, then let deployment tooling stop those containers if still busy.
+   A six-hour scan must not delay rollout. Do not terminate database sessions,
+   clear queues/checkpoints, reset leases, or use Queue all.
+3. Replace sequentially behind existing health gates: admin first, render next,
+   maintenance last. Keep the old render service available during admin recovery.
+   A brief admin/search/redeem interruption is possible. `deploy.sh` now stops
+   the old workers with `--timeout 60` and force-recreates all three roles.
+4. Let interrupted work recover using existing leases: backfill becomes stale
+   after five minutes; translation defaults to fifteen minutes. Never manually
+   reset a lease while its former process is alive.
+5. Observe for **15 minutes after lease recovery**. Old payload sequences must
+   stop replaying; startup logs (instance ID/PID for dispatchers, PID/generation
+   for backfill) must match configured roles. Jobs must advance checkpoints or
+   reach an explicit terminal state. Duplicate suppression diagnostics are
+   aggregated at most once per minute; normal invalidation logs remain intact.
+6. Compare CPU and 60-second query deltas under comparable traffic. If load
+   stays high, leave bulk maintenance paused and investigate active work. Do
+   not declare the CPU incident resolved solely because callback tests pass.
+
+Useful read-only database snapshots (preserve complete checkpoints privately):
+
+```sql
+SELECT id, status, locked_at, checkpoint, progress, finished_at
+FROM translation_backfill_runs WHERE status IN ('pending', 'running');
+SELECT status, count(*), min(created_at) FROM translation_outbox GROUP BY status;
+SELECT status, count(*), min(created_at) FROM isr_outbox GROUP BY status;
+SELECT sum(calls) AS query_calls FROM pg_stat_statements;
+```
+
+Keep before/after evidence with the release record, including observation times,
+image revision, traffic, query rates, CPU, and outstanding terminal failures.

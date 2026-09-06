@@ -119,12 +119,130 @@ export function createOutboxPayload(
   };
 }
 
+/**
+ * Narrow a localized content invalidation to the locale that was written.
+ * Existing locale rows keep route membership, while creation/removal retains
+ * `routes` and the sitemap template path; the gateway applies `localePrefix`
+ * so that language's index and shards admit or remove the path atomically.
+ */
+export function localizeTranslationPayload(
+  payload: IsrOutboxPayload,
+  targetLocale: string,
+  options: { routeMembershipChanged?: boolean } = {},
+): IsrOutboxPayload {
+  const locale = targetLocale.trim().replace(/^\/+|\/+$/g, '');
+  if (!locale) return payload;
+  const membershipChanged = options.routeMembershipChanged === true;
+  const paths = (payload.paths ?? []).filter(
+    (path) => membershipChanged || path !== SITEMAP_INDEX_PATH,
+  );
+  const optionalPathSet = new Set(payload.optionalPaths ?? []);
+  const optionalPaths = paths.filter((path) => optionalPathSet.has(path));
+  const scopes = (payload.scopes ?? []).filter(
+    (scope) =>
+      (membershipChanged || scope !== 'sitemap') &&
+      (membershipChanged || scope !== 'routes'),
+  );
+
+  return {
+    ...(payload.all ? { all: true as const } : {}),
+    localePrefix: `/${locale}`,
+    ...(paths.length > 0 ? { paths: [...new Set(paths)] } : {}),
+    ...(optionalPaths.length > 0
+      ? { optionalPaths: [...new Set(optionalPaths)] }
+      : {}),
+    ...(scopes.length > 0 ? { scopes: [...new Set(scopes)] } : {}),
+    ...(payload.offerInvalidations?.length
+      ? { offerInvalidations: payload.offerInvalidations }
+      : {}),
+  };
+}
+
+/**
+ * Expand a shared non-localized change to every configured language. This is
+ * intentionally not used for localized prose: only locale rows admitted by
+ * the storefront inventory exist, and those are invalidated after their own
+ * successful write. A full sweep (`all`) already covers everything; the
+ * sitemap index is shard-expanded by the gateway and has no locale twin.
+ */
+export function expandPayloadPathsForLocales(
+  payload: IsrOutboxPayload,
+  localeCodes: readonly string[],
+): IsrOutboxPayload {
+  if (payload.all || localeCodes.length === 0 || !payload.paths?.length) {
+    return payload;
+  }
+  const twin = (path: string, code: string): string | null => {
+    if (path === SITEMAP_INDEX_PATH) return null;
+    if (!path.startsWith('/')) return null;
+    if (path === `/${code}/` || path.startsWith(`/${code}/`)) return null;
+    return path === '/' ? `/${code}/` : `/${code}${path}`;
+  };
+  const paths = new Set(payload.paths);
+  const optionalPaths = new Set(payload.optionalPaths ?? []);
+  for (const code of localeCodes) {
+    for (const path of payload.paths) {
+      const twinPath = twin(path, code);
+      if (!twinPath) continue;
+      paths.add(twinPath);
+      // A twin inherits optionality: only optional sources stay optional.
+      if (optionalPaths.has(path)) optionalPaths.add(twinPath);
+    }
+  }
+  return {
+    ...payload,
+    paths: [...paths],
+    ...(optionalPaths.size > 0 ? { optionalPaths: [...optionalPaths] } : {}),
+  };
+}
+
 export function hasOutboxWork(payload: IsrOutboxPayload): boolean {
   return Boolean(
     payload.all ||
       payload.paths?.length ||
       payload.offerInvalidations?.length,
   );
+}
+
+/** Merge a burst of pending writes without widening it beyond one locale. */
+export function mergeOutboxPayloads(
+  before: IsrOutboxPayload,
+  after: IsrOutboxPayload,
+): IsrOutboxPayload {
+  if (before.localePrefix !== after.localePrefix) {
+    throw new Error('cannot coalesce ISR payloads for different locales');
+  }
+  const paths = [...new Set([...(before.paths ?? []), ...(after.paths ?? [])])];
+  const required = new Set([
+    ...(before.paths ?? []).filter(
+      (path) => !(before.optionalPaths ?? []).includes(path),
+    ),
+    ...(after.paths ?? []).filter(
+      (path) => !(after.optionalPaths ?? []).includes(path),
+    ),
+  ]);
+  const optionalPaths = paths.filter(
+    (path) => !required.has(path) && (
+      (before.optionalPaths ?? []).includes(path) ||
+      (after.optionalPaths ?? []).includes(path)
+    ),
+  );
+  const offers = [
+    ...new Map(
+      [...(before.offerInvalidations ?? []), ...(after.offerInvalidations ?? [])]
+        .map((offer) => [`${offer.entityType}:${offer.documentId}`, offer]),
+    ).values(),
+  ];
+  return {
+    ...(before.all || after.all ? { all: true as const } : {}),
+    ...(before.localePrefix ? { localePrefix: before.localePrefix } : {}),
+    ...(paths.length ? { paths } : {}),
+    ...(optionalPaths.length ? { optionalPaths } : {}),
+    ...((before.scopes?.length || after.scopes?.length)
+      ? { scopes: [...new Set([...(before.scopes ?? []), ...(after.scopes ?? [])])] }
+      : {}),
+    ...(offers.length ? { offerInvalidations: offers } : {}),
+  };
 }
 
 export function boundOutboxPayload(
@@ -142,6 +260,7 @@ export function boundOutboxPayload(
   }
   const full: IsrOutboxPayload = {
     all: true,
+    ...(payload.localePrefix ? { localePrefix: payload.localePrefix } : {}),
     ...(payload.scopes?.length ? { scopes: payload.scopes } : {}),
     ...(payload.offerInvalidations?.length
       ? { offerInvalidations: payload.offerInvalidations }
@@ -158,6 +277,7 @@ export function boundOutboxPayload(
 export function outboxPayloadSummary(payload: IsrOutboxPayload) {
   return {
     all: payload.all === true,
+    localePrefix: payload.localePrefix ?? null,
     pathCount: payload.paths?.length ?? 0,
     pathSample: payload.paths?.slice(0, 100) ?? [],
     pathsTruncated: (payload.paths?.length ?? 0) > 100,

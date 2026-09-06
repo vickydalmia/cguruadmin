@@ -3,7 +3,10 @@ import { errors } from '@strapi/utils';
 import { slugify } from '../constants/slugify';
 import { toRouteSlug, type IdentityKind } from './route-normalization';
 import { entityDealPageSlug } from '../api/entity-deal-page/services/entity-deal-route';
-import { RESERVED_ROUTE_SEGMENTS } from './reserved-route-segments';
+import {
+  RESERVED_ROUTE_SEGMENTS,
+  reservedRouteSegment,
+} from './reserved-route-segments';
 import {
   IDENTITY_UIDS,
   KIND_BY_UID,
@@ -18,6 +21,7 @@ import {
   toNameKey,
 } from './identity-collisions';
 import { readString } from './row-fields';
+import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
 
 /**
  * Identity rules for the taxonomy content types (store / brand / category /
@@ -94,6 +98,7 @@ export async function validateIdentity(
   data: unknown,
   documentId?: string,
   strict = false,
+  locale = DEFAULT_CONTENT_LOCALE,
 ): Promise<void> {
   if (!isIdentityUid(uid)) return;
   if (!data || typeof data !== 'object') return;
@@ -123,6 +128,7 @@ export async function validateIdentity(
     (action === 'update' || isClone) && documentId
       ? await strapi.documents(uid).findOne({
           documentId,
+          locale,
           fields: ['documentId', 'name', 'slug'],
         })
       : null;
@@ -152,11 +158,18 @@ export async function validateIdentity(
     (slugTouched && (isCreate || incomingRoute !== toRouteSlug(storedSlug, kind)));
   // Updates replace their own row and therefore exclude it. A clone leaves its
   // source in place, so the source must participate in both uniqueness checks.
-  const excludeDocumentId = action === 'update' ? documentId : undefined;
+  // A first locale version validates as a create with its shared documentId
+  // and must not collide with its own other-locale rows.
+  const excludeDocumentId = action === 'clone' ? undefined : documentId;
+  // Only the default-language name owns generated public routes. Localized
+  // names are display copy: translating "Al-Futtaim Automall" to Arabic must
+  // not change, invalidate, or be validated as the /al-futtaim-automall-deals/
+  // identity. Slugs are non-localized and Strapi keeps them shared.
+  const ownsRouteIdentity = locale === DEFAULT_CONTENT_LOCALE;
 
   const problems: Problem[] = [];
 
-  if (slugChanged) {
+  if (ownsRouteIdentity && slugChanged) {
     if (!incomingRoute) {
       // Row 102: a name in a non-Latin script slugifies to ''. Reject with an
       // explanation on `name` — that is the field the editor has to change —
@@ -167,7 +180,10 @@ export async function validateIdentity(
         message: emptySlugMessage(kind, String(effectiveName ?? '')),
       });
     } else {
-      const reserved = RESERVED_ROUTE_SEGMENTS.get(incomingRoute.split('/')[0] ?? '');
+      const reserved = reservedRouteSegment(
+        RESERVED_ROUTE_SEGMENTS,
+        incomingRoute.split('/')[0] ?? '',
+      );
       if (reserved) {
         problems.push({
           path: ['slug'],
@@ -238,6 +254,7 @@ export async function validateIdentity(
         uid,
         trimmed,
         excludeDocumentId,
+        locale,
       );
       if (duplicate !== null) {
         duplicateNameFound = true;
@@ -252,7 +269,7 @@ export async function validateIdentity(
     }
   }
 
-  if (nameChanged || slugChanged) {
+  if (ownsRouteIdentity && (nameChanged || slugChanged)) {
     if (!dealRoute) {
       if (incomingRoute || !slugChanged) {
         problems.push({

@@ -1,17 +1,30 @@
+import { onceOnCommit } from '../utils/once-on-commit';
 import type { Core } from '@strapi/strapi';
 import { readIsrOutboxConfig } from './config';
 import { IsrOutboxDispatcher } from './dispatcher';
 import { logIsrOutbox } from './log';
-import { insertIsrOutboxEvent } from './store';
+import { insertIsrOutboxEvent, ISR_OUTBOX_TABLE } from './store';
 import type { IsrOutboxInsert } from './types';
 import { purgeResponseCaches } from '../middlewares/cache';
 import { purgeEntityPopularSearchCatalog } from '../api/store/services/entity-popular-searches';
+import { advisoryTransactionLock } from '../utils/database-dialect';
+import { expandPayloadPathsForLocales } from './payload';
+import { enabledContentLocaleCodesSync } from '../translation/locales/registry';
 
 let dispatcher: IsrOutboxDispatcher | null = null;
+let lifecycleGeneration = 0;
 
 export const MINIMUM_PRODUCTION_ADMIN_SECRET_LENGTH = 16;
 
 export function startIsrOutbox(strapi: Core.Strapi): void {
+  const generation = ++lifecycleGeneration;
+  if (stopping) {
+    void stopping.then(() => {
+      if (generation === lifecycleGeneration) startIsrOutbox(strapi);
+    });
+    return;
+  }
+  if (dispatcher) return;
   const config = readIsrOutboxConfig();
   if (!config.enabled) {
     logIsrOutbox(strapi, 'info', 'isr.outbox.dispatcher_disabled', {
@@ -49,9 +62,17 @@ export function wakeIsrOutbox(): void {
   dispatcher?.wake();
 }
 
-export async function stopIsrOutbox(): Promise<void> {
-  await dispatcher?.stop();
-  dispatcher = null;
+let stopping: Promise<void> | null = null;
+
+export function stopIsrOutbox(): Promise<void> {
+  lifecycleGeneration += 1;
+  if (stopping) return stopping;
+  const current = dispatcher;
+  stopping = (async () => {
+    await current?.stop();
+    dispatcher = null;
+  })().finally(() => { stopping = null; });
+  return stopping;
 }
 
 export async function getIsrOutboxStatus() {
@@ -73,10 +94,23 @@ export async function enqueueStandaloneIsrEvent(
   strapi: Core.Strapi,
   input: IsrOutboxInsert,
 ): Promise<{ id: string; eventKey: string }> {
+  // Standalone callers mutate shared state outside the document middleware
+  // (ratings and curated relation cleanup). Give their explicit paths the
+  // same locale twins as a normal shared-field write. `all` already covers
+  // every locale and a locale-scoped command must never be widened.
+  const localizedInput = input.payload.localePrefix
+    ? input
+    : {
+        ...input,
+        payload: expandPayloadPathsForLocales(
+          input.payload,
+          enabledContentLocaleCodesSync(),
+        ),
+      };
   return strapi.db.transaction(
     async ({ trx, onCommit }: { trx: any; onCommit: (fn: () => void) => void }) => {
-      const event = await insertIsrOutboxEvent(trx, input);
-      onCommit(() => {
+      const event = await insertIsrOutboxEvent(trx, localizedInput);
+      onCommit(onceOnCommit(strapi, () => {
         // Standalone events are used after cron/Query Engine writes, which do
         // not pass through the document middleware's after-commit purge. Wake
         // only after clearing API responses so ISR cannot rebuild durable HTML
@@ -84,8 +118,56 @@ export async function enqueueStandaloneIsrEvent(
         purgeResponseCaches();
         purgeEntityPopularSearchCatalog();
         wakeIsrOutbox();
-      });
+      }));
       return event;
+    },
+  );
+}
+
+export type CoalescedIsrSweepResult =
+  | { skipped: true; id: string; eventKey: string }
+  | { skipped: false; id: string; eventKey: string };
+
+/**
+ * One full sweep per `reason` at a time. Pending rows are unique by event key,
+ * while delivered history remains append-only. Coalescing is "skip while a PENDING
+ * row with this reason exists", serialized by an advisory lock. A sweep
+ * already PROCESSING may have read state from before the caller's write, so
+ * only pending rows count. The skip path still purges the response caches —
+ * the caller's write is visible either way.
+ */
+export async function enqueueCoalescedIsrSweep(
+  strapi: Core.Strapi,
+  input: { reason: string; scopes?: readonly string[] },
+): Promise<CoalescedIsrSweepResult> {
+  return strapi.db.transaction(
+    async ({ trx, onCommit }: { trx: any; onCommit: (fn: () => void) => void }) => {
+      await advisoryTransactionLock(trx, `isr-sweep:${input.reason}`);
+      const pending = await trx(ISR_OUTBOX_TABLE)
+        .where({ reason: input.reason, status: 'pending' })
+        .select('id', 'event_key')
+        .first();
+      if (pending) {
+        onCommit(onceOnCommit(strapi, () => purgeResponseCaches()));
+        return {
+          skipped: true as const,
+          id: String(pending.id),
+          eventKey: String(pending.event_key ?? ''),
+        };
+      }
+      const event = await insertIsrOutboxEvent(trx, {
+        payload: {
+          all: true,
+          ...(input.scopes?.length ? { scopes: [...input.scopes] } : {}),
+        },
+        reason: input.reason,
+      });
+      onCommit(onceOnCommit(strapi, () => {
+        purgeResponseCaches();
+        purgeEntityPopularSearchCatalog();
+        wakeIsrOutbox();
+      }));
+      return { skipped: false as const, id: event.id, eventKey: event.eventKey };
     },
   );
 }

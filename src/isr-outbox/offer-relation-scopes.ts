@@ -10,6 +10,7 @@ import {
 import { entityDealPageSlug } from '../api/entity-deal-page/services/entity-deal-route';
 import { DOCUMENT_WRITE_ACTIONS } from '../constants/document-write';
 import { withOfferTemplateOwnerSlugs } from '../api/site-configuration/services/entity-template-owners';
+import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
 
 export const OFFER_UIDS = new Set(['api::coupon.coupon', 'api::deal.deal']);
 
@@ -55,6 +56,7 @@ export async function offerRelationScope(
 ): Promise<OfferRelationScope | null> {
   const doc: any = await strapi.documents(uid).findOne({
     documentId,
+    locale: DEFAULT_CONTENT_LOCALE,
     populate: {
       stores: { fields: ['name', 'slug'] },
       brands: { fields: ['name', 'slug'] },
@@ -98,6 +100,7 @@ export async function offerRelationScope(
             }
           : { deals: { documentId: { $eq: documentId } } };
       const entities: any[] = await strapi.documents(entityUid as any).findMany({
+        locale: DEFAULT_CONTENT_LOCALE,
         filters: offerFilter as any,
         fields: ['name', 'slug'] as any,
       });

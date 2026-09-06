@@ -7,20 +7,134 @@
     "displayName": "Partner With Us Page",
     "description": "All editable copy, hero media, logos, marketing sections, CTAs and SEO for /partner-with-us/. Empty fields use the committed Figma fallback."
   },
-  "options": { "draftAndPublish": false },
-  "pluginOptions": {},
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
+  },
   "attributes": {
-    "title": { "type": "string", "default": "Partner With Us Page" },
-    "breadcrumbAriaLabel": { "type": "string", "default": "Breadcrumb", "maxLength": 60 },
-    "breadcrumbItems": { "type": "component", "repeatable": true, "component": "shared.breadcrumb-item", "max": 5 },
-    "hero": { "type": "component", "repeatable": false, "component": "partner.hero" },
-    "trusted": { "type": "component", "repeatable": false, "component": "partner.trusted-section" },
-    "benefits": { "type": "component", "repeatable": false, "component": "partner.benefits-section" },
-    "impact": { "type": "component", "repeatable": false, "component": "partner.impact-section" },
-    "exposure": { "type": "component", "repeatable": false, "component": "partner.exposure-section" },
-    "partnerships": { "type": "component", "repeatable": false, "component": "partner.partnerships-section" },
-    "support": { "type": "component", "repeatable": false, "component": "partner.support-section" },
-    "cta": { "type": "component", "repeatable": false, "component": "partner.cta" },
-    "seo": { "type": "component", "repeatable": false, "component": "shared.seo" }
+    "title": {
+      "type": "string",
+      "default": "Partner With Us Page",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "breadcrumbAriaLabel": {
+      "type": "string",
+      "default": "Breadcrumb",
+      "maxLength": 60,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "breadcrumbItems": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.breadcrumb-item",
+      "max": 5,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "hero": {
+      "type": "component",
+      "repeatable": false,
+      "component": "partner.hero",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "trusted": {
+      "type": "component",
+      "repeatable": false,
+      "component": "partner.trusted-section",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "benefits": {
+      "type": "component",
+      "repeatable": false,
+      "component": "partner.benefits-section",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "impact": {
+      "type": "component",
+      "repeatable": false,
+      "component": "partner.impact-section",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "exposure": {
+      "type": "component",
+      "repeatable": false,
+      "component": "partner.exposure-section",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "partnerships": {
+      "type": "component",
+      "repeatable": false,
+      "component": "partner.partnerships-section",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "support": {
+      "type": "component",
+      "repeatable": false,
+      "component": "partner.support-section",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "cta": {
+      "type": "component",
+      "repeatable": false,
+      "component": "partner.cta",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "seo": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.seo",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    }
   }
 }

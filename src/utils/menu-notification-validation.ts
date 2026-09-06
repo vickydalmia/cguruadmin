@@ -109,6 +109,7 @@ export async function validateMenuNotification(
   strapi: Core.Strapi,
   data: unknown,
   documentId?: string,
+  locale?: string,
 ): Promise<void> {
   if (!data || typeof data !== 'object') return;
   const incoming = data as Record<string, unknown>;
@@ -125,7 +126,8 @@ export async function validateMenuNotification(
 
   const stored: any = documentId
     ? await strapi.documents(MENU_UID).findOne({
-        documentId,
+      documentId,
+      ...(locale ? { locale } : {}),
         fields: ['documentId'],
         populate: {
           notification: {

@@ -1,6 +1,9 @@
 import type { Core } from '@strapi/strapi';
 import { errors } from '@strapi/utils';
-import { REDIRECT_RESERVED_ROUTE_LABELS } from './reserved-route-segments';
+import {
+  REDIRECT_RESERVED_ROUTE_LABELS,
+  reservedRouteSegment,
+} from './reserved-route-segments';
 import {
   foldPathKey,
   isAssetFromPath,
@@ -238,7 +241,8 @@ export async function validateRedirect(
     }
     const reserved =
       problems.length === 0
-        ? REDIRECT_RESERVED_ROUTE_LABELS.get(
+        ? reservedRouteSegment(
+            REDIRECT_RESERVED_ROUTE_LABELS,
             fromPath.replace(/^\/+/, '').split('/')[0]?.toLowerCase() ?? '',
           )
         : undefined;

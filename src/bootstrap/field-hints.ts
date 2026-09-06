@@ -222,6 +222,18 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
         'ownership or search matching. Hidden and cleared automatically for ' +
         'affiliate-brand offers.',
     },
+    // Mirrors offer-countries-validation.ts: only Country Setup-enabled codes
+    // are accepted; empty means the offer is valid everywhere.
+    {
+      uid,
+      field: 'offerCountries',
+      hint:
+        'Optional. Countries or regions this offer is valid in — the site ' +
+        'shows their flags on the card and offers a Country filter on entity ' +
+        'pages. Leave empty for an offer valid everywhere (it matches every ' +
+        'country filter). Regions expand: GCC matches its member countries, ' +
+        'Global and MENA match all.',
+    },
     // Mirrors offer-lifecycle-validation.ts: past dates rejected, scheduledAt
     // must precede expiresAt, contentStatus derived from these two dates.
     {

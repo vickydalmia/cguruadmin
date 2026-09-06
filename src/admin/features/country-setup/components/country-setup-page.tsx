@@ -26,6 +26,9 @@ import {
   FEATURE_FORM_DEFINITIONS,
   type CountrySetup,
 } from '../types';
+import { TranslationBackfillCard } from '../../translation/components/translation-backfill-card';
+import { OfferCountriesField } from './offer-countries-field';
+import { TranslationLanguagesField } from './translation-languages-field';
 
 const IDENTITY_FIELDS = [
   ['siteName', 'Site / brand name', 'CouponzGuru'],
@@ -202,6 +205,63 @@ export default function CountrySetupPage() {
                 <Badge>{preview.numberExample}</Badge>
                 <Badge>{preview.dateExample}</Badge>
               </Flex>
+            </Box>
+
+            <Box padding={6} background="neutral0" shadow="filterShadow" hasRadius>
+              <Typography variant="beta">AI content translation</Typography>
+              <Box paddingTop={2}>
+                <Typography variant="pi" textColor="neutral600">
+                  Automatically writes a translated version of every localized
+                  entry (stores, coupons, pages, …) whenever the English source
+                  is saved, and serves it under its own URL prefix (e.g. /ar/).
+                  Needs the TRANSLATION_* server environment configured. Saving
+                  applies to this CMS instance immediately (locale rows, URL
+                  twins, translator); other CMS containers pick the change up
+                  when they restart.
+                </Typography>
+              </Box>
+              <Flex paddingTop={4} gap={5} alignItems="flex-end" wrap="wrap">
+                <Field.Root name="translationEnabled">
+                  <Field.Label>Translation enabled</Field.Label>
+                  <Toggle
+                    checked={form.translationEnabled === true}
+                    onLabel="On"
+                    offLabel="Off"
+                    onChange={() =>
+                      set('translationEnabled', form.translationEnabled !== true)
+                    }
+                  />
+                </Field.Root>
+                <Box grow={1} minWidth="240px">
+                  <TranslationLanguagesField
+                    value={String(form.translationLocales ?? '')}
+                    disabled={form.translationEnabled !== true}
+                    onChange={(csv) => set('translationLocales', csv)}
+                  />
+                </Box>
+              </Flex>
+              <TranslationBackfillCard
+                translationEnabled={form.translationEnabled === true}
+              />
+            </Box>
+
+            <Box padding={6} background="neutral0" shadow="filterShadow" hasRadius>
+              <Typography variant="beta">Offer countries</Typography>
+              <Box paddingTop={2}>
+                <Typography variant="pi" textColor="neutral600">
+                  Optional per-offer country tagging for multi-country markets
+                  (e.g. the GCC). Editors pick from this list on each Coupon
+                  and Product Deal; the website shows the flags on offer cards
+                  and adds a Country filter on entity pages. Leave empty for a
+                  single-country site.
+                </Typography>
+              </Box>
+              <Box paddingTop={4}>
+                <OfferCountriesField
+                  value={String(form.offerCountries ?? '')}
+                  onChange={(csv) => set('offerCountries', csv)}
+                />
+              </Box>
             </Box>
 
             {(['Catalog', 'Editorial', 'Legal'] as const).map((group) => (

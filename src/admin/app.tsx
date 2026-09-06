@@ -6,6 +6,7 @@ import * as React from 'react';
 import { Earth } from '@strapi/icons';
 
 import { CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME } from '../constants/checkout-merchant';
+import { OFFER_COUNTRIES_CUSTOM_FIELD_NAME } from '../constants/offer-countries';
 import RichTextEditor from './features/rich-text/rich-text-editor';
 import DateTimeInput from './components/date-time-input';
 import BooleanConfirmInput from './components/boolean-confirm-input';
@@ -18,6 +19,7 @@ import OfferBenefitsPanel from './components/offer-benefits-panel';
 import RecordLockPanel from './features/record-lock/record-lock-panel';
 import UniqueCodeImportPanel from './components/unique-code-import-panel';
 import ValidationProblemsPanel from './components/validation-problems-panel';
+import TranslationPanel from './features/translation/components/translation-panel';
 import { installEnterKeyGuard, installTitleRewrite } from './utils/dom-behaviors';
 import {
   INJECT_COLUMN_IN_TABLE,
@@ -103,6 +105,35 @@ export default {
       },
     });
 
+    // Offer Countries: the "valid in these countries" multi-select on Coupon
+    // and Product Deal, whose option list is the DYNAMIC Country Setup subset
+    // (a schema enumeration cannot express that). Same custom-field pairing
+    // rule as checkout-merchant: the server half (src/index.ts register) must
+    // declare the same name or the two `global::` uids diverge.
+    app.customFields.register({
+      name: OFFER_COUNTRIES_CUSTOM_FIELD_NAME,
+      type: 'string',
+      intlLabel: {
+        id: 'offer-countries.label',
+        defaultMessage: 'Offer countries',
+      },
+      intlDescription: {
+        id: 'offer-countries.description',
+        defaultMessage:
+          'Countries this offer is valid in (empty = all countries)',
+      },
+      components: {
+        Input: async () => {
+          const module = await import(
+            './features/offer-countries/components/offer-countries-input'
+          );
+          return {
+            default: module.default as unknown as React.ComponentType,
+          };
+        },
+      },
+    });
+
     // Generated Product Deal pages (/<slugified-entity-name>-deals/) have no content
     // type of their own — they are derived from the four entity collections —
     // so there is nothing for the Content Manager to list. This screen is the
@@ -164,6 +195,25 @@ export default {
         return { default: page.default };
       },
     });
+    // Storefront UI text (English overrides + every language). `permissions:
+    // []` gates nothing on its own: the endpoints behind it require the
+    // ui-dictionary.manage RBAC action server-side, and the page renders the
+    // resulting 403 as an explanation rather than an empty table.
+    app.addSettingsLink('global', {
+      id: 'ui-dictionary',
+      to: '/settings/ui-dictionary',
+      permissions: [],
+      intlLabel: {
+        id: 'ui-dictionary.settings.label',
+        defaultMessage: 'UI Text',
+      },
+      Component: async () => {
+        const page = await import(
+          './features/ui-dictionary/components/ui-dictionary-page'
+        );
+        return { default: page.default };
+      },
+    });
     installRecordLockLeaseInterceptor();
     const contentManager = app.getPlugin('content-manager') as any;
     const apis = contentManager.apis;
@@ -195,6 +245,9 @@ export default {
       EntityCouponLayoutPanel,
       UniqueCodeImportPanel,
       ValidationProblemsPanel,
+      // Self-hides unless this deployment translates content (Country
+      // Setup + TRANSLATION_* env) and the model is localized.
+      TranslationPanel,
     ]);
 
     // Registered after every plugin's bootstrap, so this sees (and preserves)

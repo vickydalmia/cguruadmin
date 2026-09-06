@@ -11,8 +11,11 @@ services:
     environment:
       NODE_ENV: production
       # Exactly one process owns durable delivery. The render sibling below is
-      # read-heavy only and explicitly disables its dispatcher.
+      # read-heavy only and explicitly disables both paid translation work and
+      # ISR delivery.
       ISR_OUTBOX_DISPATCHER_ENABLED: "true"
+      TRANSLATION_OUTBOX_DISPATCHER_ENABLED: "true"
+      TRANSLATION_BACKFILL_RUNNER_ENABLED: "false"
     ports:
       # Always publish on loopback so host-local consumers (admin nginx, an
       # SSH tunnel, the deploy health check) keep working.
@@ -54,8 +57,9 @@ services:
   # responsive.
   #
   # Set DATABASE_POOL_MAX=5 in ${ENV_FILE}: it applies to BOTH containers
-  # (shared env_file), so together they hold at most 10 Postgres connections —
-  # comfortably under the managed-DB 22-connection backend limit.
+  # (shared env_file), so they hold at most 10 Postgres connections; the
+  # maintenance service below adds at most 2, staying under the managed-DB
+  # 22-connection backend limit.
   strapi-render:
     image: ${APP_IMAGE:?APP_IMAGE is required}:${APP_IMAGE_TAG:?APP_IMAGE_TAG is required}
     restart: unless-stopped
@@ -72,12 +76,64 @@ services:
       # work. Keep exactly one dispatcher on the admin service so render-time
       # traffic cannot amplify retries into overlapping route-inventory scans.
       ISR_OUTBOX_DISPATCHER_ENABLED: "false"
+      # Translation jobs are also a shared-Postgres queue. One admin-owned
+      # dispatcher keeps provider concurrency and daily-spend controls global
+      # instead of multiplying them by the number of Strapi processes.
+      TRANSLATION_OUTBOX_DISPATCHER_ENABLED: "false"
+      TRANSLATION_BACKFILL_RUNNER_ENABLED: "false"
+      # Every socket that can reach this container is internal by construction
+      # (ports are published on loopback and the VPC private IP, firewalled),
+      # so trust private sources without per-host IP allowlisting. On a
+      # single-server deployment the Astro origin's requests hairpin through
+      # Docker NAT and arrive as a bridge-gateway address that differs per
+      # host — an exact RATE_LIMIT_TRUSTED_IPS entry cannot express that.
+      # NEVER set this on the admin service above: proxied visitor traffic
+      # reaches it from the same private gateway and would bypass the limiter.
+      RATE_LIMIT_TRUST_PRIVATE_SOCKETS: "true"
     ports:
       - "127.0.0.1:${RENDER_PORT:-1338}:1337"
       # Same rule as the admin container: APP_BIND must be the VPC private IP,
       # never 0.0.0.0 (published ports bypass ufw). Restrict ${RENDER_PORT} to
       # the Astro droplet's private IP via the DO Cloud Firewall.
       - "${APP_BIND:?APP_BIND must be set to the VPC private IP in ${ENV_FILE:-.env.production} (never 0.0.0.0)}:${RENDER_PORT:-1338}:1337"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:1337/_health').then((r)=>process.exit(r.status===204?0:1)).catch(()=>process.exit(1))
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Durable catalogue scans run here, away from the admin and render request
+  # loops. The strict CPU/pool limits protect a two-core host and the managed
+  # database; the scanner's persisted cursor makes the slower pace safe.
+  strapi-maintenance:
+    image: ${APP_IMAGE:?APP_IMAGE is required}:${APP_IMAGE_TAG:?APP_IMAGE_TAG is required}
+    restart: unless-stopped
+    init: true
+    user: "1001:1001"
+    env_file:
+      - ${ENV_FILE:-.env.production}
+    environment:
+      NODE_ENV: production
+      CRON_ENABLED: "false"
+      ISR_OUTBOX_DISPATCHER_ENABLED: "false"
+      TRANSLATION_OUTBOX_DISPATCHER_ENABLED: "false"
+      TRANSLATION_BACKFILL_RUNNER_ENABLED: "true"
+      DATABASE_POOL_MIN: "0"
+      DATABASE_POOL_MAX: "2"
+    cpus: "0.50"
+    mem_limit: 512m
     healthcheck:
       test:
         - CMD

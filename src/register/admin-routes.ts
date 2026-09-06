@@ -168,6 +168,98 @@ export function registerCountrySetupRoutes(strapi: Core.Strapi): void {
         handler: 'api::site-configuration.site-configuration.adminUpdate',
         config: { policies },
       },
+      // Languages the translation picker may offer (ICU-resolvable ISO 639-1).
+      {
+        method: 'GET',
+        path: '/languages',
+        handler: 'api::site-configuration.site-configuration.adminLanguages',
+        config: { policies },
+      },
+      // The full offer-country master registry the Country Setup picker
+      // offers. The editor-facing ENABLED subset is served separately below —
+      // this whole prefix is Super-Admin-only.
+      {
+        method: 'GET',
+        path: '/offer-countries',
+        handler: 'api::site-configuration.site-configuration.adminOfferCountries',
+        config: { policies },
+      },
+    ],
+  } as any);
+}
+
+/**
+ * The enabled offer-country tags, for the Coupon/Deal edit form's picker.
+ * Any authenticated admin: editors tag offers, and the list leaks nothing —
+ * it is the same data `GET /api/site-settings` serves publicly.
+ */
+export function registerOfferCountryRoutes(strapi: Core.Strapi): void {
+  strapi.server.routes({
+    type: 'admin',
+    prefix: '/offer-countries',
+    routes: [
+      {
+        method: 'GET',
+        path: '/options',
+        handler:
+          'api::site-configuration.site-configuration.adminEnabledOfferCountries',
+        config: { policies: ['admin::isAuthenticatedAdmin'] },
+      },
+    ],
+  } as any);
+}
+
+// AI-translation endpoints for the edit-view Translation panel and the
+// super-admin backfill. Per-entry status is readable by any authenticated
+// admin (the panel must render for editors); triggering paid LLM work
+// additionally requires the translation.manage RBAC action, and the
+// catalogue-wide backfill/estimate stays Super Admin only.
+export function registerTranslationRoutes(strapi: Core.Strapi): void {
+  strapi.server.routes({
+    type: 'admin',
+    prefix: '/translation',
+    routes: [
+      {
+        method: 'GET',
+        path: '/status/:uid/:documentId',
+        handler: 'api::translation.translation.entryStatus',
+        config: { policies: ['admin::isAuthenticatedAdmin'] },
+      },
+      {
+        method: 'POST',
+        path: '/enqueue',
+        handler: 'api::translation.translation.enqueue',
+        config: {
+          policies: [
+            'admin::isAuthenticatedAdmin',
+            'global::translation-manage-only',
+          ],
+        },
+      },
+      {
+        method: 'POST',
+        path: '/backfill',
+        handler: 'api::translation.translation.backfill',
+        config: {
+          policies: ['admin::isAuthenticatedAdmin', 'global::super-admin-only'],
+        },
+      },
+      {
+        method: 'POST',
+        path: '/backfill/:id/cancel',
+        handler: 'api::translation.translation.cancelBackfill',
+        config: {
+          policies: ['admin::isAuthenticatedAdmin', 'global::super-admin-only'],
+        },
+      },
+      {
+        method: 'GET',
+        path: '/outbox-status',
+        handler: 'api::translation.translation.outboxStatus',
+        config: {
+          policies: ['admin::isAuthenticatedAdmin', 'global::super-admin-only'],
+        },
+      },
     ],
   } as any);
 }
@@ -183,6 +275,47 @@ export function registerAdminRuntimeConfigRoutes(strapi: Core.Strapi): void {
         path: '/',
         handler: 'api::admin-runtime-config.admin-runtime-config.find',
         config: { policies: ['admin::isAuthenticatedAdmin'] },
+      },
+    ],
+  } as any);
+}
+
+// Settings → UI Text: the storefront's UI-text dictionary (English overrides
+// + every target language). Admin router for the same reason as above.
+// Reading and editing need the assignable ui-dictionary.manage action; the
+// paid translation trigger additionally needs translation.manage, exactly
+// like the per-entry Translate button.
+export function registerUiDictionaryRoutes(strapi: Core.Strapi): void {
+  const policies = [
+    'admin::isAuthenticatedAdmin',
+    'global::ui-dictionary-manage-only',
+  ];
+  const handler = (action: string) => `api::ui-dictionary.ui-dictionary-admin.${action}`;
+  strapi.server.routes({
+    type: 'admin',
+    prefix: '/ui-dictionary',
+    routes: [
+      { method: 'GET', path: '/status', handler: handler('status'), config: { policies } },
+      { method: 'GET', path: '/entries', handler: handler('entries'), config: { policies } },
+      {
+        method: 'PUT',
+        path: '/entries/:locale/:key',
+        handler: handler('upsertEntry'),
+        config: { policies },
+      },
+      {
+        method: 'DELETE',
+        path: '/entries/:locale/:key',
+        handler: handler('deleteEntry'),
+        config: { policies },
+      },
+      { method: 'POST', path: '/import', handler: handler('importMessages'), config: { policies } },
+      { method: 'GET', path: '/export', handler: handler('exportMessages'), config: { policies } },
+      {
+        method: 'POST',
+        path: '/translate',
+        handler: handler('translate'),
+        config: { policies: [...policies, 'global::translation-manage-only'] },
       },
     ],
   } as any);

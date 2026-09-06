@@ -7,20 +7,129 @@
     "displayName": "Job",
     "description": "Career openings shown on /careers and their detail pages."
   },
-  "options": { "draftAndPublish": false },
+  "options": {
+    "draftAndPublish": false
+  },
   "attributes": {
-    "title": { "type": "string", "required": true, "maxLength": 120 },
-    "slug": { "type": "string", "required": true, "regex": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
-    "category": { "type": "string", "required": true, "maxLength": 60 },
-    "experience": { "type": "string", "maxLength": 60 },
-    "employmentType": { "type": "string", "maxLength": 60 },
-    "location": { "type": "string", "maxLength": 100 },
-    "sortOrder": { "type": "integer", "default": 0, "min": 0 },
-    "isActive": { "type": "boolean", "default": true },
-    "opportunityParagraphs": { "type": "component", "repeatable": true, "component": "shared.paragraph", "max": 6 },
-    "responsibilities": { "type": "component", "repeatable": true, "component": "shared.paragraph", "max": 16 },
-    "requirements": { "type": "component", "repeatable": true, "component": "shared.paragraph", "max": 16 },
-    "benefits": { "type": "component", "repeatable": true, "component": "shared.paragraph", "max": 16 },
-    "seo": { "type": "component", "repeatable": false, "component": "shared.seo" }
+    "title": {
+      "type": "string",
+      "required": true,
+      "maxLength": 120,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "slug": {
+      "type": "string",
+      "required": true,
+      "regex": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "category": {
+      "type": "string",
+      "required": true,
+      "maxLength": 60,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "experience": {
+      "type": "string",
+      "maxLength": 60,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "employmentType": {
+      "type": "string",
+      "maxLength": 60,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "location": {
+      "type": "string",
+      "maxLength": 100,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "sortOrder": {
+      "type": "integer",
+      "default": 0,
+      "min": 0
+    },
+    "isActive": {
+      "type": "boolean",
+      "default": true
+    },
+    "opportunityParagraphs": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.paragraph",
+      "max": 6,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "responsibilities": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.paragraph",
+      "max": 16,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "requirements": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.paragraph",
+      "max": 16,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "benefits": {
+      "type": "component",
+      "repeatable": true,
+      "component": "shared.paragraph",
+      "max": 16,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "seo": {
+      "type": "component",
+      "repeatable": false,
+      "component": "shared.seo",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    }
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
   }
 }

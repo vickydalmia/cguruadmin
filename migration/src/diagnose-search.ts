@@ -25,6 +25,7 @@
 import { writeFileSync } from "fs";
 import { config } from "./config.js";
 import { getPgPool, closePg } from "./db/pg-client.js";
+import { DEFAULT_CONTENT_LOCALE } from "./utils/content-locale.js";
 import type {
   EntityTable,
   OfferKind,
@@ -461,13 +462,41 @@ async function explainPreviewQueries(
   const queries: Array<{ label: string; query: SqlQuery }> = [
     ...(["stores", "brands", "categories", "banks"] as EntityTable[]).flatMap(
       (table) => [
-        { label: `${table}.ranked`, query: entityRankedQuery(table, needles, entityWindow) },
-        { label: `${table}.count`, query: entityCountQuery(table, needles) },
+        {
+          label: `${table}.ranked`,
+          query: entityRankedQuery(
+            table,
+            needles,
+            entityWindow,
+            DEFAULT_CONTENT_LOCALE,
+          ),
+        },
+        {
+          label: `${table}.count`,
+          query: entityCountQuery(table, needles, DEFAULT_CONTENT_LOCALE),
+        },
       ],
     ),
     ...(["coupon", "deal"] as OfferKind[]).flatMap((kind) => [
-      { label: `${kind}s.ranked`, query: offerRankedQuery(kind, needles, offerWindow, nowIso) },
-      { label: `${kind}s.count`, query: offerCountQuery(kind, needles, nowIso) },
+      {
+        label: `${kind}s.ranked`,
+        query: offerRankedQuery(
+          kind,
+          needles,
+          offerWindow,
+          nowIso,
+          DEFAULT_CONTENT_LOCALE,
+        ),
+      },
+      {
+        label: `${kind}s.count`,
+        query: offerCountQuery(
+          kind,
+          needles,
+          nowIso,
+          DEFAULT_CONTENT_LOCALE,
+        ),
+      },
     ]),
   ];
 

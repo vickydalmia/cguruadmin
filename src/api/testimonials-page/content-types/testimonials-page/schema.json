@@ -7,50 +7,104 @@
     "displayName": "Testimonials Page",
     "description": "All editable copy, portraits, testimonial cards, CTA, FAQs and SEO for the public /testimonials/ page. The storefront uses the committed Figma content wherever a field has not yet been populated."
   },
-  "options": { "draftAndPublish": false },
-  "pluginOptions": {},
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
+  },
   "attributes": {
-    "title": { "type": "string", "default": "Testimonials Page" },
+    "title": {
+      "type": "string",
+      "default": "Testimonials Page",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
     "breadcrumbAriaLabel": {
       "type": "string",
       "default": "Breadcrumb",
-      "maxLength": 60
+      "maxLength": 60,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "breadcrumbItems": {
       "type": "component",
       "repeatable": true,
       "component": "shared.breadcrumb-item",
-      "max": 5
+      "max": 5,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "hero": {
       "type": "component",
       "repeatable": false,
-      "component": "testimonial.hero"
+      "component": "testimonial.hero",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "featured": {
       "type": "component",
       "repeatable": false,
-      "component": "testimonial.featured-section"
+      "component": "testimonial.featured-section",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "partners": {
       "type": "component",
       "repeatable": false,
-      "component": "testimonial.partners-section"
+      "component": "testimonial.partners-section",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "partnerCta": {
       "type": "component",
       "repeatable": false,
-      "component": "testimonial.partner-cta"
+      "component": "testimonial.partner-cta",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "faq": {
       "type": "component",
       "repeatable": false,
-      "component": "testimonial.faq-section"
+      "component": "testimonial.faq-section",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     },
     "seo": {
       "type": "component",
       "repeatable": false,
-      "component": "shared.seo"
+      "component": "shared.seo",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     }
   }
 }
