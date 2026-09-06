@@ -206,15 +206,16 @@ describe('TranslationDispatcher — ui-dictionary hand-off', () => {
     );
   });
 
-  it('skips the dictionary job when its locale is no longer enabled', async () => {
-    mocks.store.claim.mockResolvedValueOnce({ ...JOB, targetLocale: 'hi' });
+  it('does not claim dictionary jobs when translation is disabled', async () => {
+    mocks.enabledContentLocales.mockResolvedValueOnce([]);
     const { strapi, dispatchOne } = dispatcher();
 
-    await expect(dispatchOne()).resolves.toBe(true);
+    await expect(dispatchOne()).resolves.toBe(false);
 
+    expect(mocks.store.claim).not.toHaveBeenCalled();
     expect(mocks.processUiDictionaryJob).not.toHaveBeenCalled();
     expect(strapi.getModel).not.toHaveBeenCalled();
-    expect(mocks.store.markDelivered).toHaveBeenCalledTimes(1);
+    expect(mocks.store.markDelivered).not.toHaveBeenCalled();
   });
 
   it('does not repeat an unchanged terminal dictionary failure every night', async () => {
@@ -518,6 +519,11 @@ describe('TranslationDispatcher — hash-current content', () => {
       translations: { name: 'المتجر' },
     });
     expect(mocks.writeLocaleVersion).toHaveBeenCalledTimes(2);
+    // The success write (after the locale row is published) keeps the field
+    // fingerprints, otherwise the next English edit re-translates everything.
+    const success = mocks.store.upsertState.mock.calls.at(-1)?.[3] as { leafSourceHashes?: unknown; publishedPlanHash?: unknown };
+    expect(success.publishedPlanHash).not.toBeNull();
+    expect(success.leafSourceHashes).toEqual({ name: expect.any(String) });
     mocks.translateEntryLeaves.mockClear();
     mocks.writeLocaleVersion.mockClear();
     mocks.store.upsertState.mockClear();

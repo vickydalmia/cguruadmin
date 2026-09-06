@@ -176,7 +176,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
   async outboxStatus(ctx: any) {
     ctx.set('Cache-Control', 'private, no-store');
     ctx.body = {
-      ...(await getTranslationStatus()),
+      ...(await getTranslationStatus(strapi)),
       backfill: await currentBackfillRun(strapi),
     };
   },

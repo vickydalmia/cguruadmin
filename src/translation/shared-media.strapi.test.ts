@@ -1,3 +1,6 @@
+import { loadSiteConfiguration, siteLanguages } from '../api/site-configuration/services/site-configuration';
+import { invalidateCachedSiteConfiguration } from '../api/site-configuration/services/cached-configuration';
+import { translationRuntimeActive } from './outbox/runtime';
 import { runContentTransaction } from '../isr-outbox/transaction';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,6 +35,8 @@ integration('shared media inheritance through real Strapi documents', () => {
       writeFileSync(target, typeof value === 'string' ? value : JSON.stringify(value));
     };
     symlinkSync(join(process.cwd(), 'node_modules'), join(root, 'node_modules'), 'dir');
+    mkdirSync(join(root, 'database'));
+    symlinkSync(join(process.cwd(), 'database/country-bootstrap.js'), join(root, 'database/country-bootstrap.js'));
     put('package.json', { name: 'translation-media-test', version: '1.0.0', dependencies: {} });
     const postgres = process.env.STRAPI_TRANSACTION_TEST_DATABASE_URL;
     put('config/database.js', postgres
@@ -91,6 +96,14 @@ integration('shared media inheritance through real Strapi documents', () => {
       attributes: { products: { type: 'component', repeatable: true, component: 'home.hero-product' } },
     });
     put('src/components/home/hero-product.json', require('../components/home/hero-product.json'));
+    put('src/api/site-configuration/content-types/site-configuration/schema.json',
+      require('../api/site-configuration/content-types/site-configuration/schema.json'));
+    put('src/api/menu/content-types/menu/schema.json', {
+      kind: 'singleType', collectionName: 'menus',
+      info: { singularName: 'menu', pluralName: 'menus', displayName: 'Menu' },
+      options: { draftAndPublish: false }, ...localized,
+      attributes: { title: { type: 'string', ...localized } },
+    });
     const { createStrapi } = require('@strapi/strapi');
     strapi = createStrapi({ appDir: root, distDir: root });
     await strapi.load();
@@ -128,6 +141,41 @@ integration('shared media inheritance through real Strapi documents', () => {
       removeListeners.mockRestore();
     }
     if (root) rmSync(root, { recursive: true, force: true });
+  });
+
+  it('opens and persists explicit Country Setup on fresh USA and UAE installations', async () => {
+    const api = strapi.documents('api::site-configuration.site-configuration');
+    for (const [countryCode, countryName, currencyCode, timezone] of [
+      ['US', 'United States', 'USD', 'America/New_York'],
+      ['AE', 'United Arab Emirates', 'AED', 'Asia/Dubai'],
+    ]) {
+      vi.stubEnv('DEPLOYMENT_COUNTRY_CODE', countryCode);
+      vi.stubEnv('COUNTRY_SETUP_BOOTSTRAP_JSON', JSON.stringify({ siteName: 'New site',
+        countryCode, countryName, currencyCode, timezone, locale: `en-${countryCode}` }));
+      try {
+        const initial = await loadSiteConfiguration(strapi);
+        expect(initial).toMatchObject({ countryCode, onboardingComplete: false, translationEnabled: false, storesEnabled: false });
+        const saved = await api.create({ data: initial });
+        expect(saved.configurationRevision).toBe(0);
+        expect((await loadSiteConfiguration(strapi)).documentId).toBe(saved.documentId);
+        await api.delete({ documentId: saved.documentId });
+      } finally { vi.unstubAllEnvs(); invalidateCachedSiteConfiguration(); }
+    }
+    if (process.env.STRAPI_TRANSACTION_TEST_DATABASE_URL) {
+      const column = await strapi.db.connection('information_schema.columns').where({ table_schema: 'public',
+        table_name: 'site_configurations', column_name: 'configuration_revision' }).first();
+      expect(column.is_nullable).toBe('NO');
+      expect(column.column_default).toBe('0');
+    }
+  });
+
+  it.skipIf(!process.env.STRAPI_TRANSACTION_TEST_DATABASE_URL)('restores a legacy English single type to real Strapi document reads', async () => {
+    const menu = await strapi.documents('api::menu.menu').create({ locale: 'en', data: { title: 'Existing menu' } });
+    await strapi.db.connection('menus').where({ id: menu.id }).update({ locale: null });
+    expect(await strapi.documents('api::menu.menu').findFirst({ locale: 'en' })).toBeNull();
+    await require('../../database/migrations/2026.09.08T00.00.00.preserve-legacy-english-content.js').up(strapi.db.connection);
+    const restored = await strapi.documents('api::menu.menu').findFirst({ locale: 'en' });
+    expect(restored).toMatchObject({ id: menu.id, documentId: menu.documentId, title: 'Existing menu', locale: 'en' });
   });
 
   it('commits nested content/outbox writes atomically and never replays delayed callbacks', async () => {
@@ -278,4 +326,36 @@ integration('shared media inheritance through real Strapi documents', () => {
         .toEqual([]);
     }
   });
+  it.each([
+    ['IN', 'India', 'INR', false, ''],
+    ['US', 'United States', 'USD', false, ''],
+    ['AE', 'United Arab Emirates', 'AED', false, ''],
+    ['AE', 'United Arab Emirates', 'AED', true, 'ar'],
+    ['IN', 'India', 'INR', true, 'hi'],
+  ] as const)('persists %s (%s, %s; enabled=%s; locale=%s)', async (countryCode, countryName, currencyCode, translationEnabled, translationLocales) => {
+    vi.stubEnv('DEPLOYMENT_COUNTRY_CODE', countryCode);
+    vi.stubEnv('TRANSLATION_OUTBOX_DISPATCHER_ENABLED', 'false');
+    try {
+      const api = strapi.documents('api::site-configuration.site-configuration');
+      const existing = await api.findFirst();
+      if (existing) await api.delete({ documentId: existing.documentId });
+      await api.create({ data: { countryCode, countryName, currencyCode, locale: `en-${countryCode}`,
+        translationEnabled, translationLocales } });
+      invalidateCachedSiteConfiguration();
+      const { checkDatabaseCountry } = require('../../deploy/scripts/check-country.cjs');
+      await checkDatabaseCountry(strapi.db.connection, countryCode);
+      await expect(checkDatabaseCountry(strapi.db.connection, countryCode === 'IN' ? 'AE' : 'IN')).rejects.toThrow('does not match');
+      const configuration = await loadSiteConfiguration(strapi);
+      expect(configuration.countryCode).toBe(countryCode);
+      expect(configuration.currencyCode).toBe(currencyCode);
+      expect(siteLanguages(configuration).map((language) => language.code))
+        .toEqual(translationEnabled ? ['en', translationLocales] : ['en']);
+      // Admins must still enqueue work when a separate maintenance process owns dispatch.
+      expect(await translationRuntimeActive(strapi)).toBe(translationEnabled);
+    } finally {
+      vi.unstubAllEnvs();
+      invalidateCachedSiteConfiguration();
+    }
+  });
+
 });

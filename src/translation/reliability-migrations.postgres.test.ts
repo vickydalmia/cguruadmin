@@ -1,3 +1,4 @@
+import { readWorkerHeartbeat, writeWorkerHeartbeat } from './outbox/worker-health';
 import knexFactory, { type Knex } from 'knex';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { enqueueBlockedDependentsForAvailableTarget, TranslationOutboxStore } from './outbox/store';
@@ -10,12 +11,15 @@ const dependencyMigration = require('../../database/migrations/2026.09.04T00.00.
 const reliabilityMigration = require('../../database/migrations/2026.09.05T00.00.00.translation-isr-reliability.js');
 const performanceMigration = require('../../database/migrations/2026.09.06T00.00.00.translation-backfill-performance.js');
 
+const platformMigration = require('../../database/migrations/2026.09.07T00.00.00.shared-platform-reliability.js');
+
 const databaseUrl = process.env.UNIQUE_CODE_TEST_DATABASE_URL;
 const postgresDescribe = databaseUrl ? describe : describe.skip;
 
 postgresDescribe('translation/ISR reliability migrations on PostgreSQL', () => {
   let knex: Knex;
   const tables = [
+    'translation_worker_heartbeats',
     'translation_backfill_runs',
     'translation_usage',
     'translation_state',
@@ -40,6 +44,7 @@ postgresDescribe('translation/ISR reliability migrations on PostgreSQL', () => {
     await dependencyMigration.up(knex);
     await reliabilityMigration.up(knex);
     await performanceMigration.up(knex);
+    await platformMigration.up(knex);
   });
 
   afterAll(async () => {
@@ -157,4 +162,37 @@ postgresDescribe('translation/ISR reliability migrations on PostgreSQL', () => {
     expect(await enqueueBlockedDependentsForAvailableTarget(knex, target)).toBe(0);
     expect((await restarted.statusSummary()).counts).toEqual({ delivered: 20 });
   });
+  it('keeps additive ledger fields across repeat migrations and old-style writes', async () => {
+    await platformMigration.up(knex);
+    await knex('translation_state').insert({ uid: 'api::store.store', document_id: 'old', locale: 'ar', source_hash: 'hash', translated_at: new Date() });
+    const row = await knex('translation_state').first();
+    expect(row.leaf_source_hashes).toBeNull();
+    expect(await knex.schema.hasTable('translation_worker_heartbeats')).toBe(true);
+  });
+
+  it('serializes concurrent claims per document and reserves incremental capacity', async () => {
+    const now = new Date();
+    const entry = (key: string, reason: string) => ({ event_key: key, uid: 'api::store.store', document_id: key,
+      target_locale: 'ar', kind: 'translate', status: 'pending', force: false, reason, created_at: now, next_attempt_at: now });
+    await knex('translation_outbox').insert([entry('bulk', 'backfill'), entry('edit', 'editor save')]);
+    const store = new TranslationOutboxStore({ db: { connection: knex,
+      transaction: (callback: any) => knex.transaction((trx) => callback({ trx })),
+    } } as any, 120_000, 300_000);
+    const incremental = await store.claim({ incrementalOnly: true, locales: ['ar'] });
+    expect(incremental?.documentId).toBe('edit');
+    expect(await store.claim({ incrementalOnly: true, locales: ['ar'] })).toBeNull();
+    await knex('translation_outbox').insert(entry('edit', 'editor save'));
+    const claimed = await Promise.all([store.claim({ locales: ['ar'] }), store.claim({ locales: ['ar'] })]);
+    expect(claimed.filter(Boolean).map((job) => job!.documentId)).toEqual(['bulk']);
+    await store.markDelivered(incremental!);
+    expect((await store.claim({ locales: ['ar'] }))?.documentId).toBe('edit');
+  });
+
+  it('reports durable worker liveness across separate processes and rejects stale heartbeats', async () => {
+    await writeWorkerHeartbeat({ db: { connection: knex } } as any, 'maintenance', 'running');
+    expect((await readWorkerHeartbeat({ db: { connection: knex } } as any)).healthy).toBe(true);
+    await knex('translation_worker_heartbeats').update({ heartbeat_at: new Date(Date.now() - 61000) });
+    expect((await readWorkerHeartbeat({ db: { connection: knex } } as any)).healthy).toBe(false);
+  });
+
 });

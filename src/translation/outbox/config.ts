@@ -49,7 +49,7 @@ export function readTranslationOutboxConfig(): TranslationOutboxConfig {
   return {
     enabled,
     pollMs: intFromEnv('TRANSLATION_OUTBOX_POLL_MS', 5_000, 250),
-    batchSize: intFromEnv('TRANSLATION_OUTBOX_BATCH_SIZE', 5),
+    batchSize: intFromEnv('TRANSLATION_OUTBOX_BATCH_SIZE', 2),
     leaseMs: intFromEnv('TRANSLATION_OUTBOX_LEASE_MS', 15 * 60 * 1_000, 10_000),
     maxBackoffMs: intFromEnv(
       'TRANSLATION_OUTBOX_MAX_BACKOFF_MS',

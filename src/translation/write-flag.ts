@@ -12,6 +12,7 @@ export type TranslationWriteContext = Readonly<{
   plan: LocalizedWritePlan | null;
   targetRowExisted: boolean;
   operation: 'upsert' | 'delete';
+  assertPublicationLease?: (trx: any) => Promise<void>;
 }>;
 
 const translationWriteStorage = new AsyncLocalStorage<TranslationWriteContext>();

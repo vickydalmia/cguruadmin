@@ -298,6 +298,7 @@ export type TranslationStateRow = {
    * the dispatcher treats as "must re-translate".
    */
   translations: Record<string, string> | null;
+  leafSourceHashes?: Record<string, string> | null;
 };
 
 export type TranslationJobSnapshot = {
@@ -353,6 +354,7 @@ function stateFromDatabaseRow(row: any): TranslationStateRow {
     reviewNotes: row.review_notes ?? null,
     lastError: row.last_error ?? null,
     translations: parseStoredTranslations(row.translations),
+    leafSourceHashes: parseStoredTranslations(row.leaf_source_hashes),
   };
 }
 
@@ -382,8 +384,9 @@ export class TranslationOutboxStore {
     private readonly maxBackoffMs: number,
   ) {}
 
-  async claim(): Promise<TranslationJob | null> {
+  async claim(options: { incrementalOnly?: boolean; locales?: string[] } = {}): Promise<TranslationJob | null> {
     return this.strapi.db.transaction(async ({ trx }: any) => {
+      await advisoryTransactionLock(trx, 'translation-claim');
       const now = new Date();
       const expiredLease = new Date(now.getTime() - this.leaseMs);
       let query = trx(TRANSLATION_OUTBOX_TABLE)
@@ -400,7 +403,15 @@ export class TranslationOutboxStore {
                 .where('locked_at', '<=', expiredLease);
             });
         })
+        .whereNotExists(function (this: any) {
+          this.select('*').from(`${TRANSLATION_OUTBOX_TABLE} as active`)
+            .whereRaw(`active.event_key = ${TRANSLATION_OUTBOX_TABLE}.event_key`)
+            .where('active.status', 'processing').where('active.locked_at', '>', expiredLease);
+        })
+        .orderByRaw("CASE WHEN reason IN ('backfill', 'nightly consistency') THEN 1 ELSE 0 END")
         .orderBy('id', 'asc');
+      if (options.locales) query = query.whereIn('target_locale', options.locales);
+      if (options.incrementalOnly) query = query.whereNotIn('reason', ['backfill', 'nightly consistency']);
       if (isPostgresConnection(trx)) query = query.forUpdate().skipLocked();
       const row = await query.first();
       if (!row) return null;
@@ -1000,11 +1011,18 @@ export class TranslationOutboxStore {
       lastError: string | null;
       /** The delivered leaf translations — the durable translation memory. */
       translations: Record<string, string> | null;
+      /**
+       * Per-field source fingerprints, what lets the next English edit send
+       * only the changed fields. `undefined` leaves the stored value alone
+       * (a write that only records publication must not erase them); `null`
+       * clears them deliberately.
+       */
+      leafSourceHashes?: Record<string, string> | null;
       /** Null until the corresponding locale row has been proven/published. */
       publishedPlanHash?: string | null;
     },
   ): Promise<void> {
-    const values = {
+    const values: Record<string, unknown> = {
       source_hash: state.sourceHash,
       translated_at: new Date(),
       needs_review: state.needsReview,
@@ -1014,11 +1032,21 @@ export class TranslationOutboxStore {
         state.translations === null ? null : JSON.stringify(state.translations),
       published_plan_hash: state.publishedPlanHash ?? null,
     };
+    if (state.leafSourceHashes !== undefined) {
+      values.leaf_source_hashes = state.leafSourceHashes ? JSON.stringify(state.leafSourceHashes) : null;
+    }
     await this.strapi.db
       .connection(TRANSLATION_STATE_TABLE)
       .insert({ uid, document_id: documentId, locale, ...values })
       .onConflict(['uid', 'document_id', 'locale'])
       .merge(values);
+  }
+
+  async seedFieldFingerprints(uid: string, documentId: string, locale: string, sourceHash: string, hashes: Record<string, string>): Promise<void> {
+    await this.strapi.db.connection(TRANSLATION_STATE_TABLE)
+      .where({ uid, document_id: documentId, locale, source_hash: sourceHash })
+      .whereNull('leaf_source_hashes')
+      .update({ leaf_source_hashes: JSON.stringify(hashes) });
   }
 
   async recordPublishedPlanHash(
