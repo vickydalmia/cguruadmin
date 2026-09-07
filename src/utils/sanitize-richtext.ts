@@ -87,13 +87,19 @@ export function cleanHtml(val: string | null | undefined): string | null {
 export const RICHTEXT_FIELDS: Record<string, string[]> = {
   'api::deal.deal': ['content'],
   'api::coupon.coupon': ['content'],
-  'api::category.category': ['description'],
-  'api::bank.bank': ['description'],
+  // shortDescription is a plain `text` attribute, but the entity hero injects
+  // it with `set:html`, so it is HTML as far as the public site is concerned.
+  // The WordPress import carried it over verbatim, unclosed `<font><p>`
+  // wrappers included, and an unclosed formatting element is re-created by
+  // the browser around every later inline node on the page. Sanitizing here
+  // drops those tags and closes what is open, exactly as for `description`.
+  'api::category.category': ['description', 'shortDescription'],
+  'api::bank.bank': ['description', 'shortDescription'],
   // festiveOfferDescription is rendered raw like every other richtext field,
   // so it goes through the same allowlist. Listing it here is not optional:
   // an unlisted richtext field is stored exactly as the editor sent it.
-  'api::brand.brand': ['description', 'festiveOfferDescription'],
-  'api::store.store': ['description', 'festiveOfferDescription'],
+  'api::brand.brand': ['description', 'shortDescription', 'festiveOfferDescription'],
+  'api::store.store': ['description', 'shortDescription', 'festiveOfferDescription'],
 };
 
 const LEGAL_PAGE_UIDS = new Set([

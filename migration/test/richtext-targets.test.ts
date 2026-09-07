@@ -29,6 +29,7 @@ test("spot-checks the uid → table mapping", () => {
   assert.ok("api::store.store" in RICHTEXT_FIELDS);
   assert.deepEqual(RICHTEXT_FIELDS["api::store.store"], [
     "description",
+    "shortDescription",
     "festiveOfferDescription",
   ]);
   assert.ok(

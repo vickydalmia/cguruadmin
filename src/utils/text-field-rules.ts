@@ -156,8 +156,10 @@ export const TEXT_FIELD_RULES: readonly TextFieldRule[] = [
 
   // --- Store --------------------------------------------------------------
   { uid: STORE_UID, field: 'name', label: 'Name', kind: 'string', requiredNonBlank: true, collapse: true },
-  // Row 93 — store cards render shortDescription; blank leaves a hole.
-  { uid: STORE_UID, field: 'shortDescription', label: 'Short description', kind: 'text', requiredNonBlank: true },
+  // Row 93 — store cards render shortDescription; blank leaves a hole. HTML
+  // (rendered raw in the entity hero) since it became a richtext attribute, so
+  // sanitizeRichtextData owns its trimming like `description`.
+  { uid: STORE_UID, field: 'shortDescription', label: 'Short description', kind: 'richtext', requiredNonBlank: true },
   // Row 94 — store logo has no schema-level `required`, unlike brand's.
   { uid: STORE_UID, field: 'logo', label: 'Logo', kind: 'media', requiredNonBlank: true },
   { uid: STORE_UID, field: 'metaTitle', label: 'SEO title', kind: 'string', container: 'seo', requiredNonBlank: true, collapse: true },
@@ -175,7 +177,7 @@ export const TEXT_FIELD_RULES: readonly TextFieldRule[] = [
 
   // --- Brand --------------------------------------------------------------
   { uid: BRAND_UID, field: 'name', label: 'Name', kind: 'string', requiredNonBlank: true, collapse: true },
-  { uid: BRAND_UID, field: 'shortDescription', label: 'Short description', kind: 'text', requiredNonBlank: true },
+  { uid: BRAND_UID, field: 'shortDescription', label: 'Short description', kind: 'richtext', requiredNonBlank: true },
   { uid: BRAND_UID, field: 'logoAlt', label: 'Logo alt text', kind: 'string', requiredNonBlank: true, collapse: true },
   { uid: BRAND_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string' },
   // Same reasoning as the Store row above.
@@ -185,7 +187,7 @@ export const TEXT_FIELD_RULES: readonly TextFieldRule[] = [
   // Category's media field is `icon`, not `logo`, and `iconAlt` was added
   // alongside these rules — categories previously had no alt text at all.
   { uid: CATEGORY_UID, field: 'name', label: 'Name', kind: 'string', requiredNonBlank: true, collapse: true },
-  { uid: CATEGORY_UID, field: 'shortDescription', label: 'Short description', kind: 'text', requiredNonBlank: true },
+  { uid: CATEGORY_UID, field: 'shortDescription', label: 'Short description', kind: 'richtext', requiredNonBlank: true },
   { uid: CATEGORY_UID, field: 'icon', label: 'Icon', kind: 'media', requiredNonBlank: true },
   { uid: CATEGORY_UID, field: 'iconAlt', label: 'Icon alt text', kind: 'string', requiredNonBlank: true, collapse: true },
   { uid: CATEGORY_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string' },
@@ -194,7 +196,7 @@ export const TEXT_FIELD_RULES: readonly TextFieldRule[] = [
 
   // --- Bank ---------------------------------------------------------------
   { uid: BANK_UID, field: 'name', label: 'Name', kind: 'string', requiredNonBlank: true, collapse: true },
-  { uid: BANK_UID, field: 'shortDescription', label: 'Short description', kind: 'text', requiredNonBlank: true },
+  { uid: BANK_UID, field: 'shortDescription', label: 'Short description', kind: 'richtext', requiredNonBlank: true },
   { uid: BANK_UID, field: 'logo', label: 'Logo', kind: 'media', requiredNonBlank: true },
   { uid: BANK_UID, field: 'logoAlt', label: 'Logo alt text', kind: 'string', requiredNonBlank: true, collapse: true },
   { uid: BANK_UID, field: 'websiteUrl', label: 'Website URL', kind: 'string' },

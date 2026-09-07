@@ -330,6 +330,33 @@ describe('validateChangedFields', () => {
 });
 
 describe('validateChangedFields — STRICT (clean as you touch)', () => {
+  it('measures the 160-character minimum on the text, not the rich-text markup', async () => {
+    // 150 characters of text wrapped in paragraph tags and entities is still
+    // 150 characters to the reader.
+    const { strapi } = harness({
+      documentId: 'store-1',
+      name: 'Amazon',
+      shortDescription: `<p>${'x'.repeat(150)}&nbsp;</p><p>&nbsp;</p>`,
+    });
+
+    await expect(
+      validateChangedFields(strapi, 'api::store.store', 'update', { name: 'Amazon India' }, 'store-1', true),
+    ).rejects.toMatchObject({
+      details: {
+        problems: expect.arrayContaining([expect.stringContaining('at least 160 characters')]),
+      },
+    });
+
+    const { strapi: longEnough } = harness({
+      documentId: 'store-1',
+      name: 'Amazon',
+      shortDescription: `<p><strong>${'x'.repeat(160)}</strong></p>`,
+    });
+    await expect(
+      validateChangedFields(longEnough, 'api::store.store', 'update', { name: 'Amazon India' }, 'store-1', true),
+    ).resolves.toBeUndefined();
+  });
+
   it('STRICT blocks an unrelated human edit when shortDescription is under 160 characters', async () => {
     const { strapi } = harness({
       documentId: 'store-1',

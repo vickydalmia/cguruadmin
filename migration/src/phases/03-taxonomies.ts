@@ -31,7 +31,7 @@ import {
   replaceMedia,
   replaceContentMedia,
 } from "../utils/strapi-insert.js";
-import { clean, cleanHtml, cleanSlug } from "../utils/sanitize.js";
+import { clean, cleanHtml, cleanSlug, cleanText } from "../utils/sanitize.js";
 import { normalizeWpDate } from "../utils/wp-dates.js";
 import { parseDecimal, parseInteger } from "../utils/price.js";
 import { rewriteContentMedia } from "../utils/content-media.js";
@@ -605,7 +605,7 @@ async function insertTerm(
   // page-body blurb is not a meta description. Yoast → short description →
   // generic line only.
   const descriptionFallback =
-    clean(term.short_desc) || `${entityName} coupons, offers and deals.`;
+    cleanText(term.short_desc) || `${entityName} coupons, offers and deals.`;
   const metaTitle = (clean(yoastSeo.metaTitle) || entityName).slice(0, 70);
   const metaDescription = (
     clean(yoastSeo.metaDescription) || descriptionFallback
@@ -632,7 +632,11 @@ async function insertTerm(
     slug,
     pageTemplate,
     descriptionMedia.html,
-    clean(term.short_desc),
+    // The public site injects the short description as HTML, and the theme
+    // stored it as `<font size="2"><p>…` with neither tag closed. Same
+    // allowlist as the long description: presentational tags go, open
+    // elements are closed, so the fragment stays inside its container.
+    cleanHtml(term.short_desc),
     clean(term.image_alt) || entityName,
     ratingAverage,
     ratingCount,

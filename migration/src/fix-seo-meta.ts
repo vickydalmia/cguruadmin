@@ -8,7 +8,7 @@ import {
   loadYoastSiteConfig,
   resolveTermSeo,
 } from "./utils/yoast-term-seo.js";
-import { clean } from "./utils/sanitize.js";
+import { clean, cleanText } from "./utils/sanitize.js";
 import { syncSinglesSeo } from "./utils/singles-seo.js";
 import { replaceMedia } from "./utils/strapi-insert.js";
 import { uploadMediaOnDemand } from "./phases/02-media-upload.js";
@@ -134,7 +134,7 @@ async function main(): Promise<void> {
       });
       // No term-content fallback — Yoast → short description → generic only.
       const yoastDescription = clean(seo.metaDescription);
-      const shortDescription = clean(wpTerm?.short_desc);
+      const shortDescription = cleanText(wpTerm?.short_desc);
       const nextTitle = (clean(seo.metaTitle) || row.name).slice(0, 70);
       const nextDescription = (
         yoastDescription ||

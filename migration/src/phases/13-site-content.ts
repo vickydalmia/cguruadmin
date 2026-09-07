@@ -22,7 +22,7 @@ import {
   insertLink,
   linkMedia,
 } from "../utils/strapi-insert.js";
-import { clean } from "../utils/sanitize.js";
+import { clean, cleanText } from "../utils/sanitize.js";
 import { logger } from "../utils/logger.js";
 import { HEADER_SEARCH_SUGGESTIONS } from "../utils/site-selection-defaults.js";
 import { migrationRegistryRows } from "../utils/migration-registry.js";
@@ -1140,7 +1140,8 @@ async function gatherHomepageData(
     );
     bankOffers = limitHomepageBankOffers(rows).map((r) => ({
       bankId: r.id,
-      subtitle: truncate(clean(r.short_description), 80),
+      // short_description is HTML; the subtitle is a one-line string.
+      subtitle: truncate(cleanText(r.short_description), 80),
     }));
   } else {
     logger.warn("banks table not found — bankOffers section skipped");

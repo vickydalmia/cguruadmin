@@ -815,6 +815,8 @@ pipeline:
 - `npm run fix:cache-headers` — stamps `Cache-Control: public, max-age=31536000, immutable` on every already-uploaded S3 object via an in-place `CopyObject` (`MetadataDirective: REPLACE`) that carries the stored Content-Type/Disposition/Encoding/Language, user metadata, storage class, and SSE settings through unchanged. Objects already carrying the value are skipped, so re-runs are cheap. Write flag: `--apply --yes-i-mean-<bucket>`.
 - `npm run fix:content-srcsets` — rebuilds `srcset`/`sizes` on migrated rich-text `<img>` tags from the current `files.formats` (e.g. after Phase 15 adds missing variants). Only tags whose `src` exactly matches a `files.url` master URL are touched; the rest are logged and left as-is. Write flag: `--apply --yes-i-mean-<pg-host>`.
 
+- `npm run fix:richtext-html` — contains legacy HTML in every richtext column of a deployed database without re-importing: `description`, `shortDescription`, `festiveOfferDescription` and coupon/deal `content`, in every locale. The WordPress theme stored short descriptions as `<font size="2"><p>…` with neither tag closed, which the browser re-creates around the rest of the page. A row is rewritten only when the allowlist changes its element structure, so clean rows stay byte-identical and translation fingerprints do not churn. Needs `PUBLIC_SITE_URL` set to the site the database serves (link classification). Write flag: `--apply --yes-i-mean-<pg-host>`. Writes bypass the documents middleware, so run a Website Refresh from the admin afterwards.
+
 The content/schema repair scripts include `fix:markdown-richtext`,
 `backfill:taxonomy-descriptions`, `backfill:offer-fields`, and
 `cleanup:legacy-fields` (plus `src/reset-homepage.ts`, run through `tsx`); see

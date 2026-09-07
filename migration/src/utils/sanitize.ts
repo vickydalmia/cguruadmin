@@ -101,6 +101,29 @@ export function cleanHtml(val: string | null | undefined): string | null {
 }
 
 /**
+ * Reduce HTML to one line of plain text for surfaces that render text, not
+ * markup (meta descriptions, card subtitles). Tags go, entities are decoded
+ * and whitespace collapses. Returns null when nothing readable is left.
+ */
+export function cleanText(val: string | null | undefined): string | null {
+  if (val == null) return null;
+  // Tags become spaces first so adjacent blocks do not run into one word;
+  // sanitize-html then handles the rest, including anything that still
+  // parses as markup.
+  const spaced = val.replace(/<[^>]*>/g, " ");
+  const text = sanitizeHtmlLib(spaced, { allowedTags: [], allowedAttributes: {} })
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.length > 0 ? text : null;
+}
+
+/**
  * Sanitise a URL slug: trim, lowercase, replace whitespace/underscores with
  * hyphens, strip non-slug characters, collapse consecutive hyphens, and
  * strip leading/trailing hyphens.

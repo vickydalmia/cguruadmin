@@ -45,7 +45,7 @@
       }
     },
     "shortDescription": {
-      "type": "text",
+      "type": "richtext",
       "required": true,
       "searchable": false,
       "pluginOptions": {
