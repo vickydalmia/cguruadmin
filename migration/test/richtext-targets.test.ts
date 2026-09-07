@@ -37,6 +37,22 @@ test("spot-checks the uid → table mapping", () => {
       (target) => target.table === "stores" && target.column === "description"
     )
   );
+  // Attribute names are camelCase; Strapi's columns are snake_case.
+  assert.ok(
+    RICHTEXT_TARGETS.some(
+      (target) => target.table === "stores" && target.column === "short_description"
+    )
+  );
+  assert.ok(
+    RICHTEXT_TARGETS.some(
+      (target) =>
+        target.table === "brands" && target.column === "festive_offer_description"
+    )
+  );
+  assert.ok(
+    !RICHTEXT_TARGETS.some((target) => /[A-Z]/.test(target.column)),
+    "no camelCase column names"
+  );
   assert.ok(
     RICHTEXT_TARGETS.some(
       (target) => target.table === "deals" && target.column === "content"
@@ -46,7 +62,7 @@ test("spot-checks the uid → table mapping", () => {
     RICHTEXT_TARGETS.some(
       (target) =>
         target.table === "stores" &&
-        target.column === "festiveOfferDescription",
+        target.column === "festive_offer_description",
     ),
   );
 });

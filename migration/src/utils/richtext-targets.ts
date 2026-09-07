@@ -32,6 +32,13 @@ const TABLE_BY_UID: Record<string, string> = {
   "api::store.store": "stores",
 };
 
+// Strapi stores a camelCase attribute in a snake_case column
+// (`shortDescription` → `short_description`, `festiveOfferDescription` →
+// `festive_offer_description`); the registry holds attribute names.
+export function columnName(attribute: string): string {
+  return attribute.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+}
+
 export const RICHTEXT_TARGETS: Array<{ table: string; column: string }> =
   Object.entries(RICHTEXT_FIELDS).flatMap(([uid, fields]) => {
     const table = TABLE_BY_UID[uid];
@@ -40,5 +47,5 @@ export const RICHTEXT_TARGETS: Array<{ table: string; column: string }> =
         `RICHTEXT_FIELDS has "${uid}" but TABLE_BY_UID has no table for it — add the mapping`
       );
     }
-    return fields.map((column) => ({ table, column }));
+    return fields.map((attribute) => ({ table, column: columnName(attribute) }));
   });
