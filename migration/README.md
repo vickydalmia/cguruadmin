@@ -45,9 +45,10 @@ Optional WordPress tables: `wp_uc_coupons`, `wp_uc_codes` (unique coupon plugin)
 
 ## Setup & Configuration
 
-1. Copy the environment template and fill in your values. For USA, UAE or
-   Singapore, overlay `.env.migration.usa.example`, `.env.migration.ae.example`
-   or `.env.migration.sg.example`; each pins its profile, source identity,
+1. Copy the environment template and fill in your values. For USA, UAE,
+   Singapore or Malaysia, overlay `.env.migration.usa.example`,
+   `.env.migration.ae.example`, `.env.migration.sg.example` or
+   `.env.migration.my.example`; each pins its profile, source identity,
    classification workbook and isolated state directory:
 
 ```bash
@@ -601,7 +602,7 @@ Content HTML srcsets are frozen at migration time, so rich-text `<img>` tags don
 ### Taxonomies (Phase 03)
 
 WordPress stores all taxonomy terms in `wp_terms` with `taxonomy='category'`.
-For USA, UAE and Singapore, `MIGRATION_CLASSIFICATION_FILE` points to the approved Excel workbook;
+For USA, UAE, Singapore and Malaysia, `MIGRATION_CLASSIFICATION_FILE` points to the approved Excel workbook;
 its `Classification` value is matched to the SQL term by exact normalized
 slug. Excel is authoritative, and SQL slugs absent from the workbook default
 to Store. Other profiles use ACF `choose_type` with the same fallback. The UAE

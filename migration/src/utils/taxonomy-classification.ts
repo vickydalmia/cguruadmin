@@ -20,6 +20,10 @@ const UAE_CLASSIFICATION_WORKBOOK =
 // loudly instead of silently classifying every term as Store.
 const SG_CLASSIFICATION_WORKBOOK =
   "sg/CouponzGuru_SG_Taxonomy_Classification.xlsx";
+// Malaysia likewise has no `choose_type`; the operator builds this workbook
+// from `my/my-stores.csv`.
+const MY_CLASSIFICATION_WORKBOOK =
+  "my/CouponzGuru_MY_Taxonomy_Classification.xlsx";
 
 export interface TaxonomyClassificationRow {
   name: string;
@@ -78,6 +82,9 @@ export function taxonomyClassificationFile(
   }
   if (profile === "sg") {
     return path.resolve(migrationRoot(), SG_CLASSIFICATION_WORKBOOK);
+  }
+  if (profile === "my") {
+    return path.resolve(migrationRoot(), MY_CLASSIFICATION_WORKBOOK);
   }
   return null;
 }
