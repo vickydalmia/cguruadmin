@@ -1418,10 +1418,8 @@ export interface FooterSocialLink extends Struct.ComponentSchema {
         'instagram',
         'pinterest',
         'linkedin',
-        'telegram',
         'reddit',
         'twitter',
-        'whatsapp',
         'youtube',
       ]
     > &
@@ -2738,7 +2736,6 @@ export interface SharedTelegramCta extends Struct.ComponentSchema {
   };
   attributes: {
     ctaLabel: Schema.Attribute.String;
-    ctaUrl: Schema.Attribute.String;
     description: Schema.Attribute.Text;
     enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     heading: Schema.Attribute.String;

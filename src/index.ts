@@ -1,4 +1,5 @@
 import { WEBSITE_REFRESH_ACTION_ATTRIBUTES } from './api/website-refresh/controllers/website-refresh';
+import { GLOBAL_SETTINGS_LABELS } from './constants/global-settings';
 import { installMigrationLockTimeout } from './register/migration-lock-timeout';
 import { readWriteSerializationTimeout } from './utils/write-serialization';
 import { startTranslationConfigurationWatcher, stopTranslationConfigurationWatcher } from './translation/configuration-watcher';
@@ -265,6 +266,7 @@ export default {
     await ensureSortableListColumns(strapi);
     await ensureFullWidthEditFields(strapi);
     await ensureSectionLabels(strapi, HOMEPAGE_UID, HOMEPAGE_SECTION_LABELS);
+    await ensureSectionLabels(strapi, 'api::global.global', GLOBAL_SETTINGS_LABELS);
     await ensureSectionLabels(strapi, DOTD_UID, DOTD_SECTION_LABELS);
     await ensureSectionLabels(
       strapi,

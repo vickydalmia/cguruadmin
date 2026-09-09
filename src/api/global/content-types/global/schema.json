@@ -15,6 +15,62 @@
     }
   },
   "attributes": {
+    "telegramUrl": {
+      "type": "string",
+      "maxLength": 2048,
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      },
+      "column": {
+        "type": "string",
+        "args": [
+          2048
+        ]
+      }
+    },
+    "whatsappUrl": {
+      "type": "string",
+      "maxLength": 2048,
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      },
+      "column": {
+        "type": "string",
+        "args": [
+          2048
+        ]
+      }
+    },
+    "sendyUrl": {
+      "type": "string",
+      "maxLength": 2048,
+      "private": true,
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      },
+      "column": {
+        "type": "string",
+        "args": [
+          2048
+        ]
+      }
+    },
+    "sendyListId": {
+      "type": "string",
+      "maxLength": 255,
+      "private": true,
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      }
+    },
     "title": {
       "type": "string",
       "default": "Global Settings",

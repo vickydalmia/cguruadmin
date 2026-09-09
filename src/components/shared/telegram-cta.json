@@ -17,9 +17,6 @@
     },
     "ctaLabel": {
       "type": "string"
-    },
-    "ctaUrl": {
-      "type": "string"
     }
   }
 }

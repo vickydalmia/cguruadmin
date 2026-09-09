@@ -557,7 +557,7 @@ describe('site chrome aggregate population', () => {
     expect(footerCall.populate.googlePreferredCard).toEqual({
       populate: { icon: true },
     });
-    expect(response.footer).toEqual(rows['api::footer.footer']);
+    expect(response.footer).toEqual({ ...rows['api::footer.footer'], socialLinks: [] });
   });
 });
 

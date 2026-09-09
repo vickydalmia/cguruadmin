@@ -167,10 +167,8 @@ const SOCIAL_PLATFORMS: ReadonlyArray<string> = [
   "instagram",
   "pinterest",
   "linkedin",
-  "telegram",
   "reddit",
   "twitter",
-  "whatsapp",
   "youtube",
 ];
 

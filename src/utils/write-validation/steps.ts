@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { GLOBAL_UID, normalizeIntegrations, validateIntegrationsForWrite } from '../../api/global/services/integrations';
 import type { TranslationWriteContext } from '../../translation/write-flag';
 
 import {
@@ -155,6 +156,11 @@ export function stepApplies(step: ValidationStep, uid: string, action: string): 
  */
 export const MUTATOR_STEPS: readonly ValidationStep[] = [
   {
+    name: 'normalizeIntegrations',
+    applies: (uid) => uid === GLOBAL_UID,
+    run: ({ data }) => normalizeIntegrations(data),
+  },
+  {
     // Richtext holds HTML rendered raw on the public site — enforce the
     // migration-era allowlist on every write, whatever the editor.
     name: 'sanitizeRichtextData',
@@ -220,6 +226,11 @@ export const MUTATOR_STEPS: readonly ValidationStep[] = [
  * having run, which they always do.
  */
 export const COLLECTED_STEPS: readonly ValidationStep[] = [
+  {
+    name: 'validateIntegrationsForWrite',
+    applies: (uid) => uid === GLOBAL_UID,
+    run: ({ strapi, data, documentId, locale }) => validateIntegrationsForWrite(strapi, data, documentId, locale),
+  },
   {
     name: 'validateSiteConfigurationForWrite',
     actions: CREATE_UPDATE,
