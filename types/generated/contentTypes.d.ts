@@ -793,7 +793,7 @@ export interface ApiBankBank extends Struct.CollectionTypeSchema {
           localized: true;
         };
       }>;
-    shortDescription: Schema.Attribute.Text &
+    shortDescription: Schema.Attribute.RichText &
       Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
@@ -930,7 +930,7 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
           localized: true;
         };
       }>;
-    shortDescription: Schema.Attribute.Text &
+    shortDescription: Schema.Attribute.RichText &
       Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
@@ -1167,7 +1167,7 @@ export interface ApiCategoryCategory extends Struct.CollectionTypeSchema {
           localized: true;
         };
       }>;
-    shortDescription: Schema.Attribute.Text &
+    shortDescription: Schema.Attribute.RichText &
       Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
@@ -1371,6 +1371,11 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
     locale: Schema.Attribute.String;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::coupon.coupon'>;
     logoStore: Schema.Attribute.Relation<'manyToOne', 'api::store.store'>;
+    offerCountries: Schema.Attribute.String &
+      Schema.Attribute.CustomField<'global::offer-countries'> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 128;
+      }>;
     offerText: Schema.Attribute.String &
       Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{
@@ -1734,6 +1739,11 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
         },
         number
       >;
+    offerCountries: Schema.Attribute.String &
+      Schema.Attribute.CustomField<'global::offer-countries'> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 128;
+      }>;
     prepaidText: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
     publishedOn: Schema.Attribute.DateTime;
@@ -2283,7 +2293,6 @@ export interface ApiIndependenceDaySalePageIndependenceDaySalePage
         };
       }>;
     countdown: Schema.Attribute.Component<'festival.sale-countdown', false> &
-      Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
           localized: true;
@@ -2311,7 +2320,6 @@ export interface ApiIndependenceDaySalePageIndependenceDaySalePage
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     hero: Schema.Attribute.Component<'festival.campaign-hero', false> &
-      Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
           localized: true;
@@ -3120,6 +3128,14 @@ export interface ApiSiteConfigurationSiteConfiguration
     categoriesEnabled: Schema.Attribute.Boolean &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<true>;
+    configurationRevision: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 0;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<0>;
     contactEnabled: Schema.Attribute.Boolean &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<true>;
@@ -3169,6 +3185,11 @@ export interface ApiSiteConfigurationSiteConfiguration
       'api::site-configuration.site-configuration'
     > &
       Schema.Attribute.Private;
+    offerCountries: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 128;
+      }> &
+      Schema.Attribute.DefaultTo<''>;
     onboardingComplete: Schema.Attribute.Boolean &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<false>;
@@ -3332,7 +3353,7 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
           localized: true;
         };
       }>;
-    shortDescription: Schema.Attribute.Text &
+    shortDescription: Schema.Attribute.RichText &
       Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{
         i18n: {

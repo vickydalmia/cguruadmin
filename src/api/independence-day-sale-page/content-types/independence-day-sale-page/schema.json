@@ -29,7 +29,6 @@
       "type": "component",
       "component": "festival.sale-countdown",
       "repeatable": false,
-      "required": true,
       "pluginOptions": {
         "i18n": {
           "localized": true
@@ -40,7 +39,6 @@
       "type": "component",
       "component": "festival.campaign-hero",
       "repeatable": false,
-      "required": true,
       "pluginOptions": {
         "i18n": {
           "localized": true
