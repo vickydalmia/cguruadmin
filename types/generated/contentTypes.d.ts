@@ -3065,6 +3065,13 @@ export interface ApiRedirectRedirect extends Struct.CollectionTypeSchema {
       'api::redirect.redirect'
     > &
       Schema.Attribute.Private;
+    managedBy: Schema.Attribute.String &
+      Schema.Attribute.Private &
+      Schema.Attribute.SetPluginOptions<{
+        'content-manager': {
+          visible: false;
+        };
+      }>;
     note: Schema.Attribute.Text &
       Schema.Attribute.Private &
       Schema.Attribute.SetMinMaxLength<{
@@ -3371,6 +3378,407 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     websiteUrl: Schema.Attribute.String;
+  };
+}
+
+export interface ApiSubscriptionPageSubscriptionPage
+  extends Struct.SingleTypeSchema {
+  collectionName: 'subscription_pages';
+  info: {
+    description: 'Subscription and social channels page. Set its URL here; enable after content is ready.';
+    displayName: 'Subscription Page';
+    pluralName: 'subscription-pages';
+    singularName: 'subscription-page';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  pluginOptions: {
+    i18n: {
+      localized: true;
+    };
+  };
+  attributes: {
+    benefits: Schema.Attribute.Component<'subscription.benefits', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    breadcrumbAriaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<'Breadcrumb'>;
+    breadcrumbItems: Schema.Attribute.Component<
+      'shared.breadcrumb-item',
+      true
+    > &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    enabled: Schema.Attribute.Boolean &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }> &
+      Schema.Attribute.DefaultTo<false>;
+    hero: Schema.Attribute.Component<'subscription.hero', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    joinCta: Schema.Attribute.Component<'subscription.join-cta', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    locale: Schema.Attribute.String;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::subscription-page.subscription-page'
+    >;
+    platforms: Schema.Attribute.Component<'subscription.platforms', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    popularSearches: Schema.Attribute.Component<
+      'home.popular-searches',
+      false
+    > &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    publishedAt: Schema.Attribute.DateTime;
+    seo: Schema.Attribute.Component<'shared.seo', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    signup: Schema.Attribute.Component<'subscription.signup', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    slug: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }> &
+      Schema.Attribute.DefaultTo<'subscription'>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<'Subscription Page'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiTelegramPageTelegramPage extends Struct.SingleTypeSchema {
+  collectionName: 'telegram_pages';
+  info: {
+    description: 'Join Telegram page. Set its URL here; enable after content is ready.';
+    displayName: 'Telegram Page';
+    pluralName: 'telegram-pages';
+    singularName: 'telegram-page';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  pluginOptions: {
+    i18n: {
+      localized: true;
+    };
+  };
+  attributes: {
+    benefits: Schema.Attribute.Component<'telegram.benefits', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    breadcrumbItems: Schema.Attribute.Component<
+      'shared.breadcrumb-item',
+      true
+    > &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    enabled: Schema.Attribute.Boolean &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }> &
+      Schema.Attribute.DefaultTo<false>;
+    faq: Schema.Attribute.Component<'home.faq-block', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    favouriteStores: Schema.Attribute.Component<
+      'telegram.favourite-stores',
+      false
+    > &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    hero: Schema.Attribute.Component<'telegram.hero', false> &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    joinCta: Schema.Attribute.Component<'telegram.join-cta', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    latestDeals: Schema.Attribute.Component<'telegram.latest-deals', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    locale: Schema.Attribute.String;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::telegram-page.telegram-page'
+    >;
+    newsletter: Schema.Attribute.Component<'shared.newsletter', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    newsletterEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.DefaultTo<true>;
+    popularSearches: Schema.Attribute.Component<
+      'home.popular-searches',
+      false
+    > &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    publishedAt: Schema.Attribute.DateTime;
+    seo: Schema.Attribute.Component<'shared.seo', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    slug: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }> &
+      Schema.Attribute.DefaultTo<'join-telegram'>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.DefaultTo<'Telegram Page'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiTelegramPostTelegramPost
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'telegram_posts';
+  info: {
+    description: 'Channel posts ingested from Telegram for the Join Telegram page';
+    displayName: 'Telegram Post';
+    pluralName: 'telegram-posts';
+    singularName: 'telegram-post';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    chatId: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 32;
+      }>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    ctaUrl: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 2048;
+      }>;
+    discountLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    editedAt: Schema.Attribute.DateTime;
+    entities: Schema.Attribute.JSON & Schema.Attribute.Private;
+    hidden: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<false>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::telegram-post.telegram-post'
+    > &
+      Schema.Attribute.Private;
+    messageId: Schema.Attribute.Integer & Schema.Attribute.Required;
+    mrp: Schema.Attribute.Decimal;
+    permalink: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 255;
+      }>;
+    photo: Schema.Attribute.Media<'images'>;
+    photoFileUniqueId: Schema.Attribute.String &
+      Schema.Attribute.Private &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 64;
+      }>;
+    postedAt: Schema.Attribute.DateTime & Schema.Attribute.Required;
+    publishedAt: Schema.Attribute.DateTime;
+    salePrice: Schema.Attribute.Decimal;
+    storeDomain: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 255;
+      }>;
+    text: Schema.Attribute.Text;
+    title: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiTelegramTelegram extends Struct.SingleTypeSchema {
+  collectionName: 'telegrams';
+  info: {
+    description: 'Telegram channel connection used to ingest channel posts for the Join Telegram page';
+    displayName: 'Telegram';
+    pluralName: 'telegrams';
+    singularName: 'telegram';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    botToken: Schema.Attribute.String &
+      Schema.Attribute.Private &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 128;
+      }>;
+    channel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 64;
+      }>;
+    channelUsername: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 32;
+      }>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    enabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<false>;
+    feedPostCount: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 12;
+          min: 1;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<6>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::telegram.telegram'
+    > &
+      Schema.Attribute.Private;
+    maxStoredPosts: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 200;
+          min: 10;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<60>;
+    pollIntervalMinutes: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 60;
+          min: 1;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<5>;
+    publishedAt: Schema.Attribute.DateTime;
+    title: Schema.Attribute.String & Schema.Attribute.DefaultTo<'Telegram'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
   };
 }
 
@@ -4265,6 +4673,10 @@ declare module '@strapi/strapi' {
       'api::redirect.redirect': ApiRedirectRedirect;
       'api::site-configuration.site-configuration': ApiSiteConfigurationSiteConfiguration;
       'api::store.store': ApiStoreStore;
+      'api::subscription-page.subscription-page': ApiSubscriptionPageSubscriptionPage;
+      'api::telegram-page.telegram-page': ApiTelegramPageTelegramPage;
+      'api::telegram-post.telegram-post': ApiTelegramPostTelegramPost;
+      'api::telegram.telegram': ApiTelegramTelegram;
       'api::terms-and-conditions-page.terms-and-conditions-page': ApiTermsAndConditionsPageTermsAndConditionsPage;
       'api::testimonials-page.testimonials-page': ApiTestimonialsPageTestimonialsPage;
       'api::unique-code.unique-code': ApiUniqueCodeUniqueCode;

@@ -11,6 +11,7 @@ import {
 import { TRANSLATION_NIGHTLY_CONSISTENCY_REASON } from '../src/translation/outbox/reasons';
 import { translationNightlyConsistencyEnabled } from '../src/translation/outbox/config';
 import { translationRuntimeActive } from '../src/translation/outbox/runtime';
+import { runTelegramIngest } from '../src/telegram/ingest';
 
 /**
  * Resolve from the application ROOT, not from this module's directory, and not
@@ -371,6 +372,26 @@ export default {
     },
     options: {
       rule: "45 4 * * *",
+    },
+  },
+  // Telegram channel ingestion for the Join Telegram page. The rule is fixed
+  // at one minute because cron rules are static config; the CMS-set poll
+  // interval is enforced inside runTelegramIngest (it returns 'not-due' until
+  // the interval has elapsed). Inert unless the Telegram single type enables
+  // ingestion.
+  telegramIngest: {
+    task: async ({ strapi }: { strapi: any }) => {
+      try {
+        await runTelegramIngest(strapi);
+      } catch (err: any) {
+        strapi.log.error({
+          event: 'telegram.ingest_tick_failed',
+          error: err?.message ?? String(err),
+        });
+      }
+    },
+    options: {
+      rule: "* * * * *",
     },
   },
 };

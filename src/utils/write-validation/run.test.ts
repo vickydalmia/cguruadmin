@@ -42,6 +42,7 @@ describe('write-validation step order', () => {
 
   it('runs the collected validators in the documented order', () => {
     expect(names(COLLECTED_STEPS)).toEqual([
+      'validateSubscriptionContent',
       'validateIntegrationsForWrite',
       'validateSiteConfigurationForWrite',
       'validateCouponTypeFields',
@@ -55,6 +56,8 @@ describe('write-validation step order', () => {
       'validateMenuNotification',
       'validateDealOfTheDaySectionLimits',
       'validateIndependenceDaySale',
+      'validateTelegramPage',
+      'validateTelegramSettings',
       'validateContentManagerOfferStore',
       'validateAffiliateOfferForWrite',
       'validateAffiliateBrandFlip',
@@ -72,6 +75,8 @@ describe('write-validation step order', () => {
 
   it('keeps cross-row invariants together under the lock', () => {
     expect(names(LOCKED_STEPS)).toEqual([
+      'validateSubscriptionRoutes',
+      'validateTelegramRoutes',
       'validateIdentity',
       'validateUniqueEntityPageTemplate',
       'validateRedirect',
@@ -219,6 +224,7 @@ const fakeStrapi = ({ human }: { human: boolean }): Core.Strapi =>
     requestContext: { get: () => (human ? ({ state: {} } as any) : undefined) },
     log: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
     documents: () => ({
+      findFirst: async () => null,
       findOne: async () => null,
       findMany: async () => [],
       count: async () => 0,

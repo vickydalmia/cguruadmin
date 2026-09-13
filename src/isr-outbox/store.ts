@@ -198,7 +198,7 @@ export async function insertIsrOutboxEvent(
       attempt_count: 0,
       next_attempt_at: eventKey.startsWith('translation-isr:')
         ? new Date(now.getTime() + TRANSLATION_DEBOUNCE_MS)
-        : now,
+        : eventKey.startsWith('telegram-feed:') ? new Date(now.getTime() + 5_000) : now,
       created_at: now,
     })
     .returning(['id', 'event_key', 'delivery_key']);

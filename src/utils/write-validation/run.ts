@@ -1,3 +1,5 @@
+import { SUBSCRIPTION_PAGE_UID } from '../../api/subscription-page/services/subscription-route';
+import { TELEGRAM_PAGE_UID } from '../../constants/telegram';
 import type { Core } from '@strapi/strapi';
 
 import { isIdentityUid } from '../identity-uids';
@@ -133,6 +135,11 @@ export async function runWriteValidation(
   }
 
   return async (trx: any) => {
+    // Redirects and the singleton share taxonomy URL reservations. Always
+    // acquire identity before redirect so nested automatic redirects cannot invert locks.
+    if (uid === 'api::redirect.redirect' || uid === SUBSCRIPTION_PAGE_UID || uid === TELEGRAM_PAGE_UID) {
+      await acquireWriteSerializationLock(strapi, 'identity', trx);
+    }
     const domain = lockDomainFor(uid);
     if (domain) await acquireWriteSerializationLock(strapi, domain, trx);
     await collectLockedSteps(validationCtx);

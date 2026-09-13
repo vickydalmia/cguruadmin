@@ -1,5 +1,12 @@
+import { markTelegramFeedBatch } from '../telegram/feed-batch';
 import { fenceTranslationPublication } from '../translation/publication-fence';
 import type { Core } from '@strapi/strapi';
+import { SUBSCRIPTION_PAGE_UID, readSubscriptionRoute, type SubscriptionRouteState } from '../api/subscription-page/services/subscription-route';
+import { syncSubscriptionRedirects, subscriptionWriteScope } from '../api/subscription-page/services/subscription-write';
+import { readTelegramRoute, type TelegramRouteState } from '../api/telegram-page/services/telegram-route';
+import { syncTelegramRedirects, telegramWriteScope } from '../api/telegram-page/services/telegram-write';
+import { TELEGRAM_PAGE_UID } from '../constants/telegram';
+import { acquireWriteSerializationLock } from '../utils/write-serialization';
 import { purgeResponseCaches } from '../middlewares/cache';
 import {
   createOutboxPayload,
@@ -250,10 +257,20 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
         }
       }
 
+      let subscriptionBefore: SubscriptionRouteState | null = null;
+      let telegramBefore: TelegramRouteState | null = null;
       return await runContentTransaction(
         strapi,
         async (trx) => {
           await validateLockedWrite?.(trx);
+          if (context.uid === SUBSCRIPTION_PAGE_UID) {
+            await acquireWriteSerializationLock(strapi, 'identity', trx);
+            subscriptionBefore = await readSubscriptionRoute(strapi);
+          }
+          if (context.uid === TELEGRAM_PAGE_UID) {
+            await acquireWriteSerializationLock(strapi, 'identity', trx);
+            telegramBefore = await readTelegramRoute(strapi);
+          }
           await fenceTranslationPublication(strapi, trx, context.uid, context.params?.documentId, translationWriteContext());
           return next();
         },
@@ -336,6 +353,8 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
               );
             }
           }
+
+          if (context.uid === 'api::telegram-post.telegram-post' && markTelegramFeedBatch()) return null;
 
           const documentId =
             (result as any)?.documentId ?? context.params?.documentId;
@@ -461,6 +480,14 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
             throw err;
           }
 
+          const subscriptionAfter = context.uid === SUBSCRIPTION_PAGE_UID ? await readSubscriptionRoute(strapi) : null;
+          if (context.uid === SUBSCRIPTION_PAGE_UID) {
+            await syncSubscriptionRedirects(strapi, subscriptionBefore, subscriptionAfter);
+          }
+          const telegramAfter = context.uid === TELEGRAM_PAGE_UID ? await readTelegramRoute(strapi) : null;
+          if (context.uid === TELEGRAM_PAGE_UID) {
+            await syncTelegramRedirects(strapi, telegramBefore, telegramAfter);
+          }
           const afterScope =
             context.action === 'delete' && preScope
               ? null
@@ -476,6 +503,9 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
             context.action === 'delete'
               ? preScope ?? afterScope
               : mergeScope(preScope, afterScope);
+
+          if (context.uid === SUBSCRIPTION_PAGE_UID) scope = subscriptionWriteScope(subscriptionBefore, subscriptionAfter);
+          if (context.uid === TELEGRAM_PAGE_UID) scope = telegramWriteScope(telegramBefore, telegramAfter);
 
           if (
             entityIdentityBefore &&
@@ -625,6 +655,7 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
                 )
               : payload,
             reason: `${context.uid} ${context.action}`,
+            ...(context.uid === 'api::telegram-post.telegram-post' ? { eventKey: 'telegram-feed:page' } : {}),
           };
         },
         (event) => {

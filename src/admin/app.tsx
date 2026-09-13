@@ -1,3 +1,5 @@
+import { TelegramProcessingPanel } from './features/telegram-processing/telegram-processing-panel';
+import { TelegramPostsPanel } from './features/telegram-processing/telegram-posts-panel';
 import { WebsiteRefreshPanel } from './features/website-refresh/components/website-refresh-panel';
 import Logo from './extensions/logo-icon.svg';
 
@@ -274,6 +276,8 @@ export default {
       // Setup + TRANSLATION_* env) and the model is localized.
       TranslationPanel,
       WebsiteRefreshPanel,
+      TelegramProcessingPanel,
+      TelegramPostsPanel,
     ]);
 
     // Registered after every plugin's bootstrap, so this sees (and preserves)

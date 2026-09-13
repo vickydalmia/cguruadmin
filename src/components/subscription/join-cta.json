@@ -1,0 +1,30 @@
+{
+  "collectionName": "components_subscription_join_cta",
+  "info": {
+    "displayName": "Subscription Final CTA"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string",
+      "maxLength": 300,
+      "default": "Your next discount is one follow away"
+    },
+    "description": {
+      "type": "text",
+      "default": "Not sure which to pick? Start with Telegram it's where deals land first."
+    },
+    "ctaLabel": {
+      "type": "string",
+      "maxLength": 300,
+      "default": "Join CouponzGuru on Telegram"
+    },
+    "ctaHref": {
+      "type": "string",
+      "maxLength": 2048
+    }
+  }
+}

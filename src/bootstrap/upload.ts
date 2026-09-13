@@ -1,5 +1,6 @@
 import type { Core } from '@strapi/strapi';
 import { CULTURE_GALLERY_MEDIA_FOLDER_NAME } from '../constants/media-folders';
+import { TELEGRAM_MEDIA_FOLDER_NAME } from '../constants/telegram';
 
 // Media Library settings live in the DB plugin store (not file config).
 // Ensure responsive formats + optimization + orientation are on everywhere.
@@ -22,21 +23,29 @@ export async function ensureUploadSettings(strapi: Core.Strapi): Promise<void> {
   }
 }
 
-export async function ensureCultureGalleryMediaFolder(
-  strapi: Core.Strapi,
-): Promise<void> {
+async function ensureRootMediaFolder(strapi: Core.Strapi, name: string): Promise<void> {
   const folders: any = strapi.db.query('plugin::upload.folder');
   const existing = await folders.findOne({
-    where: { name: CULTURE_GALLERY_MEDIA_FOLDER_NAME },
+    where: { name },
     select: ['id'],
   });
   if (existing) return;
 
   await strapi.plugin('upload').service('folder').create({
-    name: CULTURE_GALLERY_MEDIA_FOLDER_NAME,
+    name,
     parent: null,
   });
-  strapi.log.info(
-    `[upload] created ${CULTURE_GALLERY_MEDIA_FOLDER_NAME} media folder`,
-  );
+  strapi.log.info(`[upload] created ${name} media folder`);
+}
+
+export async function ensureCultureGalleryMediaFolder(
+  strapi: Core.Strapi,
+): Promise<void> {
+  await ensureRootMediaFolder(strapi, CULTURE_GALLERY_MEDIA_FOLDER_NAME);
+}
+
+// Re-hosted Telegram channel photos (src/telegram/ingest.ts) land here so
+// editors can tell them apart from hand-uploaded assets.
+export async function ensureTelegramMediaFolder(strapi: Core.Strapi): Promise<void> {
+  await ensureRootMediaFolder(strapi, TELEGRAM_MEDIA_FOLDER_NAME);
 }

@@ -19,6 +19,18 @@ import { AFFILIATE_OFFER_TOGGLE_FIELD } from '../constants/affiliate-offer';
 // Uses the same DB config store + config-as-code approach as entry titles.
 // Exported for hint-coverage.test.ts only.
 export const COMPONENT_FIELD_DESCRIPTIONS: Record<string, Record<string, string>> = {};
+COMPONENT_FIELD_DESCRIPTIONS['subscription.platform-card'] = {
+  platform: 'Choose each platform once. Its colour stays consistent with the page design.',
+  count: 'Displayed count, such as 80K+. The initial Figma value is editable; it is not a live subscriber count.',
+  ctaHref: 'Required for an enabled card on a live page. Enter the channel HTTPS URL or a site path beginning with /.',
+  icon: 'Optional replacement icon. Leave empty to use the original Figma artwork.',
+};
+COMPONENT_FIELD_DESCRIPTIONS['subscription.join-cta'] = {
+  ctaHref: 'Enter the real channel HTTPS URL or a site path beginning with / before enabling the page.',
+};
+COMPONENT_FIELD_DESCRIPTIONS['subscription.platforms'] = {
+  cards: 'Drag cards to reorder them. The same order is used on desktop, tablet and mobile.',
+};
 // Component field labels that must not fall back to Strapi's raw attribute
 // names. The API/storage key remains unchanged; this only controls the label
 // editors see in Content Manager.
@@ -68,6 +80,60 @@ COMPONENT_FIELD_DESCRIPTIONS['deal-day.telegram-deal-item'].linkOverride =
   'Optional. Telegram post URL for this deal — used only by this section. Leave empty to send visitors to the deal’s affiliate link. Enter a full http(s) URL.';
 COMPONENT_FIELD_DESCRIPTIONS['deal-day.telegram-deal-item'].titleOverride =
   'Optional. Leave blank to use the selected Deal title.';
+// Join Telegram page components. The Join buttons never take a URL here: they
+// all open Global Settings › Telegram URL, exactly like the DOTD section.
+(COMPONENT_FIELD_DESCRIPTIONS['telegram.hero'] ??= {}).titleLead =
+  'First line of the headline, e.g. “Never Miss a”. The accent word and tail follow on the second line.';
+COMPONENT_FIELD_DESCRIPTIONS['telegram.hero'].titleAccent =
+  'Optional gradient-coloured word on the second headline line, e.g. “Deal”.';
+COMPONENT_FIELD_DESCRIPTIONS['telegram.hero'].titleTail =
+  'Optional plain text after the accent word, e.g. “Again”.';
+COMPONENT_FIELD_DESCRIPTIONS['telegram.hero'].ctaLabel =
+  'Label of the big Join button. It opens Global Settings › Telegram URL.';
+COMPONENT_FIELD_DESCRIPTIONS['telegram.hero'].membersLabel =
+  'Text after the member count, e.g. “members already saving”. The count is read live from the channel; set the override below to pin a number.';
+COMPONENT_FIELD_DESCRIPTIONS['telegram.hero'].membersCountOverride =
+  'Optional. Replaces the live channel member count. Leave empty to use the live number; the line is hidden when neither exists.';
+COMPONENT_FIELD_DESCRIPTIONS['telegram.hero'].freeBadgeLabel =
+  'Small green pill on the first preview card, e.g. “100% Free”. Leave empty to hide.';
+COMPONENT_FIELD_DESCRIPTIONS['telegram.hero'].cashbackBadgeLabel =
+  'Small pill under the last preview card, e.g. “Cashback”. Leave empty to hide.';
+COMPONENT_FIELD_DESCRIPTIONS['telegram.hero'].previewCards =
+  'Up to 3 chat-style preview cards shown beside the headline (illustrative, not live posts).';
+COMPONENT_FIELD_DESCRIPTIONS['telegram.hero'].previewLabel =
+  'Label on the preview badge. This identifies the hero cards as sample content.';
+(COMPONENT_FIELD_DESCRIPTIONS['telegram.preview-card'] ??= {}).icon =
+  'Optional replacement artwork inside the coloured tile. Leave empty to use the original design icon.';
+COMPONENT_FIELD_DESCRIPTIONS['telegram.preview-card'].eyebrow =
+  'Small uppercase sender line, e.g. “COUPONZGURU”.';
+COMPONENT_FIELD_DESCRIPTIONS['telegram.preview-card'].text =
+  'One or two lines of sample post text.';
+(COMPONENT_FIELD_DESCRIPTIONS['telegram.benefits'] ??= {}).phoneImage =
+  'Screenshot shown inside the phone frame. Recommended 480 × 960 px (1:2), PNG or WebP.';
+COMPONENT_FIELD_DESCRIPTIONS['telegram.benefits'].phoneImageAlt =
+  'Accessible description of the phone screenshot.';
+COMPONENT_FIELD_DESCRIPTIONS['telegram.benefits'].floatingCards =
+  'Up to 3 small cards floating over the phone mockup.';
+COMPONENT_FIELD_DESCRIPTIONS['telegram.benefits'].features =
+  'Up to 6 bullet points rendered in two columns on desktop.';
+COMPONENT_FIELD_DESCRIPTIONS['telegram.benefits'].trustLabel =
+  'Text of the green trust badge, e.g. “100% Free, Always”. Leave empty to hide.';
+(COMPONENT_FIELD_DESCRIPTIONS['telegram.feature-card'] ??= {}).icon =
+  'Small square icon shown in a coloured circle. Leave empty for the default icon.';
+(COMPONENT_FIELD_DESCRIPTIONS['telegram.feature-item'] ??= {}).dot =
+  'Colour of the bullet in front of the label.';
+(COMPONENT_FIELD_DESCRIPTIONS['telegram.latest-deals'] ??= {}).previewNote =
+  'Line under the cards, e.g. “This is just a preview — join our Telegram channel…”.';
+COMPONENT_FIELD_DESCRIPTIONS['telegram.latest-deals'].ctaLabel =
+  'Outlined button under the note. It opens Global Settings › Telegram URL.';
+(COMPONENT_FIELD_DESCRIPTIONS['telegram.favourite-stores'] ??= {}).stores =
+  'Select up to 12 Stores; their logos fill the bubble cloud in this order.';
+COMPONENT_FIELD_DESCRIPTIONS['telegram.favourite-stores'].moreLabel =
+  'Small line under the bubbles, e.g. “100+ more supported stores”.';
+COMPONENT_FIELD_DESCRIPTIONS['telegram.favourite-stores'].ctaLabel =
+  'Blue button under the bubbles. It opens Global Settings › Telegram URL.';
+(COMPONENT_FIELD_DESCRIPTIONS['telegram.join-cta'] ??= {}).ctaLabel =
+  'White pill button on the gradient band. It opens Global Settings › Telegram URL.';
 (COMPONENT_FIELD_DESCRIPTIONS['nav.category-section'] ??= {}).category =
   'Preferred destination. When selected, the menu links to this Category and uses its icon unless an Icon override is uploaded below.';
 COMPONENT_FIELD_DESCRIPTIONS['nav.category-section'].url =
@@ -184,6 +250,12 @@ const OFFER_BENEFIT_HINTS = BENEFIT_TEXT_FIELDS.map(({ field, suffix }) => ({
 }));
 
 const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }> = [
+  { uid: 'api::telegram-page.telegram-page', field: 'slug', hint: 'Single URL segment. Defaults to join-telegram. Renaming a live page creates a permanent redirect from its previous URL.' },
+  { uid: 'api::telegram-page.telegram-page', field: 'enabled', hint: 'Enable after reviewing content and Global Settings Telegram URL. Disabling removes this page from routes and sitemaps.' },
+  { uid: 'api::telegram-page.telegram-page', field: 'newsletterEnabled', hint: 'Show the existing Sendy newsletter form using the copy in Newsletter below.' },
+  { uid: 'api::telegram-page.telegram-page', field: 'breadcrumbItems', hint: 'Ordered breadcrumb labels and links. The last item is the current page and has no link.' },
+  { uid: 'api::subscription-page.subscription-page', field: 'slug', hint: 'One lowercase URL segment, using letters, digits and hyphens. A live-page rename creates a permanent redirect from the previous URL.' },
+  { uid: 'api::subscription-page.subscription-page', field: 'enabled', hint: 'Turn on after reviewing the initial Figma copy, counts and channel destinations. Turning off removes this page from public routes and sitemaps.' },
   ...[
     { uid: 'api::coupon.coupon', hints: [...OFFER_WORD_CAP_HINTS, ...OFFER_BENEFIT_HINTS] },
     {

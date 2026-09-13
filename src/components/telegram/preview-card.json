@@ -1,0 +1,27 @@
+{
+  "collectionName": "components_telegram_preview_cards",
+  "info": {
+    "displayName": "Telegram Preview Card",
+    "icon": "message"
+  },
+  "attributes": {
+    "icon": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": ["images"]
+    },
+    "eyebrow": {
+      "type": "string",
+      "maxLength": 40
+    },
+    "title": {
+      "type": "string",
+      "required": true,
+      "maxLength": 60
+    },
+    "text": {
+      "type": "text",
+      "maxLength": 160
+    }
+  }
+}

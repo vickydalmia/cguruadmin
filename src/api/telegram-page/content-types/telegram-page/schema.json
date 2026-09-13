@@ -1,0 +1,160 @@
+{
+  "kind": "singleType",
+  "collectionName": "telegram_pages",
+  "info": {
+    "singularName": "telegram-page",
+    "pluralName": "telegram-pages",
+    "displayName": "Telegram Page",
+    "description": "Join Telegram page. Set its URL here; enable after content is ready."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
+  },
+  "attributes": {
+    "title": {
+      "type": "string",
+      "default": "Telegram Page",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      }
+    },
+    "slug": {
+      "type": "string",
+      "default": "join-telegram",
+      "required": true,
+      "maxLength": 160,
+      "regex": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      }
+    },
+    "hero": {
+      "type": "component",
+      "component": "telegram.hero",
+      "repeatable": false,
+      "required": true,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "benefits": {
+      "type": "component",
+      "component": "telegram.benefits",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "latestDeals": {
+      "type": "component",
+      "component": "telegram.latest-deals",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "favouriteStores": {
+      "type": "component",
+      "component": "telegram.favourite-stores",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "faq": {
+      "type": "component",
+      "component": "home.faq-block",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "joinCta": {
+      "type": "component",
+      "component": "telegram.join-cta",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "popularSearches": {
+      "type": "component",
+      "component": "home.popular-searches",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "seo": {
+      "type": "component",
+      "component": "shared.seo",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "breadcrumbItems": {
+      "type": "component",
+      "component": "shared.breadcrumb-item",
+      "repeatable": true,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "newsletterEnabled": {
+      "type": "boolean",
+      "default": true,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "newsletter": {
+      "type": "component",
+      "component": "shared.newsletter",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    }
+  }
+}

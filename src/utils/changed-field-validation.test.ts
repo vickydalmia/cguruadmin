@@ -11,6 +11,18 @@ function harness(stored: unknown = null) {
 }
 
 describe('validateChangedFields', () => {
+  it('applies the shared SEO limits and URL safety to Subscription Page saves', async () => {
+    const { strapi } = harness();
+    await expect(validateChangedFields(strapi, 'api::subscription-page.subscription-page', 'create', {
+      seo: { metaTitle: 'x'.repeat(71), metaDescription: 'x'.repeat(171), canonicalUrl: '//untrusted.test', ogImageAlt: 'x'.repeat(126) },
+    })).rejects.toMatchObject({ details: { errors: expect.arrayContaining([
+      expect.objectContaining({ path: ['seo', 'metaTitle'] }), expect.objectContaining({ path: ['seo', 'metaDescription'] }),
+      expect.objectContaining({ path: ['seo', 'canonicalUrl'] }), expect.objectContaining({ path: ['seo', 'ogImageAlt'] }),
+    ]) } });
+    await expect(validateChangedFields(strapi, 'api::subscription-page.subscription-page', 'create', {
+      seo: { metaTitle: 'Subscribe', metaDescription: 'Receive our offers', canonicalUrl: '/subscription/' },
+    })).resolves.toBeUndefined();
+  });
   it.each(['create', 'clone'])('validates strict fields on %s', async (action) => {
     const { strapi, findOne } = harness();
     await expect(

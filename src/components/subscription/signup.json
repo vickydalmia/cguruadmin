@@ -1,0 +1,78 @@
+{
+  "collectionName": "components_subscription_signup",
+  "info": {
+    "displayName": "Subscription Signup"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "icon": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": [
+        "images"
+      ]
+    },
+    "iconAlt": {
+      "type": "string",
+      "maxLength": 300,
+      "default": ""
+    },
+    "heading": {
+      "type": "string",
+      "maxLength": 300,
+      "default": "Get the best deals delivered straight to your inbox"
+    },
+    "description": {
+      "type": "text",
+      "default": "Verified only. No spam, ever."
+    },
+    "emailLabel": {
+      "type": "string",
+      "maxLength": 300,
+      "default": "Email address"
+    },
+    "emailPlaceholder": {
+      "type": "string",
+      "maxLength": 300,
+      "default": "Enter your email"
+    },
+    "ctaLabel": {
+      "type": "string",
+      "maxLength": 300,
+      "default": "Subscribe"
+    },
+    "trustText": {
+      "type": "string",
+      "maxLength": 300,
+      "default": "No Spam \u00b7 Unsubscribe anytime"
+    },
+    "invalidMessage": {
+      "type": "string",
+      "maxLength": 300,
+      "default": "Please enter a valid email address."
+    },
+    "pendingMessage": {
+      "type": "string",
+      "maxLength": 300,
+      "default": "Subscribing\u2026"
+    },
+    "successMessage": {
+      "type": "string",
+      "maxLength": 300,
+      "default": "You have successfully subscribed!"
+    },
+    "errorMessage": {
+      "type": "string",
+      "maxLength": 300,
+      "default": "Subscription failed. Please try again."
+    },
+    "networkErrorMessage": {
+      "type": "string",
+      "maxLength": 300,
+      "default": "Unable to connect. Please try again."
+    }
+  }
+}

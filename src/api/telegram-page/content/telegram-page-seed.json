@@ -1,0 +1,171 @@
+{
+  "_comment": "Verbatim copy and assets from the Join Telegram Figma frames (desktop 1690:1720, mobile 1706:1772). SEED ONLY: written once into the Telegram Page single type when no row exists (src/bootstrap/telegram-page-seed.ts); editors own every field afterwards and later deployments never overwrite them. Image values are file names under seed/telegram-page/, uploaded into the 'Telegram Page' Media Library folder. Store names under favouriteStores.storeNames are matched case-insensitively against existing Stores; missing ones are skipped.",
+  "title": "Telegram Page",
+  "enabled": false,
+  "slug": "join-telegram",
+  "hero": {
+    "titleLead": "Never Miss a",
+    "titleAccent": "Deal",
+    "titleTail": "Again",
+    "subtitle": "Join CouponzGuru on Telegram for verified coupon codes, cashback offers and price drops sent straight to your phone, completely free.",
+    "ctaLabel": "Join CouponzGuru on Telegram",
+    "membersLabel": "members already saving",
+    "membersCountOverride": null,
+    "freeBadgeLabel": "100% Free",
+    "cashbackBadgeLabel": "Cashback",
+    "previewCards": [
+      {
+        "icon": null,
+        "eyebrow": "COUPONZGURU",
+        "title": "Myntra Loot 🔥",
+        "text": "Branded shoes @ ₹499 only! Use code LOOT499"
+      },
+      {
+        "icon": "emoji-bolt.png",
+        "eyebrow": "COUPONZGURU",
+        "title": "Price Error Deal ✅",
+        "text": "boAt Earbuds worth ₹2,999 listed at ₹149!"
+      },
+      {
+        "icon": "emoji-target.png",
+        "eyebrow": "COUPONZGURU",
+        "title": "Flash Deal",
+        "text": "Nike shoes worth ₹7,999 at ₹1,299 — limited stock!"
+      }
+    ],
+    "previewLabel": "PREVIEW"
+  },
+  "benefits": {
+    "enabled": true,
+    "heading": "What you get inside",
+    "description": "Beyond the loot deals and flash alerts already on your screen, here's everything else bundled in — verified deals, cashback, and zero spam.",
+    "phoneImage": "phone-mockup.png",
+    "phoneImageAlt": "CouponzGuru India Telegram channel showing a Qubo car dashcam deal",
+    "floatingCards": [
+      {
+        "icon": "icon-tag.png",
+        "title": "Loot Deals",
+        "text": "Handpicked loot deals on top brands, delivered to you daily"
+      },
+      {
+        "icon": "icon-gift.png",
+        "title": "Flash Deals & Alerts",
+        "text": "Get instant alerts the moment a flash deal or price error goes live"
+      },
+      {
+        "icon": "icon-percent.png",
+        "title": "Price Drop Tracker",
+        "text": "Track price drops across stores and never overpay again"
+      }
+    ],
+    "features": [
+      {
+        "label": "Verified Deal Alerts",
+        "dot": "green"
+      },
+      {
+        "label": "Price Drop Notifications",
+        "dot": "blue"
+      },
+      {
+        "label": "Real-Time Flash Deals",
+        "dot": "green"
+      },
+      {
+        "label": "Price Error Spotting",
+        "dot": "red"
+      },
+      {
+        "label": "Instant Alerts, Zero Spam",
+        "dot": "blue"
+      },
+      {
+        "label": "New Deals Added Daily",
+        "dot": "blue"
+      }
+    ],
+    "trustLabel": "100% Free, Always"
+  },
+  "latestDeals": {
+    "enabled": true,
+    "heading": "Latest deals from our telegram channel",
+    "previewNote": "This is just a preview — join our Telegram channel to catch every loot deal, price drop & flash sale live.",
+    "ctaLabel": "Join Telegram for Live Deals"
+  },
+  "favouriteStores": {
+    "enabled": true,
+    "heading": "Deals & coupons from all your favourite stores",
+    "description": "We track massive drops from national delivery services, electronics giants, fashion houses, and local grocery stores.",
+    "storeNames": [
+      "Amazon",
+      "Flipkart",
+      "Ghar Soaps",
+      "Myntra",
+      "Trip.com",
+      "GIVA",
+      "Nykaa",
+      "Zouk",
+      "Crocs",
+      "Titan",
+      "Whirlpool",
+      "Agoda"
+    ],
+    "moreLabel": "100+ more supported stores",
+    "ctaLabel": "Join now → Telegram"
+  },
+  "faq": {
+    "enabled": true,
+    "heading": "Frequently Asked Questions",
+    "items": [
+      {
+        "question": "Save More Every Time You Shop Only at CouponzGuru",
+        "answer": "Shopping online in India has never been more exciting but it gets even better when you save money on every purchase. CouponzGuru is India's one stop free shop for the latest, working and genuine coupon codes, promo deals and discount offers. Whether you are buying fashion, electronics, booking flights or ordering food CouponzGuru makes sure you never pay full price. Since 2011, CouponzGuru has been helping millions of online shoppers across India get the best deals at one place.\n\nOur team of highly skilled coupons and deals hunters are on the job 24 x 7, hunting for the latest money saving coupons and deals from top online shopping sites in India. So now, no need to visit every website daily and hunt for discounts — just check out CouponzGuru and you will get the latest deals here."
+      },
+      {
+        "question": "About CouponzGuru.com",
+        "answer": "CouponzGuru is a free coupons and deals platform that has been helping online shoppers save money since 2011. We list verified coupon codes, product deals, cashback offers and bank discounts from India's top online stores, all in one place."
+      },
+      {
+        "question": "What we do?",
+        "answer": "We track thousands of stores every day, verify every coupon and deal before it goes live, and share the best ones on the website and instantly on our Telegram channel so you never miss a loot deal, a price drop or a flash sale."
+      },
+      {
+        "question": "How we use coupon codes?",
+        "answer": "Tap a coupon to reveal its code and copy it, then paste the code in the promo or coupon box at the store's checkout before you pay. Deals without a code apply automatically when you open the store through our link."
+      },
+      {
+        "question": "What kind of coupons are available?",
+        "answer": "Percentage and flat discounts, bank card offers, cashback deals, free delivery codes, first-order coupons and limited-time flash deals across fashion, electronics, travel, food, groceries and more."
+      }
+    ]
+  },
+  "joinCta": {
+    "enabled": true,
+    "heading": "Your Next Order Deserves a Discount",
+    "description": "Join thousands of smart shoppers already saving with CouponzGuru on Telegram.",
+    "ctaLabel": "Join CouponzGuru on Telegram"
+  },
+  "seo": {
+    "metaTitle": "Join CouponzGuru on Telegram for Deals",
+    "metaDescription": "Join the CouponzGuru Telegram channel for verified coupon codes, loot deals, cashback offers and price drops sent straight to your phone."
+  },
+  "breadcrumbItems": [
+    {
+      "label": "Home",
+      "url": "/"
+    },
+    {
+      "label": "Join Telegram"
+    }
+  ],
+  "newsletterEnabled": true,
+  "newsletter": {
+    "heading": "Subscribe to our newsletter for the latest updates and insights.",
+    "mobileHeading": "Subscribe to our newsletter for the latest updates and insights.",
+    "description": "Get verified coupons in your inbox Only working deals, checked and updated regularly.",
+    "emailLabel": "Email address",
+    "emailPlaceholder": "Enter your email",
+    "ctaLabel": "Subscribe",
+    "disclaimer": "No Spam. Unsubscribe anytime"
+  }
+}

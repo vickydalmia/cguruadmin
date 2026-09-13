@@ -1,0 +1,25 @@
+{
+  "collectionName": "components_telegram_latest_deals",
+  "info": {
+    "displayName": "Telegram Latest Deals Section",
+    "icon": "priceTag"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "previewNote": {
+      "type": "text",
+      "maxLength": 200
+    },
+    "ctaLabel": {
+      "type": "string",
+      "maxLength": 40
+    }
+  }
+}

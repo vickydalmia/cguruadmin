@@ -1,0 +1,55 @@
+{
+  "kind": "singleType",
+  "collectionName": "telegrams",
+  "info": {
+    "singularName": "telegram",
+    "pluralName": "telegrams",
+    "displayName": "Telegram",
+    "description": "Telegram channel connection used to ingest channel posts for the Join Telegram page"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "title": {
+      "type": "string",
+      "default": "Telegram"
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": false,
+      "required": true
+    },
+    "botToken": {
+      "type": "string",
+      "private": true,
+      "maxLength": 128
+    },
+    "channel": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "channelUsername": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "pollIntervalMinutes": {
+      "type": "integer",
+      "default": 5,
+      "min": 1,
+      "max": 60
+    },
+    "maxStoredPosts": {
+      "type": "integer",
+      "default": 60,
+      "min": 10,
+      "max": 200
+    },
+    "feedPostCount": {
+      "type": "integer",
+      "default": 6,
+      "min": 1,
+      "max": 12
+    }
+  }
+}

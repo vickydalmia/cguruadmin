@@ -360,3 +360,12 @@ export function registerDatabaseBackupRoutes(strapi: Core.Strapi): void {
     ],
   } as any);
 }
+export function registerTelegramProcessingRoutes(strapi: Core.Strapi): void {
+  const policies = ['admin::isAuthenticatedAdmin', 'global::super-admin-only'];
+  strapi.server.routes({ type: 'admin', prefix: '/telegram-processing', routes: [
+    { method: 'GET', path: '/posts', handler: 'api::telegram.telegram.storedPosts', config: { policies } },
+    { method: 'GET', path: '/', handler: 'api::telegram.telegram.processing', config: { policies } },
+    { method: 'POST', path: '/:id/retry', handler: 'api::telegram.telegram.retryProcessing', config: { policies } },
+    { method: 'POST', path: '/:id/check', handler: 'api::telegram.telegram.checkProcessing', config: { policies } },
+  ] } as any);
+}

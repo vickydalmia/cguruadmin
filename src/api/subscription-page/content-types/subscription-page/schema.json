@@ -1,0 +1,141 @@
+{
+  "kind": "singleType",
+  "collectionName": "subscription_pages",
+  "info": {
+    "singularName": "subscription-page",
+    "pluralName": "subscription-pages",
+    "displayName": "Subscription Page",
+    "description": "Subscription and social channels page. Set its URL here; enable after content is ready."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
+  },
+  "attributes": {
+    "title": {
+      "type": "string",
+      "maxLength": 300,
+      "default": "Subscription Page",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      }
+    },
+    "slug": {
+      "type": "string",
+      "default": "subscription",
+      "required": true,
+      "maxLength": 160,
+      "regex": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      }
+    },
+    "breadcrumbAriaLabel": {
+      "type": "string",
+      "maxLength": 300,
+      "default": "Breadcrumb",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "breadcrumbItems": {
+      "type": "component",
+      "component": "shared.breadcrumb-item",
+      "repeatable": true,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "hero": {
+      "type": "component",
+      "component": "subscription.hero",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "signup": {
+      "type": "component",
+      "component": "subscription.signup",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "platforms": {
+      "type": "component",
+      "component": "subscription.platforms",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "benefits": {
+      "type": "component",
+      "component": "subscription.benefits",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "joinCta": {
+      "type": "component",
+      "component": "subscription.join-cta",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "popularSearches": {
+      "type": "component",
+      "component": "home.popular-searches",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "seo": {
+      "type": "component",
+      "component": "shared.seo",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    }
+  }
+}

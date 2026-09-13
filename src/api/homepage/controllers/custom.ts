@@ -1,3 +1,5 @@
+import { subscriptionRouteMetadata } from '../../subscription-page/services/subscription-route';
+import { telegramRouteMetadata } from '../../telegram-page/services/telegram-route';
 import type { Core } from '@strapi/strapi';
 import { publicGlobalIntegrations, publicChannelFooter } from '../../global/services/public-integrations';
 import { arrayizeOfferText } from '../../../utils/offer-text';
@@ -223,6 +225,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       return [routeMetadata(`/careers/${slug}/`, job)];
     });
 
-    return ctx.send({ data: [...pages, ...jobRoutes, ...campaignPages.flat()] });
+    const subscriptionPages = await subscriptionRouteMetadata(strapi, locale);
+    const telegramPages = await telegramRouteMetadata(strapi, locale);
+    return ctx.send({ data: [...pages, ...jobRoutes, ...campaignPages.flat(), ...subscriptionPages, ...telegramPages] });
   },
 });

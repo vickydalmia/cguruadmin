@@ -1,4 +1,5 @@
 import { WEBSITE_REFRESH_ACTION_ATTRIBUTES } from './api/website-refresh/controllers/website-refresh';
+import { seedSubscriptionPage } from './api/subscription-page/services/seed-subscription-page';
 import { GLOBAL_SETTINGS_LABELS } from './constants/global-settings';
 import { installMigrationLockTimeout } from './register/migration-lock-timeout';
 import { readWriteSerializationTimeout } from './utils/write-serialization';
@@ -10,6 +11,12 @@ import {
   INDEPENDENCE_DAY_SALE_SECTION_LABELS,
   INDEPENDENCE_DAY_SALE_UID,
 } from './constants/independence-day-sale-sections';
+import {
+  TELEGRAM_CONFIG_UID,
+  TELEGRAM_PAGE_SECTION_LABELS,
+  TELEGRAM_PAGE_UID,
+  TELEGRAM_SETTINGS_LABELS,
+} from './constants/telegram';
 import {
   HOMEPAGE_SECTION_LABELS,
   HOMEPAGE_UID,
@@ -63,9 +70,11 @@ import {
 } from './bootstrap/permissions';
 import {
   ensureCultureGalleryMediaFolder,
+  ensureTelegramMediaFolder,
   ensureUploadSettings,
 } from './bootstrap/upload';
 import { runDatabaseReconciliations } from './bootstrap/db-reconciliation';
+import { ensureTelegramPageSeed } from './bootstrap/telegram-page-seed';
 import {
   registerAdminRuntimeConfigRoutes,
   registerCsvExportRoutes,
@@ -76,6 +85,7 @@ import {
   registerOfferCountryRoutes,
   registerRecordLockRoutes,
   registerTranslationRoutes,
+  registerTelegramProcessingRoutes,
   registerUiDictionaryRoutes,
   registerWebsiteRefreshRoutes,
 } from './register/admin-routes';
@@ -175,6 +185,7 @@ export default {
     registerUiDictionaryRoutes(strapi);
     registerWebsiteRefreshRoutes(strapi);
     registerDatabaseBackupRoutes(strapi);
+    registerTelegramProcessingRoutes(strapi);
 
     // Document-service middlewares. Registration order = execution order:
     // the record-lock guard must run before the document-write pipeline
@@ -243,6 +254,14 @@ export default {
     }
 
     await runDatabaseReconciliations(strapi);
+    await seedSubscriptionPage(strapi).catch((error) => {
+      // A pre-existing URL reservation must not prevent a production upgrade
+      // from starting. The editor can create/configure the page explicitly.
+      strapi.log.warn(`[subscription-page] initial content was not installed: ${error?.message ?? error}`);
+    });
+    // Figma content for the Join Telegram page: written once (marker), only
+    // into a missing or content-less row; never over an editor's changes.
+    await ensureTelegramPageSeed(strapi);
 
     // Fix the search implementation for this process before serving traffic:
     // the database dialect alone selects Postgres full-set SQL or the
@@ -255,6 +274,7 @@ export default {
     await restrictSingleTypesToSuperAdmin(strapi);
     await ensureUploadSettings(strapi);
     await ensureCultureGalleryMediaFolder(strapi);
+    await ensureTelegramMediaFolder(strapi);
     await ensureComponentEntryTitles(strapi);
     await ensureAdminRelationSearchFields(strapi);
     await ensureRelationTargetFieldReadability(strapi);
@@ -273,6 +293,8 @@ export default {
       INDEPENDENCE_DAY_SALE_UID,
       INDEPENDENCE_DAY_SALE_SECTION_LABELS,
     );
+    await ensureSectionLabels(strapi, TELEGRAM_CONFIG_UID, TELEGRAM_SETTINGS_LABELS);
+    await ensureSectionLabels(strapi, TELEGRAM_PAGE_UID, TELEGRAM_PAGE_SECTION_LABELS);
 
     // S3_UPLOAD_ENABLED defaults OFF in production (config/plugins.ts), so a
     // boot missing the flag silently writes uploads to the container's local

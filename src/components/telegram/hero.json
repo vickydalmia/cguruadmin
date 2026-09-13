@@ -1,0 +1,56 @@
+{
+  "collectionName": "components_telegram_heroes",
+  "info": {
+    "displayName": "Telegram Hero",
+    "icon": "paperPlane"
+  },
+  "attributes": {
+    "titleLead": {
+      "type": "string",
+      "required": true,
+      "maxLength": 60
+    },
+    "titleAccent": {
+      "type": "string",
+      "maxLength": 30
+    },
+    "titleTail": {
+      "type": "string",
+      "maxLength": 30
+    },
+    "subtitle": {
+      "type": "text",
+      "maxLength": 240
+    },
+    "ctaLabel": {
+      "type": "string",
+      "maxLength": 40
+    },
+    "membersLabel": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "membersCountOverride": {
+      "type": "integer",
+      "min": 0
+    },
+    "freeBadgeLabel": {
+      "type": "string",
+      "maxLength": 30
+    },
+    "cashbackBadgeLabel": {
+      "type": "string",
+      "maxLength": 30
+    },
+    "previewCards": {
+      "type": "component",
+      "component": "telegram.preview-card",
+      "repeatable": true,
+      "max": 3
+    },
+    "previewLabel": {
+      "type": "string",
+      "maxLength": 40
+    }
+  }
+}
