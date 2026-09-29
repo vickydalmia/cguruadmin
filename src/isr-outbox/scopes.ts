@@ -1,3 +1,7 @@
+import { SUBSCRIPTION_PAGE_UID, readSubscriptionRoute } from '../api/subscription-page/services/subscription-route';
+import { subscriptionWriteScope } from '../api/subscription-page/services/subscription-write';
+import { readTelegramRoute } from '../api/telegram-page/services/telegram-route';
+import { telegramFeedScope, telegramWriteScope } from '../api/telegram-page/services/telegram-write';
 import type { Core } from '@strapi/strapi';
 import type { ScopeRequest } from './types';
 import { mergeScope } from './payload';
@@ -32,6 +36,9 @@ import {
   TERMS_PAGE_UID,
   TESTIMONIALS_PAGE_SLUG,
   TESTIMONIALS_PAGE_UID,
+  TELEGRAM_CONFIG_UID,
+  TELEGRAM_PAGE_UID,
+  TELEGRAM_POST_UID,
 } from './scope-static-pages';
 import {
   ENTITY_UIDS,
@@ -86,6 +93,17 @@ export function isEntityDealPageSeoOnlyChange(data: unknown): boolean {
   return keys.length === 1 && keys[0] === 'entityDealPageSeo';
 }
 
+// Store logos are baked into the Join Telegram page (bubble cloud + post
+// badges). Uncertainty (no singleton yet, read failure) means "no page", the
+// same way a missing campaign owner contributes nothing.
+async function liveTelegramPageSlugs(strapi: Core.Strapi): Promise<string[]> {
+  try {
+    return telegramFeedScope(await readTelegramRoute(strapi))?.slugs ?? [];
+  } catch {
+    return [];
+  }
+}
+
 /** Scope for a change, computed AFTER the write succeeded. */
 export async function computeScope(
   strapi: Core.Strapi,
@@ -100,6 +118,14 @@ export async function computeScope(
   festiveOfferBefore?: FestiveOfferSnapshot | null,
 ): Promise<ScopeRequest | null> {
   if (!DOCUMENT_WRITE_ACTIONS.has(action)) return null;
+
+  if (uid === SUBSCRIPTION_PAGE_UID) return subscriptionWriteScope(null, await readSubscriptionRoute(strapi));
+  if (uid === TELEGRAM_PAGE_UID) return telegramWriteScope(null, await readTelegramRoute(strapi));
+  // An ingested/hidden post or a channel-settings change repaints the live
+  // page; nothing renders while the page is disabled.
+  if (uid === TELEGRAM_POST_UID || uid === TELEGRAM_CONFIG_UID) {
+    return telegramFeedScope(await readTelegramRoute(strapi));
+  }
 
   if (uid === SITE_CONFIGURATION_UID) {
     return {
@@ -310,12 +336,14 @@ export async function computeScope(
 
     // The deal landing page bakes store pill labels/logos and category tab
     // names/icons into its HTML — same reason entity edits carry homepage.
+    // The Join Telegram page bakes store logos (bubble cloud + post badges).
     const campaignOwnerSlugs =
       kind === 'store' || kind === 'category'
         ? (
             await Promise.all([
               entityTemplateOwnerSlugs(strapi, 'dealTemplate'),
               entityTemplateOwnerSlugs(strapi, 'independenceDayTemplate'),
+              ...(kind === 'store' ? [liveTelegramPageSlugs(strapi)] : []),
             ])
           ).flat()
         : [];

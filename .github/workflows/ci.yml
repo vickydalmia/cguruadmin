@@ -1,0 +1,39 @@
+name: CMS checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: cguru_test
+          POSTGRES_PASSWORD: test-password
+        ports: [5432:5432]
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.1
+          cache: yarn
+      - run: corepack enable
+      - run: yarn install --frozen-lockfile
+      - run: yarn test --maxWorkers=2
+      - run: yarn tsc --noEmit
+      - run: yarn test:postgres
+        env:
+          UNIQUE_CODE_TEST_DATABASE_URL: postgres://postgres:test-password@127.0.0.1:5432/cguru_test
+      - name: Prepare isolated Strapi database
+        run: PGPASSWORD=test-password psql -h 127.0.0.1 -U postgres -d cguru_test -c 'CREATE DATABASE cguru_strapi_test'
+      - name: Native Strapi persistence and country matrix
+        run: yarn test:translation-integration
+        env:
+          STRAPI_TRANSACTION_TEST_DATABASE_URL: postgres://postgres:test-password@127.0.0.1:5432/cguru_strapi_test
+      - run: yarn build

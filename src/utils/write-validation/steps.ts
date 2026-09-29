@@ -1,4 +1,8 @@
+import { validateSubscriptionContent } from '../../api/subscription-page/services/subscription-validation';
+import { validateSubscriptionRoutes } from '../../api/subscription-page/services/subscription-route-validation';
+import { SUBSCRIPTION_PAGE_UID } from '../../api/subscription-page/services/subscription-route';
 import type { Core } from '@strapi/strapi';
+import { GLOBAL_UID, normalizeIntegrations, validateIntegrationsForWrite } from '../../api/global/services/integrations';
 import type { TranslationWriteContext } from '../../translation/write-flag';
 
 import {
@@ -41,6 +45,9 @@ import { validateHomepageHeroOffers } from '../homepage-hero-offer-validation';
 import { validateHomepagePopularStores } from '../homepage-popular-stores-validation';
 import { validateHomepagePopularSearches } from '../homepage-popular-searches-validation';
 import { validateIndependenceDaySale } from '../independence-day-sale-validation';
+import { validateTelegramPage } from '../telegram-page-validation';
+import { validateTelegramSettingsForWrite } from '../telegram-settings-validation';
+import { validateTelegramRoutes } from '../../api/telegram-page/services/telegram-route-validation';
 import { validateIdentity } from '../identity-validation';
 import { validateJobSlug } from '../job-slug-validation';
 import { MENU_UID, validateMenuCategorySections } from '../menu-category-validation';
@@ -66,6 +73,7 @@ import {
 import { DOTD_UID } from '../../constants/deal-of-the-day-sections';
 import { HOMEPAGE_UID } from '../../constants/homepage-sections';
 import { INDEPENDENCE_DAY_SALE_UID } from '../../constants/independence-day-sale-sections';
+import { TELEGRAM_CONFIG_UID, TELEGRAM_PAGE_UID } from '../../constants/telegram';
 
 /**
  * The write-validation pipeline, as data.
@@ -155,6 +163,11 @@ export function stepApplies(step: ValidationStep, uid: string, action: string): 
  */
 export const MUTATOR_STEPS: readonly ValidationStep[] = [
   {
+    name: 'normalizeIntegrations',
+    applies: (uid) => uid === GLOBAL_UID,
+    run: ({ data }) => normalizeIntegrations(data),
+  },
+  {
     // Richtext holds HTML rendered raw on the public site — enforce the
     // migration-era allowlist on every write, whatever the editor.
     name: 'sanitizeRichtextData',
@@ -220,6 +233,13 @@ export const MUTATOR_STEPS: readonly ValidationStep[] = [
  * having run, which they always do.
  */
 export const COLLECTED_STEPS: readonly ValidationStep[] = [
+  { name: 'validateSubscriptionContent', applies: (uid) => uid === SUBSCRIPTION_PAGE_UID,
+    run: ({ strapi, data, locale }) => validateSubscriptionContent(strapi, data, locale) },
+  {
+    name: 'validateIntegrationsForWrite',
+    applies: (uid) => uid === GLOBAL_UID,
+    run: ({ strapi, data, documentId, locale }) => validateIntegrationsForWrite(strapi, data, documentId, locale),
+  },
   {
     name: 'validateSiteConfigurationForWrite',
     actions: CREATE_UPDATE,
@@ -323,6 +343,20 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     applies: (uid) => uid === INDEPENDENCE_DAY_SALE_UID,
     run: ({ strapi, data, locale }) =>
       validateIndependenceDaySale(strapi, data, locale),
+  },
+  {
+    name: 'validateTelegramPage',
+    actions: CREATE_UPDATE,
+    applies: (uid) => uid === TELEGRAM_PAGE_UID,
+    run: ({ strapi, data, locale }) => validateTelegramPage(strapi, data, locale),
+  },
+  {
+    // Bot token / channel format and the enabled ⇒ configured rule. Also
+    // trims the inputs in place (same stance as normalizeIntegrations).
+    name: 'validateTelegramSettings',
+    actions: CREATE_UPDATE,
+    applies: (uid) => uid === TELEGRAM_CONFIG_UID,
+    run: ({ strapi, data }) => validateTelegramSettingsForWrite(strapi, data),
   },
   {
     name: 'validateContentManagerOfferStore',
@@ -511,6 +545,10 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
  * does not own. That is deliberately unchanged from the original middleware.
  */
 export const LOCKED_STEPS: readonly ValidationStep[] = [
+  { name: 'validateSubscriptionRoutes',
+    run: ({ strapi, uid, data, documentId, locale }) => validateSubscriptionRoutes(strapi, uid, data, documentId, locale) },
+  { name: 'validateTelegramRoutes',
+    run: ({ strapi, uid, data, documentId, locale }) => validateTelegramRoutes(strapi, uid, data, documentId, locale) },
   {
     // Name unique per type, slug unique across all four taxonomies (the public
     // URL space is flat), and no collision with a reserved Astro route.

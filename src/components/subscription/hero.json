@@ -1,0 +1,32 @@
+{
+  "collectionName": "components_subscription_hero",
+  "info": {
+    "displayName": "Subscription Hero"
+  },
+  "attributes": {
+    "headingBefore": {
+      "type": "string",
+      "maxLength": 300,
+      "default": "We're"
+    },
+    "headingHighlight": {
+      "type": "string",
+      "maxLength": 300,
+      "default": "Wherever"
+    },
+    "headingAfter": {
+      "type": "string",
+      "maxLength": 300,
+      "default": "You Are"
+    },
+    "headingSecondLine": {
+      "type": "string",
+      "maxLength": 300,
+      "default": "Don't Miss a Deal"
+    },
+    "description": {
+      "type": "text",
+      "default": "Pick your platform and get instant coupon codes, cashback offers, and price drops delivered straight to you always verified."
+    }
+  }
+}

@@ -10,12 +10,20 @@ services:
       - ${ENV_FILE:-.env.production}
     environment:
       NODE_ENV: production
-      # Exactly one process owns durable delivery. The render sibling below is
+      DATABASE_POOL_MIN: "0"
+      DATABASE_POOL_MAX: "5"
+      # Exactly one admin process owns ISR delivery. The render sibling below is
       # read-heavy only and explicitly disables both paid translation work and
       # ISR delivery.
       ISR_OUTBOX_DISPATCHER_ENABLED: "true"
-      TRANSLATION_OUTBOX_DISPATCHER_ENABLED: "true"
+      TRANSLATION_OUTBOX_DISPATCHER_ENABLED: "false"
       TRANSLATION_BACKFILL_RUNNER_ENABLED: "false"
+      # Database backups are mandatory on every host and run on exactly one
+      # process: strapi-maintenance when it is deployed, otherwise here.
+      # deploy.sh exports ADMIN_BACKUP_RUNNER_ENABLED from
+      # MAINTENANCE_SERVICE_ENABLED; set the same value in the env file if you
+      # run Compose by hand with the maintenance service disabled.
+      BACKUP_RUNNER_ENABLED: ${ADMIN_BACKUP_RUNNER_ENABLED:-false}
     ports:
       # Always publish on loopback so host-local consumers (admin nginx, an
       # SSH tunnel, the deploy health check) keep working.
@@ -56,10 +64,13 @@ services:
   # Publish storms then saturate this container while the admin one stays
   # responsive.
   #
-  # Set DATABASE_POOL_MAX=5 in ${ENV_FILE}: it applies to BOTH containers
-  # (shared env_file), so they hold at most 10 Postgres connections; the
-  # maintenance service below adds at most 2, staying under the managed-DB
-  # 22-connection backend limit.
+  # Pool sizes are pinned per service in each `environment:` block below
+  # (5 admin + 5 render + 4 maintenance = 14; Compose `environment` wins over
+  # the shared env_file, so DATABASE_POOL_MAX in ${ENV_FILE} is NOT what
+  # production uses). A running pg_dump on the maintenance service adds one
+  # connection outside its pool. deploy.sh checks the total against
+  # DATABASE_CONNECTION_BUDGET (default 22, the managed-DB backend limit) and
+  # keeps the remainder as rollout headroom.
   strapi-render:
     image: ${APP_IMAGE:?APP_IMAGE is required}:${APP_IMAGE_TAG:?APP_IMAGE_TAG is required}
     restart: unless-stopped
@@ -69,6 +80,8 @@ services:
       - ${ENV_FILE:-.env.production}
     environment:
       NODE_ENV: production
+      DATABASE_POOL_MIN: "0"
+      DATABASE_POOL_MAX: "5"
       # The */5 scheduler writes to the DB and must run exactly once — in the
       # admin container. Never enable cron here.
       CRON_ENABLED: "false"
@@ -76,11 +89,12 @@ services:
       # work. Keep exactly one dispatcher on the admin service so render-time
       # traffic cannot amplify retries into overlapping route-inventory scans.
       ISR_OUTBOX_DISPATCHER_ENABLED: "false"
-      # Translation jobs are also a shared-Postgres queue. One admin-owned
+      # Translation jobs are also a shared-Postgres queue. One maintenance-owned
       # dispatcher keeps provider concurrency and daily-spend controls global
       # instead of multiplying them by the number of Strapi processes.
       TRANSLATION_OUTBOX_DISPATCHER_ENABLED: "false"
       TRANSLATION_BACKFILL_RUNNER_ENABLED: "false"
+      BACKUP_RUNNER_ENABLED: "false"
       # Every socket that can reach this container is internal by construction
       # (ports are published on loopback and the VPC private IP, firewalled),
       # so trust private sources without per-host IP allowlisting. On a
@@ -118,6 +132,7 @@ services:
   # loops. The strict CPU/pool limits protect a two-core host and the managed
   # database; the scanner's persisted cursor makes the slower pace safe.
   strapi-maintenance:
+    profiles: [translation]
     image: ${APP_IMAGE:?APP_IMAGE is required}:${APP_IMAGE_TAG:?APP_IMAGE_TAG is required}
     restart: unless-stopped
     init: true
@@ -128,12 +143,21 @@ services:
       NODE_ENV: production
       CRON_ENABLED: "false"
       ISR_OUTBOX_DISPATCHER_ENABLED: "false"
-      TRANSLATION_OUTBOX_DISPATCHER_ENABLED: "false"
+      TRANSLATION_OUTBOX_DISPATCHER_ENABLED: "true"
       TRANSLATION_BACKFILL_RUNNER_ENABLED: "true"
+      # Exactly one process takes database backups (pg_dump streamed to S3).
+      # It adds ONE Postgres connection outside the pool while a dump runs
+      # (maintenance total 5, still inside the 22-connection budget) and is
+      # stopped first by deploy.sh so a running dump never blocks migrations.
+      BACKUP_RUNNER_ENABLED: "true"
       DATABASE_POOL_MIN: "0"
-      DATABASE_POOL_MAX: "2"
+      DATABASE_POOL_MAX: "4"
+      TRANSLATION_OUTBOX_BATCH_SIZE: "2"
+      TRANSLATION_CONCURRENCY: "2"
+      TRANSLATION_BACKFILL_MAX_DOCS_PER_SECOND: "5"
     cpus: "0.50"
-    mem_limit: 512m
+    # 768m: Strapi RSS + pg_dump (~30 MB) + two 8 MiB S3 upload buffers.
+    mem_limit: 768m
     healthcheck:
       test:
         - CMD

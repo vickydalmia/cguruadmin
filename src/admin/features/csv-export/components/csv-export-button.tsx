@@ -16,7 +16,7 @@ import {
   isCsvExportUid,
   type CsvExportUid,
 } from '../../../../constants/csv-export';
-import { isSuperAdminUser } from '../api';
+import { isSuperAdminUser } from '../../../utils/super-admin';
 import { useCsvExport, type CsvExportState } from '../use-csv-export';
 
 /**

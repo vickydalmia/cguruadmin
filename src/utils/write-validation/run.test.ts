@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Core } from '@strapi/strapi';
-import { runWriteValidation } from './run';
+import { runWriteValidation as prepareWriteValidation } from './run';
+
+// Exercise both phases as the document middleware does.
+async function runWriteValidation(...args: Parameters<typeof prepareWriteValidation>) {
+  const validateLocked = await prepareWriteValidation(...args);
+  await validateLocked?.({});
+  return null;
+}
 import { runWithTranslationWriteContext } from '../../translation/write-flag';
 import {
   COLLECTED_STEPS,
@@ -23,6 +30,7 @@ const names = (steps: readonly { name: string }[]) => steps.map((s) => s.name);
 describe('write-validation step order', () => {
   it('runs the mutators in the documented order', () => {
     expect(names(MUTATOR_STEPS)).toEqual([
+      'normalizeIntegrations',
       'sanitizeRichtextData',
       'normaliseTextFields',
       'normaliseCouponTypeFields',
@@ -34,6 +42,8 @@ describe('write-validation step order', () => {
 
   it('runs the collected validators in the documented order', () => {
     expect(names(COLLECTED_STEPS)).toEqual([
+      'validateSubscriptionContent',
+      'validateIntegrationsForWrite',
       'validateSiteConfigurationForWrite',
       'validateCouponTypeFields',
       'validateChangedFields',
@@ -46,6 +56,8 @@ describe('write-validation step order', () => {
       'validateMenuNotification',
       'validateDealOfTheDaySectionLimits',
       'validateIndependenceDaySale',
+      'validateTelegramPage',
+      'validateTelegramSettings',
       'validateContentManagerOfferStore',
       'validateAffiliateOfferForWrite',
       'validateAffiliateBrandFlip',
@@ -63,6 +75,8 @@ describe('write-validation step order', () => {
 
   it('keeps cross-row invariants together under the lock', () => {
     expect(names(LOCKED_STEPS)).toEqual([
+      'validateSubscriptionRoutes',
+      'validateTelegramRoutes',
       'validateIdentity',
       'validateUniqueEntityPageTemplate',
       'validateRedirect',
@@ -210,6 +224,7 @@ const fakeStrapi = ({ human }: { human: boolean }): Core.Strapi =>
     requestContext: { get: () => (human ? ({ state: {} } as any) : undefined) },
     log: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
     documents: () => ({
+      findFirst: async () => null,
       findOne: async () => null,
       findMany: async () => [],
       count: async () => 0,

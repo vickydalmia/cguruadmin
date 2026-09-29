@@ -147,6 +147,27 @@ describe('sanitizeRichtextData', () => {
     expect(terms.sections[0]?.body).toBe('<p>terms</p>');
   });
 
+  it('contains a legacy short description left open by the WordPress import', () => {
+    const data = {
+      shortDescription:
+        '<font size= "2"><p>DH Gate is a huge marketplace. <h2>Latest Codes</h2><font size= "2"><p>Save money.',
+    };
+
+    sanitizeRichtextData('api::store.store', data);
+
+    expect(data.shortDescription).toBe(
+      '<p>DH Gate is a huge marketplace. </p><h2>Latest Codes</h2><p>Save money.</p>'
+    );
+  });
+
+  it('sanitizes shortDescription on every entity that renders it as HTML', () => {
+    for (const uid of ['api::store.store', 'api::brand.brand', 'api::category.category', 'api::bank.bank']) {
+      const data = { shortDescription: '<font size="2"><p onclick="x()">text' };
+      sanitizeRichtextData(uid, data);
+      expect(data.shortDescription, uid).toBe('<p>text</p>');
+    }
+  });
+
   it('covers all six richtext fields', () => {
     expect(Object.keys(RICHTEXT_FIELDS).sort()).toEqual([
       'api::bank.bank',

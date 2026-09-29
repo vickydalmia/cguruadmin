@@ -11,6 +11,7 @@
     "migrate:fresh": "tsx src/index.ts --clean",
     "migrate:report": "tsx src/dry-run-report.ts",
     "fix:markdown-richtext": "tsx src/fix-markdown-richtext.ts",
+    "fix:richtext-html": "tsx src/fix-richtext-html.ts",
     "fix:seo-meta": "tsx src/fix-seo-meta.ts",
     "fix:cache-headers": "tsx src/fix-cache-headers.ts",
     "fix:content-srcsets": "tsx src/fix-content-srcsets.ts",

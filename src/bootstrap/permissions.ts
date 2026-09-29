@@ -61,7 +61,8 @@ export async function ensurePublicReadPermissions(strapi: Core.Strapi): Promise<
 // non-super-admin admin role, so re-granting them in the Roles UI will not
 // stick — the same stance as ensurePublicReadPermissions above. Super Admin
 // bypasses permission checks entirely, so it always keeps access.
-const SUPER_ADMIN_ONLY_SUBJECTS = ['api::footer.footer', 'api::global.global'];
+// The Telegram single type carries the bot token, so it is locked the same way.
+const SUPER_ADMIN_ONLY_SUBJECTS = ['api::footer.footer', 'api::global.global', 'api::telegram.telegram'];
 
 export async function restrictSingleTypesToSuperAdmin(strapi: Core.Strapi): Promise<void> {
   try {

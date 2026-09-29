@@ -103,6 +103,7 @@ export async function writeLocaleVersion(
   targetLocale: string,
   sourceEntry: any,
   translations: ReadonlyMap<string, string>,
+  assertPublicationLease?: (trx: any) => Promise<void>,
 ): Promise<{
   skippedRelations: LocalizedWritePlan['skippedRelations'];
   missingDependencies: RelationDependency[];
@@ -139,6 +140,7 @@ export async function writeLocaleVersion(
     plan,
     targetRowExisted: Boolean(existing),
     operation: 'upsert',
+    assertPublicationLease,
   }, () =>
     strapi.documents(uid as any).update({
       documentId,

@@ -1418,10 +1418,8 @@ export interface FooterSocialLink extends Struct.ComponentSchema {
         'instagram',
         'pinterest',
         'linkedin',
-        'telegram',
         'reddit',
         'twitter',
-        'whatsapp',
         'youtube',
       ]
     > &
@@ -2738,10 +2736,468 @@ export interface SharedTelegramCta extends Struct.ComponentSchema {
   };
   attributes: {
     ctaLabel: Schema.Attribute.String;
-    ctaUrl: Schema.Attribute.String;
     description: Schema.Attribute.Text;
     enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     heading: Schema.Attribute.String;
+  };
+}
+
+export interface SubscriptionBenefitCard extends Struct.ComponentSchema {
+  collectionName: 'components_subscription_benefit_card';
+  info: {
+    displayName: 'Subscription Benefit Card';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    icon: Schema.Attribute.Media<'images'>;
+    iconAlt: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<''>;
+    iconKey: Schema.Attribute.Enumeration<
+      ['verified', 'alerts', 'spam-free', 'free']
+    >;
+    label: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }>;
+  };
+}
+
+export interface SubscriptionBenefits extends Struct.ComponentSchema {
+  collectionName: 'components_subscription_benefits';
+  info: {
+    displayName: 'Subscription Benefits';
+  };
+  attributes: {
+    cards: Schema.Attribute.Component<'subscription.benefit-card', true>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<'Why follow CouponzGuru'>;
+  };
+}
+
+export interface SubscriptionHero extends Struct.ComponentSchema {
+  collectionName: 'components_subscription_hero';
+  info: {
+    displayName: 'Subscription Hero';
+  };
+  attributes: {
+    description: Schema.Attribute.Text &
+      Schema.Attribute.DefaultTo<'Pick your platform and get instant coupon codes, cashback offers, and price drops delivered straight to you always verified.'>;
+    headingAfter: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<'You Are'>;
+    headingBefore: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<"We're">;
+    headingHighlight: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<'Wherever'>;
+    headingSecondLine: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<"Don't Miss a Deal">;
+  };
+}
+
+export interface SubscriptionJoinCta extends Struct.ComponentSchema {
+  collectionName: 'components_subscription_join_cta';
+  info: {
+    displayName: 'Subscription Final CTA';
+  };
+  attributes: {
+    ctaHref: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 2048;
+      }>;
+    ctaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<'Join CouponzGuru on Telegram'>;
+    description: Schema.Attribute.Text &
+      Schema.Attribute.DefaultTo<"Not sure which to pick? Start with Telegram it's where deals land first.">;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<'Your next discount is one follow away'>;
+  };
+}
+
+export interface SubscriptionPlatformCard extends Struct.ComponentSchema {
+  collectionName: 'components_subscription_platform_card';
+  info: {
+    displayName: 'Subscription Platform Card';
+  };
+  attributes: {
+    count: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    countLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    ctaHref: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 2048;
+      }>;
+    ctaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    description: Schema.Attribute.Text;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    icon: Schema.Attribute.Media<'images'>;
+    iconAlt: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<''>;
+    name: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }>;
+    platform: Schema.Attribute.Enumeration<
+      ['telegram', 'youtube', 'instagram', 'facebook', 'reddit', 'x']
+    > &
+      Schema.Attribute.Required;
+  };
+}
+
+export interface SubscriptionPlatforms extends Struct.ComponentSchema {
+  collectionName: 'components_subscription_platforms';
+  info: {
+    displayName: 'Subscription Platforms';
+  };
+  attributes: {
+    cards: Schema.Attribute.Component<'subscription.platform-card', true>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<'Pick your platform'>;
+  };
+}
+
+export interface SubscriptionSignup extends Struct.ComponentSchema {
+  collectionName: 'components_subscription_signup';
+  info: {
+    displayName: 'Subscription Signup';
+  };
+  attributes: {
+    ctaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<'Subscribe'>;
+    description: Schema.Attribute.Text &
+      Schema.Attribute.DefaultTo<'Verified only. No spam, ever.'>;
+    emailLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<'Email address'>;
+    emailPlaceholder: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<'Enter your email'>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    errorMessage: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<'Subscription failed. Please try again.'>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<'Get the best deals delivered straight to your inbox'>;
+    icon: Schema.Attribute.Media<'images'>;
+    iconAlt: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<''>;
+    invalidMessage: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<'Please enter a valid email address.'>;
+    networkErrorMessage: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<'Unable to connect. Please try again.'>;
+    pendingMessage: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<'Subscribing\u2026'>;
+    successMessage: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<'You have successfully subscribed!'>;
+    trustText: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }> &
+      Schema.Attribute.DefaultTo<'No Spam \u00B7 Unsubscribe anytime'>;
+  };
+}
+
+export interface TelegramBenefits extends Struct.ComponentSchema {
+  collectionName: 'components_telegram_benefits';
+  info: {
+    displayName: 'Telegram Benefits Section';
+    icon: 'gift';
+  };
+  attributes: {
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    features: Schema.Attribute.Component<'telegram.feature-item', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 6;
+        },
+        number
+      >;
+    floatingCards: Schema.Attribute.Component<'telegram.feature-card', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 3;
+        },
+        number
+      >;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    phoneImage: Schema.Attribute.Media<'images'>;
+    phoneImageAlt: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+    trustLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+  };
+}
+
+export interface TelegramFavouriteStores extends Struct.ComponentSchema {
+  collectionName: 'components_telegram_favourite_stores';
+  info: {
+    displayName: 'Telegram Favourite Stores Section';
+    icon: 'shoppingCart';
+  };
+  attributes: {
+    ctaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 240;
+      }>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    moreLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    stores: Schema.Attribute.Relation<'oneToMany', 'api::store.store'>;
+  };
+}
+
+export interface TelegramFeatureCard extends Struct.ComponentSchema {
+  collectionName: 'components_telegram_feature_cards';
+  info: {
+    displayName: 'Telegram Feature Card';
+    icon: 'star';
+  };
+  attributes: {
+    icon: Schema.Attribute.Media<'images'>;
+    text: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 120;
+      }>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+  };
+}
+
+export interface TelegramFeatureItem extends Struct.ComponentSchema {
+  collectionName: 'components_telegram_feature_items';
+  info: {
+    displayName: 'Telegram Feature Item';
+    icon: 'check';
+  };
+  attributes: {
+    dot: Schema.Attribute.Enumeration<['green', 'blue', 'red']> &
+      Schema.Attribute.DefaultTo<'green'>;
+    label: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 50;
+      }>;
+  };
+}
+
+export interface TelegramHero extends Struct.ComponentSchema {
+  collectionName: 'components_telegram_heroes';
+  info: {
+    displayName: 'Telegram Hero';
+    icon: 'paperPlane';
+  };
+  attributes: {
+    cashbackBadgeLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 30;
+      }>;
+    ctaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    freeBadgeLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 30;
+      }>;
+    membersCountOverride: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 0;
+        },
+        number
+      >;
+    membersLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    previewCards: Schema.Attribute.Component<'telegram.preview-card', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 3;
+        },
+        number
+      >;
+    previewLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    subtitle: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 240;
+      }>;
+    titleAccent: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 30;
+      }>;
+    titleLead: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    titleTail: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 30;
+      }>;
+  };
+}
+
+export interface TelegramJoinCta extends Struct.ComponentSchema {
+  collectionName: 'components_telegram_join_ctas';
+  info: {
+    displayName: 'Telegram Join Banner';
+    icon: 'paperPlane';
+  };
+  attributes: {
+    ctaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 200;
+      }>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+  };
+}
+
+export interface TelegramLatestDeals extends Struct.ComponentSchema {
+  collectionName: 'components_telegram_latest_deals';
+  info: {
+    displayName: 'Telegram Latest Deals Section';
+    icon: 'priceTag';
+  };
+  attributes: {
+    ctaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    previewNote: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 200;
+      }>;
+  };
+}
+
+export interface TelegramPreviewCard extends Struct.ComponentSchema {
+  collectionName: 'components_telegram_preview_cards';
+  info: {
+    displayName: 'Telegram Preview Card';
+    icon: 'message';
+  };
+  attributes: {
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    icon: Schema.Attribute.Media<'images'>;
+    text: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
   };
 }
 
@@ -3046,6 +3502,21 @@ declare module '@strapi/strapi' {
       'shared.seo': SharedSeo;
       'shared.stat': SharedStat;
       'shared.telegram-cta': SharedTelegramCta;
+      'subscription.benefit-card': SubscriptionBenefitCard;
+      'subscription.benefits': SubscriptionBenefits;
+      'subscription.hero': SubscriptionHero;
+      'subscription.join-cta': SubscriptionJoinCta;
+      'subscription.platform-card': SubscriptionPlatformCard;
+      'subscription.platforms': SubscriptionPlatforms;
+      'subscription.signup': SubscriptionSignup;
+      'telegram.benefits': TelegramBenefits;
+      'telegram.favourite-stores': TelegramFavouriteStores;
+      'telegram.feature-card': TelegramFeatureCard;
+      'telegram.feature-item': TelegramFeatureItem;
+      'telegram.hero': TelegramHero;
+      'telegram.join-cta': TelegramJoinCta;
+      'telegram.latest-deals': TelegramLatestDeals;
+      'telegram.preview-card': TelegramPreviewCard;
       'testimonial.faq-section': TestimonialFaqSection;
       'testimonial.featured-section': TestimonialFeaturedSection;
       'testimonial.hero': TestimonialHero;

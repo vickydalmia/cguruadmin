@@ -34,8 +34,7 @@ export async function enabledContentLocales(
 
 // Boot-primed sync mirror for hot paths that cannot await (the ISR outbox
 // insert runs inside write transactions). Enabling/disabling translation
-// already requires a restart (locale creation, dispatcher start), so a
-// boot-time constant is the honest model, not a stale cache.
+// is propagated by the configuration watcher at most every 15 seconds.
 let activeLocaleCodes: readonly string[] = [];
 
 export async function primeEnabledContentLocales(

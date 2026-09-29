@@ -43,6 +43,11 @@ import {
 import { getWpOfferExpiryRaw } from "../utils/wp-offer-expiry.js";
 import { registerMigratedEntity } from "../utils/migration-registry.js";
 import { isValidAffiliateDestination } from "../utils/offer-quality.js";
+import {
+  normaliseOfferMeta,
+  offerMetaKeys,
+  sqlMetaKeyList,
+} from "../utils/wp-source-fields.js";
 import { config } from "../config.js";
 import {
   extractOfferCountries,
@@ -526,6 +531,24 @@ export async function runDeals(): Promise<void | PhaseOutcome> {
 
 // ── Bulk data fetchers ──────────────────────────────────────────────
 
+// Same alias treatment as phase 07: `code` / `link` / `image` resolve through
+// their source variants, downstream readers keep the canonical key.
+const DEAL_META_KEYS = sqlMetaKeyList(
+  offerMetaKeys([
+    "popular_coupon",
+    "deal_mrp",
+    "deal_sale_price",
+    "deal_discount",
+    "deal_image",
+    "deal_store",
+    "_action_manager_date",
+    "_expiration-date",
+    "_expiration-date-status",
+    "expiration-date",
+    "_edit_last",
+  ]),
+);
+
 async function getMetaBulk(
   postIds: number[],
 ): Promise<Map<number, Record<string, string>>> {
@@ -542,18 +565,16 @@ async function getMetaBulk(
       `SELECT post_id, meta_key, meta_value
        FROM wp_postmeta
        WHERE post_id IN (${placeholders})
-       AND meta_key IN (
-         'code', 'link', 'popular_coupon', 'image',
-         'deal_mrp', 'deal_sale_price', 'deal_discount', 'deal_image', 'deal_store',
-         '_action_manager_date', '_expiration-date', '_expiration-date-status', 'expiration-date',
-         '_edit_last'
-       )`,
+       AND meta_key IN (${DEAL_META_KEYS})`,
       ids,
     );
     for (const row of rows) {
       if (!map.has(row.post_id)) map.set(row.post_id, {});
       map.get(row.post_id)![row.meta_key] = row.meta_value;
     }
+  }
+  for (const [postId, meta] of map) {
+    map.set(postId, normaliseOfferMeta(meta));
   }
   return map;
 }

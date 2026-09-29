@@ -1,0 +1,34 @@
+{
+  "collectionName": "components_telegram_favourite_stores",
+  "info": {
+    "displayName": "Telegram Favourite Stores Section",
+    "icon": "shoppingCart"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "description": {
+      "type": "text",
+      "maxLength": 240
+    },
+    "stores": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::store.store"
+    },
+    "moreLabel": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "ctaLabel": {
+      "type": "string",
+      "maxLength": 40
+    }
+  }
+}

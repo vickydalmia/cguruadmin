@@ -3,8 +3,8 @@
 // opted-in locale rows, re-prime the sync locale mirror the ISR path
 // expansion reads, then start the job dispatcher), so an admin who picks a
 // language does not have to restart the CMS they are talking to. Other CMS
-// containers still pick the change up at their next restart — the mirror
-// is per process; only the designated worker process starts the dispatcher.
+// containers pick changes up through the 15-second configuration watcher;
+// only the designated worker process starts the dispatcher.
 //
 // Never fails the admin's save: every failure is logged loudly and swallowed.
 import type { Core } from '@strapi/strapi';
@@ -52,7 +52,7 @@ export async function applyTranslationSettings(
     logTranslation(strapi, 'error', 'translation.hot_apply_failed', {
       step: 'content-locales',
       error,
-      hint: 'restart the CMS to retry the locale bootstrap',
+      hint: 'save Country Setup again to retry the locale bootstrap; the boot-time bootstrap also retries on its own',
     });
     return { ok: false, error };
   }

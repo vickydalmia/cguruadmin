@@ -35,7 +35,10 @@ function digits(raw: string): string {
 }
 
 // Currency and qualifier fragments, shared across patterns.
-const CUR = String.raw`(?:rs\.?|₹|inr|usd|\$)`;
+// `S$` / `SGD` (Singapore dollar) are recognised as their own marker. The
+// lookbehind keeps `US$10` and `Gets$5` matching as a plain `$` exactly as
+// before, so India/USA/UAE titles produce the same badges.
+const CUR = String.raw`(?:rs\.?|₹|inr|usd|(?<![a-z])s\$|sgd|\$)`;
 const QUAL = String.raw`up\s?to|flat|extra|additional|min(?:imum)?\.?`;
 const PCT = String.raw`\d{1,3}(?:\.\d+)?`; // allow decimals: 19.2%
 // Optional "-Y" / "to Y" tail so a range ("40-60%", "30 To 80%") keeps the
@@ -49,9 +52,16 @@ const NOT_SCALED = String.raw`(?!\s*(?:lakhs?|lacs?|crores?|cr|million|thousand|
 // price ("Plan Flat At Rs.599", "Win Rs.100") is never read as a discount.
 const OFF_CTX = String.raw`[^%]{0,20}?\b(?:off|discount|save|saving)`;
 
-/** "$" for dollar amounts, "₹" for everything else (rs/inr/₹). */
+type CurrencySymbol = "$" | "₹" | "S$";
+
+/** "S$" for Singapore dollars, "$" for other dollar amounts, "₹" for the rest (rs/inr/₹). */
+function currencySymbolFor(symbol: string): CurrencySymbol {
+  if (/^s\$|sgd/i.test(symbol.trim())) return "S$";
+  return /\$|usd/i.test(symbol) ? "$" : "₹";
+}
+
 function money(symbol: string, amount: string): string {
-  return (/\$|usd/i.test(symbol) ? "$" : "₹") + digits(amount);
+  return currencySymbolFor(symbol) + digits(amount);
 }
 
 /** Normalise a qualifier word to its canonical uppercase badge form. */
@@ -197,8 +207,11 @@ export type OfferExtractionOptions = {
   currencyCode?: string;
 };
 
-function defaultCurrencySymbol(options: OfferExtractionOptions): "$" | "₹" {
-  return options.currencyCode?.trim().toUpperCase() === "USD" ? "$" : "₹";
+function defaultCurrencySymbol(options: OfferExtractionOptions): CurrencySymbol {
+  const code = options.currencyCode?.trim().toUpperCase();
+  if (code === "USD") return "$";
+  if (code === "SGD") return "S$";
+  return "₹";
 }
 
 function matchOffer(text: string, options: OfferExtractionOptions): OfferParts | null {

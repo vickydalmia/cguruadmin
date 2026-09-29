@@ -1,4 +1,7 @@
+import { subscriptionRouteMetadata } from '../../subscription-page/services/subscription-route';
+import { telegramRouteMetadata } from '../../telegram-page/services/telegram-route';
 import type { Core } from '@strapi/strapi';
+import { publicGlobalIntegrations, publicChannelFooter } from '../../global/services/public-integrations';
 import { arrayizeOfferText } from '../../../utils/offer-text';
 import { attachFestiveOffers } from '../../../utils/festive-offer-response';
 import {
@@ -89,11 +92,14 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
 
   async siteChrome(ctx) {
     const locale = requestedOfferTargetLocale(ctx) ?? DEFAULT_CONTENT_LOCALE;
-    const [menu, footer, global, siteSettings] = await Promise.all([
+    const [menu, footer, global, siteSettings, sharedChannels] = await Promise.all([
       strapi.documents('api::menu.menu').findFirst({ locale, populate: MENU_POPULATE as any }),
       strapi.documents('api::footer.footer').findFirst({ locale, populate: FOOTER_POPULATE as any }),
       strapi.documents('api::global.global').findFirst({ locale, populate: GLOBAL_POPULATE as any }),
       (strapi.service('api::site-configuration.site-configuration') as any).publicSettings(),
+      locale === DEFAULT_CONTENT_LOCALE ? Promise.resolve(null) : strapi.documents('api::global.global').findFirst({
+        locale: DEFAULT_CONTENT_LOCALE, fields: ['telegramUrl', 'whatsappUrl'] as any,
+      }),
     ]);
 
     const [sanitizedMenu, sanitizedFooter, sanitizedGlobal] = await Promise.all([
@@ -119,10 +125,11 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     );
     await attachStablePublicOfferIdsForRequest(strapi, ctx, filtered);
 
+    const publicGlobal = publicGlobalIntegrations(sanitizedGlobal, sharedChannels ?? global);
     return ctx.send({
       menu: filtered.menu,
-      footer: filtered.footer,
-      global: sanitizedGlobal,
+      footer: publicChannelFooter(filtered.footer, publicGlobal),
+      global: publicGlobal,
       siteSettings,
     });
   },
@@ -218,6 +225,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       return [routeMetadata(`/careers/${slug}/`, job)];
     });
 
-    return ctx.send({ data: [...pages, ...jobRoutes, ...campaignPages.flat()] });
+    const subscriptionPages = await subscriptionRouteMetadata(strapi, locale);
+    const telegramPages = await telegramRouteMetadata(strapi, locale);
+    return ctx.send({ data: [...pages, ...jobRoutes, ...campaignPages.flat(), ...subscriptionPages, ...telegramPages] });
   },
 });

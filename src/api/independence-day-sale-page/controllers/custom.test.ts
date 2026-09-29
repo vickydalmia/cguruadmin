@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import createIndependenceDaySaleController from './custom';
 import { COUPON_FIELDS } from './independence-day-sale-populate';
+import { setEnabledContentLocaleCodesForTest } from '../../../translation/locales/registry';
 import {
   fillAllCouponHolder,
   fillAllDealHolder,
@@ -136,5 +138,34 @@ describe('Independence Day sale All Coupons and All Deals policy', () => {
       2,
       expect.objectContaining({ start: 100, limit: 100 }),
     );
+  });
+});
+
+describe('independenceDaySaleFull locale', () => {
+  function harness() {
+    const findFirst = vi.fn(async () => null);
+    const strapi = {
+      documents: vi.fn(() => ({ findFirst })),
+      contentType: vi.fn(() => ({})),
+      contentAPI: { sanitize: { output: vi.fn(async (rows: any) => rows) } },
+    } as any;
+    const ctx = { state: { auth: null }, notFound: vi.fn(() => 'not-found'), send: vi.fn() };
+    return { controller: createIndependenceDaySaleController({ strapi }), ctx, findFirst };
+  }
+
+  it('reads the requested enabled locale and falls back to English otherwise', async () => {
+    setEnabledContentLocaleCodesForTest(['ar']);
+    try {
+      const localized = harness();
+      await localized.controller.independenceDaySaleFull({ ...localized.ctx, query: { locale: 'ar' } });
+      expect(localized.findFirst.mock.calls[0]?.[0]).toMatchObject({ locale: 'ar' });
+
+      const unknown = harness();
+      await unknown.controller.independenceDaySaleFull({ ...unknown.ctx, query: { locale: 'zz' } });
+      expect(unknown.findFirst.mock.calls[0]?.[0]).toMatchObject({ locale: 'en' });
+      expect(unknown.ctx.notFound).toHaveBeenCalledWith('Independence Day sale page not found');
+    } finally {
+      setEnabledContentLocaleCodesForTest([]);
+    }
   });
 });

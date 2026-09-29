@@ -1,3 +1,5 @@
+import { booleanEnv, integerEnv } from '../utils/env-parsers';
+
 export interface IsrOutboxConfig {
   enabled: boolean;
   gatewayUrl: string;
@@ -12,30 +14,6 @@ export interface IsrOutboxConfig {
   retentionDays: number;
   maxPaths: number;
   maxPayloadBytes: number;
-}
-
-function booleanEnv(name: string, fallback: boolean): boolean {
-  const raw = process.env[name]?.trim().toLowerCase();
-  if (!raw) return fallback;
-  if (raw === 'true') return true;
-  if (raw === 'false') return false;
-  throw new Error(`${name} must be true or false`);
-}
-
-function integerEnv(
-  name: string,
-  fallback: number,
-  minimum: number,
-  maximum: number,
-): number {
-  const raw = process.env[name]?.trim();
-  const value = raw ? Number(raw) : fallback;
-  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
-    throw new Error(
-      `${name} must be an integer between ${minimum} and ${maximum}`,
-    );
-  }
-  return value;
 }
 
 export interface IsrOutboxPayloadBounds {
@@ -87,13 +65,13 @@ export function readIsrOutboxConfig(): IsrOutboxConfig {
   const adminSecret = process.env.ISR_ADMIN_SECRET?.trim() ?? '';
   const requestTimeoutMs = integerEnv(
     'ISR_OUTBOX_REQUEST_TIMEOUT_MS',
-    90_000,
+    330_000,
     1_000,
-    120_000,
+    600_000,
   );
   const leaseMs = integerEnv(
     'ISR_OUTBOX_LEASE_MS',
-    120_000,
+    requestTimeoutMs + 30_000,
     10_000,
     600_000,
   );

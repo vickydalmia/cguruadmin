@@ -29,12 +29,29 @@ test("spot-checks the uid → table mapping", () => {
   assert.ok("api::store.store" in RICHTEXT_FIELDS);
   assert.deepEqual(RICHTEXT_FIELDS["api::store.store"], [
     "description",
+    "shortDescription",
     "festiveOfferDescription",
   ]);
   assert.ok(
     RICHTEXT_TARGETS.some(
       (target) => target.table === "stores" && target.column === "description"
     )
+  );
+  // Attribute names are camelCase; Strapi's columns are snake_case.
+  assert.ok(
+    RICHTEXT_TARGETS.some(
+      (target) => target.table === "stores" && target.column === "short_description"
+    )
+  );
+  assert.ok(
+    RICHTEXT_TARGETS.some(
+      (target) =>
+        target.table === "brands" && target.column === "festive_offer_description"
+    )
+  );
+  assert.ok(
+    !RICHTEXT_TARGETS.some((target) => /[A-Z]/.test(target.column)),
+    "no camelCase column names"
   );
   assert.ok(
     RICHTEXT_TARGETS.some(
@@ -45,7 +62,7 @@ test("spot-checks the uid → table mapping", () => {
     RICHTEXT_TARGETS.some(
       (target) =>
         target.table === "stores" &&
-        target.column === "festiveOfferDescription",
+        target.column === "festive_offer_description",
     ),
   );
 });

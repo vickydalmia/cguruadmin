@@ -22,11 +22,16 @@ import {
   insertLink,
   linkMedia,
 } from "../utils/strapi-insert.js";
-import { clean } from "../utils/sanitize.js";
+import { clean, cleanText } from "../utils/sanitize.js";
 import { logger } from "../utils/logger.js";
 import { HEADER_SEARCH_SUGGESTIONS } from "../utils/site-selection-defaults.js";
 import { migrationRegistryRows } from "../utils/migration-registry.js";
 import { isAcfTrue } from "../utils/acf.js";
+import {
+  OFFER_META_ALIASES,
+  firstAliasValue,
+  sqlMetaKeyList,
+} from "../utils/wp-source-fields.js";
 
 /**
  * Phase 13 — Site Content
@@ -162,10 +167,8 @@ const SOCIAL_PLATFORMS: ReadonlyArray<string> = [
   "instagram",
   "pinterest",
   "linkedin",
-  "telegram",
   "reddit",
   "twitter",
-  "whatsapp",
   "youtube",
 ];
 
@@ -606,7 +609,7 @@ async function seedGlobal(summary: string[]): Promise<void> {
     published_at: now,
     created_at: now,
     updated_at: now,
-    locale: null,
+    locale: 'en',
   };
 
   // Only write columns that actually exist (schema drift safety)
@@ -774,17 +777,28 @@ async function wordpressCouponImageRefs(
   for (let start = 0; start < postIds.length; start += batchSize) {
     const batch = postIds.slice(start, start + batchSize);
     const placeholders = batch.map(() => "?").join(",");
-    const rows = await wpQuery<{ post_id: number; meta_value: string }>(
-      `SELECT post_id, meta_value
+    // The Coupon image is read through its source aliases (Singapore stores
+    // it as `_cmb_coupon_image`); the canonical key wins when both exist.
+    const rows = await wpQuery<{
+      post_id: number;
+      meta_key: string;
+      meta_value: string;
+    }>(
+      `SELECT post_id, meta_key, meta_value
        FROM wp_postmeta
        WHERE post_id IN (${placeholders})
-         AND meta_key = 'image'`,
+         AND meta_key IN (${sqlMetaKeyList(OFFER_META_ALIASES.image)})`,
       [...batch],
     );
+    const rowsByPost = new Map<number, typeof rows>();
     for (const row of rows) {
-      if (String(row.meta_value ?? "").trim()) {
-        refs.set(row.post_id, row.meta_value);
-      }
+      const list = rowsByPost.get(row.post_id) ?? [];
+      list.push(row);
+      rowsByPost.set(row.post_id, list);
+    }
+    for (const [postId, postRows] of rowsByPost) {
+      const value = firstAliasValue(OFFER_META_ALIASES.image, postRows);
+      if (value !== undefined) refs.set(postId, value);
     }
   }
   return refs;
@@ -930,7 +944,7 @@ async function seedHomepage(
     published_at: now,
     created_at: now,
     updated_at: now,
-    locale: null,
+    locale: 'en',
   });
 
   const sectionCounts = await buildHomepageTree(homepageId, data, true);
@@ -1124,7 +1138,8 @@ async function gatherHomepageData(
     );
     bankOffers = limitHomepageBankOffers(rows).map((r) => ({
       bankId: r.id,
-      subtitle: truncate(clean(r.short_description), 80),
+      // short_description is HTML; the subtitle is a one-line string.
+      subtitle: truncate(cleanText(r.short_description), 80),
     }));
   } else {
     logger.warn("banks table not found — bankOffers section skipped");
@@ -2030,7 +2045,7 @@ async function seedMenu(
     published_at: now,
     created_at: now,
     updated_at: now,
-    locale: null,
+    locale: 'en',
   });
 
   // ── topStores relation (same list as popularStores, max 18) ──
@@ -2217,7 +2232,7 @@ async function seedFooter(summary: string[]): Promise<void> {
     published_at: now,
     created_at: now,
     updated_at: now,
-    locale: null,
+    locale: 'en',
   });
 
   const navLinkStoreLnk = await detectLnk("components_nav_links", "store", "store");

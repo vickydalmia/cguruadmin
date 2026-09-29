@@ -9,6 +9,12 @@ import type { Core } from '@strapi/strapi';
 // instead of the link URL). Strapi has no schema.json knob for this; it lives
 // in the DB config store, so pin it here (config-as-code, survives DB wipes).
 const COMPONENT_ENTRY_TITLES: Record<string, string> = {
+  'subscription.platform-card': 'name',
+  'subscription.benefit-card': 'label',
+  'subscription.signup': 'heading',
+  'subscription.platforms': 'heading',
+  'subscription.benefits': 'heading',
+  'subscription.join-cta': 'heading',
   'homepage.slider-slide': 'altText',
   // NOTE: relations are NOT usable here — server validation accepts them but
   // the 5.39 admin edit form crashes rendering `{connect, disconnect}` state
@@ -41,6 +47,14 @@ const COMPONENT_ENTRY_TITLES: Record<string, string> = {
   'deal-day.telegram-deals': 'heading',
   'deal-day.telegram-deal-item': 'titleOverride',
   'deal-day.section-heading': 'heading',
+  'telegram.hero': 'titleLead',
+  'telegram.preview-card': 'title',
+  'telegram.benefits': 'heading',
+  'telegram.feature-card': 'title',
+  'telegram.feature-item': 'label',
+  'telegram.latest-deals': 'heading',
+  'telegram.favourite-stores': 'heading',
+  'telegram.join-cta': 'heading',
   'festival.coupon-category-tab': 'labelOverride',
   'festival.coupon-store-tab': 'labelOverride',
   'shared.cta': 'label',
@@ -113,9 +127,12 @@ export async function ensureComponentEntryTitles(strapi: Core.Strapi): Promise<v
 // Single types' edit-view headers show their mainField — pin it to the
 // `title` attribute ("Homepage"/"Menu"/"Footer") instead of opaque IDs.
 const SINGLE_TYPE_ENTRY_TITLES = [
+  'api::subscription-page.subscription-page',
   'api::homepage.homepage',
   'api::deal-of-the-day-page.deal-of-the-day-page',
   'api::independence-day-sale-page.independence-day-sale-page',
+  'api::telegram-page.telegram-page',
+  'api::telegram.telegram',
   'api::menu.menu',
   'api::footer.footer',
   'api::global.global',

@@ -1,3 +1,4 @@
+import { readWorkerHeartbeat } from './worker-health';
 import { runInBackground } from '../../background/execution-context';
 import { onceOnCommit } from '../../utils/once-on-commit';
 // Translation RUNTIME: singleton lifecycle (start/wake/stop/status) wired
@@ -22,14 +23,12 @@ let dispatcher: TranslationDispatcher | null = null;
 let pendingStops = 0;
 
 /**
- * Is the subsystem live on this deployment? Both gates must hold: the site
- * opted in (Country Setup) AND the env block parses. Used by the enqueue
- * path so disabled deployments never write a single outbox row.
+ * Enqueue eligibility is the site opt-in, independent of this process role.
+ * A missing worker/provider is an observable backlog, never a lost editor save.
  */
 export async function translationRuntimeActive(
   strapi: Core.Strapi,
 ): Promise<boolean> {
-  if (!dispatcher) return false;
   return (await enabledContentLocales(strapi)).length > 0;
 }
 
@@ -104,7 +103,26 @@ export function stopTranslationOutbox(): Promise<void> {
   }).finally(() => { pendingStops -= 1; });
 }
 
-export async function getTranslationStatus() {
+export async function getTranslationStatus(strapi?: Core.Strapi) {
+  if (strapi) {
+    const enabled = await translationRuntimeActive(strapi);
+    if (!enabled) return { ok: true, enabled: false, dispatcher: null, outbox: null };
+    const [worker, outbox] = await Promise.all([
+      readWorkerHeartbeat(strapi), translationStore(strapi).statusSummary(),
+    ]);
+    const config = translationConfigFromEnv();
+    const limits = readTranslationOutboxConfig();
+    const backlogAgeMs = outbox.oldestUndeliveredAt
+      ? Date.now() - new Date(outbox.oldestUndeliveredAt).getTime() : 0;
+    const backlogOverdue = backlogAgeMs >= limits.backlogAlertMs;
+    return { enabled: true, ok: worker.healthy && !backlogOverdue && outbox.expiredProcessing === 0,
+      dispatcher: { ...worker, running: worker.healthy, stopped: !worker.healthy,
+        model: config?.model ?? null, provider: config?.provider ?? null,
+        lastError: worker.healthy ? null : 'Translation worker heartbeat unavailable or unhealthy' },
+      outbox: { ...outbox, dailyBudgetUsd: config?.dailyBudgetUsd || null,
+        backlogAgeMs, backlogOverdue, backlogAlertMs: limits.backlogAlertMs },
+    };
+  }
   if (!dispatcher) {
     return {
       ok: true,

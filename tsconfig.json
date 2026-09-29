@@ -38,6 +38,7 @@
     "src/admin/",
     // Do not include test files
     "**/*.test.*",
+    "**/*.test-utils.*",
     // Do not include plugins in the server compilation
     "src/plugins/**",
     // Migration has its own tsconfig

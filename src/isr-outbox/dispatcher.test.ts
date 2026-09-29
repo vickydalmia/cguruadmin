@@ -430,3 +430,11 @@ describe('dispatchOne', () => {
     expect(results).toEqual([invalid]);
   });
 });
+
+it('delivers manual commands through the versioned capability endpoint', async () => {
+  const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ paths: [{ path: '/', version: 2 }] }), { status: 202 }));
+  await deliverOutboxEvent({ ...event, payload: { manualRefresh: true, excludeLocalePrefixes: ['/ar'], paths: ['/'] } }, {
+    gatewayUrl: 'http://gateway.test', adminSecret: 'secret', requestTimeoutMs: 1000,
+  }, fetchImpl as any);
+  expect(fetchImpl.mock.calls[0][0]).toBe('http://gateway.test/internal/isr/manual-refresh');
+});

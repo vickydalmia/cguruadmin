@@ -1,3 +1,4 @@
+import { enabledContentLocales } from './locales/registry';
 import { runInBackground } from '../background/execution-context';
 // Durable, resumable catalogue scans. The runner role is independent from
 // the paid translation dispatcher so deployments can isolate scans in a
@@ -47,6 +48,8 @@ const runningIds = new Set<string>();
 let runnerTimer: ReturnType<typeof setInterval> | null = null;
 let runnerStrapi: Core.Strapi | null = null;
 let runnerTicking = false;
+
+class BackfillRunPausedError extends Error {}
 
 class BackfillRunLeaseLostError extends Error {
   constructor() {
@@ -130,7 +133,7 @@ function stateFromRow(row: any): BackfillRunState {
 
 export type StartBackfillInput = Omit<
   BackfillOptions,
-  'onProgress' | 'onCheckpoint' | 'checkpoint'
+  'onProgress' | 'onCheckpoint' | 'checkpoint' | 'beforePage'
 > & { dryRun?: boolean };
 
 async function executeRun(
@@ -144,6 +147,14 @@ async function executeRun(
   runningIds.add(id);
   try {
     const options: BackfillOptions = {
+      beforePage: async () => {
+        const pool = strapi.db.connection.client?.pool;
+        const enabled = await enabledContentLocales(strapi);
+        if (enabled.length === 0 || (pool?.numPendingAcquires?.() ?? 0) > 0 ||
+            process.memoryUsage().rss > Number(process.env.TRANSLATION_BACKFILL_MAX_RSS_MB ?? (process.env.NODE_ENV === 'test' ? Infinity : 400)) * 1024 * 1024) {
+          throw new BackfillRunPausedError();
+        }
+      },
       uids: input.uids,
       locales: input.locales,
       force: input.force,
@@ -184,7 +195,11 @@ async function executeRun(
       );
     }
   } catch (cause) {
-    if (cause instanceof BackfillRunLeaseLostError) {
+    if (cause instanceof BackfillRunPausedError) {
+      await strapi.db.connection(TRANSLATION_BACKFILL_RUNS_TABLE)
+        .where({ id, status: 'running', lock_token: lockToken })
+        .update({ status: 'pending', locked_at: null, lock_token: null });
+    } else if (cause instanceof BackfillRunLeaseLostError) {
       strapi.log.info(`[translation] backfill ${id} stopped after cancellation or lease loss`);
     } else {
       const error = cause instanceof Error ? cause.message : String(cause);
@@ -212,9 +227,7 @@ function launchRun(
   input: StartBackfillInput,
   checkpoint: BackfillCheckpoint | null,
 ): void {
-  void runInBackground(() => executeRun(strapi, id, lockToken, input, checkpoint)).finally(() => {
-    void tickRunner();
-  });
+  void runInBackground(() => executeRun(strapi, id, lockToken, input, checkpoint));
 }
 
 function tickRunner(): Promise<void> {
@@ -229,6 +242,7 @@ async function tickRunnerClean(): Promise<void> {
   const strapi = runnerStrapi;
   const generation = runnerGeneration;
   try {
+    if ((await enabledContentLocales(strapi)).length === 0) return;
     await resumeTranslationBackfillRun(strapi, () => runnerGeneration === generation && runnerStrapi === strapi);
   } catch (cause) {
     strapi.log.error(

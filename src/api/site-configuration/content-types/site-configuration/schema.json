@@ -16,6 +16,7 @@
     }
   },
   "attributes": {
+    "configurationRevision": { "type": "integer", "default": 0, "min": 0, "column": { "notNullable": true, "defaultTo": 0 } },
     "siteName": { "type": "string", "required": true, "default": "CouponzGuru", "maxLength": 80 },
     "countryName": { "type": "string", "required": true, "default": "India", "maxLength": 80 },
     "countryCode": { "type": "string", "required": true, "default": "IN", "minLength": 2, "maxLength": 2, "regex": "^[A-Z]{2}$" },

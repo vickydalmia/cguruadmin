@@ -1,3 +1,5 @@
+import { fieldFingerprints, selectTranslationFields } from '../field-memory';
+import { withLocalePublication } from '../publication-limit';
 import { runInBackground } from '../../background/execution-context';
 import { randomUUID } from 'node:crypto';
 // Translation DISPATCHER: claims jobs from translation_outbox and runs the
@@ -219,6 +221,7 @@ export class TranslationDispatcher {
 
   private async runCycle(): Promise<void> {
     try {
+      if (this.stopped || (await enabledContentLocales(this.strapi)).length === 0) return;
       const now = Date.now();
       if (now >= this.nextCleanupAt) {
         this.nextCleanupAt = now + CLEANUP_INTERVAL_MS;
@@ -243,8 +246,8 @@ export class TranslationDispatcher {
         }
       }
       await Promise.all(
-        Array.from({ length: this.outboxConfig.batchSize }, () =>
-          this.dispatchOne(),
+        Array.from({ length: Math.min(2, this.outboxConfig.batchSize) }, (_, index) =>
+          this.dispatchOne(index > 0),
         ),
       );
       this.lastError = null;
@@ -258,9 +261,11 @@ export class TranslationDispatcher {
     }
   }
 
-  private async dispatchOne(): Promise<boolean> {
+  private async dispatchOne(incrementalOnly = false): Promise<boolean> {
     if (this.stopped) return false;
-    const job = await this.store.claim();
+    const locales = await enabledContentLocales(this.strapi);
+    if (locales.length === 0) return false;
+    const job = await this.store.claim({ incrementalOnly, locales: locales.map((locale) => locale.code) });
     if (!job) return false;
     let leaseLost = false;
     let heartbeatRunning = false;
@@ -285,6 +290,9 @@ export class TranslationDispatcher {
     }, heartbeatMs);
     heartbeat.unref?.();
     const assertLease = async () => {
+      if (!(await enabledContentLocales(this.strapi)).some((locale) => locale.code === job.targetLocale)) {
+        throw new TranslationError('TRANSLATION_UNAVAILABLE', { detail: 'target language is disabled' });
+      }
       if (leaseLost || !(await this.store.refreshLease(job))) {
         leaseLost = true;
         throw new TranslationError('TRANSLATION_LEASE_LOST', {
@@ -578,8 +586,14 @@ export class TranslationDispatcher {
           typeof memory[leaf.path] === 'string' &&
           memory[leaf.path].trim().length > 0,
       );
+    const leafSourceHashes = fieldFingerprints(leaves, translationPromptFingerprint(this.strapi, locale));
+    const fields = selectTranslationFields(leaves, leafSourceHashes, state?.leafSourceHashes, memory, job.force);
     const textCurrent =
       !job.force && state?.sourceHash === hash && memoryComplete;
+
+    if (textCurrent && !state?.leafSourceHashes) {
+      await this.store.seedFieldFingerprints?.(job.uid, job.documentId, job.targetLocale, hash, leafSourceHashes);
+    }
 
     // Required localized relations are publication dependencies, not a text
     // failure. Resolve them before the provider so a child that has not been
@@ -622,7 +636,7 @@ export class TranslationDispatcher {
         this.provider,
         this.config,
         locale,
-        leaves,
+        fields.changed,
         {
           uid: job.uid,
           contentType: model?.info?.displayName ?? job.uid,
@@ -638,7 +652,7 @@ export class TranslationDispatcher {
           ),
       );
       await assertLease();
-      translations = result.translations;
+      translations = new Map([...fields.reused, ...result.translations]);
       needsReview = result.needsReview;
       reviewNotes = result.reviewNotes;
       usage = {
@@ -712,6 +726,7 @@ export class TranslationDispatcher {
           : null,
         lastError: null,
         translations: Object.fromEntries(translations),
+        leafSourceHashes,
         publishedPlanHash: null,
       });
     }
@@ -783,14 +798,20 @@ export class TranslationDispatcher {
     await assertLease();
     let writeResult: Awaited<ReturnType<typeof writeLocaleVersion>>;
     try {
-      writeResult = await writeLocaleVersion(
+      writeResult = await withLocalePublication(() => writeLocaleVersion(
         this.strapi,
         job.uid,
         job.documentId,
         job.targetLocale,
         latestSource,
         translations,
-      );
+        async (trx: any) => {
+          let lease = trx('translation_outbox').where({ id: job.id, status: 'processing', lock_token: job.lockToken });
+          if (['pg', 'postgres', 'postgresql'].includes(trx.client.config.client)) lease = lease.forUpdate();
+          const owned = await lease.first('id');
+          if (!owned) throw new TranslationError('TRANSLATION_LEASE_LOST');
+        },
+      ));
     } catch (cause) {
       if (cause instanceof TranslationDependencyBlockedError) {
         return {
@@ -813,6 +834,7 @@ export class TranslationDispatcher {
           : null,
         lastError: cause instanceof Error ? cause.message : String(cause),
         translations: Object.fromEntries(translations),
+        leafSourceHashes,
         publishedPlanHash: null,
       });
       throw new TranslationError('TRANSLATION_WRITE_REJECTED', {
@@ -822,6 +844,8 @@ export class TranslationDispatcher {
     }
     await assertLease();
 
+    // The success write carries the field fingerprints too: it is the row the
+    // next English edit reads to decide which fields actually changed.
     await this.store.upsertState(job.uid, job.documentId, job.targetLocale, {
       sourceHash: hash,
       needsReview,
@@ -830,6 +854,7 @@ export class TranslationDispatcher {
         : null,
       lastError: null,
       translations: Object.fromEntries(translations),
+      leafSourceHashes,
       publishedPlanHash: writeResult.planHash,
     });
 

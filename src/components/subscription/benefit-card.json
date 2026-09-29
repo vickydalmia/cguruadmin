@@ -1,0 +1,37 @@
+{
+  "collectionName": "components_subscription_benefit_card",
+  "info": {
+    "displayName": "Subscription Benefit Card"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "iconKey": {
+      "type": "enumeration",
+      "enum": [
+        "verified",
+        "alerts",
+        "spam-free",
+        "free"
+      ]
+    },
+    "icon": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": [
+        "images"
+      ]
+    },
+    "iconAlt": {
+      "type": "string",
+      "maxLength": 300,
+      "default": ""
+    },
+    "label": {
+      "type": "string",
+      "maxLength": 300
+    }
+  }
+}

@@ -16,6 +16,11 @@ import {
 import { getAllPoolMappings } from "../utils/id-maps.js";
 import { isValidAffiliateDestination } from "../utils/offer-quality.js";
 import {
+  OFFER_META_ALIASES,
+  normaliseOfferMeta,
+  sqlMetaKeyList,
+} from "../utils/wp-source-fields.js";
+import {
   TAXONOMY_DESCRIPTION_TARGETS,
   auditTaxonomyDescriptionCoverage,
   type StrapiTaxonomyDescriptionRow,
@@ -25,6 +30,14 @@ import {
   classifyTaxonomyTerms,
   formatTaxonomyClassificationReport,
 } from "../utils/taxonomy-classification.js";
+
+const VERIFY_META_KEYS = sqlMetaKeyList([
+  "_action_manager_date",
+  "_expiration-date",
+  "_expiration-date-status",
+  "expiration-date",
+  ...OFFER_META_ALIASES.link,
+]);
 
 interface CountCheck {
   entity: string;
@@ -72,13 +85,7 @@ async function countImportableWpOffers(
       `SELECT post_id, meta_key, meta_value
        FROM wp_postmeta
        WHERE post_id IN (${placeholders})
-         AND meta_key IN (
-           '_action_manager_date',
-           '_expiration-date',
-           '_expiration-date-status',
-           'expiration-date',
-           'link'
-         )`,
+         AND meta_key IN (${VERIFY_META_KEYS})`,
       ids,
     );
     for (const row of rows) {
@@ -86,6 +93,11 @@ async function countImportableWpOffers(
       meta[row.meta_key] = row.meta_value;
       metaByPost.set(row.post_id, meta);
     }
+  }
+  // Mirror phases 07/08: the affiliate destination is read through its
+  // source aliases so the expected count matches what those phases import.
+  for (const [postId, meta] of metaByPost) {
+    metaByPost.set(postId, normaliseOfferMeta(meta));
   }
 
   const lifecycleImportable = posts.filter((post) => {

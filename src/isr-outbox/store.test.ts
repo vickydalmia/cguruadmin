@@ -54,6 +54,16 @@ describe('ISR outbox lease ownership', () => {
     attemptCount: 0,
   };
 
+  it.each([[0, 'gateway returned 404'], [11, 'network unavailable']])('terminates an undeliverable manual command (%s)', async (attemptCount, error) => {
+    const where = vi.fn().mockReturnThis();
+    const update = vi.fn(async () => 1);
+    const store = new IsrOutboxStore({ db: { connection: () => ({ where, update }) } } as any, 120000, 300000);
+    const result = await store.scheduleRetry({ ...event, attemptCount: Number(attemptCount), payload: { manualRefresh: true, all: true } }, String(error));
+    expect(result).toMatchObject({ owned: true, delayMs: 0 });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ status: 'failed', lock_token: null, last_error: error }));
+    expect(where).toHaveBeenCalledWith(expect.objectContaining({ lock_token: event.lockToken }));
+  });
+
   it('uses the lock token in the delivered compare-and-swap', async () => {
     const where = vi.fn().mockReturnThis();
     const update = vi.fn(async () => 0);

@@ -53,8 +53,8 @@ function StatusBadges({ status }: { status: TranslationOutboxStatus }) {
   const summary = queueSummary(status);
   return (
     <Flex gap={2} wrap="wrap" alignItems="center">
-      <Badge variant={status.enabled ? 'success' : 'danger'}>
-        {status.enabled ? 'Translator active' : 'Translator not active'}
+      <Badge variant={status.enabled && status.ok ? 'success' : 'warning'}>
+        {status.enabled ? (status.ok ? 'Translator active' : 'Translator needs attention') : 'Translator not active'}
       </Badge>
       {status.dispatcher?.model ? <Badge>{status.dispatcher.model}</Badge> : null}
       <Badge variant={summary.pending ? 'primary' : 'neutral'}>{`${formatCount(summary.pending)} queued`}</Badge>

@@ -1,0 +1,59 @@
+{
+  "collectionName": "components_subscription_platform_card",
+  "info": {
+    "displayName": "Subscription Platform Card"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "platform": {
+      "type": "enumeration",
+      "enum": [
+        "telegram",
+        "youtube",
+        "instagram",
+        "facebook",
+        "reddit",
+        "x"
+      ],
+      "required": true
+    },
+    "name": {
+      "type": "string",
+      "maxLength": 300
+    },
+    "icon": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": [
+        "images"
+      ]
+    },
+    "iconAlt": {
+      "type": "string",
+      "maxLength": 300,
+      "default": ""
+    },
+    "count": {
+      "type": "string",
+      "maxLength": 40
+    },
+    "countLabel": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "description": {
+      "type": "text"
+    },
+    "ctaLabel": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "ctaHref": {
+      "type": "string",
+      "maxLength": 2048
+    }
+  }
+}

@@ -60,10 +60,8 @@ describe('cachedSiteConfiguration', () => {
     invalidateCachedSiteConfiguration();
     vi.mocked(loadSiteConfiguration).mockRejectedValue(new Error('db down'));
     const value = await cachedSiteConfiguration(strapi);
-    // Invalidation drops the memo entirely, so a failed re-read falls back
-    // to the India defaults rather than the stale row — fail safe, and the
-    // warning says so.
-    expect(value).toEqual(INDIA_DEFAULT_CONFIGURATION);
+    // Invalidation forces a read but preserves the last known country settings.
+    expect(value).toEqual({ ...INDIA_DEFAULT_CONFIGURATION, translationLocales: 'ar' });
     expect(strapi.log.warn).toHaveBeenCalledWith(
       expect.stringContaining('site-configuration cached read failed'),
     );

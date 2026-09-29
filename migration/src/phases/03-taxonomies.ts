@@ -4,6 +4,12 @@ import { config } from "../config.js";
 import { setTermMapping } from "../utils/id-maps.js";
 import { resolveMediaRef } from "../utils/media-resolver.js";
 import {
+  TERM_META_ALIASES,
+  sqlMetaKeyList,
+  termMetaCoalesceSql,
+  termMetaKeys,
+} from "../utils/wp-source-fields.js";
+import {
   getS3KeyIndex,
   preloadFileRecordCache,
   refreshFileRecordCache,
@@ -25,7 +31,7 @@ import {
   replaceMedia,
   replaceContentMedia,
 } from "../utils/strapi-insert.js";
-import { clean, cleanHtml, cleanSlug } from "../utils/sanitize.js";
+import { clean, cleanHtml, cleanSlug, cleanText } from "../utils/sanitize.js";
 import { normalizeWpDate } from "../utils/wp-dates.js";
 import { parseDecimal, parseInteger } from "../utils/price.js";
 import { rewriteContentMedia } from "../utils/content-media.js";
@@ -42,6 +48,13 @@ import {
   formatTaxonomyClassificationReport,
 } from "../utils/taxonomy-classification.js";
 import { DEFAULT_CONTENT_LOCALE } from "../utils/content-locale.js";
+
+// Store logo / alt are read through their source aliases (Singapore stores the
+// logo as `store_image`); the SQL resolves them into the neutral `image_ref` /
+// `image_alt` columns every consumer already uses.
+const TERM_QUERY_META_KEYS = sqlMetaKeyList(
+  termMetaKeys(["choose_type", "store_short_description", "enable_faq_schema"]),
+);
 
 interface WpTerm {
   term_id: number;
@@ -169,15 +182,15 @@ export async function runTaxonomies(): Promise<void> {
       tt.count,
       MAX(CASE WHEN tm.meta_key='choose_type' THEN tm.meta_value END) AS choose_type,
       MAX(CASE WHEN tm.meta_key='store_short_description' THEN tm.meta_value END) AS short_desc,
-      MAX(CASE WHEN tm.meta_key='store_cat_image' THEN tm.meta_value END) AS image_ref,
-      MAX(CASE WHEN tm.meta_key='store_image_alt' THEN tm.meta_value END) AS image_alt,
+      ${termMetaCoalesceSql(TERM_META_ALIASES.image)} AS image_ref,
+      ${termMetaCoalesceSql(TERM_META_ALIASES.imageAlt)} AS image_alt,
       MAX(CASE WHEN tm.meta_key='enable_faq_schema' THEN tm.meta_value END) AS faq_enabled,
       MAX(CASE WHEN pm.meta_key='_kksr_avg' THEN pm.meta_value END) AS rating_avg,
       MAX(CASE WHEN pm.meta_key='_kksr_casts' THEN pm.meta_value END) AS rating_count
     FROM wp_terms t
     JOIN wp_term_taxonomy tt ON t.term_id = tt.term_id AND tt.taxonomy = 'category'
     LEFT JOIN wp_termmeta tm ON t.term_id = tm.term_id
-      AND tm.meta_key IN ('choose_type','store_short_description','store_cat_image','store_image_alt','enable_faq_schema')
+      AND tm.meta_key IN (${TERM_QUERY_META_KEYS})
     LEFT JOIN wp_postmeta pm ON t.term_id = pm.post_id
       AND pm.meta_key IN ('_kksr_avg','_kksr_casts')
     GROUP BY t.term_id, t.name, t.slug, tt.parent, tt.description, tt.count
@@ -592,7 +605,7 @@ async function insertTerm(
   // page-body blurb is not a meta description. Yoast → short description →
   // generic line only.
   const descriptionFallback =
-    clean(term.short_desc) || `${entityName} coupons, offers and deals.`;
+    cleanText(term.short_desc) || `${entityName} coupons, offers and deals.`;
   const metaTitle = (clean(yoastSeo.metaTitle) || entityName).slice(0, 70);
   const metaDescription = (
     clean(yoastSeo.metaDescription) || descriptionFallback
@@ -619,7 +632,11 @@ async function insertTerm(
     slug,
     pageTemplate,
     descriptionMedia.html,
-    clean(term.short_desc),
+    // The public site injects the short description as HTML, and the theme
+    // stored it as `<font size="2"><p>…` with neither tag closed. Same
+    // allowlist as the long description: presentational tags go, open
+    // elements are closed, so the fragment stays inside its container.
+    cleanHtml(term.short_desc),
     clean(term.image_alt) || entityName,
     ratingAverage,
     ratingCount,

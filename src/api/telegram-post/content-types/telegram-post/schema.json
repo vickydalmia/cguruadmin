@@ -1,0 +1,79 @@
+{
+  "kind": "collectionType",
+  "collectionName": "telegram_posts",
+  "info": {
+    "singularName": "telegram-post",
+    "pluralName": "telegram-posts",
+    "displayName": "Telegram Post",
+    "description": "Channel posts ingested from Telegram for the Join Telegram page"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "messageId": {
+      "type": "integer",
+      "required": true
+    },
+    "chatId": {
+      "type": "string",
+      "required": true,
+      "maxLength": 32
+    },
+    "postedAt": {
+      "type": "datetime",
+      "required": true
+    },
+    "editedAt": {
+      "type": "datetime"
+    },
+    "text": {
+      "type": "text"
+    },
+    "entities": {
+      "type": "json",
+      "private": true
+    },
+    "photo": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": ["images"]
+    },
+    "photoFileUniqueId": {
+      "type": "string",
+      "private": true,
+      "maxLength": 64
+    },
+    "permalink": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "salePrice": {
+      "type": "decimal"
+    },
+    "mrp": {
+      "type": "decimal"
+    },
+    "discountLabel": {
+      "type": "string",
+      "maxLength": 40
+    },
+    "ctaUrl": {
+      "type": "string",
+      "maxLength": 2048
+    },
+    "storeDomain": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "hidden": {
+      "type": "boolean",
+      "default": false,
+      "required": true
+    }
+  }
+}

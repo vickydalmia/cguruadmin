@@ -1,0 +1,23 @@
+{
+  "collectionName": "components_telegram_feature_cards",
+  "info": {
+    "displayName": "Telegram Feature Card",
+    "icon": "star"
+  },
+  "attributes": {
+    "icon": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": ["images"]
+    },
+    "title": {
+      "type": "string",
+      "required": true,
+      "maxLength": 40
+    },
+    "text": {
+      "type": "text",
+      "maxLength": 120
+    }
+  }
+}

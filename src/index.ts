@@ -1,3 +1,9 @@
+import { WEBSITE_REFRESH_ACTION_ATTRIBUTES } from './api/website-refresh/controllers/website-refresh';
+import { seedSubscriptionPage } from './api/subscription-page/services/seed-subscription-page';
+import { GLOBAL_SETTINGS_LABELS } from './constants/global-settings';
+import { installMigrationLockTimeout } from './register/migration-lock-timeout';
+import { readWriteSerializationTimeout } from './utils/write-serialization';
+import { startTranslationConfigurationWatcher, stopTranslationConfigurationWatcher } from './translation/configuration-watcher';
 import { initializeBackgroundContext } from './background/execution-context';
 import type { Core } from '@strapi/strapi';
 import { DOTD_SECTION_LABELS, DOTD_UID } from './constants/deal-of-the-day-sections';
@@ -5,6 +11,12 @@ import {
   INDEPENDENCE_DAY_SALE_SECTION_LABELS,
   INDEPENDENCE_DAY_SALE_UID,
 } from './constants/independence-day-sale-sections';
+import {
+  TELEGRAM_CONFIG_UID,
+  TELEGRAM_PAGE_SECTION_LABELS,
+  TELEGRAM_PAGE_UID,
+  TELEGRAM_SETTINGS_LABELS,
+} from './constants/telegram';
 import {
   HOMEPAGE_SECTION_LABELS,
   HOMEPAGE_UID,
@@ -58,24 +70,31 @@ import {
 } from './bootstrap/permissions';
 import {
   ensureCultureGalleryMediaFolder,
+  ensureTelegramMediaFolder,
   ensureUploadSettings,
 } from './bootstrap/upload';
 import { runDatabaseReconciliations } from './bootstrap/db-reconciliation';
+import { ensureTelegramPageSeed } from './bootstrap/telegram-page-seed';
 import {
   registerAdminRuntimeConfigRoutes,
   registerCsvExportRoutes,
   registerCountrySetupRoutes,
+  registerDatabaseBackupRoutes,
   registerEntityCouponLayoutRoutes,
   registerEntityDealPageRoutes,
   registerOfferCountryRoutes,
   registerRecordLockRoutes,
   registerTranslationRoutes,
+  registerTelegramProcessingRoutes,
   registerUiDictionaryRoutes,
+  registerWebsiteRefreshRoutes,
 } from './register/admin-routes';
 import { TRANSLATION_ACTION_ATTRIBUTES } from './api/translation/controllers/translation';
 import { UI_DICTIONARY_ACTION_ATTRIBUTES } from './api/ui-dictionary/controllers/ui-dictionary-admin';
-import { ensureContentLocales } from './translation/ensure-locales';
-import { primeEnabledContentLocales } from './translation/locales/registry';
+import {
+  bootstrapContentLocales,
+  stopContentLocaleBootstrapRetry,
+} from './translation/locales/bootstrap';
 import {
   startTranslationOutbox,
   stopTranslationOutbox,
@@ -84,9 +103,15 @@ import {
   startTranslationBackfillRunner,
   stopTranslationBackfillRecovery,
 } from './translation/backfill-run';
+import {
+  startDatabaseBackupRunner,
+  stopDatabaseBackupRunner,
+} from './database-backup/runner';
 
 export default {
   async register({ strapi }: { strapi: Core.Strapi }) {
+    readWriteSerializationTimeout();
+    installMigrationLockTimeout(strapi);
     // The Checkout Merchant custom field, which is what lets ONE dropdown
     // offer Stores and Brands together in the main edit form (a relation can
     // only target one content type — src/constants/checkout-merchant.ts has
@@ -147,6 +172,7 @@ export default {
       // on every restart by cleanPermissionsInDatabase().
       TRANSLATION_ACTION_ATTRIBUTES,
       UI_DICTIONARY_ACTION_ATTRIBUTES,
+      WEBSITE_REFRESH_ACTION_ATTRIBUTES,
     ]);
 
     registerEntityCouponLayoutRoutes(strapi);
@@ -157,6 +183,9 @@ export default {
     registerAdminRuntimeConfigRoutes(strapi);
     registerTranslationRoutes(strapi);
     registerUiDictionaryRoutes(strapi);
+    registerWebsiteRefreshRoutes(strapi);
+    registerDatabaseBackupRoutes(strapi);
+    registerTelegramProcessingRoutes(strapi);
 
     // Document-service middlewares. Registration order = execution order:
     // the record-lock guard must run before the document-write pipeline
@@ -225,6 +254,14 @@ export default {
     }
 
     await runDatabaseReconciliations(strapi);
+    await seedSubscriptionPage(strapi).catch((error) => {
+      // A pre-existing URL reservation must not prevent a production upgrade
+      // from starting. The editor can create/configure the page explicitly.
+      strapi.log.warn(`[subscription-page] initial content was not installed: ${error?.message ?? error}`);
+    });
+    // Figma content for the Join Telegram page: written once (marker), only
+    // into a missing or content-less row; never over an editor's changes.
+    await ensureTelegramPageSeed(strapi);
 
     // Fix the search implementation for this process before serving traffic:
     // the database dialect alone selects Postgres full-set SQL or the
@@ -237,6 +274,7 @@ export default {
     await restrictSingleTypesToSuperAdmin(strapi);
     await ensureUploadSettings(strapi);
     await ensureCultureGalleryMediaFolder(strapi);
+    await ensureTelegramMediaFolder(strapi);
     await ensureComponentEntryTitles(strapi);
     await ensureAdminRelationSearchFields(strapi);
     await ensureRelationTargetFieldReadability(strapi);
@@ -248,12 +286,15 @@ export default {
     await ensureSortableListColumns(strapi);
     await ensureFullWidthEditFields(strapi);
     await ensureSectionLabels(strapi, HOMEPAGE_UID, HOMEPAGE_SECTION_LABELS);
+    await ensureSectionLabels(strapi, 'api::global.global', GLOBAL_SETTINGS_LABELS);
     await ensureSectionLabels(strapi, DOTD_UID, DOTD_SECTION_LABELS);
     await ensureSectionLabels(
       strapi,
       INDEPENDENCE_DAY_SALE_UID,
       INDEPENDENCE_DAY_SALE_SECTION_LABELS,
     );
+    await ensureSectionLabels(strapi, TELEGRAM_CONFIG_UID, TELEGRAM_SETTINGS_LABELS);
+    await ensureSectionLabels(strapi, TELEGRAM_PAGE_UID, TELEGRAM_PAGE_SECTION_LABELS);
 
     // S3_UPLOAD_ENABLED defaults OFF in production (config/plugins.ts), so a
     // boot missing the flag silently writes uploads to the container's local
@@ -292,27 +333,27 @@ export default {
     // locale mirror the ISR path expansion reads, then start the job
     // dispatcher. All BEFORE startIsrOutbox so every event created after
     // boot carries its locale path twins. Fail safe throughout: a broken
-    // TRANSLATION_* env logs loudly and stays off.
-    let translationBootstrapReady = false;
-    try {
-      await ensureContentLocales(strapi);
-      await primeEnabledContentLocales(strapi);
-      translationBootstrapReady = true;
-    } catch (err: any) {
-      strapi.log.error(
-        `[translation] content-locale bootstrap failed: ${err?.message ?? err}`,
-      );
-    }
-    if (translationBootstrapReady) {
-      await startTranslationOutbox(strapi);
-      startTranslationBackfillRunner(strapi);
-    }
+    // TRANSLATION_* env logs loudly and stays off, and a database hiccup here
+    // is retried in the background (60 s doubling to 10 min) instead of
+    // leaving the locale mirror empty for the life of the process.
+    await bootstrapContentLocales(strapi, {
+      onReady: async () => {
+        await startTranslationOutbox(strapi);
+        startTranslationBackfillRunner(strapi);
+      },
+    });
 
+    startTranslationConfigurationWatcher(strapi);
     startIsrOutbox(strapi);
+    // Last: only the container with BACKUP_RUNNER_ENABLED=true takes backups;
+    // everywhere else this logs "disabled" and returns.
+    await startDatabaseBackupRunner(strapi);
   },
 
   async destroy() {
+    stopContentLocaleBootstrapRetry();
+    stopTranslationConfigurationWatcher();
     stopTranslationBackfillRecovery();
-    await Promise.all([stopIsrOutbox(), stopTranslationOutbox()]);
+    await Promise.all([stopIsrOutbox(), stopTranslationOutbox(), stopDatabaseBackupRunner()]);
   },
 };

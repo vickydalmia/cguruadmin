@@ -1,4 +1,12 @@
+import { markTelegramFeedBatch } from '../telegram/feed-batch';
+import { fenceTranslationPublication } from '../translation/publication-fence';
 import type { Core } from '@strapi/strapi';
+import { SUBSCRIPTION_PAGE_UID, readSubscriptionRoute, type SubscriptionRouteState } from '../api/subscription-page/services/subscription-route';
+import { syncSubscriptionRedirects, subscriptionWriteScope } from '../api/subscription-page/services/subscription-write';
+import { readTelegramRoute, type TelegramRouteState } from '../api/telegram-page/services/telegram-route';
+import { syncTelegramRedirects, telegramWriteScope } from '../api/telegram-page/services/telegram-write';
+import { TELEGRAM_PAGE_UID } from '../constants/telegram';
+import { acquireWriteSerializationLock } from '../utils/write-serialization';
 import { purgeResponseCaches } from '../middlewares/cache';
 import {
   createOutboxPayload,
@@ -75,6 +83,9 @@ import {
 export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
   strapi.documents.use(async (context: any, next: any) => {
     if (!DOCUMENT_WRITE_ACTIONS.has(context.action)) return next();
+    if (context.uid === 'api::site-configuration.site-configuration' && context.params?.data) {
+      delete context.params.data.configurationRevision;
+    }
 
     // Normalise the payload, then run every editor-facing validator and
     // report ALL of their problems in one error — see
@@ -92,12 +103,10 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
     // closing a cycle. A unique index on the NORMALIZED values cannot be
     // added over legacy duplicates (identity-validation.ts), so the pipeline
     // serializes that window with one advisory lock per invariant domain,
-    // and hands the release back here because the lock must stay held until
-    // the write below has COMMITTED. No-op on non-Postgres; on lock failure
-    // the save proceeds unserialized (the pre-existing rare race, never an
-    // outage).
-    const releaseWriteLock = await runWriteValidation(strapi, context);
-    try {
+    // inside the content transaction through commit. A lock failure aborts
+    // the save instead of weakening the uniqueness invariants.
+    const validateLockedWrite = await runWriteValidation(strapi, context);
+    {
       // Redirect `note` is editor-only metadata, but the redirect UID scopes
       // to a FULL sweep (scopes.ts). Read the material fields before the
       // write so a note-only edit can skip the rebuild entirely (redirects
@@ -248,10 +257,27 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
         }
       }
 
+      let subscriptionBefore: SubscriptionRouteState | null = null;
+      let telegramBefore: TelegramRouteState | null = null;
       return await runContentTransaction(
         strapi,
-        () => next(),
+        async (trx) => {
+          await validateLockedWrite?.(trx);
+          if (context.uid === SUBSCRIPTION_PAGE_UID) {
+            await acquireWriteSerializationLock(strapi, 'identity', trx);
+            subscriptionBefore = await readSubscriptionRoute(strapi);
+          }
+          if (context.uid === TELEGRAM_PAGE_UID) {
+            await acquireWriteSerializationLock(strapi, 'identity', trx);
+            telegramBefore = await readTelegramRoute(strapi);
+          }
+          await fenceTranslationPublication(strapi, trx, context.uid, context.params?.documentId, translationWriteContext());
+          return next();
+        },
         async (result, trx) => {
+          if (context.uid === 'api::site-configuration.site-configuration' && (result as any)?.id) {
+            await trx('site_configurations').where({ id: (result as any).id }).increment('configuration_revision', 1);
+          }
           if (
             context.action === 'update' &&
             changesEntityOfferMembership(context.uid, context.params?.data)
@@ -328,6 +354,8 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
             }
           }
 
+          if (context.uid === 'api::telegram-post.telegram-post' && markTelegramFeedBatch()) return null;
+
           const documentId =
             (result as any)?.documentId ?? context.params?.documentId;
 
@@ -336,8 +364,8 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
           // transaction — the job either commits with the content or not at
           // all. The dispatcher's own locale writes are excluded twice over
           // (non-default locale + the AsyncLocalStorage write flag). Fully
-          // inert unless the site opted in AND the env parses
-          // (translationRuntimeActive), so India/USA never see a row.
+          // inert unless the site opted in
+          // (translationRuntimeActive), independent of the local worker role.
           try {
             const writesDefaultLocale =
               !context.params?.locale ||
@@ -452,6 +480,14 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
             throw err;
           }
 
+          const subscriptionAfter = context.uid === SUBSCRIPTION_PAGE_UID ? await readSubscriptionRoute(strapi) : null;
+          if (context.uid === SUBSCRIPTION_PAGE_UID) {
+            await syncSubscriptionRedirects(strapi, subscriptionBefore, subscriptionAfter);
+          }
+          const telegramAfter = context.uid === TELEGRAM_PAGE_UID ? await readTelegramRoute(strapi) : null;
+          if (context.uid === TELEGRAM_PAGE_UID) {
+            await syncTelegramRedirects(strapi, telegramBefore, telegramAfter);
+          }
           const afterScope =
             context.action === 'delete' && preScope
               ? null
@@ -467,6 +503,9 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
             context.action === 'delete'
               ? preScope ?? afterScope
               : mergeScope(preScope, afterScope);
+
+          if (context.uid === SUBSCRIPTION_PAGE_UID) scope = subscriptionWriteScope(subscriptionBefore, subscriptionAfter);
+          if (context.uid === TELEGRAM_PAGE_UID) scope = telegramWriteScope(telegramBefore, telegramAfter);
 
           if (
             entityIdentityBefore &&
@@ -607,6 +646,7 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
                 : {}),
             };
           }
+          if (localizedType && !sharedChange && targetLocale === DEFAULT_CONTENT_LOCALE) payload.inventoryLocale = 'en';
           return {
             payload: sharedChange
               ? expandPayloadPathsForLocales(
@@ -615,6 +655,7 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
                 )
               : payload,
             reason: `${context.uid} ${context.action}`,
+            ...(context.uid === 'api::telegram-post.telegram-post' ? { eventKey: 'telegram-feed:page' } : {}),
           };
         },
         (event) => {
@@ -636,8 +677,6 @@ export function installDocumentWriteMiddleware(strapi: Core.Strapi): void {
           wakeIsrOutbox();
         },
       );
-    } finally {
-      if (releaseWriteLock) await releaseWriteLock();
     }
   });
 }

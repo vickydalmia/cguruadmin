@@ -1,3 +1,4 @@
+import { assertDeploymentCountry, deploymentCountryCode } from '../../../utils/deployment-country';
 import type { Core } from '@strapi/strapi';
 import { toValidationError, type Problem } from '../../../utils/write-validation/problems';
 import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
@@ -13,8 +14,11 @@ import {
   parseOfferCountryTokens,
 } from '../../../constants/offer-countries';
 import {
+  FEATURE_FIELDS,
+  OFFER_COUNTRY_FIELDS,
   SITE_CONFIGURATION_FIELDS,
   SITE_CONFIGURATION_UID,
+  TRANSLATION_FIELDS,
   normalizeSiteConfiguration,
   translationLocaleCodes,
   type SiteConfiguration,
@@ -25,7 +29,7 @@ import { applyTranslationSettings } from './translation-hot-apply';
 
 function safeFields(config: SiteConfiguration) {
   return Object.fromEntries(
-    SITE_CONFIGURATION_FIELDS.map((field) => [field, config[field]]),
+    SITE_CONFIGURATION_FIELDS.filter((field) => field !== 'configurationRevision').map((field) => [field, config[field]]),
   );
 }
 
@@ -35,7 +39,18 @@ export async function loadSiteConfiguration(
   const row = await strapi.documents(SITE_CONFIGURATION_UID as any).findFirst({
     fields: [...SITE_CONFIGURATION_FIELDS] as any,
   });
-  return normalizeSiteConfiguration(row);
+  let source = row;
+  if (!source) {
+    const { readCountryBootstrap, assertEmptyCountryDatabase } = require(require('node:path').join((strapi as any).dirs?.app?.root ?? process.cwd(), 'database/country-bootstrap.js'));
+    const bootstrap = readCountryBootstrap(deploymentCountryCode());
+    if (bootstrap) {
+      await assertEmptyCountryDatabase(strapi.db.connection);
+      source = { ...bootstrap, ...Object.fromEntries(FEATURE_FIELDS.map((field) => [field, false])) };
+    }
+  }
+  const configuration = normalizeSiteConfiguration(source);
+  assertDeploymentCountry(configuration.countryCode);
+  return configuration;
 }
 
 /**
@@ -84,6 +99,7 @@ export async function buildSiteSettings(
   const features = await getFeatureReadiness(strapi, config);
   return {
     ...safeFields(config),
+    configurationRevision: config.configurationRevision ?? 0,
     localization: localizationPreview(
       config.locale,
       config.currencyCode,
@@ -97,6 +113,27 @@ export async function buildSiteSettings(
     offerCountryOptions: enabledOfferCountryOptions(config.offerCountries),
     features,
   };
+}
+
+/**
+ * Raw Country Setup inputs that only the admin form needs. The storefront and
+ * the deploy tooling consume the DERIVED `languages` and `offerCountryOptions`,
+ * so the anonymous `GET /api/site-settings` body omits these: which languages
+ * are paid-translated and which country tags are toggled is operator
+ * configuration, not public data.
+ */
+const ADMIN_ONLY_SITE_SETTINGS_FIELDS = [
+  ...TRANSLATION_FIELDS,
+  ...OFFER_COUNTRY_FIELDS,
+] as const;
+
+export async function buildPublicSiteSettings(
+  strapi: Core.Strapi,
+  supplied?: SiteConfiguration,
+) {
+  const settings: Record<string, unknown> = await buildSiteSettings(strapi, supplied);
+  for (const field of ADMIN_ONLY_SITE_SETTINGS_FIELDS) delete settings[field];
+  return settings;
 }
 
 export async function validateSiteConfigurationForWrite(
@@ -169,6 +206,7 @@ export async function validateSiteConfigurationForWrite(
     }
   }
 
+  assertDeploymentCountry(candidate.countryCode);
   if (problems.length > 0) throw toValidationError(problems);
   return candidate;
 }
@@ -199,7 +237,10 @@ export async function enabledOfferCountries(strapi: Core.Strapi) {
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   load: () => loadSiteConfiguration(strapi),
-  publicSettings: () => buildSiteSettings(strapi),
+  /** Anonymous `GET /api/site-settings` and internal readers of derived data. */
+  publicSettings: () => buildPublicSiteSettings(strapi),
+  /** Admin Country Setup: the public body plus the raw form inputs. */
+  adminSettings: () => buildSiteSettings(strapi),
   selectableLanguages: () => selectableSiteLanguages(strapi),
   /** Country Setup's country picker: the full master registry. */
   selectableOfferCountries: () =>
@@ -233,6 +274,6 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     // sync mirror, dispatcher). Logged-and-swallowed inside — a hot-apply
     // problem must never turn a successful save into an error response.
     await applyTranslationSettings(strapi);
-    return buildSiteSettings(strapi, candidate);
+    return buildSiteSettings(strapi);
   },
 });

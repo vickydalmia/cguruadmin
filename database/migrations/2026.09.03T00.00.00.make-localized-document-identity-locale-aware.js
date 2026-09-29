@@ -28,6 +28,14 @@ function localizedDocumentIndex(table) {
   return `${table}_document_id_locale_uq`;
 }
 
+// BTRIM is PostgreSQL's name for the standard TRIM(x); SQLite (local
+// development) only knows the latter. Same result on both. A connection that
+// does not identify itself (unit-test doubles) keeps the Postgres SQL.
+function trimFunction(knex) {
+  const client = String(knex?.client?.config?.client || "").toLowerCase();
+  return client === "" || ["pg", "postgres", "postgresql"].includes(client) ? "BTRIM" : "TRIM";
+}
+
 module.exports = {
   async up(knex) {
     for (const table of LOCALIZED_DOCUMENT_TABLES) {
@@ -38,7 +46,7 @@ module.exports = {
         `UPDATE "${table}"
             SET "locale" = ?
           WHERE "document_id" IS NOT NULL
-            AND NULLIF(BTRIM("locale"), '') IS NULL`,
+            AND NULLIF(${trimFunction(knex)}("locale"), '') IS NULL`,
         [DEFAULT_CONTENT_LOCALE],
       );
       await knex.raw(

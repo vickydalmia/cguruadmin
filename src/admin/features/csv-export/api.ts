@@ -24,17 +24,6 @@ import {
  */
 export type ExportFetchClient = Pick<ReturnType<typeof getFetchClient>, 'get'>;
 
-export const SUPER_ADMIN_ROLE_CODE = 'strapi-super-admin';
-
-/** Mirrors the server policy (`global::super-admin-only`) for the button. */
-export function isSuperAdminUser(user: unknown): boolean {
-  const roles = (user as any)?.roles;
-  return (
-    Array.isArray(roles) &&
-    roles.some((role: any) => role?.code === SUPER_ADMIN_ROLE_CODE)
-  );
-}
-
 export function exportPagePath(uid: CsvExportUid, page: number, pageSize: number): string {
   const query = new URLSearchParams({
     page: String(page),

@@ -148,6 +148,8 @@ migration/.checkpoints/
 migration/node_modules/
 migration/dist/
 migration/*.log
+# Local run artefacts (screenshots, exports) are never repository content.
+migration/output/
 # USA SQL/uploads remain local, but the approved classification workbook is
 # migration input and must ship with the importer.
 migration/usa/*

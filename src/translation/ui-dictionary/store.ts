@@ -31,7 +31,7 @@ import {
   upsertCatalogueRows,
   upsertTranslations,
 } from './store-queries';
-import { advisoryTransactionLock } from '../../utils/database-dialect';
+import { advisoryTransactionLock, isPostgresConnection } from '../../utils/database-dialect';
 import { planCatalogueSync } from './sync-plan';
 import type {
   AiTranslationWrite,
@@ -286,11 +286,20 @@ export class UiDictionaryStore {
 
   async publicDictionary(locale: string): Promise<PublicDictionary> {
     const isEnglish = locale === DEFAULT_CONTENT_LOCALE;
-    const [meta, catalogue, translations] = await Promise.all([
-      this.readMeta(),
-      loadCatalogueRows(this.db),
-      isEnglish ? [] : loadTranslationRows(this.db, locale),
-    ]);
+    const read = async (db: Db) => {
+      const meta = await this.readMeta(db);
+      const [catalogue, translations] = await Promise.all([
+        loadCatalogueRows(db),
+        isEnglish ? [] : loadTranslationRows(db, locale),
+      ]);
+      return [meta, catalogue, translations] as const;
+    };
+    // A dedicated read-only snapshot prevents a concurrent catalogue commit
+    // from pairing a new version with old rows (or the reverse). Do not inherit
+    // an ambient write transaction whose isolation may already be established.
+    const snapshot: Awaited<ReturnType<typeof read>> = await this.db.transaction(read,
+      isPostgresConnection(this.db) ? { isolationLevel: 'repeatable read', readOnly: true } : {});
+    const [meta, catalogue, translations] = snapshot;
     const messages: Record<string, string> = {};
     let updatedAt = meta?.pushedAt ?? null;
     for (const row of catalogue) {
@@ -306,7 +315,14 @@ export class UiDictionaryStore {
         updatedAt = latest(updatedAt, row.updatedAt);
       }
     }
-    return { locale, version: meta?.version ?? null, updatedAt, messages };
+    // Ready means "translated for THIS catalogue version": every live entry
+    // (plural expansions included) has text whose source hash matches the
+    // entry's effective hash. A stale row still serves above (better than
+    // English) but must not let a release ship with the previous wording —
+    // the deploy gates and the SSR readiness endpoint key on this flag.
+    const ready = isEnglish || (catalogue.length > 0 && buildEntries({ locale, catalogue, translations })
+      .every((entry) => (entry.status === 'ai' || entry.status === 'manual') && Boolean(entry.translation?.text.trim())));
+    return { locale, version: meta?.version ?? null, updatedAt, messages, ready };
   }
 
   /** Per-locale counts (plural expansions included) for `locales` ∪ locales with rows. */

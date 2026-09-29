@@ -612,3 +612,16 @@ above are defence in depth behind that boundary, not the only barrier.
 
 Pools and codes themselves are populated by migration phases 05 and 06 — see
 [migration/README.md](../migration/README.md).
+
+### Private newsletter configuration
+
+`GET /api/global/newsletter-config` requires `Authorization: Bearer <ISR_ADMIN_SECRET>`
+and returns `Cache-Control: no-store` with `{ data: { sendyUrl, sendyListId } }`.
+The gateway reads this endpoint on each subscription. These private fields are
+excluded from public Global and site-chrome payloads. The Sendy API key is not
+stored in Strapi. See [Global Settings](global-integrations.md) for migration
+and deployment order.
+
+Site-chrome Global data exposes shared `telegramUrl` and `whatsappUrl` values.
+Its footer social links derive these destinations; the old `telegramCta.ctaUrl`
+is a read-only compatibility projection of `telegramUrl` during rollout.

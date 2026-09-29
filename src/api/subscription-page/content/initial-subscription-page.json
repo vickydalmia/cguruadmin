@@ -1,0 +1,160 @@
+{
+  "title": "Subscription",
+  "slug": "subscription",
+  "enabled": false,
+  "breadcrumbAriaLabel": "Breadcrumb",
+  "breadcrumbItems": [
+    {
+      "label": "Home",
+      "url": "/"
+    },
+    {
+      "label": "Subscription",
+      "url": ""
+    }
+  ],
+  "hero": {
+    "headingBefore": "We're",
+    "headingHighlight": "Wherever",
+    "headingAfter": "You Are",
+    "headingSecondLine": "Don't Miss a Deal",
+    "description": "Pick your platform and get instant coupon codes, cashback offers, and price drops delivered straight to you always verified."
+  },
+  "signup": {
+    "enabled": true,
+    "iconAlt": "",
+    "heading": "Get the best deals delivered straight to your inbox",
+    "description": "Verified only. No spam, ever.",
+    "emailLabel": "Email address",
+    "emailPlaceholder": "Enter your email",
+    "ctaLabel": "Subscribe",
+    "trustText": "No Spam \u00b7 Unsubscribe anytime",
+    "invalidMessage": "Please enter a valid email address.",
+    "pendingMessage": "Subscribing\u2026",
+    "successMessage": "You have successfully subscribed!",
+    "errorMessage": "Subscription failed. Please try again.",
+    "networkErrorMessage": "Unable to connect. Please try again."
+  },
+  "platforms": {
+    "enabled": true,
+    "heading": "Pick your platform",
+    "cards": [
+      {
+        "enabled": true,
+        "platform": "telegram",
+        "name": "Telegram",
+        "iconAlt": "",
+        "count": "80K+",
+        "countLabel": "Members",
+        "description": "Instant deal & coupon alerts, the fastest way to catch a code",
+        "ctaLabel": "Join Channel",
+        "ctaHref": ""
+      },
+      {
+        "enabled": true,
+        "platform": "youtube",
+        "name": "YouTube",
+        "iconAlt": "",
+        "count": "22K+",
+        "countLabel": "Subscribers",
+        "description": "Deep-dive reviews & \"is it worth it\" videos before you buy",
+        "ctaLabel": "Subscribe",
+        "ctaHref": ""
+      },
+      {
+        "enabled": true,
+        "platform": "instagram",
+        "name": "Instagram",
+        "iconAlt": "",
+        "count": "45K+",
+        "countLabel": "Followers",
+        "description": "Daily deal reels & quick visual drops you can scroll in seconds",
+        "ctaLabel": "Follow",
+        "ctaHref": ""
+      },
+      {
+        "enabled": true,
+        "platform": "facebook",
+        "name": "Facebook",
+        "iconAlt": "",
+        "count": "30K+",
+        "countLabel": "Likes",
+        "description": "Community discussions & polls talk deals with other members",
+        "ctaLabel": "Like Page",
+        "ctaHref": ""
+      },
+      {
+        "enabled": true,
+        "platform": "reddit",
+        "name": "Reddit",
+        "iconAlt": "",
+        "count": "10K+",
+        "countLabel": "Members",
+        "description": "Honest reviews, unboxing threads & community recommendations you can trust",
+        "ctaLabel": "Join",
+        "ctaHref": ""
+      },
+      {
+        "enabled": true,
+        "platform": "x",
+        "name": "X (Twitter)",
+        "iconAlt": "",
+        "count": "25K+",
+        "countLabel": "Followers",
+        "description": "Daily deal drops, trending steals & quick savings tips in your timeline",
+        "ctaLabel": "Follow",
+        "ctaHref": ""
+      }
+    ]
+  },
+  "benefits": {
+    "enabled": true,
+    "heading": "Why follow CouponzGuru",
+    "cards": [
+      {
+        "enabled": true,
+        "iconKey": "verified",
+        "label": "Verified Coupons",
+        "iconAlt": ""
+      },
+      {
+        "enabled": true,
+        "iconKey": "alerts",
+        "label": "Real-Time Alerts",
+        "iconAlt": ""
+      },
+      {
+        "enabled": true,
+        "iconKey": "spam-free",
+        "label": "Zero Spam",
+        "iconAlt": ""
+      },
+      {
+        "enabled": true,
+        "iconKey": "free",
+        "label": "Always Free",
+        "iconAlt": ""
+      }
+    ]
+  },
+  "joinCta": {
+    "enabled": true,
+    "heading": "Your next discount is one follow away",
+    "description": "Not sure which to pick? Start with Telegram it's where deals land first.",
+    "ctaLabel": "Join CouponzGuru on Telegram",
+    "ctaHref": ""
+  },
+  "popularSearches": {
+    "enabled": true,
+    "heading": "Popular Searches",
+    "stores": [],
+    "brands": [],
+    "categories": [],
+    "banks": []
+  },
+  "seo": {
+    "metaTitle": "Subscription | CouponzGuru",
+    "metaDescription": "Pick your platform and get instant coupon codes, cashback offers, and price drops delivered straight to you always verified.",
+    "noIndex": false
+  }
+}

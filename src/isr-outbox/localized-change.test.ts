@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import globalSchema from '../api/global/content-types/global/schema.json';
 import {
   sharedFieldSelection,
   sharedFieldSnapshot,
@@ -16,6 +17,14 @@ const model = {
 };
 
 describe('localized ISR shared-field change detection', () => {
+  it('recognizes channel changes as shared across every language', () => {
+    const selection = sharedFieldSelection(globalSchema, { telegramUrl: 'https://t.me/new', whatsappUrl: '' });
+    expect(selection).toEqual({ scalars: ['telegramUrl', 'whatsappUrl'], media: [], unknown: false });
+    expect(sharedFieldSnapshotsDiffer(
+      sharedFieldSnapshot({ telegramUrl: 'https://t.me/old', whatsappUrl: '' }, selection),
+      sharedFieldSnapshot({ telegramUrl: 'https://t.me/new', whatsappUrl: '' }, selection),
+    )).toBe(true);
+  });
   it('ignores unchanged shared fields resent by a full localized form', () => {
     const selection = sharedFieldSelection(model, {
       title: 'Edited English title',

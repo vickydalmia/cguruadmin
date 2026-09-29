@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   registerAdminRuntimeConfigRoutes,
   registerCountrySetupRoutes,
+  registerDatabaseBackupRoutes,
   registerOfferCountryRoutes,
   registerUiDictionaryRoutes,
+  registerWebsiteRefreshRoutes,
 } from './admin-routes';
 
 describe('admin runtime config route', () => {
@@ -112,5 +114,42 @@ describe('ui dictionary routes', () => {
         },
       ],
     });
+  });
+});
+
+
+it('protects all manual refresh endpoints with admin session and refresh permission', () => {
+  const routes = vi.fn();
+  registerWebsiteRefreshRoutes({ server: { routes } } as any);
+  const registration = routes.mock.calls[0][0];
+  expect(registration.type).toBe('admin');
+  expect(registration.routes).toHaveLength(3);
+  for (const route of registration.routes) expect(route.config.policies).toEqual(['admin::isAuthenticatedAdmin', 'global::website-refresh-manage-only']);
+});
+
+describe('database backup routes', () => {
+  it('keeps every endpoint on the admin router behind the Super Admin policy', () => {
+    const routes = vi.fn();
+    registerDatabaseBackupRoutes({ server: { routes } } as any);
+
+    expect(routes).toHaveBeenCalledTimes(1);
+    const registration = routes.mock.calls[0][0];
+    expect(registration.type).toBe('admin');
+    expect(registration.prefix).toBe('/database-backups');
+    expect(registration.routes.map((route: any) => `${route.method} ${route.path} → ${route.handler}`)).toEqual([
+      'GET /overview → api::database-backup.database-backup.overview',
+      'PUT /settings → api::database-backup.database-backup.updateSettings',
+      'POST /test-connection → api::database-backup.database-backup.testConnection',
+      'GET /runs → api::database-backup.database-backup.listRuns',
+      'POST /runs → api::database-backup.database-backup.createRun',
+      'GET /runs/:id → api::database-backup.database-backup.getRun',
+      'DELETE /runs/:id → api::database-backup.database-backup.deleteRun',
+      'POST /runs/:id/cancel → api::database-backup.database-backup.cancelRun',
+      'POST /runs/:id/verify → api::database-backup.database-backup.verifyRun',
+      'GET /runs/:id/download-url → api::database-backup.database-backup.downloadUrl',
+    ]);
+    for (const route of registration.routes) {
+      expect(route.config.policies).toEqual(['admin::isAuthenticatedAdmin', 'global::super-admin-only']);
+    }
   });
 });

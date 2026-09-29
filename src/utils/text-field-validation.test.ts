@@ -107,12 +107,12 @@ describe('normaliseTextFields', () => {
   });
 
   it('does NOT collapse internal whitespace on `text` fields', () => {
-    // store.shortDescription is a textarea; paragraph breaks are content.
-    const multiline = 'First paragraph.\n\nSecond paragraph.';
-    const data: any = { shortDescription: `  ${multiline}  ` };
-    normaliseTextFields(STORE, 'update', data);
-    expect(data.shortDescription).toBe(multiline);
-    expect(data.shortDescription).toContain('\n\n');
+    // coupon.affiliateLink is a textarea; line breaks are content.
+    const multiline = 'First line.\n\nSecond line.';
+    const data: any = { affiliateLink: `  ${multiline}  ` };
+    normaliseTextFields(COUPON, 'update', data);
+    expect(data.affiliateLink).toBe(multiline);
+    expect(data.affiliateLink).toContain('\n\n');
   });
 
   it('does NOT touch `richtext` fields at all', () => {
@@ -124,8 +124,10 @@ describe('normaliseTextFields', () => {
     expect(data.content).toBe(html);
   });
 
-  it('preserves newlines in a multi-paragraph brand shortDescription', () => {
-    const body = 'Line one.\n\n  Line two indented.\nLine three.';
+  it('leaves a rich-text brand shortDescription untouched', () => {
+    // shortDescription is richtext: sanitizeRichtextData owns it, and the
+    // outer whitespace it keeps here is what that step trims.
+    const body = '  <p>Line one.</p>\n\n<p>  Line two indented.</p>  ';
     const data: any = { shortDescription: body };
     normaliseTextFields(BRAND, 'update', data);
     expect(data.shortDescription).toBe(body);

@@ -80,6 +80,18 @@ field of that type, across every content type:
 The registry key must be the **raw attribute type**. In particular `richtext`,
 not the Strapi v4 `wysiwyg` key, which silently does nothing in v5.
 
+Entity `shortDescription` (store, brand, category, bank) is a `richtext`
+attribute too, since September 2026. It was imported from WordPress as a plain
+`text` field although the entity hero has always injected it as HTML, and the
+theme had stored it as `<font size="2"><p>…` with neither tag closed. An
+unclosed formatting element is not contained by the element it is rendered
+into: the browser re-creates it around every later inline node, so one store
+page carried ~670 injected `<font>` elements and rendered visibly broken. The
+field now goes through the same editor and allowlist as `description`, the
+`2026.09.12` migration repaired the rows already stored, and the public site
+balances the fragment once more before injecting it. The editorial minimum of
+160 characters is measured on the text, not the markup.
+
 ### `config` — branding, locale, translations
 
 Replaces the Strapi logo in the auth and menu views, declares `locales: ['en']`,

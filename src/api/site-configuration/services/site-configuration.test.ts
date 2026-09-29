@@ -181,9 +181,11 @@ describe('siteLanguages', () => {
 describe('update() hot-apply', () => {
   function writableStrapi() {
     const order: string[] = [];
-    const findFirst = vi.fn(async () => ({ ...uaeConfig, documentId: 'cfg-1' }));
-    const findOne = vi.fn(async () => ({ ...uaeConfig, documentId: 'cfg-1' }));
-    const update = vi.fn(async () => {
+    let persisted = { ...uaeConfig, documentId: 'cfg-1' };
+    const findFirst = vi.fn(async () => persisted);
+    const findOne = vi.fn(async () => persisted);
+    const update = vi.fn(async ({ data }) => {
+      persisted = { ...persisted, ...data };
       order.push('write');
     });
     const create = vi.fn(async () => {
@@ -226,5 +228,30 @@ describe('update() hot-apply', () => {
     vi.mocked(applyTranslationSettings).mockResolvedValueOnce({ ok: false, error: 'i18n down' });
     const result = await serviceFactory({ strapi }).update({ translationEnabled: false });
     expect(result.translationEnabled).toBe(false);
+  });
+});
+
+describe('public vs admin settings bodies', () => {
+  function strapiWith(config: Record<string, unknown>) {
+    const findFirst = vi.fn(async () => config);
+    return { documents: vi.fn(() => ({ findFirst })), log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } } as any;
+  }
+  const translated = { ...uaeConfig, translationEnabled: true, translationLocales: 'ar', offerCountries: 'AE,SA' };
+
+  it('keeps the raw Country Setup inputs off the anonymous body but on the admin body', async () => {
+    const service = serviceFactory({ strapi: strapiWith(translated) });
+    const publicBody: any = await service.publicSettings();
+    expect(publicBody).not.toHaveProperty('translationEnabled');
+    expect(publicBody).not.toHaveProperty('translationLocales');
+    expect(publicBody).not.toHaveProperty('offerCountries');
+    // The derived views the storefront and deploy tooling consume stay.
+    expect(publicBody.countryCode).toBe('AE');
+    expect(publicBody.languages.map((language: any) => language.code)).toEqual(['en', 'ar']);
+    expect(publicBody.offerCountryOptions.map((option: any) => option.code)).toEqual(['AE', 'SA']);
+    expect(publicBody).toHaveProperty('configurationRevision');
+
+    const adminBody: any = await service.adminSettings();
+    expect(adminBody).toMatchObject({ translationEnabled: true, translationLocales: 'ar', offerCountries: 'AE,SA' });
+    expect(adminBody.languages).toEqual(publicBody.languages);
   });
 });

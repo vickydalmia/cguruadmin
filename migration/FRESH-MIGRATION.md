@@ -271,6 +271,7 @@ target and exits non-zero.
 |---|---|
 | `yarn tsx src/reset-homepage.ts` | Back up and delete the homepage row so phase 13 can reseed it — **no dry run; deletes as soon as it is confirmed** |
 | `yarn fix:markdown-richtext` | Repair markdown artifacts left by the old admin editor |
+| `yarn fix:richtext-html` | Contain legacy unclosed `<font>`/`<p>` HTML in every richtext column (needs `PUBLIC_SITE_URL`) |
 | `yarn fix:cache-headers` | Stamp immutable `Cache-Control` on already-uploaded S3 objects |
 | `yarn fix:content-srcsets` | Rebuild rich-text `<img>` srcsets from the current `files.formats` |
 | `yarn backfill:offer-fields` | Fill `badge`, Coupon `offerText`, and Coupon/Deal benefit texts on offers migrated before those fields existed |

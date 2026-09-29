@@ -95,9 +95,11 @@ async function* defaultLocaleEntries(
   strapi: Core.Strapi,
   uid: string,
   afterId = 0,
+  beforePage?: () => Promise<void>,
 ): AsyncGenerator<SourcePage> {
   let lastId = afterId;
   for (;;) {
+    await beforePage?.();
     const rows: any[] = await strapi.db.query(uid as any).findMany({
       where: { locale: DEFAULT_CONTENT_LOCALE, id: { $gt: lastId } },
       orderBy: { id: 'asc' },
@@ -157,6 +159,7 @@ export type BackfillCheckpoint = {
 };
 
 type ScanOptions = {
+  beforePage?: () => Promise<void>;
   mode: BackfillMode;
   force: boolean;
   reason: string;
@@ -230,7 +233,7 @@ function cloneScan(scan: CandidateScan): CandidateScan {
 }
 
 function maxDocumentsPerSecond(): number {
-  const fallback = process.env.NODE_ENV === 'test' ? 0 : 20;
+  const fallback = process.env.NODE_ENV === 'test' ? 0 : 5;
   const parsed = Number.parseInt(
     process.env.TRANSLATION_BACKFILL_MAX_DOCS_PER_SECOND ?? '',
     10,
@@ -339,7 +342,7 @@ async function scanContentCandidates(
       scan,
     });
 
-    for await (const page of defaultLocaleEntries(strapi, uid, firstSourceId)) {
+    for await (const page of defaultLocaleEntries(strapi, uid, firstSourceId, options.beforePage)) {
       const pageStartedAt = Date.now();
       const inputs: TranslationJobInsert[] = [];
       const populatedSources = page.entries.filter(
@@ -525,6 +528,7 @@ async function scanContentCandidates(
 }
 
 export type BackfillOptions = {
+  beforePage?: () => Promise<void>;
   uids?: string[];
   locales?: string[];
   force?: boolean;
@@ -568,6 +572,7 @@ export async function enqueueTranslationBackfill(
     onPage: (inputs) => flushInputs(strapi, inputs),
     onProgress: options.onProgress,
     onCheckpoint: options.onCheckpoint,
+    beforePage: options.beforePage,
     checkpoint: options.checkpoint,
     persistPlanHashes: true,
   });
@@ -648,6 +653,7 @@ export async function estimateTranslationBackfill(
     reason: TRANSLATION_BACKFILL_REASON,
     onProgress: options.onProgress,
     onCheckpoint: options.onCheckpoint,
+    beforePage: options.beforePage,
     checkpoint: options.checkpoint,
     persistPlanHashes: false,
   });

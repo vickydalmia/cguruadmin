@@ -7,7 +7,7 @@
   "attributes": {
     "platform": {
       "type": "enumeration",
-      "enum": ["facebook", "instagram", "pinterest", "linkedin", "telegram", "reddit", "twitter", "whatsapp", "youtube"],
+      "enum": ["facebook", "instagram", "pinterest", "linkedin", "reddit", "twitter", "youtube"],
       "required": true
     },
     "url": {

@@ -7,7 +7,11 @@ function strapiHarness(rows: Record<string, any>, counts: Record<string, number>
   return {
     documents: vi.fn((uid: string) => ({
       findFirst: vi.fn(async () => rows[uid] ?? null),
-      findMany: vi.fn(async () => rows[`${uid}:many`] ?? []),
+      findMany: vi.fn(async ({ filters }) =>
+        (rows[`${uid}:many`] ?? []).filter(
+          (row: any) => row.pageTemplate === filters.pageTemplate,
+        ),
+      ),
       count: vi.fn(async () => counts[uid] ?? 0),
     })),
   } as any;
@@ -43,7 +47,7 @@ describe('feature readiness', () => {
     const rows = {
       'api::deal-of-the-day-page.deal-of-the-day-page': { heroTitle: 'Today only' },
       'api::category.category:many': [
-        { documentId: 'category-1', slug: 'daily-specials' },
+        { documentId: 'category-1', slug: 'daily-specials', pageTemplate: 'dealTemplate' },
       ],
     };
     const readiness = await getFeatureReadiness(
@@ -64,7 +68,7 @@ describe('feature readiness', () => {
         countdown: { saleEndAt: '2026-08-15' },
       },
       'api::store.store:many': [
-        { documentId: 'store-1', slug: 'freedom-sale' },
+        { documentId: 'store-1', slug: 'freedom-sale', pageTemplate: 'independenceDayTemplate' },
       ],
     };
     const readiness = await getFeatureReadiness(strapiHarness(rows, {}), config);
@@ -92,5 +96,75 @@ describe('feature readiness', () => {
       live: false,
     });
     expect(readiness.independenceDaySale.path).toBeUndefined();
+  });
+
+  it.each(['IN', 'US', 'AE'])('allows optional campaign sections in %s', async (countryCode) => {
+    const readiness = await getFeatureReadiness(
+      strapiHarness({
+        'api::deal-of-the-day-page.deal-of-the-day-page': { heroTitle: null },
+        'api::independence-day-sale-page.independence-day-sale-page': {
+          hero: null,
+          countdown: null,
+        },
+        'api::category.category:many': [
+          { documentId: 'daily', slug: 'daily-specials', pageTemplate: 'dealTemplate' },
+          { documentId: 'sale', slug: 'freedom-sale', pageTemplate: 'independenceDayTemplate' },
+        ],
+      }, { 'api::deal.deal': 1 }),
+      { ...INDIA_DEFAULT_CONFIGURATION, countryCode },
+    );
+
+    expect(readiness.dealOfTheDay).toEqual({
+      enabled: true, ready: true, live: true, path: '/daily-specials/',
+    });
+    expect(readiness.independenceDaySale).toEqual({
+      enabled: true, ready: true, live: true, path: '/freedom-sale/',
+    });
+  });
+
+  it.each([undefined, '', '   '])('allows an omitted or blank Deal heading (%j)', async (heroTitle) => {
+    const readiness = await getFeatureReadiness(
+      strapiHarness({
+        'api::deal-of-the-day-page.deal-of-the-day-page': { heroTitle },
+        'api::category.category:many': [
+          { documentId: 'daily', slug: 'daily-specials', pageTemplate: 'dealTemplate' },
+        ],
+      }, { 'api::deal.deal': 1 }),
+      INDIA_DEFAULT_CONFIGURATION,
+    );
+
+    expect(readiness.dealOfTheDay.live).toBe(true);
+  });
+
+  it('still requires a saved singleton for each selected campaign', async () => {
+    const readiness = await getFeatureReadiness(
+      strapiHarness({
+        'api::category.category:many': [
+          { documentId: 'daily', slug: 'daily-specials', pageTemplate: 'dealTemplate' },
+          { documentId: 'sale', slug: 'freedom-sale', pageTemplate: 'independenceDayTemplate' },
+        ],
+      }, { 'api::deal.deal': 1 }),
+      INDIA_DEFAULT_CONFIGURATION,
+    );
+
+    for (const feature of [readiness.dealOfTheDay, readiness.independenceDaySale]) {
+      expect(feature).toEqual({
+        enabled: true, ready: false, live: false, reason: 'CMS singleton is missing.',
+      });
+    }
+  });
+
+  it('does not activate unassigned campaigns with optional sections missing', async () => {
+    const readiness = await getFeatureReadiness(
+      strapiHarness({
+        'api::deal-of-the-day-page.deal-of-the-day-page': {},
+        'api::independence-day-sale-page.independence-day-sale-page': {},
+      }, { 'api::deal.deal': 1 }),
+      INDIA_DEFAULT_CONFIGURATION,
+    );
+
+    for (const feature of [readiness.dealOfTheDay, readiness.independenceDaySale]) {
+      expect(feature).toEqual({ enabled: false, ready: true, live: false });
+    }
   });
 });

@@ -102,7 +102,7 @@ test("the approved USA workbook keeps its audited classification totals", async 
   });
 });
 
-test("USA and UAE default to their approved workbooks and India does not", () => {
+test("USA, UAE and SG default to their approved workbooks and India does not", () => {
   assert.equal(
     taxonomyClassificationFile({ MIGRATION_PROFILE: "usa" }),
     WORKBOOK,
@@ -112,6 +112,15 @@ test("USA and UAE default to their approved workbooks and India does not", () =>
     fileURLToPath(
       new URL(
         "../uae/CouponzGuru_UAE_Taxonomy_Classification.xlsx",
+        import.meta.url,
+      ),
+    ),
+  );
+  assert.equal(
+    taxonomyClassificationFile({ MIGRATION_PROFILE: "sg" }),
+    fileURLToPath(
+      new URL(
+        "../sg/CouponzGuru_SG_Taxonomy_Classification.xlsx",
         import.meta.url,
       ),
     ),

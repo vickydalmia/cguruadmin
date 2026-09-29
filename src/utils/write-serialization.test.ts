@@ -1,78 +1,46 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { acquireWriteSerializationLock } from './write-serialization';
 
-function strapiWithKnex(client: string, trx: any, transactionError?: Error) {
-  return {
-    db: {
-      connection: {
-        client: { config: { client } },
-        transaction: transactionError
-          ? vi.fn(async () => {
-              throw transactionError;
-            })
-          : vi.fn(async () => trx),
-      },
-    },
-    log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-  } as any;
-}
+const makeStrapi = (client: string) => ({ db: { connection: {
+  client: { config: { client } }, transaction: vi.fn(),
+} } }) as any;
 
-describe('acquireWriteSerializationLock', () => {
-  it('is a no-op (null) on non-Postgres dialects', async () => {
-    const strapi = strapiWithKnex('better-sqlite3', {});
-    await expect(
-      acquireWriteSerializationLock(strapi, 'identity'),
-    ).resolves.toBeNull();
-    expect(strapi.db.connection.transaction).not.toHaveBeenCalled();
-  });
+afterEach(() => vi.unstubAllEnvs());
 
-  it('takes the advisory lock on a dedicated transaction and commits on release', async () => {
-    const trx = {
-      raw: vi.fn(async () => ({})),
-      commit: vi.fn(async () => {}),
-      rollback: vi.fn(async () => {}),
-    };
-    const strapi = strapiWithKnex('postgres', trx);
-
-    const release = await acquireWriteSerializationLock(strapi, 'redirect');
-    expect(release).toBeTypeOf('function');
+describe('content-transaction serialization', () => {
+  it('uses the caller transaction without reserving another connection', async () => {
+    const strapi = makeStrapi('pg');
+    const trx = { raw: vi.fn().mockResolvedValue({ rows: [{ lock_timeout: '0' }] }) };
+    await acquireWriteSerializationLock(strapi, 'identity', trx);
+    expect(trx.raw).toHaveBeenCalledWith("SELECT set_config('lock_timeout', ?, true)", ['8000ms']);
+    expect(trx.raw).toHaveBeenLastCalledWith("SELECT set_config('lock_timeout', ?, true)", ['0']);
     expect(trx.raw).toHaveBeenCalledWith(
       'SELECT pg_advisory_xact_lock(hashtext(?), hashtext(?))',
-      ['cguru:document-write', 'redirect'],
+      ['cguru:document-write', 'identity'],
     );
-
-    await release!();
-    expect(trx.commit).toHaveBeenCalledTimes(1);
-    expect(trx.rollback).not.toHaveBeenCalled();
+    expect(strapi.db.connection.transaction).not.toHaveBeenCalled();
+  });
+  it('rejects a missing content transaction on PostgreSQL', async () => {
+    await expect(acquireWriteSerializationLock(makeStrapi('pg'), 'redirect', null))
+      .rejects.toThrow('content transaction');
+  });
+  it('propagates lock failure so the content transaction rolls back', async () => {
+    const trx = { raw: vi.fn().mockRejectedValue(new Error('lock timeout')) };
+    await expect(acquireWriteSerializationLock(makeStrapi('pg'), 'job', trx))
+      .rejects.toThrow('lock timeout');
+  });
+  it('does not issue PostgreSQL SQL on SQLite', async () => {
+    const trx = { raw: vi.fn() };
+    await acquireWriteSerializationLock(makeStrapi('better-sqlite3'), 'identity', trx);
+    expect(trx.raw).not.toHaveBeenCalled();
+  });
+  it('honors a bounded operator timeout and reports lock contention without further SQL', async () => {
+    vi.stubEnv('WRITE_SERIALIZATION_TIMEOUT_MS', '12000');
+    const trx = { raw: vi.fn().mockResolvedValueOnce({ rows: [{ lock_timeout: '3s' }] })
+      .mockResolvedValueOnce({}).mockRejectedValueOnce({ code: '55P03' }) };
+    await expect(acquireWriteSerializationLock(makeStrapi('pg'), 'identity', trx)).rejects.toThrow('please retry');
+    expect(trx.raw).toHaveBeenCalledWith("SELECT set_config('lock_timeout', ?, true)", ['12000ms']);
+    expect(trx.raw).toHaveBeenCalledTimes(3);
   });
 
-  it('proceeds unserialized (null + warn) when the lock cannot be taken, rolling back', async () => {
-    const trx = {
-      raw: vi.fn(async (sql: string) => {
-        if (sql.includes('pg_advisory_xact_lock')) {
-          throw new Error('canceling statement due to lock timeout');
-        }
-        return {};
-      }),
-      commit: vi.fn(async () => {}),
-      rollback: vi.fn(async () => {}),
-    };
-    const strapi = strapiWithKnex('pg', trx);
-
-    await expect(
-      acquireWriteSerializationLock(strapi, 'identity'),
-    ).resolves.toBeNull();
-    expect(trx.rollback).toHaveBeenCalledTimes(1);
-    expect(strapi.log.warn).toHaveBeenCalledWith(
-      expect.stringContaining('proceeding unserialized'),
-    );
-  });
-
-  it('proceeds unserialized when opening the lock transaction itself fails', async () => {
-    const strapi = strapiWithKnex('pg', {}, new Error('pool exhausted'));
-    await expect(
-      acquireWriteSerializationLock(strapi, 'identity'),
-    ).resolves.toBeNull();
-    expect(strapi.log.warn).toHaveBeenCalled();
-  });
 });

@@ -183,3 +183,13 @@ describe('enqueueCoalescedIsrSweep', () => {
     expect(mocks.purgeEntityPopularSearchCatalog).toHaveBeenCalledTimes(1);
   });
 });
+
+it('does not expand English manual page commands into other languages', async () => {
+  setEnabledContentLocaleCodesForTest(['ar']);
+  const trx = vi.fn();
+  const transaction = vi.fn(async (callback: any) => callback({ trx, onCommit: vi.fn() }));
+  const payload = { manualRefresh: true as const, excludeLocalePrefixes: ['/ar'], paths: ['/amazon/'] };
+  await enqueueStandaloneIsrEvent({ db: { transaction } } as any, { reason: 'manual-refresh:admin:1', payload });
+  expect(mocks.insertIsrOutboxEvent).toHaveBeenCalledWith(trx, expect.objectContaining({ payload }));
+  setEnabledContentLocaleCodesForTest([]);
+});

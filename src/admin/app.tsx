@@ -1,3 +1,6 @@
+import { TelegramProcessingPanel } from './features/telegram-processing/telegram-processing-panel';
+import { TelegramPostsPanel } from './features/telegram-processing/telegram-posts-panel';
+import { WebsiteRefreshPanel } from './features/website-refresh/components/website-refresh-panel';
 import Logo from './extensions/logo-icon.svg';
 
 import type { StrapiApp } from '@strapi/strapi/admin';
@@ -181,6 +184,12 @@ export default {
   },
   bootstrap(app: StrapiApp) {
     app.addSettingsLink('global', {
+      id: 'website-refresh', to: '/settings/website-refresh',
+      permissions: [{ action: 'admin::website-refresh.manage', subject: null }],
+      intlLabel: { id: 'website-refresh.settings.label', defaultMessage: 'Website refresh' },
+      Component: async () => import('./features/website-refresh/components/website-refresh-page'),
+    });
+    app.addSettingsLink('global', {
       id: 'country-setup',
       to: '/settings/country-setup',
       permissions: [],
@@ -210,6 +219,24 @@ export default {
       Component: async () => {
         const page = await import(
           './features/ui-dictionary/components/ui-dictionary-page'
+        );
+        return { default: page.default };
+      },
+    });
+    // Super-Admin-only. `permissions: []` gates nothing by itself: every
+    // endpoint behind the page requires global::super-admin-only, and the
+    // page renders NoPermissions for any other role / on a 403.
+    app.addSettingsLink('global', {
+      id: 'database-backups',
+      to: '/settings/database-backups',
+      permissions: [],
+      intlLabel: {
+        id: 'database-backups.settings.label',
+        defaultMessage: 'Database Backups',
+      },
+      Component: async () => {
+        const page = await import(
+          './features/database-backups/components/database-backups-page'
         );
         return { default: page.default };
       },
@@ -248,6 +275,9 @@ export default {
       // Self-hides unless this deployment translates content (Country
       // Setup + TRANSLATION_* env) and the model is localized.
       TranslationPanel,
+      WebsiteRefreshPanel,
+      TelegramProcessingPanel,
+      TelegramPostsPanel,
     ]);
 
     // Registered after every plugin's bootstrap, so this sees (and preserves)

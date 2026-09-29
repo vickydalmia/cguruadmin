@@ -88,8 +88,9 @@ export async function deliverOutboxEvent(
   paths: Array<{ path: string; version: number }>;
   removedPaths: string[];
   globalVersion?: number;
+  jobId?: string;
 }> {
-  const response = await fetchImpl(`${config.gatewayUrl}/revalidate`, {
+  const response = await fetchImpl(`${config.gatewayUrl}${event.payload.manualRefresh ? "/internal/isr/manual-refresh" : "/revalidate"}`, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${config.adminSecret}`,
@@ -144,6 +145,7 @@ export async function deliverOutboxEvent(
       version: Number(entry.version),
     })),
     removedPaths,
+    ...(typeof body?.jobId === 'string' && /^manual-[a-f0-9]{64}$/.test(body.jobId) ? { jobId: body.jobId } : {}),
     ...(Number.isSafeInteger(Number(body?.globalVersion))
       ? { globalVersion: Number(body.globalVersion) }
       : {}),

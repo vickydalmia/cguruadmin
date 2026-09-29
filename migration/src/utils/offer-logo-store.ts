@@ -1,4 +1,5 @@
 import { wpQuery } from "../db/wp-client.js";
+import { TERM_META_ALIASES, sqlMetaKeyList } from "./wp-source-fields.js";
 
 export type StoreLogoIndex = ReadonlyMap<string, readonly number[]>;
 
@@ -25,7 +26,7 @@ export async function loadWpStoreLogoIndex(): Promise<StoreLogoIndex> {
     LEFT JOIN wp_posts attachment
       ON attachment.ID = CAST(logo.meta_value AS UNSIGNED)
      AND attachment.post_type = 'attachment'
-    WHERE logo.meta_key = 'store_cat_image'
+    WHERE logo.meta_key IN (${sqlMetaKeyList(TERM_META_ALIASES.image)})
     ORDER BY logo.term_id
   `);
 

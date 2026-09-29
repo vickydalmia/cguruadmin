@@ -95,6 +95,23 @@ describe('Independence Day sale validation', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('accepts a page without a hero or countdown', async () => {
+    const { strapi } = strapiWithCurrent();
+    await expect(validateIndependenceDaySale(strapi, { title: 'Sale' })).resolves.toBeUndefined();
+  });
+
+  it('accepts removing a previously invalid countdown', async () => {
+    const { strapi } = strapiWithCurrent({ countdown: { enabled: true } });
+    await expect(validateIndependenceDaySale(strapi, { countdown: null })).resolves.toBeUndefined();
+  });
+
+  it('still validates a stored countdown when an update omits it', async () => {
+    const { strapi } = strapiWithCurrent({ countdown: { enabled: true } });
+    await expect(validateIndependenceDaySale(strapi, { title: 'Sale' })).rejects.toMatchObject({
+      details: { errors: [{ path: ['countdown'] }] },
+    });
+  });
+
   it('counts nested tab connect/disconnect updates against the saved relation', async () => {
     const savedOffers = Array.from({ length: 10 }, (_, id) => ({ id: id + 1 }));
     const { strapi } = strapiWithCurrent({

@@ -38,8 +38,9 @@ export async function validateIndependenceDaySale(
     } as any,
   });
   const problems: Problem[] = [];
-  const countdown = data.countdown ?? current?.countdown;
-  if (countdown?.enabled !== false) {
+  // Null removes the optional component; omission retains the saved clock.
+  const countdown = data.countdown === undefined ? current?.countdown : data.countdown;
+  if (countdown && countdown.enabled !== false) {
     const start = dateValue(countdown?.saleStartAt);
     const end = dateValue(countdown?.saleEndAt);
     if (start === null || end === null || start >= end) {

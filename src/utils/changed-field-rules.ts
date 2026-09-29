@@ -36,6 +36,8 @@ export const SEO_UIDS = new Set([
   'api::contact-page.contact-page',
   'api::deal-of-the-day-page.deal-of-the-day-page',
   'api::independence-day-sale-page.independence-day-sale-page',
+  'api::telegram-page.telegram-page',
+  'api::subscription-page.subscription-page',
   'api::faq-page.faq-page',
   'api::homepage.homepage',
   'api::job.job',
@@ -88,8 +90,19 @@ const optionalString = (
 const maxLength = (max: number) =>
   optionalString((value) => value.length <= max);
 
-const minLength = (min: number) =>
-  optionalString((value) => value.length >= min);
+// Rich text: the editorial minimum applies to what the reader sees, so tags
+// are stripped and entities decoded before counting. `<p></p>` around 150
+// characters of text is still 150 characters.
+const richTextLength = (value: string): number =>
+  value
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&[a-z#0-9]+;/gi, 'x')
+    .replace(/\s+/g, ' ')
+    .trim().length;
+
+const minTextLength = (min: number) =>
+  optionalString((value) => richTextLength(value) >= min);
 
 const topRule = (
   uid: string,
@@ -135,7 +148,7 @@ export const TOP_LEVEL_RULES: Rule[] = [
     topRule(
       uid,
       'shortDescription',
-      minLength(160),
+      minTextLength(160),
       'Short description must be at least 160 characters.',
       'At least 160 characters.',
     ),

@@ -11,6 +11,18 @@ function harness(stored: unknown = null) {
 }
 
 describe('validateChangedFields', () => {
+  it('applies the shared SEO limits and URL safety to Subscription Page saves', async () => {
+    const { strapi } = harness();
+    await expect(validateChangedFields(strapi, 'api::subscription-page.subscription-page', 'create', {
+      seo: { metaTitle: 'x'.repeat(71), metaDescription: 'x'.repeat(171), canonicalUrl: '//untrusted.test', ogImageAlt: 'x'.repeat(126) },
+    })).rejects.toMatchObject({ details: { errors: expect.arrayContaining([
+      expect.objectContaining({ path: ['seo', 'metaTitle'] }), expect.objectContaining({ path: ['seo', 'metaDescription'] }),
+      expect.objectContaining({ path: ['seo', 'canonicalUrl'] }), expect.objectContaining({ path: ['seo', 'ogImageAlt'] }),
+    ]) } });
+    await expect(validateChangedFields(strapi, 'api::subscription-page.subscription-page', 'create', {
+      seo: { metaTitle: 'Subscribe', metaDescription: 'Receive our offers', canonicalUrl: '/subscription/' },
+    })).resolves.toBeUndefined();
+  });
   it.each(['create', 'clone'])('validates strict fields on %s', async (action) => {
     const { strapi, findOne } = harness();
     await expect(
@@ -330,6 +342,33 @@ describe('validateChangedFields', () => {
 });
 
 describe('validateChangedFields — STRICT (clean as you touch)', () => {
+  it('measures the 160-character minimum on the text, not the rich-text markup', async () => {
+    // 150 characters of text wrapped in paragraph tags and entities is still
+    // 150 characters to the reader.
+    const { strapi } = harness({
+      documentId: 'store-1',
+      name: 'Amazon',
+      shortDescription: `<p>${'x'.repeat(150)}&nbsp;</p><p>&nbsp;</p>`,
+    });
+
+    await expect(
+      validateChangedFields(strapi, 'api::store.store', 'update', { name: 'Amazon India' }, 'store-1', true),
+    ).rejects.toMatchObject({
+      details: {
+        problems: expect.arrayContaining([expect.stringContaining('at least 160 characters')]),
+      },
+    });
+
+    const { strapi: longEnough } = harness({
+      documentId: 'store-1',
+      name: 'Amazon',
+      shortDescription: `<p><strong>${'x'.repeat(160)}</strong></p>`,
+    });
+    await expect(
+      validateChangedFields(longEnough, 'api::store.store', 'update', { name: 'Amazon India' }, 'store-1', true),
+    ).resolves.toBeUndefined();
+  });
+
   it('STRICT blocks an unrelated human edit when shortDescription is under 160 characters', async () => {
     const { strapi } = harness({
       documentId: 'store-1',

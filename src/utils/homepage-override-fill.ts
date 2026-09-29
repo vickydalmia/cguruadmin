@@ -25,6 +25,20 @@ const OVERRIDE_FILLS: Array<{
   { componentUid: 'festival.coupon-store-tab', overrideField: 'labelOverride', relationField: 'store', relationLabel: 'name' },
 ];
 
+// Override fields are single-line strings, and one source (bank
+// `shortDescription`) is rich text: strip its markup and collapse whitespace
+// so the subtitle never shows a literal `<p>`.
+export function toPlainLabel(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text || null;
+}
+
 export async function fillHomepageOverrides(strapi: Core.Strapi): Promise<void> {
   for (const fill of OVERRIDE_FILLS) {
     const rows = await strapi.db.query(fill.componentUid as any).findMany({
@@ -33,11 +47,11 @@ export async function fillHomepageOverrides(strapi: Core.Strapi): Promise<void> 
     });
 
     for (const row of rows) {
-      const label = row[fill.relationField]?.[fill.relationLabel];
-      if (typeof label === 'string' && label.trim()) {
+      const label = toPlainLabel(row[fill.relationField]?.[fill.relationLabel]);
+      if (label) {
         await strapi.db.query(fill.componentUid as any).update({
           where: { id: row.id },
-          data: { [fill.overrideField]: label.trim() },
+          data: { [fill.overrideField]: label },
         });
       }
     }

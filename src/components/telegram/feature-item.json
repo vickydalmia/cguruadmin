@@ -1,0 +1,19 @@
+{
+  "collectionName": "components_telegram_feature_items",
+  "info": {
+    "displayName": "Telegram Feature Item",
+    "icon": "check"
+  },
+  "attributes": {
+    "label": {
+      "type": "string",
+      "required": true,
+      "maxLength": 50
+    },
+    "dot": {
+      "type": "enumeration",
+      "enum": ["green", "blue", "red"],
+      "default": "green"
+    }
+  }
+}

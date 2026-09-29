@@ -74,19 +74,21 @@ let waiters: Array<() => void> = [];
 let configuredConcurrency = 2;
 
 export function configureTranslationConcurrency(limit: number): void {
-  configuredConcurrency = Math.max(1, limit);
+  configuredConcurrency = Math.min(2, Math.max(1, limit));
 }
 
 async function withTranslationSlot<T>(operation: () => Promise<T>): Promise<T> {
   if (activeRequests >= configuredConcurrency) {
     await new Promise<void>((resolve) => waiters.push(resolve));
+  } else {
+    activeRequests += 1;
   }
-  activeRequests += 1;
   try {
     return await operation();
   } finally {
-    activeRequests -= 1;
-    waiters.shift()?.();
+    const next = waiters.shift();
+    if (next) next();
+    else activeRequests -= 1;
   }
 }
 

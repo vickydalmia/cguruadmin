@@ -147,6 +147,7 @@ export type UiDictionarySummary = {
 };
 
 export type PublicDictionary = {
+  ready: boolean;
   locale: string;
   version: string | null;
   updatedAt: string | null;

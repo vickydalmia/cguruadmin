@@ -7,6 +7,21 @@ export const CHROME_UIDS = new Set(['api::menu.menu', 'api::footer.footer', 'api
 export const DOTD_PAGE_UID = 'api::deal-of-the-day-page.deal-of-the-day-page';
 export const INDEPENDENCE_DAY_SALE_PAGE_UID =
   'api::independence-day-sale-page.independence-day-sale-page';
+// Join Telegram is a standalone singleton with its own slug (see
+// api/telegram-page/services/telegram-route.ts); ingested channel posts and
+// the channel connection render only on that page.
+export const TELEGRAM_PAGE_UID = 'api::telegram-page.telegram-page';
+export const TELEGRAM_POST_UID = 'api::telegram-post.telegram-post';
+export const TELEGRAM_CONFIG_UID = 'api::telegram.telegram';
+
+/** Campaign singleton → the entity page template whose owner renders it. */
+export const CAMPAIGN_TEMPLATE_BY_PAGE_UID: Record<
+  string,
+  'dealTemplate' | 'independenceDayTemplate'
+> = {
+  [DOTD_PAGE_UID]: 'dealTemplate',
+  [INDEPENDENCE_DAY_SALE_PAGE_UID]: 'independenceDayTemplate',
+};
 // The About page is a standalone editorial route with no entity relations, so
 // an edit rebuilds exactly one page. Its country cards read from the Footer
 // single type, which is in CHROME_UIDS and already triggers a full rebuild.

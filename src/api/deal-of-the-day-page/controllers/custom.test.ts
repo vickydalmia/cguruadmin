@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import createDealOfTheDayController from './custom';
+import { setEnabledContentLocaleCodesForTest } from '../../../translation/locales/registry';
 
 const PAGE_UID = 'api::deal-of-the-day-page.deal-of-the-day-page';
 
@@ -70,6 +71,25 @@ function benefitDeal(index: number, overrides: Record<string, any> = {}) {
 }
 
 describe('deal-of-the-day aggregate population', () => {
+  it('reads the requested enabled locale and falls back to English otherwise', async () => {
+    setEnabledContentLocaleCodesForTest(['ar']);
+    try {
+      const localized = createHarness(null);
+      await localized.controller.dealOfTheDayFull({ ...localized.ctx, query: { locale: 'ar' } } as any);
+      expect(localized.findFirst.mock.calls[0]?.[0]).toMatchObject({ locale: 'ar' });
+
+      const unknown = createHarness(null);
+      await unknown.controller.dealOfTheDayFull({ ...unknown.ctx, query: { locale: 'zz' } } as any);
+      expect(unknown.findFirst.mock.calls[0]?.[0]).toMatchObject({ locale: 'en' });
+
+      const plain = createHarness(null);
+      await plain.controller.dealOfTheDayFull(plain.ctx as any);
+      expect(plain.findFirst.mock.calls[0]?.[0]).toMatchObject({ locale: 'en' });
+    } finally {
+      setEnabledContentLocaleCodesForTest([]);
+    }
+  });
+
   it('404s when the single type has never been saved', async () => {
     const harness = createHarness(null);
 
