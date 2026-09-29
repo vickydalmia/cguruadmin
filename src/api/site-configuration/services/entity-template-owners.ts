@@ -5,6 +5,7 @@ export const ENTITY_PAGE_TEMPLATES = [
   'default',
   'dealTemplate',
   'independenceDayTemplate',
+  'festivalTemplate',
 ] as const;
 
 export type EntityPageTemplate = (typeof ENTITY_PAGE_TEMPLATES)[number];

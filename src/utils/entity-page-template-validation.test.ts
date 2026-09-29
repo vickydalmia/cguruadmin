@@ -17,7 +17,7 @@ function strapiHarness(
   } as any;
 }
 
-describe('validateUniqueEntityPageTemplate', () => {
+describe.each(['dealTemplate', 'independenceDayTemplate', 'festivalTemplate'])('validateUniqueEntityPageTemplate (%s)', (template) => {
   it('applies only to the four entity collections', () => {
     expect(isEntityTemplateUid('api::category.category')).toBe(true);
     expect(isEntityTemplateUid('api::store.store')).toBe(true);
@@ -27,7 +27,7 @@ describe('validateUniqueEntityPageTemplate', () => {
   it('ignores writes that do not assign a campaign template', async () => {
     const strapi = strapiHarness({
       'api::category.category': [
-        { documentId: 'other', slug: 'deal-of-the-day', pageTemplate: 'dealTemplate' },
+        { documentId: 'other', slug: 'deal-of-the-day', pageTemplate: template },
       ],
     });
     await expect(
@@ -41,13 +41,13 @@ describe('validateUniqueEntityPageTemplate', () => {
   it('rejects a second owner of the same campaign template', async () => {
     const strapi = strapiHarness({
       'api::category.category': [
-        { documentId: 'other', slug: 'deal-of-the-day', pageTemplate: 'dealTemplate' },
+        { documentId: 'other', slug: 'deal-of-the-day', pageTemplate: template },
       ],
     });
     await expect(
       validateUniqueEntityPageTemplate(
         strapi,
-        { pageTemplate: 'dealTemplate' },
+        { pageTemplate: template },
         'doc-1',
       ),
     ).rejects.toThrowError(/already assigned/u);
@@ -56,13 +56,13 @@ describe('validateUniqueEntityPageTemplate', () => {
   it('allows the current owner to re-save its own template', async () => {
     const strapi = strapiHarness({
       'api::category.category': [
-        { documentId: 'doc-1', slug: 'deal-of-the-day', pageTemplate: 'dealTemplate' },
+        { documentId: 'doc-1', slug: 'deal-of-the-day', pageTemplate: template },
       ],
     });
     await expect(
       validateUniqueEntityPageTemplate(
         strapi,
-        { pageTemplate: 'dealTemplate' },
+        { pageTemplate: template },
         'doc-1',
       ),
     ).resolves.toBeUndefined();
@@ -71,13 +71,13 @@ describe('validateUniqueEntityPageTemplate', () => {
   it('rejects a clone even when its source document owns the template', async () => {
     const strapi = strapiHarness({
       'api::category.category': [
-        { documentId: 'doc-1', slug: 'deal-of-the-day', pageTemplate: 'dealTemplate' },
+        { documentId: 'doc-1', slug: 'deal-of-the-day', pageTemplate: template },
       ],
     });
     await expect(
       validateUniqueEntityPageTemplate(
         strapi,
-        { pageTemplate: 'dealTemplate' },
+        { pageTemplate: template },
         'doc-1',
         'clone',
       ),
@@ -89,10 +89,10 @@ describe('validateUniqueEntityPageTemplate', () => {
     const strapi = strapiHarness(
       {
         [uid]: [
-          { documentId: 'doc-1', slug: 'deal-of-the-day', pageTemplate: 'dealTemplate' },
+          { documentId: 'doc-1', slug: 'deal-of-the-day', pageTemplate: template },
         ],
       },
-      { [uid]: { documentId: 'doc-1', pageTemplate: 'dealTemplate' } },
+      { [uid]: { documentId: 'doc-1', pageTemplate: template } },
     );
     await expect(
       validateUniqueEntityPageTemplate(strapi, {}, 'doc-1', 'clone', uid),

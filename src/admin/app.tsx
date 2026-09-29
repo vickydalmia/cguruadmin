@@ -1,4 +1,5 @@
 import { TelegramProcessingPanel } from './features/telegram-processing/telegram-processing-panel';
+import TemplateEnumerationInput from './features/entity-template/components/template-enumeration-input';
 import { TelegramPostsPanel } from './features/telegram-processing/telegram-posts-panel';
 import { WebsiteRefreshPanel } from './features/website-refresh/components/website-refresh-panel';
 import Logo from './extensions/logo-icon.svg';
@@ -65,6 +66,7 @@ export default {
     // Confirmation dialog before any boolean toggle flips (QC: avoid accidental
     // ON/OFF from a stray click).
     app.addFields({ type: 'boolean', Component: BooleanConfirmInput } as any);
+    app.addFields({ type: 'enumeration', Component: TemplateEnumerationInput } as any);
     // Slug fields are plain `string` attributes (schema-regex-validated, typed
     // by hand) — the former uid SlugInput and its Regenerate button are gone.
 

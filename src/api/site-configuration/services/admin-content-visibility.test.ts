@@ -7,6 +7,13 @@ import {
 } from './admin-content-visibility';
 
 describe('country-aware Content Manager visibility', () => {
+  it.each([false, true])('shows Festival settings only when its template is assigned (%s)', (assigned) => {
+    const hidden = hiddenAdminContentTypeUids(INDIA_DEFAULT_CONFIGURATION, {
+      dealTemplate: false, independenceDayTemplate: false, festivalTemplate: assigned,
+    });
+    expect(hidden.has('api::festival-page.festival-page')).toBe(!assigned);
+  });
+
   it('hides disabled feature types and their supporting editor collections', () => {
     const hidden = hiddenAdminContentTypeUids(
       {
@@ -15,7 +22,7 @@ describe('country-aware Content Manager visibility', () => {
         careersEnabled: false,
         privacyPolicyEnabled: false,
       },
-      { dealTemplate: true, independenceDayTemplate: true },
+      { festivalTemplate: false, dealTemplate: true, independenceDayTemplate: true },
     );
 
     expect([...hidden]).toEqual(expect.arrayContaining([
@@ -33,7 +40,7 @@ describe('country-aware Content Manager visibility', () => {
   it('derives campaign singleton visibility from template ownership', () => {
     const hidden = hiddenAdminContentTypeUids(
       INDIA_DEFAULT_CONFIGURATION,
-      { dealTemplate: false, independenceDayTemplate: true },
+      { festivalTemplate: false, dealTemplate: false, independenceDayTemplate: true },
     );
 
     expect(hidden.has('api::deal-of-the-day-page.deal-of-the-day-page')).toBe(true);
@@ -51,7 +58,7 @@ describe('country-aware Content Manager visibility', () => {
         countryCode: 'US',
         aboutEnabled: true,
       },
-      { dealTemplate: true, independenceDayTemplate: true },
+      { festivalTemplate: false, dealTemplate: true, independenceDayTemplate: true },
     );
 
     expect(hidden.has('api::about-page.about-page')).toBe(false);

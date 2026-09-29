@@ -1,0 +1,39 @@
+{
+  "kind": "singleType",
+  "collectionName": "festival_pages",
+  "info": {
+    "singularName": "festival-page",
+    "pluralName": "festival-pages",
+    "displayName": "Festival Template",
+    "description": "Shared Festival Template settings for its single Store, Brand, Category or Bank owner. Content sections are added incrementally."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
+  },
+  "attributes": {
+    "title": {
+      "type": "string",
+      "default": "Festival Template",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "seo": {
+      "type": "component",
+      "component": "shared.seo",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    }
+  }
+}

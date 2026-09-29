@@ -18,6 +18,29 @@ function strapiHarness(rows: Record<string, any>, counts: Record<string, number>
 }
 
 describe('feature readiness', () => {
+  it.each(['store', 'brand', 'category', 'bank'])('keeps an unconfigured Festival %s on its default view', async (kind) => {
+    const uid = `api::${kind}.${kind}`;
+    for (const singleton of [null, { title: 'Festival Template', seo: { metaTitle: 'Festival' } }]) {
+      const readiness = await getFeatureReadiness(strapiHarness({
+        [`${uid}:many`]: [{ documentId: 'owner', slug: 'seasonal', pageTemplate: 'festivalTemplate' }],
+        'api::festival-page.festival-page': singleton,
+      }, {}), INDIA_DEFAULT_CONFIGURATION);
+      expect(readiness.festival).toMatchObject({ enabled: true, ready: false, live: false });
+      expect(readiness.festival.path).toBeUndefined();
+      expect(readiness.festival.reason).toBe(singleton
+        ? 'Festival content sections are not configured yet.'
+        : 'CMS singleton is missing.');
+    }
+  });
+
+  it('does not activate saved Festival settings without an owner', async () => {
+    const readiness = await getFeatureReadiness(strapiHarness({
+      'api::festival-page.festival-page': { title: 'Festival Template' },
+    }, {}), INDIA_DEFAULT_CONFIGURATION);
+    expect(readiness.festival).toMatchObject({ enabled: false, ready: false, live: false });
+    expect(readiness.festival.path).toBeUndefined();
+  });
+
   it('does not treat India fallback copy as USA CMS content', async () => {
     const usa = {
       ...INDIA_DEFAULT_CONFIGURATION,

@@ -54,12 +54,14 @@ const FEATURE_CONTENT_TYPES: readonly FeatureContentTypes[] = [
 ] as const;
 
 const CAMPAIGN_CONTENT_TYPES = {
+  festivalTemplate: 'api::festival-page.festival-page',
   dealTemplate: 'api::deal-of-the-day-page.deal-of-the-day-page',
   independenceDayTemplate:
     'api::independence-day-sale-page.independence-day-sale-page',
 } as const;
 
 export type AdminCampaignOwnership = {
+  festivalTemplate: boolean;
   dealTemplate: boolean;
   independenceDayTemplate: boolean;
 };
@@ -95,12 +97,14 @@ export async function filterContentManagerInitBody(
   const contentTypes = body?.data?.contentTypes;
   if (!Array.isArray(contentTypes)) return body;
 
-  const [config, dealOwners, independenceDayOwners] = await Promise.all([
+  const [config, dealOwners, independenceDayOwners, festivalOwners] = await Promise.all([
     loadSiteConfiguration(strapi),
     findEntityTemplateOwners(strapi, 'dealTemplate'),
     findEntityTemplateOwners(strapi, 'independenceDayTemplate'),
+    findEntityTemplateOwners(strapi, 'festivalTemplate'),
   ]);
   const hidden = hiddenAdminContentTypeUids(config, {
+    festivalTemplate: festivalOwners.length > 0,
     dealTemplate: dealOwners.length > 0,
     independenceDayTemplate: independenceDayOwners.length > 0,
   });

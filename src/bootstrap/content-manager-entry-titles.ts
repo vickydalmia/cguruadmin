@@ -131,6 +131,7 @@ const SINGLE_TYPE_ENTRY_TITLES = [
   'api::homepage.homepage',
   'api::deal-of-the-day-page.deal-of-the-day-page',
   'api::independence-day-sale-page.independence-day-sale-page',
+  'api::festival-page.festival-page',
   'api::telegram-page.telegram-page',
   'api::telegram.telegram',
   'api::menu.menu',

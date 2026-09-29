@@ -34,6 +34,22 @@ function strapiWithFindOne(
 }
 
 describe('preDeleteScope failure escalation', () => {
+  it.each(['store', 'brand', 'category', 'bank'])('targets the Festival %s owner when settings change', async (kind) => {
+    const { computeScope } = await import('./scopes');
+    const strapi = strapiWithFindOne(async () => null, async (uid, args) =>
+      uid === `api::${kind}.${kind}` && args.filters?.pageTemplate === 'festivalTemplate'
+        ? [{ documentId: 'festival-owner', slug: 'seasonal-specials' }]
+        : []);
+    await expect(computeScope(strapi, 'api::festival-page.festival-page', 'update', 'settings'))
+      .resolves.toEqual({ slugs: ['seasonal-specials'], sitemap: true, refreshScopes: ['routes'] });
+  });
+
+  it('does not invent a Festival URL when no entity owns the template', async () => {
+    const { computeScope } = await import('./scopes');
+    await expect(computeScope(strapiWithFindOne(async () => null), 'api::festival-page.festival-page', 'delete', 'settings'))
+      .resolves.toEqual({ slugs: [], sitemap: true, refreshScopes: ['routes'] });
+  });
+
   it('returns the related-page scope when the pre-read succeeds', async () => {
     const strapi = strapiWithFindOne(async () => ({
       id: 41,

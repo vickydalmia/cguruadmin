@@ -65,6 +65,12 @@ async function singletonReady(
     };
   }
 
+  // Setup-only rollout: saving an admin title/SEO is not renderable content.
+  // Replace this gate with section eligibility when the first Festival block ships.
+  if (feature.key === 'festival') {
+    return { ready: false, reason: 'Festival content sections are not configured yet.' };
+  }
+
   if (feature.key === 'dealOfTheDay') {
     const dealCount = await strapi.documents('api::deal.deal').count({
       filters: { contentStatus: 'published' } as any,
