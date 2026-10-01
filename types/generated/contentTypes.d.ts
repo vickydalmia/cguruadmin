@@ -2009,6 +2009,12 @@ export interface ApiFestivalPageFestivalPage extends Struct.SingleTypeSchema {
           localized: true;
         };
       }>;
+    faq: Schema.Attribute.Component<'home.faq-block', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
     hero: Schema.Attribute.Component<'festival.responsive-banner', false> &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
@@ -2021,6 +2027,15 @@ export interface ApiFestivalPageFestivalPage extends Struct.SingleTypeSchema {
       'api::festival-page.festival-page'
     >;
     offerSlider: Schema.Attribute.Component<'festival.offer-slider', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    popularSearches: Schema.Attribute.Component<
+      'home.popular-searches',
+      false
+    > &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
           localized: true;

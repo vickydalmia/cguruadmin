@@ -4,6 +4,8 @@ import { brandRef, categoryRef, storeRef, dealRef, PUBLISHED_OFFER_FILTER } from
 export const FESTIVAL_POPULATE = {
   productSection: { populate: { filterBrands: { fields: ['name'] }, filterStores: { fields: ['name'] }, filterBanks: { fields: ['name'] }, items: { populate: { deal: { ...dealRef, filters: PUBLISHED_OFFER_FILTER } } }, categories: { populate: { category: categoryRef, imageOverride: true } } } },
   exploreCategories: FESTIVAL_CATEGORIES_POPULATE,
+  faq: { populate: { items: true } },
+  popularSearches: { populate: { stores: { fields: ['name', 'slug'] }, brands: { fields: ['name', 'slug'] }, categories: { fields: ['name', 'slug'] }, banks: { fields: ['name', 'slug'] } } },
   countdown: true,
   hero: { populate: { desktopImage: true } },
   offerSlider: { populate: { items: { populate: {

@@ -92,6 +92,26 @@
           "localized": true
         }
       }
+    },
+    "faq": {
+      "type": "component",
+      "component": "home.faq-block",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "popularSearches": {
+      "type": "component",
+      "component": "home.popular-searches",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     }
   }
 }
