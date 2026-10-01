@@ -2057,7 +2057,10 @@ export interface ApiFestivalPageFestivalPage extends Struct.SingleTypeSchema {
         };
       }>;
     publishedAt: Schema.Attribute.DateTime;
-    seo: Schema.Attribute.Component<'shared.seo', false> &
+    savingsSection: Schema.Attribute.Component<
+      'festival.savings-section',
+      false
+    > &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
           localized: true;

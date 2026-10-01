@@ -1547,6 +1547,65 @@ export interface FestivalSaleCountdown extends Struct.ComponentSchema {
   };
 }
 
+export interface FestivalSavingsCoupon extends Struct.ComponentSchema {
+  collectionName: 'components_festival_savings_coupons';
+  info: {
+    displayName: 'Savings Coupon';
+  };
+  attributes: {
+    badgeCaption: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }> &
+      Schema.Attribute.DefaultTo<'extra off*'>;
+    badgeLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }> &
+      Schema.Attribute.DefaultTo<'Card offer'>;
+    badgeValue: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 30;
+      }>;
+    buttonLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    coupon: Schema.Attribute.Relation<'oneToOne', 'api::coupon.coupon'>;
+    descriptionOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 240;
+      }>;
+    logoOverride: Schema.Attribute.Media<'images'>;
+    termsText: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 120;
+      }> &
+      Schema.Attribute.DefaultTo<'*T&C Apply'>;
+    titleOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+  };
+}
+
+export interface FestivalSavingsSection extends Struct.ComponentSchema {
+  collectionName: 'components_festival_savings_sections';
+  info: {
+    displayName: 'Savings Section';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    items: Schema.Attribute.Component<'festival.savings-coupon', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 2;
+        },
+        number
+      >;
+  };
+}
+
 export interface FooterCountry extends Struct.ComponentSchema {
   collectionName: 'components_footer_countries';
   info: {
@@ -3640,6 +3699,8 @@ declare module '@strapi/strapi' {
       'festival.promo-strip': FestivalPromoStrip;
       'festival.responsive-banner': FestivalResponsiveBanner;
       'festival.sale-countdown': FestivalSaleCountdown;
+      'festival.savings-coupon': FestivalSavingsCoupon;
+      'festival.savings-section': FestivalSavingsSection;
       'footer.country': FooterCountry;
       'footer.google-preferred-card': FooterGooglePreferredCard;
       'footer.link-section': FooterLinkSection;

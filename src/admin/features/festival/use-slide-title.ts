@@ -8,7 +8,7 @@ type QueryHook = (args: { model: string; id?: string; targetField: string; param
 export function useFestivalSlideTitle(name: string, component: string, fallback: unknown, params: Record<string, unknown>, useRelations: QueryHook) {
   const isCategory = ['festival.category-selection', 'festival.product-category', 'festival.gift-category'].includes(component);
   const isProduct = component === 'festival.product-slide';
-  const supported = isProduct || ['festival.offer-slide', 'festival.gift-coupon'].includes(component) || isCategory;
+  const supported = isProduct || ['festival.offer-slide', 'festival.gift-coupon', 'festival.savings-coupon'].includes(component) || isCategory;
   const field = isCategory ? 'category' : isProduct ? 'deal' : 'coupon';
   const row = useForm('FestivalSlideTitle', (state) => {
     if (!supported) return undefined;

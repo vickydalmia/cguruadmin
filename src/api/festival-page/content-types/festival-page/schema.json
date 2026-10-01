@@ -73,16 +73,6 @@
         }
       }
     },
-    "seo": {
-      "type": "component",
-      "component": "shared.seo",
-      "repeatable": false,
-      "pluginOptions": {
-        "i18n": {
-          "localized": true
-        }
-      }
-    },
     "productSection": {
       "type": "component",
       "component": "festival.product-section",
@@ -116,6 +106,16 @@
     "giftSection": {
       "type": "component",
       "component": "festival.gift-section",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "savingsSection": {
+      "type": "component",
+      "component": "festival.savings-section",
       "repeatable": false,
       "pluginOptions": {
         "i18n": {

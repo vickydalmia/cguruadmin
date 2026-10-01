@@ -63,3 +63,5 @@ main field. `festival.gift-coupon` uses `coupon.title` with `titleOverride`.
 Both participate in the same read-only relation-title hook; selecting a record
 never copies its name into an override. Selected Coupon entries alone define the slider contents and order. Empty
 selections hide the slider; category selections control only the tiles below.
+
+Festival `festival.savings-coupon` uses the same read-only Coupon relation-title fallback as gift coupons. Its scalar main field remains `titleOverride`; selecting a Coupon never writes into storefront override fields. The parent `savings-section.items` is capped at two in both schema and Festival save validation.

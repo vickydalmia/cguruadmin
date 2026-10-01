@@ -10,6 +10,7 @@ function relations(incoming: unknown, stored: unknown): RelationEntry[] {
 export function festivalSlideProblems(incoming: any, stored: any, section = 'offerSlider', field = 'coupon'): Problem[] {
   if (!Array.isArray(incoming?.items)) return [];
   const problems: Problem[] = [];
+  if (section === 'savingsSection' && incoming.items.length > 2) problems.push({ path: [section, 'items'], message: 'Select no more than 2 Coupons.' });
   incoming.items.forEach((item: any, index: number) => {
     const old = item?.id == null ? null : stored?.items?.find((row: any) => String(row.id) === String(item.id));
     if (relations(item?.[field], old?.[field]).length !== 1) {

@@ -61,6 +61,7 @@ const COMPONENT_ENTRY_TITLES: Record<string, string> = {
   'festival.product-category': 'labelOverride',
   'festival.product-section': 'heading',
   'festival.gift-coupon': 'titleOverride',
+  'festival.savings-coupon': 'titleOverride',
   'festival.gift-category': 'labelOverride',
   'festival.gift-section': 'heading',
   'festival.offer-slide': 'titleOverride',
