@@ -90,7 +90,6 @@ index d44653c..10ed70e 100644
                  transformResponse: (response, meta, arg)=>{
                      /**
           * TODO v6
-
 diff --git a/node_modules/@strapi/content-manager/dist/admin/pages/EditView/components/FormInputs/Component/Repeatable.mjs b/node_modules/@strapi/content-manager/dist/admin/pages/EditView/components/FormInputs/Component/Repeatable.mjs
 --- a/node_modules/@strapi/content-manager/dist/admin/pages/EditView/components/FormInputs/Component/Repeatable.mjs
 +++ b/node_modules/@strapi/content-manager/dist/admin/pages/EditView/components/FormInputs/Component/Repeatable.mjs
@@ -115,7 +114,6 @@ diff --git a/node_modules/@strapi/content-manager/dist/admin/pages/EditView/comp
      const accordionRef = React.useRef(null);
      /**
     * The last item in the fieldName array will be the index of this component.
-
 diff --git a/node_modules/@strapi/content-manager/dist/admin/pages/EditView/components/FormInputs/Component/Repeatable.js b/node_modules/@strapi/content-manager/dist/admin/pages/EditView/components/FormInputs/Component/Repeatable.js
 --- a/node_modules/@strapi/content-manager/dist/admin/pages/EditView/components/FormInputs/Component/Repeatable.js
 +++ b/node_modules/@strapi/content-manager/dist/admin/pages/EditView/components/FormInputs/Component/Repeatable.js
