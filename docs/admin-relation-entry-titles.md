@@ -61,5 +61,5 @@ supported component UIDs still render blank until the old prebundle is replaced.
 `festival.gift-category` uses `category.name` with `labelOverride` as its scalar
 main field. `festival.gift-coupon` uses `coupon.title` with `titleOverride`.
 Both participate in the same read-only relation-title hook; selecting a record
-never copies its name into an override. Section categories supply the slider's
-live Coupons, while Coupon entries only provide optional display overrides.
+never copies its name into an override. Selected Coupon entries alone define the slider contents and order. Empty
+selections hide the slider; category selections control only the tiles below.

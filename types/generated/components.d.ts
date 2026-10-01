@@ -1386,7 +1386,13 @@ export interface FestivalGiftSection extends Struct.ComponentSchema {
     displayName: 'Gift Section';
   };
   attributes: {
-    categories: Schema.Attribute.Component<'festival.gift-category', true>;
+    categories: Schema.Attribute.Component<'festival.gift-category', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 6;
+        },
+        number
+      >;
     description: Schema.Attribute.String;
     enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     heading: Schema.Attribute.String &

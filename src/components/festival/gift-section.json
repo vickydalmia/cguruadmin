@@ -18,7 +18,8 @@
     "categories": {
       "type": "component",
       "component": "festival.gift-category",
-      "repeatable": true
+      "repeatable": true,
+      "max": 6
     },
     "items": {
       "type": "component",

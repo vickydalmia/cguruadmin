@@ -4,6 +4,7 @@ import type { Problem } from '../../../utils/write-validation/problems';
 export function festivalCategoryProblems(incoming: any, stored: any, section = 'exploreCategories'): Problem[] {
   if (!Array.isArray(incoming?.categories)) return [];
   const problems: Problem[] = [];
+  if (section === 'giftSection' && incoming.categories.length > 6) problems.push({ path: [section, 'categories'], message: 'Select no more than 6 categories.' });
   const seen = new Set<string>();
   incoming.categories.forEach((row: any, index: number) => {
     const old = stored?.categories?.find((item: any) => row.id != null && String(item.id) === String(row.id));

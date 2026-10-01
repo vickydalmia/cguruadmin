@@ -46,3 +46,10 @@ it('resolves gift categories without a curated Coupons field', async () => {
  expect(section.categories[0].coupons.map((row:any)=>row.documentId)).toEqual(['gift']);
  expect(festivalCategoryProblems({categories:[{category:null}]},null,'giftSection')[0].path).toEqual(['giftSection','categories',0,'category']);
 });
+
+it('limits gift category selections to six without limiting other sections', () => {
+ const categories=Array.from({length:7},(_,index)=>({category:{documentId:`cat-${index}`}}));
+ expect(festivalCategoryProblems({categories},null,'giftSection')).toContainEqual({path:['giftSection','categories'],message:'Select no more than 6 categories.'});
+ expect(festivalCategoryProblems({categories:categories.slice(0,6)},null,'giftSection')).toEqual([]);
+ expect(festivalCategoryProblems({categories},null,'exploreCategories')).toEqual([]);
+});
