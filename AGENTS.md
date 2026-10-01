@@ -286,3 +286,14 @@ Docker install must run `yarn postinstall` after pruning. Verify both installed
 transaction-context modules in the **final runtime image**, not only the build
 stage. Removing `--ignore-scripts` alone changes all dependency lifecycle scripts;
 keep the explicit postinstall step.
+
+### `patches/@strapi+upload+5.50.0.patch`
+
+Adds the per-upload Default/High selector to the pending-assets dialog and
+forwards `imageQuality` with upload requests. UI lives in
+`src/admin/features/upload-quality/upload-quality-field.tsx`; the Vite alias
+and patch hash in `src/admin/vite.config.ts` are required in dev and builds.
+On Strapi upgrades, check both ESM and CJS adapters, dialog state, and request
+payloads. Run upload extension tests and build the admin. Server controllers
+read the choice into an AsyncLocalStorage context so concurrent uploads never
+share a profile. Existing media is not reprocessed by changing the selector.

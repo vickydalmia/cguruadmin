@@ -8,8 +8,10 @@ export default (config: UserConfig) => {
   // changing versions. A patched save handler must get a fresh dependency cache.
   const patchRevision = createHash('sha256')
     .update(readFileSync(resolve(process.cwd(), 'patches/@strapi+content-manager+5.50.0.patch')))
+    .update(readFileSync(resolve(process.cwd(), 'patches/@strapi+upload+5.50.0.patch')))
     .digest('hex').slice(0, 12);
   return mergeConfig(config, {
+    resolve: { alias: { '@cguru/upload-quality': resolve(process.cwd(), 'src/admin/features/upload-quality/upload-quality-field.tsx') } },
     cacheDir: `${config.cacheDir ?? 'node_modules/.strapi/vite'}-${patchRevision}`,
   });
 };
