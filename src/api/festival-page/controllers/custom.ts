@@ -1,3 +1,4 @@
+import { resolveFestivalDealListing } from '../services/festival-deal-listing';
 import { resolveFestivalCategories } from '../services/festival-categories';
 import type { Core } from '@strapi/strapi';
 import { FESTIVAL_PAGE_UID } from '../../../constants/festival-page';
@@ -27,6 +28,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       data.productSection.items = data.productSection.items.filter((item: any) => isLiveOffer(item.deal, new Date()) && hasSafeAffiliateLink(item.deal.affiliateLink));
     }
     await resolveFestivalCategories(strapi, ctx, data.exploreCategories, locale);
+    if (data.enabled === true) await resolveFestivalDealListing(strapi, ctx, data.productSection, locale);
     arrayizeOfferText(data);
     await attachFestiveOffers(strapi, data);
     await attachStablePublicOfferIdsForRequest(strapi, ctx, data);

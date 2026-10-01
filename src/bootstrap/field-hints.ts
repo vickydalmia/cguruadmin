@@ -56,6 +56,10 @@ COMPONENT_FIELD_DESCRIPTIONS['festival.explore-categories'] = { categories: 'Add
 COMPONENT_FIELD_DESCRIPTIONS['festival.category-selection'] = { category: 'Choose a category. Its name appears in the collapsed row.', labelOverride: 'Optional; leave empty to use the current category name.', imageOverride: 'Optional square campaign image. Leave empty to use the category icon.', coupons: 'Optional Coupons only, with or without a code. Leave empty to use all latest live Coupons belonging to this category. Selected Coupons keep their order under Recommended; expired selections are omitted, not replaced.' };
 COMPONENT_FIELD_LABELS['festival.category-selection'] = { coupons: 'Selected Coupons (optional)', imageOverride: 'Category image override' };
 COMPONENT_FIELD_DESCRIPTIONS['festival.product-section'] = {
+  filterBrands: 'Optional filter choices. Leave empty for all brands with live Deals. Selected brands without live Deals are hidden.',
+  filterStores: 'Optional filter choices. Leave empty for all stores with live Deals. Selected stores without live Deals are hidden.',
+  filterBanks: 'Optional filter choices. Leave empty for all banks with live Deals. Selected banks without live Deals are hidden.',
+  listingEnabled: 'Show the latest 50 Product Deals below the category tiles. Brand, store, bank and discount filters search all live Product Deals; Load More adds 8 cards.',
   items: 'Select and reorder Product Deals. The slider uses every valid selection; empty means no product slider.',
   categories: 'Optional category tiles below the slider. Upload artwork per tile and drag to reorder.',
 };
@@ -69,7 +73,7 @@ COMPONENT_FIELD_DESCRIPTIONS['festival.product-category'] = {
   imageOverride: 'Upload campaign artwork. Displayed as 242 × 210 on desktop and 110 × 132 on mobile with cover cropping. Leave empty to use the category image.',
   urlOverride: 'Optional. Leave empty to use the generated category Deal page, for example /mobile-phones-deals/. Otherwise enter a root-relative path or HTTP(S) URL.',
 };
-COMPONENT_FIELD_LABELS['festival.product-section'] = { items: 'Product Deals', categories: 'Category tiles' };
+COMPONENT_FIELD_LABELS['festival.product-section'] = { items: 'Product Deals', categories: 'Category tiles', listingEnabled: 'Show Product Deal listing', filterBrands: 'Filter brands', filterStores: 'Filter stores', filterBanks: 'Filter banks' };
 COMPONENT_FIELD_LABELS['festival.product-slide'] = { deal: 'Product Deal', titleOverride: 'Title override (optional)' };
 COMPONENT_FIELD_LABELS['festival.product-category'] = { category: 'Category', labelOverride: 'Label override (optional)', imageOverride: 'Category image', urlOverride: 'URL override (optional)' };
 COMPONENT_FIELD_LABELS['festival.offer-slide'] = { coupon: 'Coupon' };

@@ -25,6 +25,25 @@
       "type": "component",
       "repeatable": true,
       "component": "festival.product-category"
+    },
+    "listingEnabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "filterBrands": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::brand.brand"
+    },
+    "filterStores": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::store.store"
+    },
+    "filterBanks": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::bank.bank"
     }
   }
 }

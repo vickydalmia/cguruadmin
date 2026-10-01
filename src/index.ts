@@ -1,3 +1,4 @@
+import { registerFestivalAdminFilters } from './api/festival-page/services/festival-admin-filters';
 import { WEBSITE_REFRESH_ACTION_ATTRIBUTES } from './api/website-refresh/controllers/website-refresh';
 import { seedSubscriptionPage } from './api/subscription-page/services/seed-subscription-page';
 import { GLOBAL_SETTINGS_LABELS } from './constants/global-settings';
@@ -236,6 +237,7 @@ export default {
     // Engine lifecycle filter keeps only live Coupons/Deals in those pickers
     // while leaving the normal offer collection views fully manageable.
     registerCuratedOfferRelationQueryFilter(strapi);
+    registerFestivalAdminFilters(strapi);
 
     // The curated set is derived from the schemas at boot; this log is the
     // audit trail for which pickers are live-filtered.
