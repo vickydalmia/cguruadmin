@@ -73,6 +73,9 @@ export async function withOfferTemplateOwnerSlugs(
 ): Promise<string[]> {
   const templateSlugs = await Promise.all([
     entityTemplateOwnerSlugs(strapi, 'independenceDayTemplate'),
+    offerUid === 'api::coupon.coupon'
+      ? entityTemplateOwnerSlugs(strapi, 'festivalTemplate')
+      : Promise.resolve([]),
     offerUid === 'api::deal.deal'
       ? entityTemplateOwnerSlugs(strapi, 'dealTemplate')
       : Promise.resolve([]),

@@ -1309,6 +1309,41 @@ export interface FestivalCouponsByStore extends Struct.ComponentSchema {
   };
 }
 
+export interface FestivalOfferSlide extends Struct.ComponentSchema {
+  collectionName: 'components_festival_offer_slides';
+  info: {
+    displayName: 'Offer slide';
+    icon: 'priceTag';
+  };
+  attributes: {
+    badgeOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    coupon: Schema.Attribute.Relation<'oneToOne', 'api::coupon.coupon'>;
+    descriptionOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 240;
+      }>;
+    titleOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+  };
+}
+
+export interface FestivalOfferSlider extends Struct.ComponentSchema {
+  collectionName: 'components_festival_offer_sliders';
+  info: {
+    displayName: 'Offer slider';
+    icon: 'slideshow';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    items: Schema.Attribute.Component<'festival.offer-slide', true>;
+  };
+}
+
 export interface FestivalPromoStrip extends Struct.ComponentSchema {
   collectionName: 'components_festival_promo_strips';
   info: {
@@ -3446,6 +3481,8 @@ declare module '@strapi/strapi' {
       'festival.coupon-store-tab': FestivalCouponStoreTab;
       'festival.coupons-by-category': FestivalCouponsByCategory;
       'festival.coupons-by-store': FestivalCouponsByStore;
+      'festival.offer-slide': FestivalOfferSlide;
+      'festival.offer-slider': FestivalOfferSlider;
       'festival.promo-strip': FestivalPromoStrip;
       'festival.responsive-banner': FestivalResponsiveBanner;
       'festival.sale-countdown': FestivalSaleCountdown;

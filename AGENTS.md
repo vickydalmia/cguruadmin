@@ -297,3 +297,7 @@ On Strapi upgrades, check both ESM and CJS adapters, dialog state, and request
 payloads. Run upload extension tests and build the admin. Server controllers
 read the choice into an AsyncLocalStorage context so concurrent uploads never
 share a profile. Existing media is not reprocessed by changing the selector.
+
+## Relation-backed component entry titles
+
+For blank repeatable-row labels after selecting a related offer, read `docs/admin-relation-entry-titles.md`. Festival slides have a read-only relation-title fallback; the document records its adapter, tests, and the requested follow-up audit for other components. Do not set a relation as Strapi’s `mainField` or auto-fill storefront overrides to solve an admin label.

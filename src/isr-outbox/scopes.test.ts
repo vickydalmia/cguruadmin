@@ -44,6 +44,13 @@ describe('preDeleteScope failure escalation', () => {
       .resolves.toEqual({ slugs: ['seasonal-specials'], sitemap: true, refreshScopes: ['routes'] });
   });
 
+  it('refreshes Festival when a source Coupon changes or is deleted', async () => {
+    const strapi = strapiWithFindOne(async () => ({ id: 41 }), async (uid, args) =>
+      uid === 'api::store.store' && args.filters?.pageTemplate === 'festivalTemplate'
+        ? [{ documentId: 'festival-owner', slug: 'seasonal-specials' }] : []);
+    const scope = await preDeleteScope(strapi, 'api::coupon.coupon', 'offer', 'delete');
+    expect(scope?.slugs).toContain('seasonal-specials');
+  });
   it('does not invent a Festival URL when no entity owns the template', async () => {
     const { computeScope } = await import('./scopes');
     await expect(computeScope(strapiWithFindOne(async () => null), 'api::festival-page.festival-page', 'delete', 'settings'))
@@ -227,6 +234,7 @@ describe('deal-of-the-day landing page scope', () => {
   it('refreshes every entity page that owns a Coupon through membership or curation', async () => {
     const { computeScope } = await import('./scopes');
     const findMany = vi.fn(async (uid: string, args: any) => {
+      if (args.filters?.pageTemplate === 'festivalTemplate') return [];
       expect(args.filters).toEqual({
         $or: [
           { coupons: { documentId: { $eq: 'coupon-1' } } },
@@ -269,7 +277,7 @@ describe('deal-of-the-day landing page scope', () => {
       sitemap: true,
       refreshScopes: ['routes'],
     });
-    expect(findMany).toHaveBeenCalledTimes(4);
+    expect(findMany.mock.calls.filter(([, args]) => !args.filters?.pageTemplate)).toHaveLength(4);
   });
 
   it('refreshes every entity page that owns a Deal through its deals relation', async () => {
@@ -312,7 +320,7 @@ describe('deal-of-the-day landing page scope', () => {
       sitemap: true,
       refreshScopes: ['routes'],
     });
-    expect(findMany).toHaveBeenCalledTimes(4);
+    expect(findMany.mock.calls.filter(([, args]) => !args.filters?.pageTemplate)).toHaveLength(4);
   });
 
   it('captures every entity-owned Coupon association before delete', async () => {

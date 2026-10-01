@@ -1,0 +1,18 @@
+{
+  "collectionName": "components_festival_offer_sliders",
+  "info": {
+    "displayName": "Offer slider",
+    "icon": "slideshow"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "items": {
+      "type": "component",
+      "repeatable": true,
+      "component": "festival.offer-slide"
+    }
+  }
+}

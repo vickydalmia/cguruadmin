@@ -1,6 +1,12 @@
+import { brandRef, categoryRef, storeRef, PUBLISHED_OFFER_FILTER } from '../../../utils/offer-visibility';
+
 export const FESTIVAL_POPULATE = {
   countdown: true,
   hero: { populate: { desktopImage: true } },
+  offerSlider: { populate: { items: { populate: {
+    coupon: { filters: PUBLISHED_OFFER_FILTER, fields: ['title', 'content', 'offerText', 'code', 'couponType', 'affiliateLink', 'checkoutMerchant', 'isForAffiliateBrand', 'expiresAt', 'contentStatus'],
+      populate: { stores: storeRef, logoStore: storeRef, brands: brandRef, categories: categoryRef, banks: { fields: ['name', 'slug', 'logoAlt'], populate: { logo: true } }, uniqueCouponPool: { fields: ['name'] } } },
+  } } } },
   seo: { populate: { ogImage: true } },
 } as const;
 

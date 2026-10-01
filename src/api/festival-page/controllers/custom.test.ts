@@ -23,6 +23,19 @@ describe('Festival aggregate', () => {
     expect(h.sanitize).toHaveBeenCalled();
     expect(h.ctx.send).toHaveBeenCalledWith({ data: page });
   });
+  it('preserves editorial order, removes dead offers, and normalizes coupon badge copy', async () => {
+    const offer = { documentId: 'coupon', title: 'Sale', contentStatus: 'published', affiliateLink: 'https://example.com', offerText: 'Extra 20% Off' };
+    const page = { offerSlider: { items: [
+      { coupon: { ...offer } },
+      { coupon: { ...offer, expiresAt: '2000-01-01' } },
+      { coupon: { ...offer, documentId: 'coupon-b' } },
+      { coupon: { ...offer, affiliateLink: 'javascript:alert(1)' } },
+    ] } };
+    const h = harness(page);
+    await h.controller.festivalFull(h.ctx);
+    expect(page.offerSlider.items.map((item) => item.coupon.documentId)).toEqual(['coupon', 'coupon-b']);
+    expect(page.offerSlider.items[0].coupon?.offerText).toEqual(['Extra', '20%', 'Off']);
+  });
   it('returns a missing-page response only when no singleton exists', async () => {
     const h = harness(null);
     await h.controller.festivalFull(h.ctx);

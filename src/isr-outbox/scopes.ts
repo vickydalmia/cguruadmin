@@ -355,7 +355,8 @@ export async function computeScope(
             ])
           ).flat()
         : [];
-    const slugs = [...new Set([slug, ...campaignOwnerSlugs])];
+    const festivalOwnerSlugs = await entityTemplateOwnerSlugs(strapi, 'festivalTemplate');
+    const slugs = [...new Set([slug, ...campaignOwnerSlugs, ...festivalOwnerSlugs])];
     const routeMetadataChanged =
       data
       && typeof data === 'object'

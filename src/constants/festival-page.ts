@@ -7,5 +7,6 @@ export const FESTIVAL_SECTION_LABELS: SectionLabel[] = [
   { attr: 'title', label: 'Page title', description: 'Heading and breadcrumb label for the Festival page.' },
   { attr: 'countdown', label: '1 · Sale countdown', description: 'Optional clock. Supply valid start/end dates and working CTA URLs for both phases.' },
   { attr: 'hero', label: '2 · Festival banner', description: 'One desktop image fills the full viewport width on every screen. Height scales proportionally on smaller screens without cropping. Include badges in the image. No image means no banner; this does not affect template activation.' },
+  { attr: 'offerSlider', label: '3 · Offer slider', description: 'Add and reorder Coupon slides (with or without a code). Empty overrides use the selected offer’s current content; no items means no slider.' },
   { attr: 'seo', label: 'SEO (search & social)', description: 'Your Festival search and social metadata.' },
 ];

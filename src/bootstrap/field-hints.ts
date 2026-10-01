@@ -46,6 +46,13 @@ export const COMPONENT_FIELD_LABELS: Record<string, Record<string, string>> = {
     brands: 'Brands',
   },
 };
+COMPONENT_FIELD_DESCRIPTIONS['festival.offer-slide'] = {
+  coupon: 'Select the Coupon for this slide. Coupons with and without a code are supported.',
+  titleOverride: 'Optional. Leave empty to use the selected offer title.',
+  descriptionOverride: 'Optional. Displayed in two lines; leave empty to use the selected offer description.',
+  badgeOverride: 'Optional, for example Extra 20% Off. Leave empty to use the selected Coupon offer text. No badge is invented when both are empty.',
+};
+COMPONENT_FIELD_LABELS['festival.offer-slide'] = { coupon: 'Coupon' };
 for (const rule of HOMEPAGE_IMAGE_RULES) {
   (COMPONENT_FIELD_DESCRIPTIONS[rule.componentUid] ??= {})[rule.field] =
     imageRuleDescription(rule);

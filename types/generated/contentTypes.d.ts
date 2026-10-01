@@ -2011,6 +2011,12 @@ export interface ApiFestivalPageFestivalPage extends Struct.SingleTypeSchema {
       'oneToMany',
       'api::festival-page.festival-page'
     >;
+    offerSlider: Schema.Attribute.Component<'festival.offer-slider', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
     publishedAt: Schema.Attribute.DateTime;
     seo: Schema.Attribute.Component<'shared.seo', false> &
       Schema.Attribute.SetPluginOptions<{
