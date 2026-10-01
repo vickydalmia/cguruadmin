@@ -1,0 +1,29 @@
+{
+  "collectionName": "components_festival_gift_sections",
+  "info": {
+    "displayName": "Gift Section"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string",
+      "default": "Festival Gift Offers"
+    },
+    "description": {
+      "type": "string"
+    },
+    "categories": {
+      "type": "component",
+      "component": "festival.gift-category",
+      "repeatable": true
+    },
+    "items": {
+      "type": "component",
+      "component": "festival.gift-coupon",
+      "repeatable": true
+    }
+  }
+}

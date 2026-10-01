@@ -6,9 +6,9 @@ type QueryHook = (args: { model: string; id?: string; targetField: string; param
 // Strapi's relation query is injected by the small repeatable-row adapter so
 // labels share its cache, permissions, locale and post-save invalidation.
 export function useFestivalSlideTitle(name: string, component: string, fallback: unknown, params: Record<string, unknown>, useRelations: QueryHook) {
-  const isCategory = ['festival.category-selection', 'festival.product-category'].includes(component);
+  const isCategory = ['festival.category-selection', 'festival.product-category', 'festival.gift-category'].includes(component);
   const isProduct = component === 'festival.product-slide';
-  const supported = isProduct || component === 'festival.offer-slide' || isCategory;
+  const supported = isProduct || ['festival.offer-slide', 'festival.gift-coupon'].includes(component) || isCategory;
   const field = isCategory ? 'category' : isProduct ? 'deal' : 'coupon';
   const row = useForm('FestivalSlideTitle', (state) => {
     if (!supported) return undefined;

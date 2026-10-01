@@ -1,0 +1,23 @@
+{
+  "collectionName": "components_festival_gift_categorys",
+  "info": {
+    "displayName": "Gift Category"
+  },
+  "attributes": {
+    "category": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::category.category"
+    },
+    "labelOverride": {
+      "type": "string"
+    },
+    "imageOverride": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": [
+        "images"
+      ]
+    }
+  }
+}

@@ -37,3 +37,12 @@ describe('Festival category validation', () => {
     expect(festivalCategoryProblems({categories:[{category:{connect:[{documentId:'cat'}]}},{category:{connect:[{documentId:'cat'}]}}]},null)[0].path).toEqual(['exploreCategories','categories',1,'category']);
   });
 });
+
+it('resolves gift categories without a curated Coupons field', async () => {
+ const {strapi,findMany}=setup([[offer('gift')]]);
+ const section:any={categories:[{category:{documentId:'cat'},labelOverride:'Gifts'}]};
+ await resolveFestivalCategories(strapi,{state:{}},section,'en');
+ expect(findMany).toHaveBeenCalledTimes(1);
+ expect(section.categories[0].coupons.map((row:any)=>row.documentId)).toEqual(['gift']);
+ expect(festivalCategoryProblems({categories:[{category:null}]},null,'giftSection')[0].path).toEqual(['giftSection','categories',0,'category']);
+});

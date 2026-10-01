@@ -29,6 +29,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     }
     await resolveFestivalCategories(strapi, ctx, data.exploreCategories, locale);
     if (data.enabled === true) await resolveFestivalDealListing(strapi, ctx, data.productSection, locale);
+    await resolveFestivalCategories(strapi, ctx, data.giftSection, locale);
     arrayizeOfferText(data);
     await attachFestiveOffers(strapi, data);
     await attachStablePublicOfferIdsForRequest(strapi, ctx, data);

@@ -1340,6 +1340,61 @@ export interface FestivalExploreCategories extends Struct.ComponentSchema {
   };
 }
 
+export interface FestivalGiftCategory extends Struct.ComponentSchema {
+  collectionName: 'components_festival_gift_categorys';
+  info: {
+    displayName: 'Gift Category';
+  };
+  attributes: {
+    category: Schema.Attribute.Relation<'oneToOne', 'api::category.category'>;
+    imageOverride: Schema.Attribute.Media<'images'>;
+    labelOverride: Schema.Attribute.String;
+  };
+}
+
+export interface FestivalGiftCoupon extends Struct.ComponentSchema {
+  collectionName: 'components_festival_gift_coupons';
+  info: {
+    displayName: 'Gift Coupon';
+  };
+  attributes: {
+    badgeOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    coupon: Schema.Attribute.Relation<'oneToOne', 'api::coupon.coupon'>;
+    descriptionOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 240;
+      }>;
+    imageOverride: Schema.Attribute.Media<'images'>;
+    occasionOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }> &
+      Schema.Attribute.DefaultTo<'Diwali Special'>;
+    titleOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+  };
+}
+
+export interface FestivalGiftSection extends Struct.ComponentSchema {
+  collectionName: 'components_festival_gift_sections';
+  info: {
+    displayName: 'Gift Section';
+  };
+  attributes: {
+    categories: Schema.Attribute.Component<'festival.gift-category', true>;
+    description: Schema.Attribute.String;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Festival Gift Offers'>;
+    items: Schema.Attribute.Component<'festival.gift-coupon', true>;
+  };
+}
+
 export interface FestivalOfferSlide extends Struct.ComponentSchema {
   collectionName: 'components_festival_offer_slides';
   info: {
@@ -3568,6 +3623,9 @@ declare module '@strapi/strapi' {
       'festival.coupons-by-category': FestivalCouponsByCategory;
       'festival.coupons-by-store': FestivalCouponsByStore;
       'festival.explore-categories': FestivalExploreCategories;
+      'festival.gift-category': FestivalGiftCategory;
+      'festival.gift-coupon': FestivalGiftCoupon;
+      'festival.gift-section': FestivalGiftSection;
       'festival.offer-slide': FestivalOfferSlide;
       'festival.offer-slider': FestivalOfferSlider;
       'festival.product-category': FestivalProductCategory;

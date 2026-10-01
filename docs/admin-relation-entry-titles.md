@@ -55,3 +55,11 @@ reads `category.name`, using the same read-only relation fallback. Vite's
 prebundled content-manager dependency embeds this hook; cache invalidation must
 include the hook and resolver source, not only the dependency patch, or newly
 supported component UIDs still render blank until the old prebundle is replaced.
+
+### Festival Gift Offers
+
+`festival.gift-category` uses `category.name` with `labelOverride` as its scalar
+main field. `festival.gift-coupon` uses `coupon.title` with `titleOverride`.
+Both participate in the same read-only relation-title hook; selecting a record
+never copies its name into an override. Section categories supply the slider's
+live Coupons, while Coupon entries only provide optional display overrides.

@@ -112,6 +112,16 @@
           "localized": true
         }
       }
+    },
+    "giftSection": {
+      "type": "component",
+      "component": "festival.gift-section",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     }
   }
 }

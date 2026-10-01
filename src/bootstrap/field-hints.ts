@@ -720,3 +720,8 @@ export async function ensureFieldDescriptions(strapi: Core.Strapi): Promise<void
     }
   }
 }
+
+COMPONENT_FIELD_DESCRIPTIONS['festival.gift-section'] = { categories: 'Categories whose live Coupons appear in the slider, newest first. These also become the category tiles below. Add each category once.', items: 'Optional overrides for Coupons in the selected categories. Overrides do not add unrelated Coupons or change their source records.', description: 'Supporting text under the section heading.' };
+COMPONENT_FIELD_LABELS['festival.gift-section'] = { categories: 'Coupon categories and tiles', items: 'Coupon display overrides (optional)' };
+COMPONENT_FIELD_DESCRIPTIONS['festival.gift-category'] = { category: 'Choose a category. The selected name appears on the collapsed row.', labelOverride: 'Leave empty to use the current category name.', imageOverride: 'Upload category artwork. Falls back to the category icon when empty.' };
+COMPONENT_FIELD_DESCRIPTIONS['festival.gift-coupon'] = { coupon: 'Choose a Coupon belonging to one of this section’s categories.', titleOverride: 'Leave empty to use the current Coupon title.', descriptionOverride: 'Leave empty to use the Coupon description.', imageOverride: 'Campaign image for the right side of the voucher. Without this, the category artwork or merchant logo is used.', occasionOverride: 'Defaults to Diwali Special.', badgeOverride: 'Optional discount text, for example 50% OFF. Empty uses the Coupon offer text.' };

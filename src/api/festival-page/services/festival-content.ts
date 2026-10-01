@@ -1,7 +1,8 @@
-import { FESTIVAL_CATEGORIES_POPULATE } from './festival-categories';
+import { FESTIVAL_CATEGORY_COUPON, FESTIVAL_CATEGORIES_POPULATE } from './festival-categories';
 import { brandRef, categoryRef, storeRef, dealRef, PUBLISHED_OFFER_FILTER } from '../../../utils/offer-visibility';
 
 export const FESTIVAL_POPULATE = {
+  giftSection: { populate: { categories: { populate: { category: categoryRef, imageOverride: true } }, items: { populate: { coupon: FESTIVAL_CATEGORY_COUPON, imageOverride: true } } } },
   productSection: { populate: { filterBrands: { fields: ['name'] }, filterStores: { fields: ['name'] }, filterBanks: { fields: ['name'] }, items: { populate: { deal: { ...dealRef, filters: PUBLISHED_OFFER_FILTER } } }, categories: { populate: { category: categoryRef, imageOverride: true } } } },
   exploreCategories: FESTIVAL_CATEGORIES_POPULATE,
   faq: { populate: { items: true } },

@@ -2015,6 +2015,12 @@ export interface ApiFestivalPageFestivalPage extends Struct.SingleTypeSchema {
           localized: true;
         };
       }>;
+    giftSection: Schema.Attribute.Component<'festival.gift-section', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
     hero: Schema.Attribute.Component<'festival.responsive-banner', false> &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
