@@ -11,13 +11,20 @@ type Props = {
   attribute: { enum: string[] };
 };
 
+const PAGE_TEMPLATE_LABELS: Record<string, string> = {
+  default: 'Default',
+  dealTemplate: 'Deal Template',
+  independenceDayTemplate: 'Independence Day Template',
+  festivalTemplate: 'Festival Template',
+};
+
 // Keep Strapi's native field state, accessibility, focus and validation. Only
-// this template option gets a display label; all stored enum values stay intact.
+// the page-template options get display labels; stored enum values stay intact.
 export default function TemplateEnumerationInput(props: Props) {
   const options = props.attribute.enum.map((value) => ({
     value,
-    label: props.name === 'pageTemplate' && value === 'festivalTemplate'
-      ? 'Festival Template'
+    label: props.name === 'pageTemplate'
+      ? PAGE_TEMPLATE_LABELS[value] ?? value
       : value,
   }));
   return <InputRenderer {...props} type="enumeration" options={options} />;
