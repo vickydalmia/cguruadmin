@@ -57,3 +57,18 @@ An empty or disabled slider is omitted. All remaining editorial selections are
 rendered without a display cap. Coupon updates/deletions and merchant identity
 edits invalidate the actual Festival owner route. Validation errors address the
 specific slide's Coupon picker, including partial relation updates and reordering.
+
+## Product Deal section
+
+`productSection` is the optional fifth section. Its repeatable `items` select
+only `api::deal.deal`, with an optional placement title override. Shared Deal
+projections and live/safe-link filters preserve current prices, media, codes,
+merchant identity and stable public IDs. No cap is applied to the selections.
+The frontend virtualizes cards using one template and compact data.
+
+Repeatable category tiles select Categories, with optional label, uploaded image
+and URL overrides. The default link is the existing generated name-based Deal
+page (`/mobile-phones-deals/`). Overrides accept root-relative or HTTP(S) URLs.
+Missing Deal/Category selections report errors at the individual row field.
+Product/category row titles reuse the read-only relation fallback. Changes to
+selected Deals invalidate the Festival owner through curatedSourcePaths.

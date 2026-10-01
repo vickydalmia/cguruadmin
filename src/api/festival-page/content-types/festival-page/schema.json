@@ -82,6 +82,16 @@
           "localized": true
         }
       }
+    },
+    "productSection": {
+      "type": "component",
+      "component": "festival.product-section",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     }
   }
 }

@@ -49,3 +49,11 @@ describe('Festival aggregate', () => {
     expect(h.ctx.notFound).not.toHaveBeenCalled();
   });
 });
+
+it('keeps live Product Deals in editorial order and rejects unsafe selections', async () => {
+  const deal = { documentId: 'product', title: 'Product', contentStatus: 'published', affiliateLink: 'https://example.com', dealImage: {url:'/p.png'}, discount: '30% OFF' };
+  const page = { productSection: { items: [{deal}, {deal:{...deal,expiresAt:'2000-01-01'}}, {deal:null}, {deal:{...deal,documentId:'second'}}, {deal:{...deal,affiliateLink:'javascript:alert(1)'}}] } };
+  const h = harness(page);
+  await h.controller.festivalFull(h.ctx);
+  expect(page.productSection.items.map(row=>row.deal?.documentId)).toEqual(['product','second']);
+});

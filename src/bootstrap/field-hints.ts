@@ -55,6 +55,23 @@ COMPONENT_FIELD_DESCRIPTIONS['festival.offer-slide'] = {
 COMPONENT_FIELD_DESCRIPTIONS['festival.explore-categories'] = { categories: 'Add each category once and drag to reorder. Every category appears in a horizontally scrolling strip on desktop and mobile.', description: 'Optional supporting text below the heading.' };
 COMPONENT_FIELD_DESCRIPTIONS['festival.category-selection'] = { category: 'Choose a category. Its name appears in the collapsed row.', labelOverride: 'Optional; leave empty to use the current category name.', imageOverride: 'Optional square campaign image. Leave empty to use the category icon.', coupons: 'Optional Coupons only, with or without a code. Leave empty to use all latest live Coupons belonging to this category. Selected Coupons keep their order under Recommended; expired selections are omitted, not replaced.' };
 COMPONENT_FIELD_LABELS['festival.category-selection'] = { coupons: 'Selected Coupons (optional)', imageOverride: 'Category image override' };
+COMPONENT_FIELD_DESCRIPTIONS['festival.product-section'] = {
+  items: 'Select and reorder Product Deals. The slider uses every valid selection; empty means no product slider.',
+  categories: 'Optional category tiles below the slider. Upload artwork per tile and drag to reorder.',
+};
+COMPONENT_FIELD_DESCRIPTIONS['festival.product-slide'] = {
+  deal: 'Choose a Product Deal. Its current title appears in the collapsed row.',
+  titleOverride: 'Optional. Leave empty to show the selected Product Deal’s current title.',
+};
+COMPONENT_FIELD_DESCRIPTIONS['festival.product-category'] = {
+  category: 'Choose a Category. Its name appears in the collapsed row.',
+  labelOverride: 'Optional display label. Leave empty to use the current category name.',
+  imageOverride: 'Upload campaign artwork. Displayed as 242 × 210 on desktop and 110 × 132 on mobile with cover cropping. Leave empty to use the category image.',
+  urlOverride: 'Optional. Leave empty to use the generated category Deal page, for example /mobile-phones-deals/. Otherwise enter a root-relative path or HTTP(S) URL.',
+};
+COMPONENT_FIELD_LABELS['festival.product-section'] = { items: 'Product Deals', categories: 'Category tiles' };
+COMPONENT_FIELD_LABELS['festival.product-slide'] = { deal: 'Product Deal', titleOverride: 'Title override (optional)' };
+COMPONENT_FIELD_LABELS['festival.product-category'] = { category: 'Category', labelOverride: 'Label override (optional)', imageOverride: 'Category image', urlOverride: 'URL override (optional)' };
 COMPONENT_FIELD_LABELS['festival.offer-slide'] = { coupon: 'Coupon' };
 for (const rule of HOMEPAGE_IMAGE_RULES) {
   (COMPONENT_FIELD_DESCRIPTIONS[rule.componentUid] ??= {})[rule.field] =

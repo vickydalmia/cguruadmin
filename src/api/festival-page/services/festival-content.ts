@@ -1,7 +1,8 @@
 import { FESTIVAL_CATEGORIES_POPULATE } from './festival-categories';
-import { brandRef, categoryRef, storeRef, PUBLISHED_OFFER_FILTER } from '../../../utils/offer-visibility';
+import { brandRef, categoryRef, storeRef, dealRef, PUBLISHED_OFFER_FILTER } from '../../../utils/offer-visibility';
 
 export const FESTIVAL_POPULATE = {
+  productSection: { populate: { items: { populate: { deal: { ...dealRef, filters: PUBLISHED_OFFER_FILTER } } }, categories: { populate: { category: categoryRef, imageOverride: true } } } },
   exploreCategories: FESTIVAL_CATEGORIES_POPULATE,
   countdown: true,
   hero: { populate: { desktopImage: true } },

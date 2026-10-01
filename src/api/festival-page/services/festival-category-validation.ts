@@ -1,7 +1,7 @@
 import { relationKeys, resultingRelations, type RelationEntry } from '../../../utils/deal-of-the-day-validation';
 import type { Problem } from '../../../utils/write-validation/problems';
 
-export function festivalCategoryProblems(incoming: any, stored: any): Problem[] {
+export function festivalCategoryProblems(incoming: any, stored: any, section = 'exploreCategories'): Problem[] {
   if (!Array.isArray(incoming?.categories)) return [];
   const problems: Problem[] = [];
   const seen = new Set<string>();
@@ -10,7 +10,7 @@ export function festivalCategoryProblems(incoming: any, stored: any): Problem[] 
     const previous = old?.category ? [old.category] : [];
     const selected = row.category === undefined ? previous
       : resultingRelations(row.category, previous) ?? (relationKeys(row.category).length ? [row.category as RelationEntry] : []);
-    const path = ['exploreCategories', 'categories', index, 'category'];
+    const path = [section, 'categories', index, 'category'];
     if (selected.length !== 1) problems.push({ path, message: 'Select one Category.' });
     else {
       const keys = relationKeys(selected[0]);

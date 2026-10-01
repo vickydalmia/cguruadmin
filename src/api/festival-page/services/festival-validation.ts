@@ -15,13 +15,16 @@ const safeLink = (value: unknown) => {
 export async function validateFestivalPage(strapi: Core.Strapi, data, locale?: string): Promise<void> {
   if (!data || typeof data !== 'object') return;
   const current = await strapi.db.query(FESTIVAL_PAGE_UID).findOne({
-    where: { locale: locale ?? DEFAULT_CONTENT_LOCALE }, populate: { exploreCategories: { populate: { categories: { populate: ['category'] } } }, countdown: true, hero: true, offerSlider: { populate: { items: { populate: ['coupon'] } } } },
+    where: { locale: locale ?? DEFAULT_CONTENT_LOCALE }, populate: { productSection: { populate: { items: { populate: ['deal'] }, categories: { populate: ['category'] } } }, exploreCategories: { populate: { categories: { populate: ['category'] } } }, countdown: true, hero: true, offerSlider: { populate: { items: { populate: ['coupon'] } } } },
   });
   const merged = (key: string) => data[key] === undefined ? current?.[key]
     : data[key] === null ? null : { ...current?.[key], ...data[key] };
   const countdown = merged('countdown');
   const hero = merged('hero');
-  const problems: Problem[] = [...festivalSlideProblems(data.offerSlider, current?.offerSlider), ...festivalCategoryProblems(data.exploreCategories, current?.exploreCategories)];
+  const problems: Problem[] = [...festivalSlideProblems(data.productSection, current?.productSection, 'productSection', 'deal'), ...festivalCategoryProblems(data.productSection, current?.productSection, 'productSection'), ...festivalSlideProblems(data.offerSlider, current?.offerSlider), ...festivalCategoryProblems(data.exploreCategories, current?.exploreCategories)];
+  for (const [index, row] of (data.productSection?.categories ?? []).entries()) {
+    if (row?.urlOverride && !safeLink(row.urlOverride)) problems.push({ path: ['productSection', 'categories', index, 'urlOverride'], message: 'Use a root-relative path or an HTTP(S) URL.' });
+  }
   if (countdown && countdown.enabled !== false) {
     const start = Date.parse(countdown.saleStartAt);
     const end = Date.parse(countdown.saleEndAt);

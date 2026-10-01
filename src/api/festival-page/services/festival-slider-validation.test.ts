@@ -19,3 +19,10 @@ describe('Festival Coupon slide relations', () => {
     expect(festivalSlideProblems({ items: [] }, null)).toEqual([]);
   });
 });
+
+it('validates Product Deal relations at their own section path', () => {
+  expect(festivalSlideProblems({ items: [{}] }, null, 'productSection', 'deal')).toEqual([
+    { path: ['productSection', 'items', 0, 'deal'], message: 'Select one Product Deal for this slide.' },
+  ]);
+  expect(festivalSlideProblems({ items: [{ id: 8 }] }, { items: [{ id: 8, deal: { documentId: 'saved-deal' } }] }, 'productSection', 'deal')).toEqual([]);
+});

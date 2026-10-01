@@ -23,6 +23,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         return isLiveOffer(offer, new Date()) && hasSafeAffiliateLink(offer.affiliateLink);
       });
     }
+    if (Array.isArray(data.productSection?.items)) {
+      data.productSection.items = data.productSection.items.filter((item: any) => isLiveOffer(item.deal, new Date()) && hasSafeAffiliateLink(item.deal.affiliateLink));
+    }
     await resolveFestivalCategories(strapi, ctx, data.exploreCategories, locale);
     arrayizeOfferText(data);
     await attachFestiveOffers(strapi, data);

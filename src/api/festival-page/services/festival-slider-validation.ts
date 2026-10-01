@@ -7,13 +7,13 @@ function relations(incoming: unknown, stored: unknown): RelationEntry[] {
   return resultingRelations(incoming, previous) ?? (relationKeys(incoming).length ? [incoming as RelationEntry] : []);
 }
 
-export function festivalSlideProblems(incoming: any, stored: any): Problem[] {
+export function festivalSlideProblems(incoming: any, stored: any, section = 'offerSlider', field = 'coupon'): Problem[] {
   if (!Array.isArray(incoming?.items)) return [];
   const problems: Problem[] = [];
   incoming.items.forEach((item: any, index: number) => {
     const old = item?.id == null ? null : stored?.items?.find((row: any) => String(row.id) === String(item.id));
-    if (relations(item?.coupon, old?.coupon).length !== 1) {
-      problems.push({ path: ['offerSlider', 'items', index, 'coupon'], message: 'Select one Coupon for this slide.' });
+    if (relations(item?.[field], old?.[field]).length !== 1) {
+      problems.push({ path: [section, 'items', index, field], message: field === 'deal' ? 'Select one Product Deal for this slide.' : 'Select one Coupon for this slide.' });
     }
   });
   return problems;

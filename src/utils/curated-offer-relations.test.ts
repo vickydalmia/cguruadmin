@@ -83,6 +83,7 @@ describe('curated offer relation derivation', () => {
         { sourceUid: 'deal-day.telegram-deal-item', field: 'deal', targetUid: 'api::deal.deal' },
         { sourceUid: 'festival.category-selection', field: 'coupons', targetUid: 'api::coupon.coupon' },
         { sourceUid: 'festival.offer-slide', field: 'coupon', targetUid: 'api::coupon.coupon' },
+        { sourceUid: 'festival.product-slide', field: 'deal', targetUid: 'api::deal.deal' },
         { sourceUid: 'festival.coupon-category-tab', field: 'offers', targetUid: 'api::coupon.coupon' },
         { sourceUid: 'festival.coupon-store-tab', field: 'offers', targetUid: 'api::coupon.coupon' },
         { sourceUid: 'header.coupon-notification', field: 'coupon', targetUid: 'api::coupon.coupon' },

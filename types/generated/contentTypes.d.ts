@@ -2026,6 +2026,15 @@ export interface ApiFestivalPageFestivalPage extends Struct.SingleTypeSchema {
           localized: true;
         };
       }>;
+    productSection: Schema.Attribute.Component<
+      'festival.product-section',
+      false
+    > &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
     publishedAt: Schema.Attribute.DateTime;
     seo: Schema.Attribute.Component<'shared.seo', false> &
       Schema.Attribute.SetPluginOptions<{

@@ -47,3 +47,11 @@ also accepts relation `name`, used by Category records; unsaved labels and saved
 relation cache reads still follow the original precedence. It never auto-fills
 `labelOverride`. The older `festival.coupon-category-tab` remains unchanged because
 it belongs to Independence Day. The broader admin audit is still separate work.
+
+### Festival Product Deal section
+
+`festival.product-slide` reads `deal.title` and `festival.product-category`
+reads `category.name`, using the same read-only relation fallback. Vite's
+prebundled content-manager dependency embeds this hook; cache invalidation must
+include the hook and resolver source, not only the dependency patch, or newly
+supported component UIDs still render blank until the old prebundle is replaced.

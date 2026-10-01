@@ -1375,6 +1375,56 @@ export interface FestivalOfferSlider extends Struct.ComponentSchema {
   };
 }
 
+export interface FestivalProductCategory extends Struct.ComponentSchema {
+  collectionName: 'components_festival_product_categorys';
+  info: {
+    displayName: 'Product category tile';
+    icon: 'slideshow';
+  };
+  attributes: {
+    category: Schema.Attribute.Relation<'oneToOne', 'api::category.category'>;
+    imageOverride: Schema.Attribute.Media<'images'>;
+    labelOverride: Schema.Attribute.String;
+    urlOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 2048;
+      }>;
+  };
+}
+
+export interface FestivalProductSection extends Struct.ComponentSchema {
+  collectionName: 'components_festival_product_sections';
+  info: {
+    displayName: 'Picked for you \u00B7 Product Deals';
+    icon: 'slideshow';
+  };
+  attributes: {
+    categories: Schema.Attribute.Component<'festival.product-category', true>;
+    description: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 240;
+      }>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String;
+    items: Schema.Attribute.Component<'festival.product-slide', true>;
+  };
+}
+
+export interface FestivalProductSlide extends Struct.ComponentSchema {
+  collectionName: 'components_festival_product_slides';
+  info: {
+    displayName: 'Product Deal slide';
+    icon: 'slideshow';
+  };
+  attributes: {
+    deal: Schema.Attribute.Relation<'oneToOne', 'api::deal.deal'>;
+    titleOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 200;
+      }>;
+  };
+}
+
 export interface FestivalPromoStrip extends Struct.ComponentSchema {
   collectionName: 'components_festival_promo_strips';
   info: {
@@ -3516,6 +3566,9 @@ declare module '@strapi/strapi' {
       'festival.explore-categories': FestivalExploreCategories;
       'festival.offer-slide': FestivalOfferSlide;
       'festival.offer-slider': FestivalOfferSlider;
+      'festival.product-category': FestivalProductCategory;
+      'festival.product-section': FestivalProductSection;
+      'festival.product-slide': FestivalProductSlide;
       'festival.promo-strip': FestivalPromoStrip;
       'festival.responsive-banner': FestivalResponsiveBanner;
       'festival.sale-countdown': FestivalSaleCountdown;
