@@ -1,3 +1,5 @@
+import { validateFestivalPage } from '../../api/festival-page/services/festival-validation';
+import { FESTIVAL_PAGE_UID } from '../../constants/festival-page';
 import { validateSubscriptionContent } from '../../api/subscription-page/services/subscription-validation';
 import { validateSubscriptionRoutes } from '../../api/subscription-page/services/subscription-route-validation';
 import { SUBSCRIPTION_PAGE_UID } from '../../api/subscription-page/services/subscription-route';
@@ -336,6 +338,12 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     applies: (uid) => uid === DOTD_UID,
     run: ({ strapi, data, locale }) =>
       validateDealOfTheDaySectionLimits(strapi, data, locale),
+  },
+  {
+    name: 'validateFestivalPage',
+    actions: CREATE_UPDATE,
+    applies: (uid) => uid === FESTIVAL_PAGE_UID,
+    run: ({ strapi, data, locale }) => validateFestivalPage(strapi, data, locale),
   },
   {
     name: 'validateIndependenceDaySale',

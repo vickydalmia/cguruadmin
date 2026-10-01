@@ -1,3 +1,4 @@
+import { FESTIVAL_POPULATE, festivalTemplateEnabled } from '../../festival-page/services/festival-content';
 import { subscriptionRouteMetadata } from '../../subscription-page/services/subscription-route';
 import { telegramRouteMetadata } from '../../telegram-page/services/telegram-route';
 import type { Core } from '@strapi/strapi';
@@ -185,6 +186,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         } as any,
       }) : Promise.resolve([]),
       Promise.all([
+        ['festival', 'festivalTemplate', 'api::festival-page.festival-page'],
         ['dealOfTheDay', 'dealTemplate', 'api::deal-of-the-day-page.deal-of-the-day-page'],
         ['independenceDaySale', 'independenceDayTemplate', 'api::independence-day-sale-page.independence-day-sale-page'],
       ].map(async ([featureKey, pageTemplate, uid]) => {
@@ -193,16 +195,16 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
           findEntityTemplateOwners(strapi, pageTemplate as any, locale),
           strapi.documents(uid as any).findFirst({
             locale,
-            fields: ['documentId', 'updatedAt'] as any,
-            populate: { seo: { fields: ['noIndex'] } } as any,
+            fields: ['documentId', 'updatedAt', ...(featureKey === 'festival' ? ['enabled'] : [])] as any,
+            populate: (featureKey === 'festival' ? FESTIVAL_POPULATE : { seo: { fields: ['noIndex'] } }) as any,
           }),
         ]);
-        if (!singleton) return [];
+        if (featureKey === 'festival' ? !festivalTemplateEnabled(singleton) : !singleton) return [];
         // Only the first (authoritative) owner renders the campaign template —
         // any accidental duplicate falls back to its generic entity page, so
         // it must not inherit the singleton's route metadata.
         return owners.slice(0, 1).map((owner) => {
-          const timestamps = [owner.updatedAt, singleton.updatedAt]
+          const timestamps = [owner.updatedAt, singleton?.updatedAt]
             .map((value) => new Date(value ?? 0))
             .filter((value) => Number.isFinite(value.getTime()));
           const updatedAt = timestamps.length > 0

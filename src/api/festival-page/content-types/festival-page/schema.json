@@ -16,9 +16,37 @@
     }
   },
   "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      }
+    },
     "title": {
       "type": "string",
-      "default": "Festival Template",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "countdown": {
+      "type": "component",
+      "component": "festival.sale-countdown",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "hero": {
+      "type": "component",
+      "component": "festival.responsive-banner",
+      "repeatable": false,
       "pluginOptions": {
         "i18n": {
           "localized": true

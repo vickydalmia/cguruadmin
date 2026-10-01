@@ -1,42 +1,34 @@
-# Festival Template — setup milestone
+# Festival Template
 
-Festival Template uses the existing entity-owned campaign system. Choose
-`Festival Template` (`festivalTemplate` in the API) in the Page Template field
-when creating or editing a Store, Brand, Category or Bank. Only one entity may
-own it across all four types. Clear the previous assignment before moving it;
-cloning the owner cannot create a second owner.
+Assign Festival Template to one Store, Brand, Category or Bank. The owner's
+existing URL is used; there is no fixed Festival route. Assignment alone does
+not activate Festival.
 
-After assignment, Content Manager exposes the **Festival Template** single
-type. Its localized settings currently contain only an admin title and shared
-SEO. No entity slug is hardcoded, and assignment does not create another URL.
+In Content Manager → Festival Template, **Enable template** defaults to off.
+This shared switch controls activation independently of content completeness.
+Off: the owner renders its normal entity page. On: the owner renders Festival,
+even with no sections configured. Saving the switch invalidates the owner route.
 
-This milestone intentionally keeps `features.festival.ready` and `live` false:
-an admin title or SEO is not page content. The storefront continues to render
-the owner's default entity view and metadata. Saving, deleting, or translating
-Festival settings emits the existing transactional ISR event for the owner
-path, with route/settings and sitemap refresh. Entity assignment, clearing and
-renaming retain the existing entity-write invalidation behavior. Website
-Refresh resolves this singleton to the same owner path.
+There is no bundled artwork, promotional copy, or sample data fallback. Add
+content section by section:
 
-No template is assigned automatically, no settings are seeded, and no existing
-entity or campaign is migrated. Strapi schema synchronization adds the new
-singleton and enum option; the admin build supplies the friendly option label.
+- Page title supplies the heading and breadcrumb label; SEO supplies metadata.
+- Banner uses one uploaded desktop image at the full viewport width on every screen. Height scales with the image’s natural proportions;
+  smaller screens show the full image without cropping. Include any badge
+  inside the image. An absent image or disabled banner omits only that section.
+- Countdown is optional. Configure valid start/end dates, labels and safe action
+  URLs for both phases. Disabled, incomplete or expired clocks do not render.
 
-The next milestone adds the first user-selected content block. It must add the
-aggregate read API, block validation/eligibility, and matching frontend renderer
-before replacing the setup-only readiness gate in `feature-readiness.ts`.
-At that point also add Festival to the campaign metadata mapping in
-`api/homepage/controllers/custom.ts`, map its frontend campaign feature, update
-localized inventory admission, and connect the new block's data dependencies
-to offer/merchant invalidation as needed. Preserve default-view fallback for
-missing or unconfigured content, and propagate temporary upstream errors.
+The API `/api/festival-full` includes `enabled`, countdown, banner and SEO.
+Only literal `enabled: true` activates the template. Missing CMS records or a
+missing flag keep it off. Temporary upstream failures remain retryable.
+Localized route metadata also checks the flag, never section completeness.
 
-Design references:
+Browser coverage: `E2E_FESTIVAL_PATH` targets an enabled configured page;
+`E2E_FESTIVAL_EMPTY_PATH` targets an enabled page with no section content.
+Tests use synthetic artwork only; no test assets are shipped as page defaults.
 
-- [Mobile, 375px](https://www.figma.com/design/5LPugIVhN7c19SF0rGJvCp/Developer-mode?node-id=2190-2362)
-- [Desktop, 1440px](https://www.figma.com/design/5LPugIVhN7c19SF0rGJvCp/Developer-mode?node-id=2214-537)
-- Additional desktop interaction states: `2216:2533` (filters), `2216:4507`
-  (sort menu). No separate tablet frame was found on the Festival page.
-
-Build visual sections one at a time, reusing existing cards, actions, image
-primitives and controllers. Verify intermediate widths as each block ships.
+Validation errors target individual inputs (including each countdown date and
+CTA URL). Failed saves preserve the editor's text, selected image and section
+state, including before the singleton's first successful save. Success still
+refreshes the saved document. See the Content Manager patch notes in AGENTS.md.

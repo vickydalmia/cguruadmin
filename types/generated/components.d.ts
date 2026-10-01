@@ -1327,6 +1327,20 @@ export interface FestivalPromoStrip extends Struct.ComponentSchema {
   };
 }
 
+export interface FestivalResponsiveBanner extends Struct.ComponentSchema {
+  collectionName: 'components_festival_responsive_banners';
+  info: {
+    displayName: 'Festival responsive banner';
+    icon: 'picture';
+  };
+  attributes: {
+    altText: Schema.Attribute.String;
+    desktopImage: Schema.Attribute.Media<'images'>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    linkUrl: Schema.Attribute.String;
+  };
+}
+
 export interface FestivalSaleCountdown extends Struct.ComponentSchema {
   collectionName: 'components_festival_sale_countdowns';
   info: {
@@ -3433,6 +3447,7 @@ declare module '@strapi/strapi' {
       'festival.coupons-by-category': FestivalCouponsByCategory;
       'festival.coupons-by-store': FestivalCouponsByStore;
       'festival.promo-strip': FestivalPromoStrip;
+      'festival.responsive-banner': FestivalResponsiveBanner;
       'festival.sale-countdown': FestivalSaleCountdown;
       'footer.country': FooterCountry;
       'footer.google-preferred-card': FooterGooglePreferredCard;

@@ -3,16 +3,9 @@ import type { SectionLabel } from './homepage-sections';
 export const FESTIVAL_PAGE_UID = 'api::festival-page.festival-page';
 
 export const FESTIVAL_SECTION_LABELS: SectionLabel[] = [
-  {
-    attr: 'title',
-    label: 'Admin title',
-    description:
-      'Internal name only. The selected entity keeps its default view until Festival content sections are available and configured.',
-  },
-  {
-    attr: 'seo',
-    label: 'SEO (search & social)',
-    description:
-      'Festival metadata for the configured template. The default entity metadata remains active until Festival content is ready.',
-  },
+  { attr: 'enabled', label: 'Enable template', description: 'Off by default. Assigning an owner does not enable the template. Turn this on when you want the owner to render Festival, regardless of which sections are filled.' },
+  { attr: 'title', label: 'Page title', description: 'Heading and breadcrumb label for the Festival page.' },
+  { attr: 'countdown', label: '1 · Sale countdown', description: 'Optional clock. Supply valid start/end dates and working CTA URLs for both phases.' },
+  { attr: 'hero', label: '2 · Festival banner', description: 'One desktop image fills the full viewport width on every screen. Height scales proportionally on smaller screens without cropping. Include badges in the image. No image means no banner; this does not affect template activation.' },
+  { attr: 'seo', label: 'SEO (search & social)', description: 'Your Festival search and social metadata.' },
 ];

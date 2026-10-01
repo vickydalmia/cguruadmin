@@ -18,18 +18,32 @@ function strapiHarness(rows: Record<string, any>, counts: Record<string, number>
 }
 
 describe('feature readiness', () => {
-  it.each(['store', 'brand', 'category', 'bank'])('keeps an unconfigured Festival %s on its default view', async (kind) => {
+  it('requires an owner before a complete Festival banner goes live', async () => {
+    const page = { enabled: true, hero: { desktopImage: { url: '/desktop.png' }, altText: 'Festival' } };
+    const rows = { 'api::festival-page.festival-page': page };
+    expect((await getFeatureReadiness(strapiHarness(rows, {}), INDIA_DEFAULT_CONFIGURATION)).festival).toMatchObject({ enabled: false, ready: true, live: false });
+    const ready = await getFeatureReadiness(strapiHarness({ ...rows, 'api::store.store:many': [{ documentId: 'owner', slug: 'seasonal', pageTemplate: 'festivalTemplate' }] }, {}), INDIA_DEFAULT_CONFIGURATION);
+    expect(ready.festival).toMatchObject({ enabled: true, ready: true, live: true, path: '/seasonal/' });
+  });
+  it.each(['store', 'brand', 'category', 'bank'])('keeps a Festival %s inactive until explicitly enabled', async (kind) => {
     const uid = `api::${kind}.${kind}`;
     for (const singleton of [null, { title: 'Festival Template', seo: { metaTitle: 'Festival' } }]) {
       const readiness = await getFeatureReadiness(strapiHarness({
         [`${uid}:many`]: [{ documentId: 'owner', slug: 'seasonal', pageTemplate: 'festivalTemplate' }],
         'api::festival-page.festival-page': singleton,
       }, {}), INDIA_DEFAULT_CONFIGURATION);
-      expect(readiness.festival).toMatchObject({ enabled: true, ready: false, live: false });
+      expect(readiness.festival).toMatchObject({ enabled: false, ready: true, live: false });
       expect(readiness.festival.path).toBeUndefined();
-      expect(readiness.festival.reason).toBe(singleton
-        ? 'Festival content sections are not configured yet.'
-        : 'CMS singleton is missing.');
+    }
+  });
+
+  it('activates an enabled owner even with no content or a disabled banner', async () => {
+    for (const page of [{ enabled: true }, { enabled: true, hero: { enabled: false } }]) {
+      const readiness = await getFeatureReadiness(strapiHarness({
+        'api::festival-page.festival-page': page,
+        'api::store.store:many': [{ documentId: 'owner', slug: 'seasonal', pageTemplate: 'festivalTemplate' }],
+      }, {}), INDIA_DEFAULT_CONFIGURATION);
+      expect(readiness.festival).toMatchObject({ enabled: true, ready: true, live: true, path: '/seasonal/' });
     }
   });
 
@@ -37,7 +51,7 @@ describe('feature readiness', () => {
     const readiness = await getFeatureReadiness(strapiHarness({
       'api::festival-page.festival-page': { title: 'Festival Template' },
     }, {}), INDIA_DEFAULT_CONFIGURATION);
-    expect(readiness.festival).toMatchObject({ enabled: false, ready: false, live: false });
+    expect(readiness.festival).toMatchObject({ enabled: false, ready: true, live: false });
     expect(readiness.festival.path).toBeUndefined();
   });
 

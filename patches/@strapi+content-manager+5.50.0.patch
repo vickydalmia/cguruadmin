@@ -2,7 +2,14 @@ diff --git a/node_modules/@strapi/content-manager/dist/admin/services/documents.
 index a46c395..7a433b8 100644
 --- a/node_modules/@strapi/content-manager/dist/admin/services/documents.js
 +++ b/node_modules/@strapi/content-manager/dist/admin/services/documents.js
-@@ -364,18 +364,11 @@ const documentApi = api.contentManagerApi.injectEndpoints({
+@@ -347,2 +347,5 @@
+-                invalidatesTags: (_result, _error, { collectionType, model, documentId })=>{
++                invalidatesTags: (_result, error, { collectionType, model, documentId })=>{
++                    // Rejected writes must not refetch and unmount an unsaved
++                    // single-type form. Preserve typed values and inline errors.
++                    if (error) return [];
+                     return [
+@@ -364,18 +367,11 @@ const documentApi = api.contentManagerApi.injectEndpoints({
                          }
                      ];
                  },
@@ -30,7 +37,14 @@ diff --git a/node_modules/@strapi/content-manager/dist/admin/services/documents.
 index d44653c..10ed70e 100644
 --- a/node_modules/@strapi/content-manager/dist/admin/services/documents.mjs
 +++ b/node_modules/@strapi/content-manager/dist/admin/services/documents.mjs
-@@ -362,18 +362,33 @@ const documentApi = contentManagerApi.injectEndpoints({
+@@ -345,2 +345,5 @@
+-                invalidatesTags: (_result, _error, { collectionType, model, documentId })=>{
++                invalidatesTags: (_result, error, { collectionType, model, documentId })=>{
++                    // Rejected writes must not refetch and unmount an unsaved
++                    // single-type form. Preserve typed values and inline errors.
++                    if (error) return [];
+                     return [
+@@ -362,18 +365,33 @@ const documentApi = contentManagerApi.injectEndpoints({
                          }
                      ];
                  },

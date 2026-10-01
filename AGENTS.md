@@ -92,8 +92,8 @@ because it means we are carrying a diff for no reason. Check both cases.
 
 ### `patches/@strapi+content-manager+5.50.0.patch`
 
-**What it does:** removes the optimistic `onQueryStarted` from the
-`updateDocument` RTK Query mutation in
+**What it does:** removes the optimistic `onQueryStarted` and skips cache-tag
+invalidation when `updateDocument` fails, in the RTK Query mutation in
 `dist/admin/services/documents.{js,mjs}`.
 
 **Why:** without this patch, **the editor's typed values are wiped whenever a
@@ -113,7 +113,7 @@ So the optimistic write drags `initialValues.current` up to the typed values, th
 typed is discarded. `errors` is untouched by that action, which is why the inline
 red messages survive on top of reverted values.
 
-Removing the optimistic patch fixes it: the refetch that `invalidatesTags`
+Removing the optimistic patch protects saved documents: the refetch that `invalidatesTags`
 triggers then returns data deep-equal to `initialValues.current`, Form's
 `isEqual` check short-circuits, and nothing is clobbered. The only cost is losing
 an optimistic repaint on the success path, which is invisible.
@@ -128,6 +128,16 @@ upstream React state):
    applying.
 4. `createDocument` never had an `onQueryStarted`, so the create flow is a
    control: it should behave the same before and after the patch.
+
+**Unsaved single types:** A failed save must return `[]` from `invalidatesTags`.
+Otherwise `useDocument` reports a refetch as loading; an unsaved singleton has no
+`documentId`, so EditView replaces the Form with Page.Loading. Remounting resets
+all typed values, selected media and field errors even without an optimistic
+update. Successful saves must retain their existing cache invalidation.
+`src/utils/content-manager-save-regression.test.ts` exercises both installed
+module formats. Verify a rejected first Festival save preserves its title,
+selected banner and inline errors. `src/admin/vite.config.ts` keys the dependency
+cache by patch contents so local admin bundles pick up patch changes.
 
 **If upstream fixes it:** delete the patch file, drop this section, and confirm
 step 3 still passes. Worth checking the Strapi changelog for `onQueryStarted`,

@@ -1984,9 +1984,28 @@ export interface ApiFestivalPageFestivalPage extends Struct.SingleTypeSchema {
     };
   };
   attributes: {
+    countdown: Schema.Attribute.Component<'festival.sale-countdown', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    enabled: Schema.Attribute.Boolean &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }> &
+      Schema.Attribute.DefaultTo<false>;
+    hero: Schema.Attribute.Component<'festival.responsive-banner', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
     locale: Schema.Attribute.String;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -2004,8 +2023,7 @@ export interface ApiFestivalPageFestivalPage extends Struct.SingleTypeSchema {
         i18n: {
           localized: true;
         };
-      }> &
-      Schema.Attribute.DefaultTo<'Festival Template'>;
+      }>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
