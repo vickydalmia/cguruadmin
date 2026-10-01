@@ -1,3 +1,4 @@
+import { FESTIVAL_FIELD_DESCRIPTIONS, FESTIVAL_FIELD_LABELS } from '../constants/festival-field-hints';
 import type { Core } from '@strapi/strapi';
 import { HOMEPAGE_IMAGE_RULES, imageRuleDescription } from '../constants/homepage-images';
 import { CULTURE_GALLERY_MEDIA_FOLDER_NAME } from '../constants/media-folders';
@@ -46,37 +47,26 @@ export const COMPONENT_FIELD_LABELS: Record<string, Record<string, string>> = {
     brands: 'Brands',
   },
 };
-COMPONENT_FIELD_DESCRIPTIONS['festival.offer-slide'] = {
-  coupon: 'Select the Coupon for this slide. Coupons with and without a code are supported.',
-  titleOverride: 'Optional. Leave empty to use the selected offer title.',
-  descriptionOverride: 'Optional. Displayed in two lines; leave empty to use the selected offer description.',
-  badgeOverride: 'Optional, for example Extra 20% Off. Leave empty to use the selected Coupon offer text. No badge is invented when both are empty.',
+Object.assign(COMPONENT_FIELD_DESCRIPTIONS, FESTIVAL_FIELD_DESCRIPTIONS);
+Object.assign(COMPONENT_FIELD_LABELS, FESTIVAL_FIELD_LABELS);
+// Shared sections used by Festival and other editorial pages.
+COMPONENT_FIELD_DESCRIPTIONS['home.faq-block'] = {
+  enabled: 'Turn off to hide this FAQ section while retaining its questions.',
+  heading: 'Optional heading above the questions. Leave empty to use the shared FAQ presentation.',
+  items: 'Add questions and answers, then drag to reorder. No questions means no FAQ section. The first item with an answer opens initially.',
 };
-COMPONENT_FIELD_DESCRIPTIONS['festival.explore-categories'] = { categories: 'Add each category once and drag to reorder. Every category appears in a horizontally scrolling strip on desktop and mobile.', description: 'Optional supporting text below the heading.' };
-COMPONENT_FIELD_DESCRIPTIONS['festival.category-selection'] = { category: 'Choose a category. Its name appears in the collapsed row.', labelOverride: 'Optional; leave empty to use the current category name.', imageOverride: 'Optional square campaign image. Leave empty to use the category icon.', coupons: 'Optional Coupons only, with or without a code. Leave empty to use all latest live Coupons belonging to this category. Selected Coupons keep their order under Recommended; expired selections are omitted, not replaced.' };
-COMPONENT_FIELD_LABELS['festival.category-selection'] = { coupons: 'Selected Coupons (optional)', imageOverride: 'Category image override' };
-COMPONENT_FIELD_DESCRIPTIONS['festival.product-section'] = {
-  filterBrands: 'Optional filter choices. Leave empty for all brands with live Deals. Selected brands without live Deals are hidden.',
-  filterStores: 'Optional filter choices. Leave empty for all stores with live Deals. Selected stores without live Deals are hidden.',
-  filterBanks: 'Optional filter choices. Leave empty for all banks with live Deals. Selected banks without live Deals are hidden.',
-  listingEnabled: 'Show the latest 50 Product Deals below the category tiles. Brand, store, bank and discount filters search all live Product Deals; Load More adds 8 cards.',
-  items: 'Select and reorder Product Deals. The slider uses every valid selection; empty means no product slider.',
-  categories: 'Optional category tiles below the slider. Upload artwork per tile and drag to reorder.',
+COMPONENT_FIELD_DESCRIPTIONS['shared.faq-item'] = {
+  question: 'Required. Enter the question visitors will see in the accordion.',
+  answer: 'Answer this question in plain text. Use blank lines between paragraphs. Empty leaves the question without answer content.',
 };
-COMPONENT_FIELD_DESCRIPTIONS['festival.product-slide'] = {
-  deal: 'Choose a Product Deal. Its current title appears in the collapsed row.',
-  titleOverride: 'Optional. Leave empty to show the selected Product Deal’s current title.',
+COMPONENT_FIELD_DESCRIPTIONS['home.popular-searches'] = {
+  enabled: 'Turn off to hide these links without deleting the selections.',
+  heading: 'Optional title above the selected links. Clear it to omit the title.',
+  stores: 'Select Stores to link, in your preferred order. Empty adds no Store links.',
+  brands: 'Select Brands to link, in your preferred order. Empty adds no Brand links.',
+  categories: 'Select Categories to link, in your preferred order. Empty adds no Category links.',
+  banks: 'Select Banks to link, in your preferred order. Empty adds no Bank links. If all groups are empty, this section is hidden.',
 };
-COMPONENT_FIELD_DESCRIPTIONS['festival.product-category'] = {
-  category: 'Choose a Category. Its name appears in the collapsed row.',
-  labelOverride: 'Optional display label. Leave empty to use the current category name.',
-  imageOverride: 'Upload campaign artwork. Displayed as 242 × 210 on desktop and 110 × 132 on mobile with cover cropping. Leave empty to use the category image.',
-  urlOverride: 'Optional. Leave empty to use the generated category Deal page, for example /mobile-phones-deals/. Otherwise enter a root-relative path or HTTP(S) URL.',
-};
-COMPONENT_FIELD_LABELS['festival.product-section'] = { items: 'Product Deals', categories: 'Category tiles', listingEnabled: 'Show Product Deal listing', filterBrands: 'Filter brands', filterStores: 'Filter stores', filterBanks: 'Filter banks' };
-COMPONENT_FIELD_LABELS['festival.product-slide'] = { deal: 'Product Deal', titleOverride: 'Title override (optional)' };
-COMPONENT_FIELD_LABELS['festival.product-category'] = { category: 'Category', labelOverride: 'Label override (optional)', imageOverride: 'Category image', urlOverride: 'URL override (optional)' };
-COMPONENT_FIELD_LABELS['festival.offer-slide'] = { coupon: 'Coupon' };
 for (const rule of HOMEPAGE_IMAGE_RULES) {
   (COMPONENT_FIELD_DESCRIPTIONS[rule.componentUid] ??= {})[rule.field] =
     imageRuleDescription(rule);
@@ -720,11 +710,3 @@ export async function ensureFieldDescriptions(strapi: Core.Strapi): Promise<void
     }
   }
 }
-
-COMPONENT_FIELD_DESCRIPTIONS['festival.gift-section'] = { categories: 'Select up to 6 category tiles below the slider. They do not add Coupons to the slider. Add each category once.', items: 'Select and reorder the exact Coupons to show. Only selected live Coupons appear. An empty selection hides the slider.', description: 'Supporting text under the section heading.' };
-COMPONENT_FIELD_LABELS['festival.gift-section'] = { categories: 'Coupon categories and tiles', items: 'Selected Coupons' };
-COMPONENT_FIELD_DESCRIPTIONS['festival.gift-category'] = { category: 'Choose a category. The selected name appears on the collapsed row.', labelOverride: 'Leave empty to use the current category name.', imageOverride: 'Upload category artwork. Falls back to the category icon when empty.' };
-COMPONENT_FIELD_DESCRIPTIONS['festival.gift-coupon'] = { coupon: 'Choose a Coupon to display in this slider. Selections keep their order.', titleOverride: 'Leave empty to use the current Coupon title.', descriptionOverride: 'Leave empty to use the Coupon description.', imageOverride: 'Campaign image for the right side of the voucher. Without this, the category artwork or merchant logo is used.', occasionOverride: 'Defaults to Diwali Special.', badgeOverride: 'Optional discount text, for example 50% OFF. Empty uses the Coupon offer text.' };
-
-COMPONENT_FIELD_DESCRIPTIONS['festival.savings-section'] = { items: 'Select up to 2 Coupons, in display order. Only selected live Coupons appear. Displays between Explore Categories and picked-for-you deals.' };
-COMPONENT_FIELD_DESCRIPTIONS['festival.savings-coupon'] = { coupon: 'Select one Coupon. Its title appears on the collapsed row.', titleOverride: 'Empty uses the Coupon title.', descriptionOverride: 'Empty uses the Coupon description.', logoOverride: 'Empty uses the Coupon merchant logo and its background colour.', badgeLabel: 'Editable top badge line.', badgeValue: 'Main badge value. Empty uses the Coupon discount.', badgeCaption: 'Editable bottom badge line.', buttonLabel: 'Empty uses Unlock Coupon or Get Deal according to the Coupon.', termsText: 'Editable vertical terms and conditions text.' };
