@@ -1,3 +1,4 @@
+import { festivalCategoryProblems } from './festival-category-validation';
 import { festivalSlideProblems } from './festival-slider-validation';
 import type { Core } from '@strapi/strapi';
 import { FESTIVAL_PAGE_UID } from '../../../constants/festival-page';
@@ -14,13 +15,13 @@ const safeLink = (value: unknown) => {
 export async function validateFestivalPage(strapi: Core.Strapi, data, locale?: string): Promise<void> {
   if (!data || typeof data !== 'object') return;
   const current = await strapi.db.query(FESTIVAL_PAGE_UID).findOne({
-    where: { locale: locale ?? DEFAULT_CONTENT_LOCALE }, populate: { countdown: true, hero: true, offerSlider: { populate: { items: { populate: ['coupon'] } } } },
+    where: { locale: locale ?? DEFAULT_CONTENT_LOCALE }, populate: { exploreCategories: { populate: { categories: { populate: ['category'] } } }, countdown: true, hero: true, offerSlider: { populate: { items: { populate: ['coupon'] } } } },
   });
   const merged = (key: string) => data[key] === undefined ? current?.[key]
     : data[key] === null ? null : { ...current?.[key], ...data[key] };
   const countdown = merged('countdown');
   const hero = merged('hero');
-  const problems: Problem[] = festivalSlideProblems(data.offerSlider, current?.offerSlider);
+  const problems: Problem[] = [...festivalSlideProblems(data.offerSlider, current?.offerSlider), ...festivalCategoryProblems(data.exploreCategories, current?.exploreCategories)];
   if (countdown && countdown.enabled !== false) {
     const start = Date.parse(countdown.saleStartAt);
     const end = Date.parse(countdown.saleEndAt);

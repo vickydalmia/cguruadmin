@@ -1,6 +1,8 @@
+import { FESTIVAL_CATEGORIES_POPULATE } from './festival-categories';
 import { brandRef, categoryRef, storeRef, PUBLISHED_OFFER_FILTER } from '../../../utils/offer-visibility';
 
 export const FESTIVAL_POPULATE = {
+  exploreCategories: FESTIVAL_CATEGORIES_POPULATE,
   countdown: true,
   hero: { populate: { desktopImage: true } },
   offerSlider: { populate: { items: { populate: {

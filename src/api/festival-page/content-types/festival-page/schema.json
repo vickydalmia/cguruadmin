@@ -63,6 +63,16 @@
         }
       }
     },
+    "exploreCategories": {
+      "type": "component",
+      "component": "festival.explore-categories",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
     "seo": {
       "type": "component",
       "component": "shared.seo",

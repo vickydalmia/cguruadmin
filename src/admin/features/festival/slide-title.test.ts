@@ -15,3 +15,9 @@ describe('Festival slide editor title', () => {
     expect(festivalSlideTitle('', { disconnect: [{ id: 1 }] }, [{ id: 1, title: 'Removed' }])).toBe('Select a Coupon');
   });
 });
+
+it('uses the selected category name without filling a label override', () => {
+  expect(festivalSlideTitle('', { connect: [{ documentId: 'category', name: 'Travel' }] }, [], 'Select a Category')).toBe('Travel');
+  expect(festivalSlideTitle('', undefined, [{ documentId: 'category', name: 'Travel' }], 'Select a Category')).toBe('Travel');
+  expect(festivalSlideTitle('', undefined, [], 'Select a Category')).toBe('Select a Category');
+});

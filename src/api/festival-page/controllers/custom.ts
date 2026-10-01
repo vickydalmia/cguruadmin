@@ -1,3 +1,4 @@
+import { resolveFestivalCategories } from '../services/festival-categories';
 import type { Core } from '@strapi/strapi';
 import { FESTIVAL_PAGE_UID } from '../../../constants/festival-page';
 import { DEFAULT_CONTENT_LOCALE } from '../../../constants/content-locales';
@@ -22,6 +23,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         return isLiveOffer(offer, new Date()) && hasSafeAffiliateLink(offer.affiliateLink);
       });
     }
+    await resolveFestivalCategories(strapi, ctx, data.exploreCategories, locale);
     arrayizeOfferText(data);
     await attachFestiveOffers(strapi, data);
     await attachStablePublicOfferIdsForRequest(strapi, ctx, data);

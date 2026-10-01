@@ -55,6 +55,8 @@ const COMPONENT_ENTRY_TITLES: Record<string, string> = {
   'telegram.latest-deals': 'heading',
   'telegram.favourite-stores': 'heading',
   'telegram.join-cta': 'heading',
+  'festival.category-selection': 'labelOverride',
+  'festival.explore-categories': 'heading',
   'festival.offer-slide': 'titleOverride',
   'festival.coupon-category-tab': 'labelOverride',
   'festival.coupon-store-tab': 'labelOverride',

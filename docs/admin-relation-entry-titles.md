@@ -37,3 +37,13 @@ Verify each actual component schema before extending this behavior. Some relate 
 ## Validation for future changes
 
 Cover newly selected, replaced, disconnected, saved/reopened, reordered, and localized rows; an explicit override must win, and clearing it must restore the related title. Test query failure/no permission without crashing the editor. Confirm selection never changes the override or marks an otherwise unchanged document dirty. Check both collapsed and expanded rows. Run admin typecheck, targeted tests, and the production admin build. Recheck the dependency adapter on every Strapi upgrade and keep the CJS/ESM patches aligned.
+
+### Festival category rows
+
+The Festival Explore Categories phase adds `festival.category-selection` to the
+same read-only adapter. Its relation field is `category`, its stored mainField is
+`labelOverride`, and its empty prompt is `Select a Category`. The title helper
+also accepts relation `name`, used by Category records; unsaved labels and saved
+relation cache reads still follow the original precedence. It never auto-fills
+`labelOverride`. The older `festival.coupon-category-tab` remains unchanged because
+it belongs to Independence Day. The broader admin audit is still separate work.

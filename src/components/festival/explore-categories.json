@@ -1,0 +1,26 @@
+{
+  "collectionName": "components_festival_explore_categories",
+  "info": {
+    "displayName": "Festival Explore Categories",
+    "description": "Scrollable category navigation and client-side Coupon filters",
+    "icon": "grid"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string",
+      "default": "Explore Categories"
+    },
+    "description": {
+      "type": "string"
+    },
+    "categories": {
+      "type": "component",
+      "repeatable": true,
+      "component": "festival.category-selection"
+    }
+  }
+}

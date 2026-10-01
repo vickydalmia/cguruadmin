@@ -129,6 +129,10 @@ export async function curatedSourcePaths(
       (slug) => `/${slug}/`,
     );
   }
+  if (['festival.offer-slide', 'festival.category-selection'].includes(sourceUid)) {
+    const { entityTemplateOwnerSlugs } = await import('../api/site-configuration/services/entity-template-owners');
+    return (await entityTemplateOwnerSlugs(strapi, 'festivalTemplate')).map((slug) => `/${slug}/`);
+  }
   if (sourceUid.startsWith('festival.')) {
     const { entityTemplateOwnerSlugs } = await import(
       '../api/site-configuration/services/entity-template-owners'

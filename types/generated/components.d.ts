@@ -1237,6 +1237,21 @@ export interface FestivalCampaignHero extends Struct.ComponentSchema {
   };
 }
 
+export interface FestivalCategorySelection extends Struct.ComponentSchema {
+  collectionName: 'components_festival_category_selections';
+  info: {
+    description: 'Choose a category, then optionally curate its Coupons';
+    displayName: 'Festival Category Selection';
+    icon: 'grid';
+  };
+  attributes: {
+    category: Schema.Attribute.Relation<'oneToOne', 'api::category.category'>;
+    coupons: Schema.Attribute.Relation<'oneToMany', 'api::coupon.coupon'>;
+    imageOverride: Schema.Attribute.Media<'images'>;
+    labelOverride: Schema.Attribute.String;
+  };
+}
+
 export interface FestivalCouponCategoryTab extends Struct.ComponentSchema {
   collectionName: 'components_festival_coupon_category_tabs';
   info: {
@@ -1306,6 +1321,22 @@ export interface FestivalCouponsByStore extends Struct.ComponentSchema {
         },
         number
       >;
+  };
+}
+
+export interface FestivalExploreCategories extends Struct.ComponentSchema {
+  collectionName: 'components_festival_explore_categories';
+  info: {
+    description: 'Scrollable category navigation and client-side Coupon filters';
+    displayName: 'Festival Explore Categories';
+    icon: 'grid';
+  };
+  attributes: {
+    categories: Schema.Attribute.Component<'festival.category-selection', true>;
+    description: Schema.Attribute.String;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Explore Categories'>;
   };
 }
 
@@ -3477,10 +3508,12 @@ declare module '@strapi/strapi' {
       'faq.faq-item': FaqFaqItem;
       'faq.support-cta': FaqSupportCta;
       'festival.campaign-hero': FestivalCampaignHero;
+      'festival.category-selection': FestivalCategorySelection;
       'festival.coupon-category-tab': FestivalCouponCategoryTab;
       'festival.coupon-store-tab': FestivalCouponStoreTab;
       'festival.coupons-by-category': FestivalCouponsByCategory;
       'festival.coupons-by-store': FestivalCouponsByStore;
+      'festival.explore-categories': FestivalExploreCategories;
       'festival.offer-slide': FestivalOfferSlide;
       'festival.offer-slider': FestivalOfferSlider;
       'festival.promo-strip': FestivalPromoStrip;

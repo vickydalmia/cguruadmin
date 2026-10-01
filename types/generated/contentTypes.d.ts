@@ -2000,6 +2000,15 @@ export interface ApiFestivalPageFestivalPage extends Struct.SingleTypeSchema {
         };
       }> &
       Schema.Attribute.DefaultTo<false>;
+    exploreCategories: Schema.Attribute.Component<
+      'festival.explore-categories',
+      false
+    > &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
     hero: Schema.Attribute.Component<'festival.responsive-banner', false> &
       Schema.Attribute.SetPluginOptions<{
         i18n: {

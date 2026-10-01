@@ -52,6 +52,9 @@ COMPONENT_FIELD_DESCRIPTIONS['festival.offer-slide'] = {
   descriptionOverride: 'Optional. Displayed in two lines; leave empty to use the selected offer description.',
   badgeOverride: 'Optional, for example Extra 20% Off. Leave empty to use the selected Coupon offer text. No badge is invented when both are empty.',
 };
+COMPONENT_FIELD_DESCRIPTIONS['festival.explore-categories'] = { categories: 'Add each category once and drag to reorder. Every category appears in a horizontally scrolling strip on desktop and mobile.', description: 'Optional supporting text below the heading.' };
+COMPONENT_FIELD_DESCRIPTIONS['festival.category-selection'] = { category: 'Choose a category. Its name appears in the collapsed row.', labelOverride: 'Optional; leave empty to use the current category name.', imageOverride: 'Optional square campaign image. Leave empty to use the category icon.', coupons: 'Optional Coupons only, with or without a code. Leave empty to use all latest live Coupons belonging to this category. Selected Coupons keep their order under Recommended; expired selections are omitted, not replaced.' };
+COMPONENT_FIELD_LABELS['festival.category-selection'] = { coupons: 'Selected Coupons (optional)', imageOverride: 'Category image override' };
 COMPONENT_FIELD_LABELS['festival.offer-slide'] = { coupon: 'Coupon' };
 for (const rule of HOMEPAGE_IMAGE_RULES) {
   (COMPONENT_FIELD_DESCRIPTIONS[rule.componentUid] ??= {})[rule.field] =
