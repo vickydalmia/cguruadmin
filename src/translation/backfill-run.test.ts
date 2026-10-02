@@ -42,6 +42,7 @@ const waitFor = async (status: 'done' | 'failed' | 'cancelled') => {
     if (run?.status === status) return run;
     await new Promise((resolve) => setTimeout(resolve, 2));
   }
+  console.error(await knex("translation_backfill_runs").select("id", "status", "created_at", "last_error"));
   throw new Error(`run did not become ${status}`);
 };
 
