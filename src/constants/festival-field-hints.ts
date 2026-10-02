@@ -19,12 +19,8 @@ export const FESTIVAL_FIELD_DESCRIPTIONS: Record<string, Record<string, string>>
     "coupons": "Optional Coupons only, with or without a code. Leave empty to use all latest live Coupons belonging to this category. Selected Coupons keep their order under Recommended; expired selections are omitted, not replaced."
   },
   "festival.product-section": {
-    "filterBrands": "Optional filter choices. Leave empty for all brands with live Deals. Selected brands without live Deals are hidden.",
-    "filterStores": "Optional filter choices. Leave empty for all stores with live Deals. Selected stores without live Deals are hidden.",
-    "filterBanks": "Optional filter choices. Leave empty for all banks with live Deals. Selected banks without live Deals are hidden.",
-    "listingEnabled": "Enable to show the latest 50 live Product Deals initially, with Load More revealing the next 8 at a time. Filters can match the wider rendered Deal catalogue. Turn off to hide only the listing and its filters; the selected slider and category tiles remain.",
     "items": "Select and reorder Product Deals. The slider uses every valid selection; empty means no product slider.",
-    "categories": "Optional category tiles below the Product Deal slider. Select a category and upload its campaign artwork; drag to reorder. Empty hides the tile row. A tile without an override or category icon is omitted.",
+    "categories": "Select and order category tabs below the Product Deal slider. The first category opens automatically. Each tab shows all its live Product Deals, with brand, store, bank and discount filters derived automatically from those Deals. Empty hides the tabs and listing.",
     "enabled": "Turn off to hide the entire Product Deal section: slider, category tiles and listing. Saved selections are retained.",
     "heading": "Optional heading. Empty uses the storefront’s Picked for you heading.",
     "description": "Optional supporting text. Empty omits it."
@@ -36,8 +32,7 @@ export const FESTIVAL_FIELD_DESCRIPTIONS: Record<string, Record<string, string>>
   "festival.product-category": {
     "category": "Choose a Category. Its name appears in the collapsed row.",
     "labelOverride": "Optional display label. Leave empty to use the current category name.",
-    "imageOverride": "Recommended desktop artwork: 242 × 210 px; Retina 2×: 484 × 420 px. The same image fills a 110 × 132 px mobile tile with cover cropping. Keep important content centred and away from edges. Empty uses the category icon; if neither exists, the tile is hidden.",
-    "urlOverride": "Optional. Leave empty to use the generated category Deal page, for example /mobile-phones-deals/. Otherwise enter a root-relative path or HTTP(S) URL."
+    "imageOverride": "Recommended desktop artwork: 242 × 210 px; Retina 2×: 484 × 420 px. The same image fills a 110 × 132 px mobile tile with cover cropping. Keep important content centred and away from edges. Empty uses the category icon; if neither exists, a text-only tab is shown."
   },
   "festival.gift-section": {
     "categories": "Select a maximum of 6 unique categories and drag to reorder. These create only the tiles below the slider; they never add Coupons. Empty hides the tiles. Mobile displays 3 tiles per row.",
@@ -105,10 +100,6 @@ export const FESTIVAL_FIELD_LABELS: Record<string, Record<string, string>> = {
   "festival.product-section": {
     "items": "Product Deals",
     "categories": "Category tiles",
-    "listingEnabled": "Show Product Deal listing",
-    "filterBrands": "Filter brands",
-    "filterStores": "Filter stores",
-    "filterBanks": "Filter banks"
   },
   "festival.product-slide": {
     "deal": "Product Deal",
@@ -118,7 +109,6 @@ export const FESTIVAL_FIELD_LABELS: Record<string, Record<string, string>> = {
     "category": "Category",
     "labelOverride": "Label override (optional)",
     "imageOverride": "Category image",
-    "urlOverride": "URL override (optional)"
   },
   "festival.offer-slide": {
     "coupon": "Coupon"

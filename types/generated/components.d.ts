@@ -1446,10 +1446,6 @@ export interface FestivalProductCategory extends Struct.ComponentSchema {
     category: Schema.Attribute.Relation<'oneToOne', 'api::category.category'>;
     imageOverride: Schema.Attribute.Media<'images'>;
     labelOverride: Schema.Attribute.String;
-    urlOverride: Schema.Attribute.String &
-      Schema.Attribute.SetMinMaxLength<{
-        maxLength: 2048;
-      }>;
   };
 }
 
@@ -1466,12 +1462,8 @@ export interface FestivalProductSection extends Struct.ComponentSchema {
         maxLength: 240;
       }>;
     enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
-    filterBanks: Schema.Attribute.Relation<'manyToMany', 'api::bank.bank'>;
-    filterBrands: Schema.Attribute.Relation<'manyToMany', 'api::brand.brand'>;
-    filterStores: Schema.Attribute.Relation<'manyToMany', 'api::store.store'>;
     heading: Schema.Attribute.String;
     items: Schema.Attribute.Component<'festival.product-slide', true>;
-    listingEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
   };
 }
 

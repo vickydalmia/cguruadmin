@@ -19,10 +19,6 @@
       "allowedTypes": [
         "images"
       ]
-    },
-    "urlOverride": {
-      "type": "string",
-      "maxLength": 2048
     }
   }
 }

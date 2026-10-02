@@ -66,9 +66,15 @@ projections and live/safe-link filters preserve current prices, media, codes,
 merchant identity and stable public IDs. No cap is applied to the selections.
 The frontend virtualizes cards using one template and compact data.
 
-Repeatable category tiles select Categories, with optional label, uploaded image
-and URL overrides. The default link is the existing generated name-based Deal
-page (`/mobile-phones-deals/`). Overrides accept root-relative or HTTP(S) URLs.
-Missing Deal/Category selections report errors at the individual row field.
-Product/category row titles reuse the read-only relation fallback. Changes to
-selected Deals invalidate the Festival owner through curatedSourcePaths.
+Repeatable category tiles are same-page tabs, with optional labels and uploaded images.
+The first tab is selected on load. No category selection means no listing.
+The backend paginates all live, safe Product Deals in the selected categories,
+including category, brand, store and bank membership. It sends each Deal once.
+There is no default 50-Deal cap and no manual filter selection or URL override.
+
+The UI derives filter choices and discount buckets from the active category.
+Switching tabs resets filters and pagination; eight cards render initially and
+Load More adds eight. Empty tabs show an empty state. All tabs share compact JSON
+and one card template; switching/filtering requires no browser API request.
+Missing artwork falls back to a text-only tab. Product/category row labels use
+the read-only relation fallback.

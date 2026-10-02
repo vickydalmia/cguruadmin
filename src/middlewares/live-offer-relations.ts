@@ -1,4 +1,3 @@
-import { festivalFilterTarget, runWithFestivalFilter, liveFestivalFilterIds } from '../api/festival-page/services/festival-admin-filters';
 import type { Core } from '@strapi/strapi';
 import {
   curatedOfferTargetForRelationPath,
@@ -26,12 +25,6 @@ export default (
       ctx.request.query._q = normalizeRelationSearch(ctx.request.query._q);
     }
 
-    const festivalTarget=festivalFilterTarget(ctx.path);
-    if(festivalTarget){
-      const locale=ctx.query?.locale??ctx.query?.plugins?.i18n?.locale;
-      const ids=await liveFestivalFilterIds(strapi,festivalTarget,typeof locale==='string'?locale:'en');
-      return runWithFestivalFilter(festivalTarget,ids,next);
-    }
     const targetUid = curatedOfferTargetForRelationPath(strapi, ctx.path);
     if (!targetUid) return next();
 
