@@ -11,6 +11,22 @@ function harness(stored: unknown = null) {
 }
 
 describe('validateChangedFields', () => {
+  it('allows strict Festival saves without reading the removed SEO component', async () => {
+    const { strapi, findOne } = harness();
+    findOne.mockRejectedValue(new Error('Invalid key seo'));
+
+    await expect(validateChangedFields(
+      strapi,
+      'api::festival-page.festival-page',
+      'update',
+      { title: 'Festival offers', enabled: true },
+      'festival-1',
+      true,
+      'en',
+    )).resolves.toBeUndefined();
+    expect(findOne).not.toHaveBeenCalled();
+  });
+
   it('applies the shared SEO limits and URL safety to Subscription Page saves', async () => {
     const { strapi } = harness();
     await expect(validateChangedFields(strapi, 'api::subscription-page.subscription-page', 'create', {

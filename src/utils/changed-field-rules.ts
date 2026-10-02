@@ -36,7 +36,6 @@ export const SEO_UIDS = new Set([
   'api::contact-page.contact-page',
   'api::deal-of-the-day-page.deal-of-the-day-page',
   'api::independence-day-sale-page.independence-day-sale-page',
-  'api::festival-page.festival-page',
   'api::telegram-page.telegram-page',
   'api::subscription-page.subscription-page',
   'api::faq-page.faq-page',
