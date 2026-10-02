@@ -2,8 +2,9 @@
 // which fixed public slugs. One of the modules split out of scopes.ts,
 // which keeps the computeScope coordinator.
 
-export const CHROME_UIDS = new Set(['api::menu.menu', 'api::footer.footer', 'api::global.global']);
+import { FESTIVAL_PAGE_UID } from '../constants/festival-page';
 
+export const CHROME_UIDS = new Set(['api::menu.menu', 'api::footer.footer', 'api::global.global']);
 export const DOTD_PAGE_UID = 'api::deal-of-the-day-page.deal-of-the-day-page';
 export const INDEPENDENCE_DAY_SALE_PAGE_UID =
   'api::independence-day-sale-page.independence-day-sale-page';
@@ -17,8 +18,9 @@ export const TELEGRAM_CONFIG_UID = 'api::telegram.telegram';
 /** Campaign singleton → the entity page template whose owner renders it. */
 export const CAMPAIGN_TEMPLATE_BY_PAGE_UID: Record<
   string,
-  'dealTemplate' | 'independenceDayTemplate'
+  'dealTemplate' | 'independenceDayTemplate' | 'festivalTemplate'
 > = {
+  [FESTIVAL_PAGE_UID]: 'festivalTemplate',
   [DOTD_PAGE_UID]: 'dealTemplate',
   [INDEPENDENCE_DAY_SALE_PAGE_UID]: 'independenceDayTemplate',
 };

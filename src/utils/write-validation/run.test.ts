@@ -55,6 +55,7 @@ describe('write-validation step order', () => {
       'validateMenuCategorySections',
       'validateMenuNotification',
       'validateDealOfTheDaySectionLimits',
+      'validateFestivalPage',
       'validateIndependenceDaySale',
       'validateTelegramPage',
       'validateTelegramSettings',

@@ -1,0 +1,26 @@
+{
+  "collectionName": "components_festival_responsive_banners",
+  "info": {
+    "displayName": "Festival responsive banner",
+    "icon": "picture"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "desktopImage": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": [
+        "images"
+      ]
+    },
+    "altText": {
+      "type": "string"
+    },
+    "linkUrl": {
+      "type": "string"
+    }
+  }
+}

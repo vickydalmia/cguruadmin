@@ -895,4 +895,21 @@ describe('public route metadata aggregate', () => {
       );
     }
   });
+  it.each([null, {}, { enabled: false }, { enabled: true }, { enabled: true, hero: { enabled: false } }])('emits Festival metadata only when the template flag is enabled (%j)', async (singleton) => {
+    const documents = vi.fn((uid: string) => ({
+      findFirst: vi.fn(async () => uid === 'api::festival-page.festival-page' ? singleton : null),
+      findMany: vi.fn(async ({ filters }: any) => uid === 'api::store.store' && filters?.pageTemplate === 'festivalTemplate'
+        ? [{ documentId: 'festival-owner', slug: 'festival-sale', updatedAt: '2026-10-01T00:00:00.000Z' }] : []),
+    }));
+    const controller = createHomepageController({ strapi: {
+      documents,
+      service: () => ({ publicSettings: async () => ({ countryCode: 'IN', features: { festival: { live: true } } }) }),
+    } as any });
+    const ctx = { send: vi.fn((payload: any) => payload) };
+    const response = await controller.publicRouteMetadata(ctx as any);
+    const route = response.data.find((row: any) => row.path === '/festival-sale/');
+    if (singleton?.enabled !== true) expect(route).toBeUndefined();
+    else expect(route).toMatchObject({ path: '/festival-sale/', updatedAt: '2026-10-01T00:00:00.000Z', noIndex: false });
+  });
+
 });

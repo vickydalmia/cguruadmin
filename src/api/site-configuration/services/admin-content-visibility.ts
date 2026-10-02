@@ -54,6 +54,7 @@ const FEATURE_CONTENT_TYPES: readonly FeatureContentTypes[] = [
 ] as const;
 
 const CAMPAIGN_CONTENT_TYPES = {
+  // Festival settings stay available so editors can prepare them before assignment.
   dealTemplate: 'api::deal-of-the-day-page.deal-of-the-day-page',
   independenceDayTemplate:
     'api::independence-day-sale-page.independence-day-sale-page',

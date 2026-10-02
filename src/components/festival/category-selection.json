@@ -1,0 +1,30 @@
+{
+  "collectionName": "components_festival_category_selections",
+  "info": {
+    "displayName": "Festival Category Selection",
+    "description": "Choose a category, then optionally curate its Coupons",
+    "icon": "grid"
+  },
+  "attributes": {
+    "category": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::category.category"
+    },
+    "labelOverride": {
+      "type": "string"
+    },
+    "imageOverride": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": [
+        "images"
+      ]
+    },
+    "coupons": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::coupon.coupon"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "collectionName": "components_festival_product_sections",
+  "info": {
+    "displayName": "Picked for you \u00b7 Product Deals",
+    "icon": "slideshow"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "heading": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 240
+    },
+    "items": {
+      "type": "component",
+      "repeatable": true,
+      "component": "festival.product-slide"
+    },
+    "categories": {
+      "type": "component",
+      "repeatable": true,
+      "component": "festival.product-category"
+    }
+  }
+}

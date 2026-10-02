@@ -1,0 +1,37 @@
+{
+  "collectionName": "components_festival_gift_coupons",
+  "info": {
+    "displayName": "Gift Coupon"
+  },
+  "attributes": {
+    "coupon": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::coupon.coupon"
+    },
+    "titleOverride": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "descriptionOverride": {
+      "type": "string",
+      "maxLength": 240
+    },
+    "imageOverride": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": [
+        "images"
+      ]
+    },
+    "occasionOverride": {
+      "type": "string",
+      "default": "Diwali Special",
+      "maxLength": 40
+    },
+    "badgeOverride": {
+      "type": "string",
+      "maxLength": 40
+    }
+  }
+}

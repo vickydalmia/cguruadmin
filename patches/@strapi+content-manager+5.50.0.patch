@@ -2,7 +2,14 @@ diff --git a/node_modules/@strapi/content-manager/dist/admin/services/documents.
 index a46c395..7a433b8 100644
 --- a/node_modules/@strapi/content-manager/dist/admin/services/documents.js
 +++ b/node_modules/@strapi/content-manager/dist/admin/services/documents.js
-@@ -364,18 +364,11 @@ const documentApi = api.contentManagerApi.injectEndpoints({
+@@ -347,2 +347,5 @@
+-                invalidatesTags: (_result, _error, { collectionType, model, documentId })=>{
++                invalidatesTags: (_result, error, { collectionType, model, documentId })=>{
++                    // Rejected writes must not refetch and unmount an unsaved
++                    // single-type form. Preserve typed values and inline errors.
++                    if (error) return [];
+                     return [
+@@ -364,18 +367,11 @@ const documentApi = api.contentManagerApi.injectEndpoints({
                          }
                      ];
                  },
@@ -30,7 +37,14 @@ diff --git a/node_modules/@strapi/content-manager/dist/admin/services/documents.
 index d44653c..10ed70e 100644
 --- a/node_modules/@strapi/content-manager/dist/admin/services/documents.mjs
 +++ b/node_modules/@strapi/content-manager/dist/admin/services/documents.mjs
-@@ -362,18 +362,33 @@ const documentApi = contentManagerApi.injectEndpoints({
+@@ -345,2 +345,5 @@
+-                invalidatesTags: (_result, _error, { collectionType, model, documentId })=>{
++                invalidatesTags: (_result, error, { collectionType, model, documentId })=>{
++                    // Rejected writes must not refetch and unmount an unsaved
++                    // single-type form. Preserve typed values and inline errors.
++                    if (error) return [];
+                     return [
+@@ -362,18 +365,33 @@ const documentApi = contentManagerApi.injectEndpoints({
                          }
                      ];
                  },
@@ -76,3 +90,49 @@ index d44653c..10ed70e 100644
                  transformResponse: (response, meta, arg)=>{
                      /**
           * TODO v6
+diff --git a/node_modules/@strapi/content-manager/dist/admin/pages/EditView/components/FormInputs/Component/Repeatable.mjs b/node_modules/@strapi/content-manager/dist/admin/pages/EditView/components/FormInputs/Component/Repeatable.mjs
+--- a/node_modules/@strapi/content-manager/dist/admin/pages/EditView/components/FormInputs/Component/Repeatable.mjs
++++ b/node_modules/@strapi/content-manager/dist/admin/pages/EditView/components/FormInputs/Component/Repeatable.mjs
+@@ -1,3 +1,5 @@
++import { useFestivalSlideTitle } from '@cguru/festival-slide-title';
++import { useGetRelationsQuery } from '../../../../../services/relations.mjs';
+ import { jsx, Fragment, jsxs } from 'react/jsx-runtime';
+ import * as React from 'react';
+ import { useNotification, useField, useForm, useIsDesktop } from '@strapi/admin/strapi-admin';
+@@ -323,12 +325,13 @@
+ }, layout, onDeleteComponent, renderField, toggleCollapses, __temp_key__, totalLength, onMoveItem, ...dragProps })=>{
+     const { formatMessage } = useIntl();
+     const isDesktop = useIsDesktop();
+-    const displayValue = useForm('RepeatableComponent', (state)=>{
++    const rawDisplayValue = useForm('RepeatableComponent', (state)=>{
+         return getIn(state.values, [
+             ...name.split('.'),
+             mainField.name
+         ]);
+     });
++    const displayValue = useFestivalSlideTitle(name, attributeComponent, rawDisplayValue, useDocumentContext('FestivalSlideTitle').currentDocumentMeta.params, useGetRelationsQuery);
+     const accordionRef = React.useRef(null);
+     /**
+    * The last item in the fieldName array will be the index of this component.
+diff --git a/node_modules/@strapi/content-manager/dist/admin/pages/EditView/components/FormInputs/Component/Repeatable.js b/node_modules/@strapi/content-manager/dist/admin/pages/EditView/components/FormInputs/Component/Repeatable.js
+--- a/node_modules/@strapi/content-manager/dist/admin/pages/EditView/components/FormInputs/Component/Repeatable.js
++++ b/node_modules/@strapi/content-manager/dist/admin/pages/EditView/components/FormInputs/Component/Repeatable.js
+@@ -1 +1,3 @@
++var festivalSlideTitle = require('@cguru/festival-slide-title');
++var festivalRelations = require('../../../../../services/relations.js');
+ 'use strict';
+@@ -345,12 +347,13 @@
+ }, layout, onDeleteComponent, renderField, toggleCollapses, __temp_key__, totalLength, onMoveItem, ...dragProps })=>{
+     const { formatMessage } = reactIntl.useIntl();
+     const isDesktop = strapiAdmin.useIsDesktop();
+-    const displayValue = strapiAdmin.useForm('RepeatableComponent', (state)=>{
++    const rawDisplayValue = strapiAdmin.useForm('RepeatableComponent', (state)=>{
+         return objects.getIn(state.values, [
+             ...name.split('.'),
+             mainField.name
+         ]);
+     });
++    const displayValue = festivalSlideTitle.useFestivalSlideTitle(name, attributeComponent, rawDisplayValue, useDocumentContext.useDocumentContext('FestivalSlideTitle').currentDocumentMeta.params, festivalRelations.useGetRelationsQuery);
+     const accordionRef = React__namespace.useRef(null);
+     /**
+    * The last item in the fieldName array will be the index of this component.

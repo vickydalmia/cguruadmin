@@ -1,3 +1,4 @@
+import { FESTIVAL_POPULATE, festivalTemplateEnabled } from '../../festival-page/services/festival-content';
 import type { Core } from '@strapi/strapi';
 import {
   FEATURE_REGISTRY,
@@ -38,10 +39,15 @@ async function singletonReady(
   strapi: Core.Strapi,
   config: SiteConfiguration,
   feature: FeatureDefinition,
-): Promise<{ ready: boolean; reason?: string }> {
+): Promise<{ ready: boolean; reason?: string; activationEnabled?: boolean }> {
   const row: any = await strapi.documents(feature.sourceUid as any).findFirst({
-    populate: '*' as any,
+    populate: (feature.key === 'festival' ? FESTIVAL_POPULATE : '*') as any,
   });
+
+  if (feature.key === 'festival') {
+    return { ready: true, activationEnabled: festivalTemplateEnabled(row),
+      ...(!festivalTemplateEnabled(row) ? { reason: 'Enable the Festival template in its settings.' } : {}) };
+  }
 
   // The committed static-page fixtures are an intentional compatibility
   // source only for the India deployment. Other countries must supply CMS
@@ -100,6 +106,7 @@ async function readinessFor(
     if (!ready) reason = 'No source-backed catalog records exist.';
   } else if (feature.sourceUid) {
     const result = await singletonReady(strapi, config, feature);
+    enabled = enabled && result.activationEnabled !== false;
     ready = result.ready;
     reason = result.reason;
   }

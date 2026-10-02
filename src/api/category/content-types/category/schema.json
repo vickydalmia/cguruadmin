@@ -30,7 +30,8 @@
       "enum": [
         "default",
         "dealTemplate",
-        "independenceDayTemplate"
+        "independenceDayTemplate",
+        "festivalTemplate"
       ],
       "default": "default",
       "required": true

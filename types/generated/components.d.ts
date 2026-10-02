@@ -1237,6 +1237,21 @@ export interface FestivalCampaignHero extends Struct.ComponentSchema {
   };
 }
 
+export interface FestivalCategorySelection extends Struct.ComponentSchema {
+  collectionName: 'components_festival_category_selections';
+  info: {
+    description: 'Choose a category, then optionally curate its Coupons';
+    displayName: 'Festival Category Selection';
+    icon: 'grid';
+  };
+  attributes: {
+    category: Schema.Attribute.Relation<'oneToOne', 'api::category.category'>;
+    coupons: Schema.Attribute.Relation<'oneToMany', 'api::coupon.coupon'>;
+    imageOverride: Schema.Attribute.Media<'images'>;
+    labelOverride: Schema.Attribute.String;
+  };
+}
+
 export interface FestivalCouponCategoryTab extends Struct.ComponentSchema {
   collectionName: 'components_festival_coupon_category_tabs';
   info: {
@@ -1309,6 +1324,164 @@ export interface FestivalCouponsByStore extends Struct.ComponentSchema {
   };
 }
 
+export interface FestivalExploreCategories extends Struct.ComponentSchema {
+  collectionName: 'components_festival_explore_categories';
+  info: {
+    description: 'Scrollable category navigation and client-side Coupon filters';
+    displayName: 'Festival Explore Categories';
+    icon: 'grid';
+  };
+  attributes: {
+    categories: Schema.Attribute.Component<'festival.category-selection', true>;
+    description: Schema.Attribute.String;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Explore Categories'>;
+  };
+}
+
+export interface FestivalGiftCategory extends Struct.ComponentSchema {
+  collectionName: 'components_festival_gift_categorys';
+  info: {
+    displayName: 'Gift Category';
+  };
+  attributes: {
+    category: Schema.Attribute.Relation<'oneToOne', 'api::category.category'>;
+    imageOverride: Schema.Attribute.Media<'images'>;
+    labelOverride: Schema.Attribute.String;
+  };
+}
+
+export interface FestivalGiftCoupon extends Struct.ComponentSchema {
+  collectionName: 'components_festival_gift_coupons';
+  info: {
+    displayName: 'Gift Coupon';
+  };
+  attributes: {
+    badgeOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    coupon: Schema.Attribute.Relation<'oneToOne', 'api::coupon.coupon'>;
+    descriptionOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 240;
+      }>;
+    imageOverride: Schema.Attribute.Media<'images'>;
+    occasionOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }> &
+      Schema.Attribute.DefaultTo<'Diwali Special'>;
+    titleOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+  };
+}
+
+export interface FestivalGiftSection extends Struct.ComponentSchema {
+  collectionName: 'components_festival_gift_sections';
+  info: {
+    displayName: 'Gift Section';
+  };
+  attributes: {
+    categories: Schema.Attribute.Component<'festival.gift-category', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 6;
+        },
+        number
+      >;
+    description: Schema.Attribute.String;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Festival Gift Offers'>;
+    items: Schema.Attribute.Component<'festival.gift-coupon', true>;
+  };
+}
+
+export interface FestivalOfferSlide extends Struct.ComponentSchema {
+  collectionName: 'components_festival_offer_slides';
+  info: {
+    displayName: 'Offer slide';
+    icon: 'priceTag';
+  };
+  attributes: {
+    badgeOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    coupon: Schema.Attribute.Relation<'oneToOne', 'api::coupon.coupon'>;
+    descriptionOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 240;
+      }>;
+    titleOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+  };
+}
+
+export interface FestivalOfferSlider extends Struct.ComponentSchema {
+  collectionName: 'components_festival_offer_sliders';
+  info: {
+    displayName: 'Offer slider';
+    icon: 'slideshow';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    items: Schema.Attribute.Component<'festival.offer-slide', true>;
+  };
+}
+
+export interface FestivalProductCategory extends Struct.ComponentSchema {
+  collectionName: 'components_festival_product_categorys';
+  info: {
+    displayName: 'Product category tile';
+    icon: 'slideshow';
+  };
+  attributes: {
+    category: Schema.Attribute.Relation<'oneToOne', 'api::category.category'>;
+    imageOverride: Schema.Attribute.Media<'images'>;
+    labelOverride: Schema.Attribute.String;
+  };
+}
+
+export interface FestivalProductSection extends Struct.ComponentSchema {
+  collectionName: 'components_festival_product_sections';
+  info: {
+    displayName: 'Picked for you \u00B7 Product Deals';
+    icon: 'slideshow';
+  };
+  attributes: {
+    categories: Schema.Attribute.Component<'festival.product-category', true>;
+    description: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 240;
+      }>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    heading: Schema.Attribute.String;
+    items: Schema.Attribute.Component<'festival.product-slide', true>;
+  };
+}
+
+export interface FestivalProductSlide extends Struct.ComponentSchema {
+  collectionName: 'components_festival_product_slides';
+  info: {
+    displayName: 'Product Deal slide';
+    icon: 'slideshow';
+  };
+  attributes: {
+    deal: Schema.Attribute.Relation<'oneToOne', 'api::deal.deal'>;
+    titleOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 200;
+      }>;
+  };
+}
+
 export interface FestivalPromoStrip extends Struct.ComponentSchema {
   collectionName: 'components_festival_promo_strips';
   info: {
@@ -1324,6 +1497,20 @@ export interface FestivalPromoStrip extends Struct.ComponentSchema {
       Schema.Attribute.DefaultTo<'FLASH DEALS'>;
     heading: Schema.Attribute.String &
       Schema.Attribute.DefaultTo<'UP TO 70% OFF'>;
+  };
+}
+
+export interface FestivalResponsiveBanner extends Struct.ComponentSchema {
+  collectionName: 'components_festival_responsive_banners';
+  info: {
+    displayName: 'Festival responsive banner';
+    icon: 'picture';
+  };
+  attributes: {
+    altText: Schema.Attribute.String;
+    desktopImage: Schema.Attribute.Media<'images'>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    linkUrl: Schema.Attribute.String;
   };
 }
 
@@ -1349,6 +1536,65 @@ export interface FestivalSaleCountdown extends Struct.ComponentSchema {
       Schema.Attribute.DefaultTo<'Sale starts in'>;
     saleEndAt: Schema.Attribute.DateTime;
     saleStartAt: Schema.Attribute.DateTime;
+  };
+}
+
+export interface FestivalSavingsCoupon extends Struct.ComponentSchema {
+  collectionName: 'components_festival_savings_coupons';
+  info: {
+    displayName: 'Savings Coupon';
+  };
+  attributes: {
+    badgeCaption: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }> &
+      Schema.Attribute.DefaultTo<'extra off*'>;
+    badgeLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }> &
+      Schema.Attribute.DefaultTo<'Card offer'>;
+    badgeValue: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 30;
+      }>;
+    buttonLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    coupon: Schema.Attribute.Relation<'oneToOne', 'api::coupon.coupon'>;
+    descriptionOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 240;
+      }>;
+    logoOverride: Schema.Attribute.Media<'images'>;
+    termsText: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 120;
+      }> &
+      Schema.Attribute.DefaultTo<'*T&C Apply'>;
+    titleOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+  };
+}
+
+export interface FestivalSavingsSection extends Struct.ComponentSchema {
+  collectionName: 'components_festival_savings_sections';
+  info: {
+    displayName: 'Savings Section';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    items: Schema.Attribute.Component<'festival.savings-coupon', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 2;
+        },
+        number
+      >;
   };
 }
 
@@ -3428,12 +3674,25 @@ declare module '@strapi/strapi' {
       'faq.faq-item': FaqFaqItem;
       'faq.support-cta': FaqSupportCta;
       'festival.campaign-hero': FestivalCampaignHero;
+      'festival.category-selection': FestivalCategorySelection;
       'festival.coupon-category-tab': FestivalCouponCategoryTab;
       'festival.coupon-store-tab': FestivalCouponStoreTab;
       'festival.coupons-by-category': FestivalCouponsByCategory;
       'festival.coupons-by-store': FestivalCouponsByStore;
+      'festival.explore-categories': FestivalExploreCategories;
+      'festival.gift-category': FestivalGiftCategory;
+      'festival.gift-coupon': FestivalGiftCoupon;
+      'festival.gift-section': FestivalGiftSection;
+      'festival.offer-slide': FestivalOfferSlide;
+      'festival.offer-slider': FestivalOfferSlider;
+      'festival.product-category': FestivalProductCategory;
+      'festival.product-section': FestivalProductSection;
+      'festival.product-slide': FestivalProductSlide;
       'festival.promo-strip': FestivalPromoStrip;
+      'festival.responsive-banner': FestivalResponsiveBanner;
       'festival.sale-countdown': FestivalSaleCountdown;
+      'festival.savings-coupon': FestivalSavingsCoupon;
+      'festival.savings-section': FestivalSavingsSection;
       'footer.country': FooterCountry;
       'footer.google-preferred-card': FooterGooglePreferredCard;
       'footer.link-section': FooterLinkSection;

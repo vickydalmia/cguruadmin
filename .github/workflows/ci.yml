@@ -37,3 +37,5 @@ jobs:
         env:
           STRAPI_TRANSACTION_TEST_DATABASE_URL: postgres://postgres:test-password@127.0.0.1:5432/cguru_strapi_test
       - run: yarn build
+        env:
+          S3_UPLOAD_ENABLED: 'false'

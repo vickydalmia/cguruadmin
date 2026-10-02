@@ -48,3 +48,17 @@ export const IMAGE_BREAKPOINTS = {
 
 /** Strapi's internal thumbnail format size (upload plugin default). */
 export const THUMBNAIL = { width: 245, height: 156 } as const;
+
+/** Explicit High choice in the upload dialog; does not upscale small sources. */
+export const HIGH_IMAGE_OPTIMIZATION = {
+  maxDimension: 3840,
+  quality: 90,
+  webp: { effort: 4, smartSubsample: true },
+  avif: { quality: 60, effort: 4 },
+} as const;
+export const HIGH_IMAGE_BREAKPOINTS = {
+  ...IMAGE_BREAKPOINTS,
+  xlarge: 1440,
+  fullhd: 1920,
+  retina: 2880,
+} as const;

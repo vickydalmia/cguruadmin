@@ -8,7 +8,7 @@ it('covers the localized tables that existed at the English-locale upgrade', () 
     try {
       const schema = JSON.parse(readFileSync(join(root, name, 'content-types', name, 'schema.json'), 'utf8'));
       // Introduced after this immutable migration, with locale from creation.
-      if (['subscription_pages', 'telegram_pages'].includes(schema.collectionName)) return [];
+      if (['subscription_pages', 'telegram_pages', 'festival_pages'].includes(schema.collectionName)) return [];
       return schema.pluginOptions?.i18n?.localized ? [schema.collectionName] : [];
     } catch { return []; }
   });

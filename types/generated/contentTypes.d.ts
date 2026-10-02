@@ -766,7 +766,7 @@ export interface ApiBankBank extends Struct.CollectionTypeSchema {
       'api::coupon.coupon'
     >;
     pageTemplate: Schema.Attribute.Enumeration<
-      ['default', 'dealTemplate', 'independenceDayTemplate']
+      ['default', 'dealTemplate', 'independenceDayTemplate', 'festivalTemplate']
     > &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<'default'>;
@@ -903,7 +903,7 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
       'api::coupon.coupon'
     >;
     pageTemplate: Schema.Attribute.Enumeration<
-      ['default', 'dealTemplate', 'independenceDayTemplate']
+      ['default', 'dealTemplate', 'independenceDayTemplate', 'festivalTemplate']
     > &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<'default'>;
@@ -1140,7 +1140,7 @@ export interface ApiCategoryCategory extends Struct.CollectionTypeSchema {
       'api::coupon.coupon'
     >;
     pageTemplate: Schema.Attribute.Enumeration<
-      ['default', 'dealTemplate', 'independenceDayTemplate']
+      ['default', 'dealTemplate', 'independenceDayTemplate', 'festivalTemplate']
     > &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<'default'>;
@@ -1961,6 +1961,117 @@ export interface ApiFaqPageFaqPage extends Struct.SingleTypeSchema {
         };
       }> &
       Schema.Attribute.DefaultTo<'FAQ Page'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiFestivalPageFestivalPage extends Struct.SingleTypeSchema {
+  collectionName: 'festival_pages';
+  info: {
+    description: 'Shared Festival Template settings for its single Store, Brand, Category or Bank owner. Content sections are added incrementally.';
+    displayName: 'Festival Template';
+    pluralName: 'festival-pages';
+    singularName: 'festival-page';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  pluginOptions: {
+    i18n: {
+      localized: true;
+    };
+  };
+  attributes: {
+    countdown: Schema.Attribute.Component<'festival.sale-countdown', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    enabled: Schema.Attribute.Boolean &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }> &
+      Schema.Attribute.DefaultTo<false>;
+    exploreCategories: Schema.Attribute.Component<
+      'festival.explore-categories',
+      false
+    > &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    faq: Schema.Attribute.Component<'home.faq-block', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    giftSection: Schema.Attribute.Component<'festival.gift-section', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    hero: Schema.Attribute.Component<'festival.responsive-banner', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    locale: Schema.Attribute.String;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::festival-page.festival-page'
+    >;
+    offerSlider: Schema.Attribute.Component<'festival.offer-slider', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    popularSearches: Schema.Attribute.Component<
+      'home.popular-searches',
+      false
+    > &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    productSection: Schema.Attribute.Component<
+      'festival.product-section',
+      false
+    > &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    publishedAt: Schema.Attribute.DateTime;
+    savingsSection: Schema.Attribute.Component<
+      'festival.savings-section',
+      false
+    > &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -3333,7 +3444,7 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
       'api::coupon.coupon'
     >;
     pageTemplate: Schema.Attribute.Enumeration<
-      ['default', 'dealTemplate', 'independenceDayTemplate']
+      ['default', 'dealTemplate', 'independenceDayTemplate', 'festivalTemplate']
     > &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<'default'>;
@@ -4660,6 +4771,7 @@ declare module '@strapi/strapi' {
       'api::deal.deal': ApiDealDeal;
       'api::error-page.error-page': ApiErrorPageErrorPage;
       'api::faq-page.faq-page': ApiFaqPageFaqPage;
+      'api::festival-page.festival-page': ApiFestivalPageFestivalPage;
       'api::footer.footer': ApiFooterFooter;
       'api::global.global': ApiGlobalGlobal;
       'api::homepage.homepage': ApiHomepageHomepage;

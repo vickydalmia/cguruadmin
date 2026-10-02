@@ -1,3 +1,4 @@
+import { FESTIVAL_FIELD_DESCRIPTIONS, FESTIVAL_FIELD_LABELS } from '../constants/festival-field-hints';
 import type { Core } from '@strapi/strapi';
 import { HOMEPAGE_IMAGE_RULES, imageRuleDescription } from '../constants/homepage-images';
 import { CULTURE_GALLERY_MEDIA_FOLDER_NAME } from '../constants/media-folders';
@@ -45,6 +46,26 @@ export const COMPONENT_FIELD_LABELS: Record<string, Record<string, string>> = {
     stores: 'Stores',
     brands: 'Brands',
   },
+};
+Object.assign(COMPONENT_FIELD_DESCRIPTIONS, FESTIVAL_FIELD_DESCRIPTIONS);
+Object.assign(COMPONENT_FIELD_LABELS, FESTIVAL_FIELD_LABELS);
+// Shared sections used by Festival and other editorial pages.
+COMPONENT_FIELD_DESCRIPTIONS['home.faq-block'] = {
+  enabled: 'Turn off to hide this FAQ section while retaining its questions.',
+  heading: 'Optional heading above the questions. Leave empty to use the shared FAQ presentation.',
+  items: 'Add questions and answers, then drag to reorder. No questions means no FAQ section. The first item with an answer opens initially.',
+};
+COMPONENT_FIELD_DESCRIPTIONS['shared.faq-item'] = {
+  question: 'Required. Enter the question visitors will see in the accordion.',
+  answer: 'Answer this question in plain text. Use blank lines between paragraphs. Empty leaves the question without answer content.',
+};
+COMPONENT_FIELD_DESCRIPTIONS['home.popular-searches'] = {
+  enabled: 'Turn off to hide these links without deleting the selections.',
+  heading: 'Optional title above the selected links. Clear it to omit the title.',
+  stores: 'Select Stores to link, in your preferred order. Empty adds no Store links.',
+  brands: 'Select Brands to link, in your preferred order. Empty adds no Brand links.',
+  categories: 'Select Categories to link, in your preferred order. Empty adds no Category links.',
+  banks: 'Select Banks to link, in your preferred order. Empty adds no Bank links. If all groups are empty, this section is hidden.',
 };
 for (const rule of HOMEPAGE_IMAGE_RULES) {
   (COMPONENT_FIELD_DESCRIPTIONS[rule.componentUid] ??= {})[rule.field] =

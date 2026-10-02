@@ -21,6 +21,7 @@ const ENTITY_TEMPLATE_UIDS = new Set([
 const SINGLETON_TEMPLATES = new Set<EntityPageTemplate>([
   'dealTemplate',
   'independenceDayTemplate',
+  'festivalTemplate',
 ]);
 
 export function isEntityTemplateUid(uid: string): boolean {

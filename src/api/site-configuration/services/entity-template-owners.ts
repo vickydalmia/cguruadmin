@@ -5,6 +5,7 @@ export const ENTITY_PAGE_TEMPLATES = [
   'default',
   'dealTemplate',
   'independenceDayTemplate',
+  'festivalTemplate',
 ] as const;
 
 export type EntityPageTemplate = (typeof ENTITY_PAGE_TEMPLATES)[number];
@@ -72,6 +73,9 @@ export async function withOfferTemplateOwnerSlugs(
 ): Promise<string[]> {
   const templateSlugs = await Promise.all([
     entityTemplateOwnerSlugs(strapi, 'independenceDayTemplate'),
+    offerUid === 'api::coupon.coupon'
+      ? entityTemplateOwnerSlugs(strapi, 'festivalTemplate')
+      : Promise.resolve([]),
     offerUid === 'api::deal.deal'
       ? entityTemplateOwnerSlugs(strapi, 'dealTemplate')
       : Promise.resolve([]),
