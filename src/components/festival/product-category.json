@@ -1,0 +1,24 @@
+{
+  "collectionName": "components_festival_product_categorys",
+  "info": {
+    "displayName": "Product category tile",
+    "icon": "slideshow"
+  },
+  "attributes": {
+    "category": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::category.category"
+    },
+    "labelOverride": {
+      "type": "string"
+    },
+    "imageOverride": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": [
+        "images"
+      ]
+    }
+  }
+}

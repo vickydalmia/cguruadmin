@@ -6,6 +6,7 @@ import { readWriteSerializationTimeout } from './utils/write-serialization';
 import { startTranslationConfigurationWatcher, stopTranslationConfigurationWatcher } from './translation/configuration-watcher';
 import { initializeBackgroundContext } from './background/execution-context';
 import type { Core } from '@strapi/strapi';
+import { FESTIVAL_PAGE_UID, FESTIVAL_SECTION_LABELS } from './constants/festival-page';
 import { DOTD_SECTION_LABELS, DOTD_UID } from './constants/deal-of-the-day-sections';
 import {
   INDEPENDENCE_DAY_SALE_SECTION_LABELS,
@@ -288,6 +289,7 @@ export default {
     await ensureSectionLabels(strapi, HOMEPAGE_UID, HOMEPAGE_SECTION_LABELS);
     await ensureSectionLabels(strapi, 'api::global.global', GLOBAL_SETTINGS_LABELS);
     await ensureSectionLabels(strapi, DOTD_UID, DOTD_SECTION_LABELS);
+    await ensureSectionLabels(strapi, FESTIVAL_PAGE_UID, FESTIVAL_SECTION_LABELS);
     await ensureSectionLabels(
       strapi,
       INDEPENDENCE_DAY_SALE_UID,

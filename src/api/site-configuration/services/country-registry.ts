@@ -70,7 +70,8 @@ export type FeatureKey =
   | 'termsAndConditions'
   | 'affiliateDisclosure'
   | 'dealOfTheDay'
-  | 'independenceDaySale';
+  | 'independenceDaySale'
+  | 'festival';
 
 export type FeatureDefinition = {
   key: FeatureKey;
@@ -82,7 +83,7 @@ export type FeatureDefinition = {
   sourceUid?: string;
   sourceFields?: readonly string[];
   catalogUid?: string;
-  pageTemplate?: 'dealTemplate' | 'independenceDayTemplate';
+  pageTemplate?: 'dealTemplate' | 'independenceDayTemplate' | 'festivalTemplate';
 };
 
 export const FEATURE_REGISTRY: readonly FeatureDefinition[] = [
@@ -105,6 +106,7 @@ export const FEATURE_REGISTRY: readonly FeatureDefinition[] = [
   // Campaign presentation is optional: the storefront supplies heading copy
   // and omits absent hero/countdown sections. Keep singleton/owner readiness.
   { key: 'dealOfTheDay', label: 'Deal of the Day', group: 'Campaigns', paths: [], pageTemplate: 'dealTemplate', sourceUid: 'api::deal-of-the-day-page.deal-of-the-day-page' },
+  { key: 'festival', label: 'Festival Template', group: 'Campaigns', paths: [], pageTemplate: 'festivalTemplate', sourceUid: 'api::festival-page.festival-page' },
   { key: 'independenceDaySale', label: 'Independence Day Sale', group: 'Campaigns', paths: [], pageTemplate: 'independenceDayTemplate', sourceUid: 'api::independence-day-sale-page.independence-day-sale-page' },
 ] as const;
 

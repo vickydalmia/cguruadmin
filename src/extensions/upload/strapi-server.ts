@@ -1,3 +1,4 @@
+import { applyUploadQualityControllers } from './upload-quality';
 import {
   CULTURE_GALLERY_MEDIA_FOLDER_NAME,
 } from '../../constants/media-folders';
@@ -73,5 +74,6 @@ export default (plugin: any) => {
     );
   }
   extendDealImageUploadPlugin(plugin);
+  applyUploadQualityControllers(plugin);
   return plugin;
 };

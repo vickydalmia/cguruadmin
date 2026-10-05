@@ -9,9 +9,12 @@ import path from 'path';
 import sharp, { type FormatEnum, type Metadata } from 'sharp';
 import {
   CULTURE_GALLERY_IMAGE_OPTIMIZATION,
+  HIGH_IMAGE_OPTIMIZATION,
+  HIGH_IMAGE_BREAKPOINTS,
   IMAGE_BREAKPOINTS,
   IMAGE_OPTIMIZATION as OPT,
 } from '../../constants/image';
+import { currentUploadQuality } from './upload-quality';
 import { calculateImageBackgroundColour } from '../../utils/image-background-colour';
 import {
   slugifyFileName,
@@ -122,10 +125,12 @@ export const createImageOptimization = ({
       file.tmpWorkingDirectory ?? os.tmpdir(),
       `optimized-${file.hash}`
     );
-    const cultureGalleryUpload = await isCultureGalleryUpload(file);
-    const profile = cultureGalleryUpload
-      ? CULTURE_GALLERY_IMAGE_OPTIMIZATION
-      : OPT;
+    const choice = currentUploadQuality();
+    const highQualityUpload = choice === 'high';
+    const cultureGalleryUpload = choice === undefined && await isCultureGalleryUpload(file);
+    const enhancedProfile = highQualityUpload ? HIGH_IMAGE_OPTIMIZATION : CULTURE_GALLERY_IMAGE_OPTIMIZATION;
+    const enhancedUpload = highQualityUpload || cultureGalleryUpload;
+    const profile = enhancedUpload ? enhancedProfile : OPT;
 
     const needsResize =
       (meta.width ?? 0) > profile.maxDimension ||
@@ -139,13 +144,13 @@ export const createImageOptimization = ({
         fit: 'inside',
         withoutEnlargement: true,
       });
-    const info = outFormat === 'webp' && cultureGalleryUpload
+    const info = outFormat === 'webp' && enhancedUpload
       ? await transformer
           .webp({
             quality: profile.quality,
-            effort: CULTURE_GALLERY_IMAGE_OPTIMIZATION.webp.effort,
+            effort: enhancedProfile.webp.effort,
             smartSubsample:
-              CULTURE_GALLERY_IMAGE_OPTIMIZATION.webp.smartSubsample,
+              enhancedProfile.webp.smartSubsample,
           })
           .toFile(outPath)
       : await transformer
@@ -155,9 +160,9 @@ export const createImageOptimization = ({
     // Same-format re-encode that got bigger without needing a resize:
     // keep the original bytes (parity with stock optimize behavior).
     if (!toWebp && !needsResize && meta.size && info.size > meta.size) {
-      if (cultureGalleryUpload) {
+      if (enhancedUpload) {
         file.__sourceFilepath = file.filepath;
-        file.__imageOptimizationProfile = 'culture-gallery';
+        file.__imageOptimizationProfile = highQualityUpload ? 'high' : 'culture-gallery';
       }
       return attachDealImageMetadata(file, file.filepath);
     }
@@ -174,8 +179,8 @@ export const createImageOptimization = ({
     // generateResponsiveFormats below; never persisted (non-schema props are
     // dropped by the db layer, like tmpWorkingDirectory).
     newFile.__sourceFilepath = file.filepath;
-    if (cultureGalleryUpload) {
-      newFile.__imageOptimizationProfile = 'culture-gallery';
+    if (enhancedUpload) {
+      newFile.__imageOptimizationProfile = highQualityUpload ? 'high' : 'culture-gallery';
     }
 
     // Rewrite the hash to the folder scheme (slug-rand8/slug) — unless this
@@ -196,7 +201,7 @@ export const createImageOptimization = ({
         'plugin::upload.breakpoints',
         { ...IMAGE_BREAKPOINTS }
       );
-      for (const prefix of ['thumbnail', ...Object.keys(breakpoints)]) {
+      for (const prefix of ['thumbnail', ...Object.keys(highQualityUpload ? HIGH_IMAGE_BREAKPOINTS : breakpoints)]) {
         fs.mkdirSync(path.join(file.tmpWorkingDirectory, `${prefix}_${folder}`), {
           recursive: true,
         });

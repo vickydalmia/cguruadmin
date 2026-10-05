@@ -92,8 +92,8 @@ because it means we are carrying a diff for no reason. Check both cases.
 
 ### `patches/@strapi+content-manager+5.50.0.patch`
 
-**What it does:** removes the optimistic `onQueryStarted` from the
-`updateDocument` RTK Query mutation in
+**What it does:** removes the optimistic `onQueryStarted` and skips cache-tag
+invalidation when `updateDocument` fails, in the RTK Query mutation in
 `dist/admin/services/documents.{js,mjs}`.
 
 **Why:** without this patch, **the editor's typed values are wiped whenever a
@@ -113,7 +113,7 @@ So the optimistic write drags `initialValues.current` up to the typed values, th
 typed is discarded. `errors` is untouched by that action, which is why the inline
 red messages survive on top of reverted values.
 
-Removing the optimistic patch fixes it: the refetch that `invalidatesTags`
+Removing the optimistic patch protects saved documents: the refetch that `invalidatesTags`
 triggers then returns data deep-equal to `initialValues.current`, Form's
 `isEqual` check short-circuits, and nothing is clobbered. The only cost is losing
 an optimistic repaint on the success path, which is invisible.
@@ -128,6 +128,16 @@ upstream React state):
    applying.
 4. `createDocument` never had an `onQueryStarted`, so the create flow is a
    control: it should behave the same before and after the patch.
+
+**Unsaved single types:** A failed save must return `[]` from `invalidatesTags`.
+Otherwise `useDocument` reports a refetch as loading; an unsaved singleton has no
+`documentId`, so EditView replaces the Form with Page.Loading. Remounting resets
+all typed values, selected media and field errors even without an optimistic
+update. Successful saves must retain their existing cache invalidation.
+`src/utils/content-manager-save-regression.test.ts` exercises both installed
+module formats. Verify a rejected first Festival save preserves its title,
+selected banner and inline errors. `src/admin/vite.config.ts` keys the dependency
+cache by patch contents so local admin bundles pick up patch changes.
 
 **If upstream fixes it:** delete the patch file, drop this section, and confirm
 step 3 still passes. Worth checking the Strapi changelog for `onQueryStarted`,
@@ -276,3 +286,18 @@ Docker install must run `yarn postinstall` after pruning. Verify both installed
 transaction-context modules in the **final runtime image**, not only the build
 stage. Removing `--ignore-scripts` alone changes all dependency lifecycle scripts;
 keep the explicit postinstall step.
+
+### `patches/@strapi+upload+5.50.0.patch`
+
+Adds the per-upload Default/High selector to the pending-assets dialog and
+forwards `imageQuality` with upload requests. UI lives in
+`src/admin/features/upload-quality/upload-quality-field.tsx`; the Vite alias
+and patch hash in `src/admin/vite.config.ts` are required in dev and builds.
+On Strapi upgrades, check both ESM and CJS adapters, dialog state, and request
+payloads. Run upload extension tests and build the admin. Server controllers
+read the choice into an AsyncLocalStorage context so concurrent uploads never
+share a profile. Existing media is not reprocessed by changing the selector.
+
+## Relation-backed component entry titles
+
+For blank repeatable-row labels after selecting a related offer, read `docs/admin-relation-entry-titles.md`. Festival slides have a read-only relation-title fallback; the document records its adapter, tests, and the requested follow-up audit for other components. Do not set a relation as Strapi’s `mainField` or auto-fill storefront overrides to solve an admin label.

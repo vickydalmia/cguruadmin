@@ -1,0 +1,51 @@
+{
+  "collectionName": "components_festival_savings_coupons",
+  "info": {
+    "displayName": "Savings Coupon"
+  },
+  "attributes": {
+    "coupon": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::coupon.coupon"
+    },
+    "titleOverride": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "descriptionOverride": {
+      "type": "string",
+      "maxLength": 240
+    },
+    "logoOverride": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": [
+        "images"
+      ]
+    },
+    "badgeLabel": {
+      "type": "string",
+      "maxLength": 40,
+      "default": "Card offer"
+    },
+    "badgeValue": {
+      "type": "string",
+      "maxLength": 30
+    },
+    "badgeCaption": {
+      "type": "string",
+      "maxLength": 40,
+      "default": "extra off*"
+    },
+    "buttonLabel": {
+      "type": "string",
+      "maxLength": 40
+    },
+    "termsText": {
+      "type": "string",
+      "maxLength": 120,
+      "default": "*T&C Apply"
+    }
+  }
+}

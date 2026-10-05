@@ -9,6 +9,7 @@ import { toRouteSlug } from '../utils/route-normalization';
 import { entityDealPageSlug } from '../api/entity-deal-page/services/entity-deal-route';
 import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
 import { DOCUMENT_WRITE_ACTIONS } from '../constants/document-write';
+import { FESTIVAL_PAGE_UID } from '../constants/festival-page';
 import {
   ABOUT_PAGE_SLUG,
   ABOUT_PAGE_UID,
@@ -136,6 +137,13 @@ export async function computeScope(
 
   if (uid === 'api::homepage.homepage') {
     return { homepage: true, sitemap: true };
+  }
+  if (uid === FESTIVAL_PAGE_UID) {
+    return {
+      slugs: await entityTemplateOwnerSlugs(strapi, 'festivalTemplate'),
+      sitemap: true,
+      refreshScopes: ['routes'],
+    };
   }
   if (uid === DOTD_PAGE_UID) {
     return {
@@ -347,7 +355,8 @@ export async function computeScope(
             ])
           ).flat()
         : [];
-    const slugs = [...new Set([slug, ...campaignOwnerSlugs])];
+    const festivalOwnerSlugs = await entityTemplateOwnerSlugs(strapi, 'festivalTemplate');
+    const slugs = [...new Set([slug, ...campaignOwnerSlugs, ...festivalOwnerSlugs])];
     const routeMetadataChanged =
       data
       && typeof data === 'object'

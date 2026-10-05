@@ -1,0 +1,18 @@
+{
+  "collectionName": "components_festival_savings_sections",
+  "info": {
+    "displayName": "Savings Section"
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "items": {
+      "type": "component",
+      "component": "festival.savings-coupon",
+      "repeatable": true,
+      "max": 2
+    }
+  }
+}

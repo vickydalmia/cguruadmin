@@ -6,6 +6,7 @@ import type {
   IsrOutboxPayload,
 } from './types';
 import { readOutboxPayloadBounds } from './config';
+import { reconcileDeletedOfferRetry } from './deleted-offer-retry';
 import {
   boundOutboxPayload,
   hasOutboxWork,
@@ -235,6 +236,9 @@ export class IsrOutboxStore {
                 .where('locked_at', '<=', expiredLease);
             });
         })
+        // A failed old ID must not jump ahead of work waiting since before
+        // its latest retry was scheduled. Keep FIFO for equal due times.
+        .orderBy('next_attempt_at', 'asc')
         .orderBy('id', 'asc');
       if (isPostgresConnection(trx)) query = query.forUpdate().skipLocked();
       const row = await query.first();
@@ -263,16 +267,18 @@ export class IsrOutboxStore {
         };
       }
       const lockToken = randomUUID();
+      const repaired = reconcileDeletedOfferRetry(payload, row.reason, row.last_error);
       await trx(ISR_OUTBOX_TABLE)
         .where({ id: row.id })
         .update({
           status: 'processing',
           locked_at: now,
           lock_token: lockToken,
+          ...(repaired !== payload ? { payload: JSON.stringify(repaired) } : {}),
         });
       return {
         state: 'event' as const,
-        event: toEvent({ ...row, payload }, lockToken),
+        event: toEvent({ ...row, payload: repaired }, lockToken),
       };
     });
   }

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../utils/offer-visibility', () => ({
+vi.mock('../../../utils/offer-visibility', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../../utils/offer-visibility')>(),
   sanitizeOutput: vi.fn(async (_strapi, _ctx, _uid, value) => value),
 }));
 

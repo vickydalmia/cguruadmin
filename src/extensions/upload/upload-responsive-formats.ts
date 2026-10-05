@@ -1,5 +1,5 @@
 // Upload RESPONSIVE FORMATS: single-generation WebP rungs for the Culture
-// Gallery profile, AVIF twin variants with the size guard, and the widened
+// Gallery and explicit High profiles, AVIF twins with the size guard, and the widened
 // resizable-image check for AVIF masters. One of the modules split out of
 // strapi-server.ts.
 import fs from 'fs';
@@ -8,6 +8,8 @@ import path from 'path';
 import sharp from 'sharp';
 import {
   CULTURE_GALLERY_IMAGE_OPTIMIZATION,
+  HIGH_IMAGE_OPTIMIZATION,
+  HIGH_IMAGE_BREAKPOINTS,
   IMAGE_BREAKPOINTS,
   IMAGE_OPTIMIZATION as OPT,
 } from '../../constants/image';
@@ -18,13 +20,9 @@ export const createResponsiveFormats = ({ base }: { base: any }) => {
   // Stock Strapi resizes the already-encoded WebP master without an explicit
   // output profile. Sharp therefore applies its default WebP quality again,
   // creating a second lossy generation. For the opt-in Culture Gallery photo
-  // profile, build responsive WebPs directly from the temporary upload so
+  // profile and explicit High uploads, build WebPs from the temporary upload so
   // every rung is encoded once. Other folders retain stock byte behaviour.
-  const generateWebpResponsiveFormats = async (file: any, sourcePath: string) => {
-    const breakpoints: Record<string, number> = strapi.config.get(
-      'plugin::upload.breakpoints',
-      { ...IMAGE_BREAKPOINTS }
-    );
+  const generateEnhancedResponsiveFormats = async (file: any, sourcePath: string, profile: typeof HIGH_IMAGE_OPTIMIZATION | typeof CULTURE_GALLERY_IMAGE_OPTIMIZATION, breakpoints: Record<string, number>) => {
     const formats: Array<{ key: string; file: any }> = [];
 
     for (const [key, breakpoint] of Object.entries(breakpoints)) {
@@ -40,29 +38,28 @@ export const createResponsiveFormats = ({ base }: { base: any }) => {
         temporaryHash
       );
       fs.mkdirSync(path.dirname(outPath), { recursive: true });
-      const info = await sharp(sourcePath)
+      const avifSource = file.mime === 'image/avif';
+      const outputFormat = avifSource ? 'avif' : 'webp';
+      const transformer = sharp(sourcePath)
         .rotate()
         .resize({
           width: breakpoint,
           height: breakpoint,
           fit: 'inside',
           withoutEnlargement: true,
-        })
-        .webp({
-          quality: CULTURE_GALLERY_IMAGE_OPTIMIZATION.quality,
-          effort: CULTURE_GALLERY_IMAGE_OPTIMIZATION.webp.effort,
-          smartSubsample:
-            CULTURE_GALLERY_IMAGE_OPTIMIZATION.webp.smartSubsample,
-        })
-        .toFile(outPath);
+        });
+      const info = await (avifSource
+        ? transformer.avif(profile.avif)
+        : transformer.webp({ quality: profile.quality, ...profile.webp })
+      ).toFile(outPath);
 
       formats.push({
         key,
         file: {
           name: `${key}_${file.name}`,
           hash: temporaryHash,
-          ext: '.webp',
-          mime: 'image/webp',
+          ext: `.${outputFormat}`,
+          mime: `image/${outputFormat}`,
           filepath: outPath,
           path: file.path || null,
           getStream: () => fs.createReadStream(outPath),
@@ -92,16 +89,20 @@ export const createResponsiveFormats = ({ base }: { base: any }) => {
     // file.getStream() when filepath is gone; our encoder reads from a path.
     const sourceFilepath: string | undefined = file.__sourceFilepath;
     const masterFilepath: string | undefined = file.filepath;
-    const cultureGalleryUpload =
-      file.__imageOptimizationProfile === 'culture-gallery';
+    const highQualityUpload = file.__imageOptimizationProfile === 'high';
+    const cultureGalleryUpload = file.__imageOptimizationProfile === 'culture-gallery';
+    const enhancedUpload = highQualityUpload || cultureGalleryUpload;
+    const profile = highQualityUpload ? HIGH_IMAGE_OPTIMIZATION : CULTURE_GALLERY_IMAGE_OPTIMIZATION;
+    const breakpoints: Record<string, number> = highQualityUpload ? HIGH_IMAGE_BREAKPOINTS
+      : strapi.config.get('plugin::upload.breakpoints', { ...IMAGE_BREAKPOINTS });
     delete file.__sourceFilepath;
     delete file.__imageOptimizationProfile;
 
     const readableSource = [sourceFilepath, masterFilepath].find(
       (candidate): candidate is string => Boolean(candidate) && fs.existsSync(candidate as string)
     );
-    const rawFormats = cultureGalleryUpload && file.mime === 'image/webp' && readableSource
-      ? await generateWebpResponsiveFormats(file, readableSource)
+    const rawFormats = enhancedUpload && ['image/webp', 'image/avif'].includes(file.mime) && readableSource
+      ? await generateEnhancedResponsiveFormats(file, readableSource, profile, breakpoints)
       : ((await base.generateResponsiveFormats(file)) ?? []);
     // Move each variant's size prefix inside the image folder (no-op for
     // flat hashes, e.g. gif pass-throughs or pre-folder legacy replaces).
@@ -131,10 +132,6 @@ export const createResponsiveFormats = ({ base }: { base: any }) => {
     }
 
     try {
-      const breakpoints: Record<string, number> = strapi.config.get(
-        'plugin::upload.breakpoints',
-        { ...IMAGE_BREAKPOINTS }
-      );
       // JSON keys keep `_avif` (must differ from the webp entries); FILENAMES
       // drop it — the .avif extension already carries the format. Twin of
       // `medium_x.webp` is `medium_x.avif`; the original's twin is `x.avif`.
@@ -161,12 +158,14 @@ export const createResponsiveFormats = ({ base }: { base: any }) => {
             file.tmpWorkingDirectory ?? os.tmpdir(),
             `avif-${filePrefix}${(parts?.base ?? file.hash) || 'img'}`
           );
-          const avifProfile = cultureGalleryUpload
-            ? CULTURE_GALLERY_IMAGE_OPTIMIZATION.avif
+          const avifProfile = enhancedUpload
+            ? profile.avif
             : OPT.avif;
           const info = await sharp(srcPath)
             .rotate()
-            .resize({ width: w, height: h, fit: 'inside', withoutEnlargement: true })
+            .resize(key === 'original_avif'
+              ? { width: w, withoutEnlargement: true }
+              : { width: w, height: h, fit: 'inside', withoutEnlargement: true })
             .avif({ quality: avifProfile.quality, effort: avifProfile.effort })
             .toFile(outPath);
 

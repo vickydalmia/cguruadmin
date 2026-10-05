@@ -79,6 +79,7 @@ beforeEach(async () => {
 afterEach(async () => {
   resetBackfillRunForTests();
   vi.clearAllMocks();
+  vi.useRealTimers();
   await knex.destroy();
 });
 
@@ -137,10 +138,15 @@ describe('startTranslationBackfill', () => {
   });
 
   it('persists failure and permits a later run', async () => {
+    // The current-run query sorts by created_at. Give the later run a
+    // distinct timestamp instead of relying on execution speed.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
     mocks.enqueueTranslationBackfill.mockRejectedValueOnce(new Error('out of shared memory'));
     await startTranslationBackfill(strapi, { mode: 'all' });
     await resumeTranslationBackfillRun(strapi);
     expect(await waitFor('failed')).toMatchObject({ error: 'out of shared memory' });
+    vi.setSystemTime(new Date('2026-01-01T00:00:01Z'));
     mocks.enqueueTranslationBackfill.mockResolvedValueOnce(result);
     expect((await startTranslationBackfill(strapi, { mode: 'all' })).started).toBe(true);
     await resumeTranslationBackfillRun(strapi);

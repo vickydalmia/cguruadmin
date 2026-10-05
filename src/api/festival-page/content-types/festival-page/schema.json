@@ -1,0 +1,127 @@
+{
+  "kind": "singleType",
+  "collectionName": "festival_pages",
+  "info": {
+    "singularName": "festival-page",
+    "pluralName": "festival-pages",
+    "displayName": "Festival Template",
+    "description": "Shared Festival Template settings for its single Store, Brand, Category or Bank owner. Content sections are added incrementally."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      }
+    },
+    "title": {
+      "type": "string",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "countdown": {
+      "type": "component",
+      "component": "festival.sale-countdown",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "hero": {
+      "type": "component",
+      "component": "festival.responsive-banner",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "offerSlider": {
+      "type": "component",
+      "component": "festival.offer-slider",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "exploreCategories": {
+      "type": "component",
+      "component": "festival.explore-categories",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "productSection": {
+      "type": "component",
+      "component": "festival.product-section",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "faq": {
+      "type": "component",
+      "component": "home.faq-block",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "popularSearches": {
+      "type": "component",
+      "component": "home.popular-searches",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "giftSection": {
+      "type": "component",
+      "component": "festival.gift-section",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "savingsSection": {
+      "type": "component",
+      "component": "festival.savings-section",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    }
+  }
+}

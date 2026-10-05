@@ -7,6 +7,13 @@ import {
 } from './admin-content-visibility';
 
 describe('country-aware Content Manager visibility', () => {
+  it('shows Festival settings before any campaign template is assigned', () => {
+    const hidden = hiddenAdminContentTypeUids(INDIA_DEFAULT_CONFIGURATION, {
+      dealTemplate: false, independenceDayTemplate: false,
+    });
+    expect(hidden.has('api::festival-page.festival-page')).toBe(false);
+  });
+
   it('hides disabled feature types and their supporting editor collections', () => {
     const hidden = hiddenAdminContentTypeUids(
       {
@@ -72,6 +79,7 @@ describe('country-aware Content Manager visibility', () => {
         fieldSizes: { string: 6 },
         contentTypes: [
           { uid: 'api::store.store' },
+          { uid: 'api::festival-page.festival-page' },
           { uid: 'api::deal-of-the-day-page.deal-of-the-day-page' },
           {
             uid: 'api::independence-day-sale-page.independence-day-sale-page',
@@ -85,12 +93,13 @@ describe('country-aware Content Manager visibility', () => {
     expect(filtered.data.fieldSizes).toEqual(body.data.fieldSizes);
     expect(filtered.data.contentTypes).toEqual([
       { uid: 'api::store.store' },
+      { uid: 'api::festival-page.festival-page' },
       { uid: 'api::deal-of-the-day-page.deal-of-the-day-page' },
       {
         uid: 'api::independence-day-sale-page.independence-day-sale-page',
         isDisplayed: false,
       },
     ]);
-    expect(body.data.contentTypes).toHaveLength(3);
+    expect(body.data.contentTypes).toHaveLength(4);
   });
 });
