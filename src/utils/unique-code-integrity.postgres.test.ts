@@ -1,5 +1,5 @@
 import knexFactory, { type Knex } from 'knex';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import uniqueCouponService from '../plugins/unique-coupon/server/src/services/unique-coupon';
 
@@ -276,6 +276,12 @@ postgresDescribe('unique-code integrity PostgreSQL integration', () => {
 
   describe('concurrent redemption', () => {
     const CODE_COUNT = 24;
+    const redemptionErrors = vi.fn();
+
+    afterEach(() => {
+      // A retry must not hide SQL failures behind an otherwise passing result.
+      expect(redemptionErrors).not.toHaveBeenCalled();
+    });
 
     async function seedPool(codeCount = CODE_COUNT) {
       await knex('unique_coupon_pools').insert({
@@ -288,8 +294,8 @@ postgresDescribe('unique-code integrity PostgreSQL integration', () => {
         db: { connection: knex },
         log: {
           info: () => undefined,
-          warn: () => undefined,
-          error: () => undefined,
+          warn: console.warn,
+          error: redemptionErrors,
         },
       } as any;
       const service = uniqueCouponService({ strapi });
@@ -321,7 +327,7 @@ postgresDescribe('unique-code integrity PostgreSQL integration', () => {
       expect(used).toMatchObject({ count: String(CODE_COUNT) });
     });
 
-    it('reports exhaustion exactly once past the last code, never early', async () => {
+    it('reports exhaustion for the extra claims after concurrent contention settles', async () => {
       const service = await seedPool();
 
       const results = await Promise.all(
@@ -330,16 +336,59 @@ postgresDescribe('unique-code integrity PostgreSQL integration', () => {
         ),
       );
 
+      // A bounded claim can return a retryable 503 while another request still
+      // holds the last free rows. Once the burst has settled, retry only those
+      // requests, sequentially so this assertion has no CI scheduling deadline.
+      for (let index = 0; index < results.length; index++) {
+        if (results[index].error === 'MAX_RETRIES_EXCEEDED') {
+          results[index] = await service.redeemCode('pool-doc');
+        }
+      }
+
       const succeeded = results.filter((result) => result.success);
       const exhausted = results.filter(
         (result) => !result.success && result.error === 'NO_CODES_AVAILABLE',
       );
       expect(succeeded).toHaveLength(CODE_COUNT);
-      expect(exhausted).toHaveLength(3);
+      expect(
+        exhausted,
+        JSON.stringify(results.filter((result) => !result.success)),
+      ).toHaveLength(3);
+      expect(new Set(succeeded.map((result) => result.code)).size).toBe(CODE_COUNT);
       // A code locked by a concurrent claimer must never be mistaken for an
       // empty pool.
       expect(results.filter((result) => !result.success)).toHaveLength(3);
     });
+
+    it.each(['commit', 'rollback'] as const)(
+      'does not report exhaustion for a locked final code before %s',
+      async (settlement) => {
+        const service = await seedPool(1);
+        // Exercise all attempts without depending on a wall-clock lock delay.
+        service.delay = async () => undefined;
+        const claimant = await knex.transaction();
+        try {
+          await claimant('unique_codes').update({ is_used: true });
+
+          await expect(service.redeemCode('pool-doc')).resolves.toMatchObject({
+            success: false,
+            error: 'MAX_RETRIES_EXCEEDED',
+          });
+          await expect(knex('unique_coupon_pools').first())
+            .resolves.toMatchObject({ exhausted_at: null });
+
+          await claimant[settlement]();
+
+          await expect(service.redeemCode('pool-doc')).resolves.toMatchObject(
+            settlement === 'commit'
+              ? { success: false, error: 'NO_CODES_AVAILABLE' }
+              : { success: true, code: 'CODE-0' },
+          );
+        } finally {
+          if (!claimant.isCompleted()) await claimant.rollback();
+        }
+      },
+    );
 
     it('burns one code per activation no matter how often it is retried', async () => {
       const service = await seedPool();
