@@ -1,3 +1,4 @@
+import { selectedOfferAmount, isNumericOfferAmount } from './offer-currency';
 // Shared, browser-safe tables for the offer text fields. This file is the
 // single source of truth for the write validator (offer-field-validation.ts),
 // the editor-facing hints in src/bootstrap/field-hints.ts, AND the Offer
@@ -28,11 +29,11 @@ export const BENEFIT_TEXT_FIELDS: Array<{
 ];
 
 export function benefitFieldHint(suffix: string): string {
-  return `Amount only — e.g. 10%, ₹100 or $40. “${suffix}” is appended automatically on the site.`;
+  return `Enter 10%, ₹100 or $40, or a number such as 100 when Offer currency is selected. “${suffix}” is appended automatically on the site.`;
 }
 
 export function offerAmountFieldHint(appendedText: string): string {
-  return `Amount only — e.g. 10%, ₹100 or $40. “${appendedText}” is assembled automatically on the site.`;
+  return `Enter 10%, ₹100 or $40, or a number such as 100 when Offer currency is selected. “${appendedText}” is assembled automatically on the site.`;
 }
 
 // "10%" / "19.2%" — a percent needs a number before the sign.
@@ -42,9 +43,11 @@ const PERCENT_AMOUNT = /^\d{1,3}(?:\.\d+)?\s*%$/;
 const CURRENCY_AMOUNT = /^(?:₹|rs\.?|inr|\$)\s*\d[\d,]*$/i;
 
 /** True when the value is a bare amount: "10%", "₹100", "Rs.100", "$40". */
-export function isOfferAmount(value: string): boolean {
+export function isOfferAmount(value: string, currencyCode?: unknown, usesCurrencyAmounts = false): boolean {
   const trimmed = value.trim();
-  return PERCENT_AMOUNT.test(trimmed) || CURRENCY_AMOUNT.test(trimmed);
+  return PERCENT_AMOUNT.test(trimmed) || CURRENCY_AMOUNT.test(trimmed)
+    || selectedOfferAmount(trimmed, currencyCode) !== null
+    || (usesCurrencyAmounts && isNumericOfferAmount(trimmed));
 }
 
 /**
@@ -53,10 +56,12 @@ export function isOfferAmount(value: string): boolean {
  * unchanged when it is not a bare amount (legacy full-text values pass
  * through untouched).
  */
-export function normalizeOfferAmount(value: string): string {
+export function normalizeOfferAmount(value: string, currencyCode?: unknown): string {
   const trimmed = value.trim();
   const pct = trimmed.match(PERCENT_AMOUNT);
   if (pct) return trimmed.replace(/\s+/g, '');
+  const selected = selectedOfferAmount(trimmed, currencyCode);
+  if (selected) return selected;
   const cur = trimmed.match(/^(₹|rs\.?|inr|\$)\s*([\d,]+)$/i);
   if (cur) {
     const symbol = /\$/.test(cur[1]) ? '$' : '₹';

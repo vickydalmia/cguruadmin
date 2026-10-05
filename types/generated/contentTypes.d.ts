@@ -1308,6 +1308,8 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
     };
   };
   attributes: {
+    usesCurrencyAmounts: Schema.Attribute.Boolean;
+    currencyCode: Schema.Attribute.String & Schema.Attribute.SetMinMaxLength<{ maxLength: 3 }>;
     affiliateLink: Schema.Attribute.Text & Schema.Attribute.Required;
     badge: Schema.Attribute.Enumeration<
       [
@@ -1666,6 +1668,8 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     };
   };
   attributes: {
+    usesCurrencyAmounts: Schema.Attribute.Boolean;
+    currencyCode: Schema.Attribute.String & Schema.Attribute.SetMinMaxLength<{ maxLength: 3 }>;
     affiliateLink: Schema.Attribute.Text & Schema.Attribute.Required;
     badge: Schema.Attribute.Enumeration<
       [

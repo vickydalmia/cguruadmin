@@ -57,6 +57,7 @@ export const COUPON_FIELDS = [
   // Affiliate-brand offers render the BRAND logo in their identity slot.
   'isForAffiliateBrand',
   // Csv of offer-country registry codes — flag tags on the cards.
+  'usesCurrencyAmounts', 'currencyCode',
   'offerCountries',
   'expiresAt',
   'contentStatus',

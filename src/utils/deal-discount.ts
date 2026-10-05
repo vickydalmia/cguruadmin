@@ -42,15 +42,15 @@ export function dealDiscountPrefixLabel(value: unknown): string | null {
  * The prefix is deliberately an internal field and is removed by the response
  * walker after this formatter runs.
  */
-export function formatDealDiscount(amount: unknown, prefix: unknown): string | null {
+export function formatDealDiscount(amount: unknown, prefix: unknown, currencyCode?: unknown, usesCurrencyAmounts = false): string | null {
   if (typeof amount !== 'string' || !amount.trim()) return null;
   const trimmed = amount.trim();
   const label = dealDiscountPrefixLabel(prefix);
-  if (!label || !isOfferAmount(trimmed)) return trimmed;
+  if (!label || !isOfferAmount(trimmed, currencyCode, usesCurrencyAmounts)) return trimmed;
   const suffix = isDealDiscountPrefix(prefix) && PREFIXES_WITHOUT_OFF.has(prefix)
     ? ''
     : ' OFF';
-  return `${label} ${normalizeOfferAmount(trimmed)}${suffix}`;
+  return `${label} ${normalizeOfferAmount(trimmed, currencyCode)}${suffix}`;
 }
 
 /** Parse a recognizable old free-text discount into the new stored fields. */

@@ -223,6 +223,14 @@
       "relation": "manyToMany",
       "target": "api::brand.brand",
       "inversedBy": "deals"
+    },
+    "currencyCode": {
+      "type": "string",
+      "maxLength": 3,
+      "regex": "^[A-Z]{3}$"
+    },
+    "usesCurrencyAmounts": {
+      "type": "boolean"
     }
   }
 }

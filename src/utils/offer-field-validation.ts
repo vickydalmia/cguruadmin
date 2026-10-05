@@ -1,3 +1,4 @@
+import { isOfferCurrency, parseOfferMoney } from './offer-currency';
 import type { Core } from '@strapi/strapi';
 import { errors } from '@strapi/utils';
 import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
@@ -31,7 +32,7 @@ const wordCount = (value: string): number =>
 type FieldRule = {
   field: string;
   /** Problem message for an invalid value, or null when the value passes. */
-  problem: (value: string) => string | null;
+  problem: (value: string, currencyCode?: unknown, usesCurrencyAmounts?: boolean) => string | null;
 };
 
 const WORD_FIELD_RULES: FieldRule[] = WORD_LIMITS.map(({ field, label, max }) => ({
@@ -47,8 +48,8 @@ const WORD_FIELD_RULES: FieldRule[] = WORD_LIMITS.map(({ field, label, max }) =>
 const BENEFIT_FIELD_RULES: FieldRule[] = BENEFIT_TEXT_FIELDS.map(
   ({ field, label, suffix }) => ({
     field,
-    problem: (value: string) =>
-      isOfferAmount(value)
+    problem: (value: string, currencyCode?: unknown, usesCurrencyAmounts?: boolean) =>
+      isOfferAmount(value, currencyCode, usesCurrencyAmounts)
         ? null
         : `${label} must be an amount only — a percent ("10%") or a currency amount ("₹100") — got "${value.trim()}". “${suffix}” is appended automatically on the site.`,
   }),
@@ -59,8 +60,8 @@ const DEAL_DISCOUNT_FIELDS = ['discount', 'discountPrefix'] as const;
 const DEAL_DISCOUNT_FIELD_SET = new Set<string>(DEAL_DISCOUNT_FIELDS);
 const DEAL_DISCOUNT_RULE: FieldRule = {
   field: 'discount',
-  problem: (value: string) =>
-    isOfferAmount(value)
+  problem: (value: string, currencyCode?: unknown, usesCurrencyAmounts?: boolean) =>
+    isOfferAmount(value, currencyCode, usesCurrencyAmounts)
       ? null
       : `Discount must be an amount only — a percent ("10%") or a currency amount ("₹100") — got "${value.trim()}". The selected prefix and any applicable “OFF” suffix are assembled automatically on the site.`,
 };
@@ -79,6 +80,7 @@ function fieldRulesForUid(uid?: string, skipWordRules = false): FieldRule[] {
 function fieldNamesForUid(uid?: string): string[] {
   const fields = fieldRulesForUid(uid).map(({ field }) => field);
   if (uid === DEAL_UID) fields.push('discountPrefix');
+  fields.push('currencyCode', 'usesCurrencyAmounts');
   return fields;
 }
 
@@ -130,10 +132,29 @@ export function validateOfferFields(
     if (!unchanged(comparisonFields)) problems.push({ path, message });
   };
 
+  if (data.currencyCode != null && data.currencyCode !== '' && !isOfferCurrency(data.currencyCode)) {
+    problems.push({ path: ['currencyCode'], message: 'Select a supported currency or use the site default.' });
+  }
+  const currencyConflictFields = new Set<string>();
+  const moneyFields = [...BENEFIT_TEXT_FIELDS.map(item => item.field), ...(uid === DEAL_UID ? ['discount'] : [])];
+  if (isOfferCurrency(data.currencyCode)) {
+    for (const field of moneyFields) {
+      const value = data[field];
+      if (typeof value !== 'string') continue;
+      const money = parseOfferMoney(value, data.currencyCode);
+      if (money?.currencyCode && money.currencyCode !== data.currencyCode
+        && (!stored || value !== stored[field] || data.currencyCode !== stored.currencyCode)) {
+        currencyConflictFields.add(field);
+        problems.push({ path: [field], message: `This amount uses ${money.currencyCode}, but offer currency is ${data.currencyCode}. Correct the amount or currency; no conversion is performed.` });
+      }
+    }
+  }
+
   for (const { field, problem } of fieldRulesForUid(uid, skipWordRules)) {
+    if (currencyConflictFields.has(field)) continue;
     const value = data[field];
     if (typeof value !== 'string' || value.trim() === '') continue;
-    const message = problem(value);
+    const message = problem(value, data.currencyCode, data.usesCurrencyAmounts === true);
     if (message) {
       // The Deal discount amount is grandfathered only while the WHOLE pair is
       // untouched — otherwise a prefix-only write could pair a valid prefix
@@ -222,14 +243,14 @@ export async function validateOfferFieldsForWrite(
   if (!isClone && !strict && touched.length === 0) return;
 
   let stored: unknown = null;
+  const needsCurrencyContext = touched.length > 0;
   const needsDealPairContext =
     uid === DEAL_UID && touched.some((field) => DEAL_DISCOUNT_FIELD_SET.has(field));
   if ((action === 'update' || isClone) && documentId) {
-    // Strict and clone both check the FULL record, so they need every
-    // validated field pulled from the stored row; a non-strict update only
-    // needs the touched ones for its grandfather comparison.
+    // Currency changes need all monetary fields to detect conflicting markers.
+    // Ordinary partial writes still validate only the submitted fields below.
     const fields =
-      isClone || strict
+      isClone || strict || needsCurrencyContext
         ? applicableFields
         : needsDealPairContext
           ? [...new Set([...touched, ...DEAL_DISCOUNT_FIELDS])]
@@ -249,11 +270,14 @@ export async function validateOfferFieldsForWrite(
   // Strict reuses the clone merge: payload over stored, so an absent field
   // falls back to its stored (possibly dirty) value and gets validated too.
   const effective =
-    (isClone || strict || needsDealPairContext) && stored && typeof stored === 'object'
+    (isClone || strict || needsDealPairContext || needsCurrencyContext) && stored && typeof stored === 'object'
       ? { ...stored, ...data }
       : data;
   // Word caps are English editorial rules; localized text skips them (see
   // fieldRulesForUid). Amount rules always run — those fields are shared.
   const skipWordRules = Boolean(locale) && locale !== DEFAULT_CONTENT_LOCALE;
-  validateOfferFields(effective, action, stored, strict, uid, skipWordRules, translationSource);
+  const validationData = !strict && !isClone && !Object.prototype.hasOwnProperty.call(data, 'currencyCode')
+    ? { ...data, currencyCode: (effective as any).currencyCode, usesCurrencyAmounts: (effective as any).usesCurrencyAmounts, ...(needsDealPairContext ? { discount: (effective as any).discount, discountPrefix: (effective as any).discountPrefix } : {}) }
+    : effective;
+  validateOfferFields(validationData, action, stored, strict, uid, skipWordRules, translationSource);
 }

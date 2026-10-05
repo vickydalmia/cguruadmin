@@ -1,3 +1,5 @@
+import { numericOfferAmountInput } from '../../utils/offer-currency';
+import { OfferCurrencyField } from '../features/offer-currency/offer-currency-field';
 import type { PanelComponent } from '@strapi/content-manager/strapi-admin';
 import { useField } from '@strapi/strapi/admin';
 import {
@@ -62,14 +64,16 @@ function OfferAmountInput({
   placeholder?: string;
 }) {
   const field = useField<string>(name);
+  const currency = useField<string | null>('currencyCode');
+  const amountMode = useField<boolean>('usesCurrencyAmounts');
   // Typing is unrestricted; the value is checked when the editor leaves the
   // field — flagging "1" as invalid mid-keystroke would be noise.
   const [blurred, setBlurred] = React.useState(false);
 
   const value = field.value ?? '';
   const draftError =
-    blurred && value.trim() && !isOfferAmount(value)
-      ? 'Amount only — e.g. 10%, ₹100 or $40.'
+    blurred && value.trim() && !isOfferAmount(value, currency.value, amountMode.value === true)
+      ? 'Enter a percentage, a currency amount, or a number with an offer currency selected.'
       : undefined;
 
   const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -80,8 +84,8 @@ function OfferAmountInput({
     setBlurred(true);
     // Canonicalize an accepted amount so the stored value is uniform:
     // "Rs. 2,000" → "₹2000", "10 %" → "10%".
-    if (value.trim() && isOfferAmount(value)) {
-      const canonical = normalizeOfferAmount(value);
+    if (value.trim() && isOfferAmount(value, currency.value, amountMode.value === true)) {
+      const canonical = numericOfferAmountInput(value, currency.value) ?? normalizeOfferAmount(value);
       if (canonical !== value) field.onChange(name, canonical);
     }
   };
@@ -90,7 +94,7 @@ function OfferAmountInput({
     <Field.Root error={field.error ?? draftError} name={name} hint={hint}>
       <Field.Label>{label}</Field.Label>
       <TextInput
-        placeholder={placeholder}
+        placeholder={currency.value ? `${currency.value} 100 or 10%` : placeholder}
         value={value}
         onChange={handleChange}
         onBlur={handleBlur}
@@ -102,11 +106,13 @@ function OfferAmountInput({
 }
 
 function DealDiscountFields() {
+  const currency = useField<string | null>('currencyCode');
+  const amountMode = useField<boolean>('usesCurrencyAmounts');
   const prefixField = useField<string | null>('discountPrefix');
   const discountField = useField<string>('discount');
-  const preview = formatDealDiscount(discountField.value, prefixField.value);
+  const preview = formatDealDiscount(discountField.value, prefixField.value, currency.value, amountMode.value === true);
   const hasStandardPreview = Boolean(
-    prefixField.value && discountField.value && isOfferAmount(discountField.value),
+    prefixField.value && discountField.value && isOfferAmount(discountField.value, currency.value, amountMode.value === true),
   );
 
   return (
@@ -143,7 +149,7 @@ function DealDiscountFields() {
 
       {hasStandardPreview ? (
         <Typography variant="pi" textColor="neutral600">
-          Site label preview: {preview}
+          Site label preview: {preview}{!currency.value && amountMode.value ? " (site currency for numeric amounts)" : ""}
         </Typography>
       ) : null}
     </Flex>
@@ -153,6 +159,7 @@ function DealDiscountFields() {
 function OfferBenefitsPanelBody({ includeDiscount }: { includeDiscount: boolean }) {
   return (
     <Flex direction="column" alignItems="stretch" gap={4} width="100%">
+      <OfferCurrencyField includeDiscount={includeDiscount} />
       {includeDiscount ? <DealDiscountFields /> : null}
       {BENEFIT_INPUTS.map(({ name, label, hint }) => (
         <OfferAmountInput key={name} name={name} label={label} hint={hint} />

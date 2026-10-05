@@ -56,6 +56,7 @@ import { MENU_UID, validateMenuCategorySections } from '../menu-category-validat
 import { validateMenuNotification } from '../menu-notification-validation';
 import { validateOfferCountriesForWrite } from '../offer-countries-validation';
 import { isOfferCountriesOfferUid } from '../../constants/offer-countries';
+import { normaliseOfferCurrencyForWrite } from '../offer-currency-write';
 import { validateOfferFieldsForWrite } from '../offer-field-validation';
 import {
   isOfferLifecycleUid,
@@ -164,6 +165,12 @@ export function stepApplies(step: ValidationStep, uid: string, action: string): 
  * length-checks it. Do not sort, group or "tidy" these lists.
  */
 export const MUTATOR_STEPS: readonly ValidationStep[] = [
+  {
+    name: 'normaliseOfferCurrencyForWrite',
+    applies: (uid) => uid === 'api::coupon.coupon' || uid === 'api::deal.deal',
+    run: ({ strapi, uid, action, data, documentId, locale }) =>
+      normaliseOfferCurrencyForWrite(strapi, uid, action, data, documentId, locale),
+  },
   {
     name: 'normalizeIntegrations',
     applies: (uid) => uid === GLOBAL_UID,

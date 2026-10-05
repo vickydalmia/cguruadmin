@@ -46,6 +46,7 @@ export const COUPON_PUBLIC_FIELDS = [
   'isForAffiliateBrand',
   // Csv of offer-country registry codes ("AE,SA") — flag tags + the entity
   // Country filter. Null/absent = valid everywhere.
+  'usesCurrencyAmounts', 'currencyCode',
   'offerCountries',
   'expiresAt',
   'contentStatus',
@@ -77,6 +78,7 @@ export const DEAL_PUBLIC_FIELDS = [
   'isForAffiliateBrand',
   // Csv of offer-country registry codes ("AE,SA") — flag tags + the entity
   // Country filter. Null/absent = valid everywhere.
+  'usesCurrencyAmounts', 'currencyCode',
   'offerCountries',
   // Consumed and removed by arrayizeOfferText after it derives the final
   // Amazon Creator Connections condition.
