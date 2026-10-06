@@ -38,7 +38,7 @@ lifecycle state.
 
 | Type | Kind | What it is |
 |---|---|---|
-| **Store** | collection | A merchant. Owns `slug` (may contain nested path segments), logo, `ratingAverage`/`ratingCount` from the anonymous rating system, curated Top Picks, FAQs and SEO |
+| **Store** | collection | A merchant. Owns `slug` (may contain nested path segments), logo, `ratingAverage`/`ratingCount` from the anonymous rating system, curated Top Picks, FAQs and SEO. `offerCardStyle: marketplace` makes its page show each Coupon's Logo Store on the card (a Nike page listing Myntra offers); Coupons without a Logo Store keep the default layout |
 | **Brand** | collection | A brand entity page, same shape as Store |
 | **Category** | collection | A category entity page; carries `icon` rather than `logo` |
 | **Bank** | collection | A bank entity page (bank-offer pages) |

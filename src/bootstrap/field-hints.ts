@@ -299,8 +299,12 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
       uid,
       field: 'logoStore',
       hint:
-        'Optional image source only. The site borrows this Store logo; it does ' +
-        'not add Store membership, ownership, search matching, or Store-page placement. ' +
+        'Optional. Which Store logo the card shows when the offer\'s own Stores ' +
+        'have no usable logo (Brand, Category and Bank pages, Deal cards, the ' +
+        'homepage hero). On a Store whose Offer card style is Marketplace, the ' +
+        'card instead shows this Store as its identity: logo, link to its page ' +
+        'and merchant in the redeem popup. Does not add Store membership, ' +
+        'ownership, search matching, festive offers or Store-page placement. ' +
         'Hidden and cleared automatically for affiliate-brand offers.',
     },
     // Mirrors checkout-merchant-validation.ts: the reference must resolve to a
@@ -309,11 +313,14 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
       uid,
       field: 'checkoutMerchant',
       hint:
-        'Optional. One Store OR Brand — the merchant the shopper actually ' +
-        'checks out with. Search the dropdown to see both; each option is ' +
-        'tagged Store or Brand. Like Logo Store, this adds no membership, ' +
-        'ownership or search matching. Hidden and cleared automatically for ' +
-        'affiliate-brand offers.',
+        'Optional. One Store OR Brand — the merchant the shopper actually pays. ' +
+        'Search the dropdown to see both; each option is tagged Store or Brand. ' +
+        'Used only for festive offers: while that merchant\'s Festive offer is ' +
+        'on and complete, its title replaces this offer\'s badge and its ' +
+        'description is added under the offer\'s own, and festive edits ' +
+        're-render exactly the offers that name it. It changes no logo, ' +
+        'membership, ownership or search matching. Hidden and cleared ' +
+        'automatically for affiliate-brand offers.',
     },
     // Mirrors offer-countries-validation.ts: only Country Setup-enabled codes
     // are accepted; empty means the offer is valid everywhere.
@@ -534,6 +541,15 @@ const VALIDATOR_MIRROR_HINTS: Array<{ uid: string; field: string; hint: string }
         'Turn this off to hide the entire Trending Deals section.',
     },
   ]),
+  {
+    uid: 'api::store.store',
+    field: 'offerCardStyle',
+    hint:
+      'Marketplace: this Store page shows each Coupon\'s Logo Store (for ' +
+      'example Myntra on a Nike page) on the card, the way Brand pages show ' +
+      'the Store. Coupons without a Logo Store keep the Default layout. ' +
+      'Other entity pages are not affected.',
+  },
 ];
 
 // Merge the three hint sources. When several validators constrain the same
@@ -619,11 +635,15 @@ const CONTENT_TYPE_FIELD_LABELS: Record<string, Record<string, string>> = {
     categoriesViewAllUrl: 'All Categories button URL',
   },
   ...Object.fromEntries(
-    ['store', 'category', 'bank'].map((name) => [
+    ['category', 'bank'].map((name) => [
       `api::${name}.${name}`,
       { showTrendingDeals: 'Show Trending Deals' },
     ]),
   ),
+  'api::store.store': {
+    showTrendingDeals: 'Show Trending Deals',
+    offerCardStyle: 'Offer card style',
+  },
   // Brand gets the shared label plus its own — an explicit key after the
   // spread REPLACES the spread's entry, so both must live here together.
   'api::brand.brand': {
