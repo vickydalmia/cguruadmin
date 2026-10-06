@@ -9,6 +9,34 @@ import {
   type EditLayout,
 } from '../utils/content-manager-layout';
 
+// Keep each placement's switch beside its theme, ahead of shared content.
+// Persisted Content Manager layouts do not follow schema attribute ordering.
+export async function ensureSaleStripControlPlacement(strapi: Core.Strapi): Promise<void> {
+  const service: any = strapi.plugin('content-manager').service('components');
+  if (!service) return;
+  try {
+    const component = service.findComponent('shared.sale-strip');
+    if (!component) return;
+    const config = await service.findConfiguration(component);
+    const previous: EditLayout = config.layouts?.edit ?? [];
+    const groups = [['enabled', 'colorTheme'], ['homepageEnabled', 'homepageColorTheme']];
+    const names = new Set(groups.flat());
+    const cells = new Map(previous.flat().map((cell) => [cell.name, cell]));
+    const edit: EditLayout = [
+      ...groups.map((group) => group.map((name) => ({ ...cells.get(name), name, size: 6 }))),
+      ...previous.map((row) => row.filter((cell) => !names.has(cell.name))).filter((row) => row.length),
+    ];
+    if (JSON.stringify(edit) === JSON.stringify(previous)) return;
+    await service.updateConfiguration(component, {
+      ...config,
+      layouts: { ...config.layouts, edit },
+    });
+    strapi.log.info('[content-manager] sale strip controls grouped by placement');
+  } catch (err: any) {
+    strapi.log.warn(`[content-manager] sale strip control placement failed: ${err?.message ?? err}`);
+  }
+}
+
 // Category Section already has an icon field, but its persisted layout placed
 // it below the large repeatable Links editor. Keep the same field and move it
 // directly below Category so the override is discoverable.

@@ -1,0 +1,100 @@
+{
+  "collectionName": "components_shared_sale_strips",
+  "info": {
+    "displayName": "Sale strip",
+    "description": "Shared campaign content with independent homepage and store visibility and colors. No offer relations."
+  },
+  "options": {},
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "colorTheme": {
+      "type": "enumeration",
+      "enum": [
+        "navy",
+        "orange"
+      ],
+      "default": "navy"
+    },
+    "homepageEnabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "homepageColorTheme": {
+      "type": "enumeration",
+      "enum": [
+        "navy",
+        "orange"
+      ],
+      "default": "navy"
+    },
+    "logo": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": [
+        "images"
+      ]
+    },
+    "logoAlt": {
+      "type": "string",
+      "maxLength": 120,
+      "default": "Great Savings Fest"
+    },
+    "heading": {
+      "type": "string",
+      "maxLength": 100,
+      "default": "Great Savings Fest is"
+    },
+    "highlight": {
+      "type": "string",
+      "maxLength": 40,
+      "default": "LIVE!"
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 240,
+      "default": "Massive discounts on 500+ brands \u00b7 Verified coupons \u00b7 Updated every hour"
+    },
+    "brandsValue": {
+      "type": "string",
+      "maxLength": 20,
+      "default": "500+"
+    },
+    "brandsLabel": {
+      "type": "string",
+      "maxLength": 40,
+      "default": "Brands/ Stores"
+    },
+    "couponsValue": {
+      "type": "string",
+      "maxLength": 20,
+      "default": "8K+"
+    },
+    "couponsLabel": {
+      "type": "string",
+      "maxLength": 40,
+      "default": "Coupons"
+    },
+    "discountValue": {
+      "type": "string",
+      "maxLength": 20,
+      "default": "80%"
+    },
+    "discountLabel": {
+      "type": "string",
+      "maxLength": 40,
+      "default": "Max Off"
+    },
+    "ctaLabel": {
+      "type": "string",
+      "maxLength": 40,
+      "default": "EXPLORE ALL"
+    },
+    "ctaUrl": {
+      "type": "string",
+      "maxLength": 2048
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import { validateSaleStripForWrite } from '../../api/global/services/sale-strip-validation';
 import { validateFestivalPage } from '../../api/festival-page/services/festival-validation';
 import { FESTIVAL_PAGE_UID } from '../../constants/festival-page';
 import { validateSubscriptionContent } from '../../api/subscription-page/services/subscription-validation';
@@ -244,6 +245,12 @@ export const MUTATOR_STEPS: readonly ValidationStep[] = [
 export const COLLECTED_STEPS: readonly ValidationStep[] = [
   { name: 'validateSubscriptionContent', applies: (uid) => uid === SUBSCRIPTION_PAGE_UID,
     run: ({ strapi, data, locale }) => validateSubscriptionContent(strapi, data, locale) },
+  {
+    name: 'validateSaleStripForWrite',
+    actions: CREATE_UPDATE,
+    applies: (uid) => uid === GLOBAL_UID,
+    run: ({ strapi, data, documentId, locale }) => validateSaleStripForWrite(strapi, data, documentId, locale),
+  },
   {
     name: 'validateIntegrationsForWrite',
     applies: (uid) => uid === GLOBAL_UID,

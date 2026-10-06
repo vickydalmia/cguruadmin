@@ -214,6 +214,7 @@ export const FOOTER_POPULATE = {
 } as const;
 
 export const GLOBAL_POPULATE = {
+  saleStrip: { populate: { logo: true } },
   telegramCta: true,
   newsletter: true,
 } as const;

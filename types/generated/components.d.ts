@@ -2903,6 +2903,83 @@ export interface SharedParagraph extends Struct.ComponentSchema {
   };
 }
 
+export interface SharedSaleStrip extends Struct.ComponentSchema {
+  collectionName: 'components_shared_sale_strips';
+  info: {
+    description: 'Shared campaign content with independent homepage and store visibility and colors. No offer relations.';
+    displayName: 'Sale strip';
+  };
+  attributes: {
+    brandsLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }> &
+      Schema.Attribute.DefaultTo<'Brands/ Stores'>;
+    brandsValue: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 20;
+      }> &
+      Schema.Attribute.DefaultTo<'500+'>;
+    colorTheme: Schema.Attribute.Enumeration<['navy', 'orange']> &
+      Schema.Attribute.DefaultTo<'navy'>;
+    couponsLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }> &
+      Schema.Attribute.DefaultTo<'Coupons'>;
+    couponsValue: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 20;
+      }> &
+      Schema.Attribute.DefaultTo<'8K+'>;
+    ctaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }> &
+      Schema.Attribute.DefaultTo<'EXPLORE ALL'>;
+    ctaUrl: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 2048;
+      }>;
+    description: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 240;
+      }> &
+      Schema.Attribute.DefaultTo<'Massive discounts on 500+ brands \u00B7 Verified coupons \u00B7 Updated every hour'>;
+    discountLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }> &
+      Schema.Attribute.DefaultTo<'Max Off'>;
+    discountValue: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 20;
+      }> &
+      Schema.Attribute.DefaultTo<'80%'>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }> &
+      Schema.Attribute.DefaultTo<'Great Savings Fest is'>;
+    highlight: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }> &
+      Schema.Attribute.DefaultTo<'LIVE!'>;
+    homepageColorTheme: Schema.Attribute.Enumeration<['navy', 'orange']> &
+      Schema.Attribute.DefaultTo<'navy'>;
+    homepageEnabled: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
+    logo: Schema.Attribute.Media<'images'>;
+    logoAlt: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 120;
+      }> &
+      Schema.Attribute.DefaultTo<'Great Savings Fest'>;
+  };
+}
+
 export interface SharedSectionHeader extends Struct.ComponentSchema {
   collectionName: 'components_shared_section_headers';
   info: {
@@ -3757,6 +3834,7 @@ declare module '@strapi/strapi' {
       'shared.milestone': SharedMilestone;
       'shared.newsletter': SharedNewsletter;
       'shared.paragraph': SharedParagraph;
+      'shared.sale-strip': SharedSaleStrip;
       'shared.section-header': SharedSectionHeader;
       'shared.seo': SharedSeo;
       'shared.stat': SharedStat;

@@ -68,6 +68,7 @@ const COMPONENT_ENTRY_TITLES: Record<string, string> = {
   'festival.coupon-category-tab': 'labelOverride',
   'festival.coupon-store-tab': 'labelOverride',
   'shared.cta': 'label',
+  'shared.sale-strip': 'heading',
   'shared.telegram-cta': 'heading',
   'shared.newsletter': 'heading',
   'shared.section-header': 'heading',

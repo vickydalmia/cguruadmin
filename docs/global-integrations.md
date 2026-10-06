@@ -62,3 +62,11 @@ upgrade. A frontend-only rollback works with the derived compatibility URL and
 footer links. A gateway rollback requires restoring its old Sendy URL/list
 environment values. Rolling Strapi back requires restoring the pre-upgrade
 database backup because schema sync removes the retired component URL column.
+
+## Sale strip — homepage and stores
+
+Global Settings → Sale strip — homepage and stores contains separate enable toggles and navy/orange color selections for each placement. The homepage strip sits between Top Offers and Top Deals; the store strip sits below Top Picks. Brands, categories and banks do not show the store placement. Both placements default to disabled. Existing store settings remain compatible.
+
+The logo, heading/highlight, description, three statistics and button are shared. A valid site path or HTTP(S) destination and complete text are required when either placement is enabled. Statistics are editorial values, not live counts. An empty logo field uses the bundled Great Savings Fest artwork; a selected image uses the CMS responsive media pipeline. Copy is localized per Global entry.
+
+Both placements and themes use the same responsive component. The existing Global ISR scope refreshes all pages and the chrome cache after saves. `GLOBAL_POPULATE` lives in the shared site-chrome configuration within `homepage-populate.ts`; rendering is controlled independently by each page composition.

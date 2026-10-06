@@ -20,6 +20,19 @@ import { AFFILIATE_OFFER_TOGGLE_FIELD } from '../constants/affiliate-offer';
 // Uses the same DB config store + config-as-code approach as entry titles.
 // Exported for hint-coverage.test.ts only.
 export const COMPONENT_FIELD_DESCRIPTIONS: Record<string, Record<string, string>> = {};
+COMPONENT_FIELD_DESCRIPTIONS['shared.sale-strip'] = {
+  colorTheme: 'Store strip color: navy blue or orange gradient. Independent of the homepage color.',
+  homepageEnabled: 'Show this strip between Top Offers and Top Deals on the homepage. Independent of store visibility.',
+  homepageColorTheme: 'Homepage strip color: navy blue or orange gradient. Independent of the store color.',
+  enabled: 'Enable the sale strip below Top Picks on all store pages. Independent of homepage visibility. Other entity types do not show it.',
+  logo: 'Optional square campaign logo. Leave empty to use the original Great Savings Fest artwork. Rendered at 88px on desktop and 64px on mobile.',
+  logoAlt: 'Accessible description of the campaign logo.',
+  highlight: 'Highlighted yellow text after the heading, for example LIVE!.',
+  brandsValue: 'Editorial value shown in the first stat, for example 500+. This is not an automatic count.',
+  couponsValue: 'Editorial coupon count, for example 8K+. This is not an automatic count.',
+  discountValue: 'Editorial maximum discount, for example 80%.',
+  ctaUrl: 'Required when enabled. Link to your live sale page using a path beginning with / or a full HTTP(S) URL.',
+};
 COMPONENT_FIELD_DESCRIPTIONS['subscription.platform-card'] = {
   platform: 'Choose each platform once. Its colour stays consistent with the page design.',
   count: 'Displayed count, such as 80K+. The initial Figma value is editable; it is not a live subscriber count.',
@@ -36,6 +49,7 @@ COMPONENT_FIELD_DESCRIPTIONS['subscription.platforms'] = {
 // names. The API/storage key remains unchanged; this only controls the label
 // editors see in Content Manager.
 export const COMPONENT_FIELD_LABELS: Record<string, Record<string, string>> = {
+  'shared.sale-strip': { homepageEnabled: 'Enable sale strip on homepage', homepageColorTheme: 'Homepage color theme', colorTheme: 'Store color theme', enabled: 'Enable sale strip in stores', logoAlt: 'Logo alternative text', highlight: 'Highlighted heading text', ctaLabel: 'Button label', ctaUrl: 'Button destination' },
   'home.hero-section': {
     products: 'Product/Offer',
   },

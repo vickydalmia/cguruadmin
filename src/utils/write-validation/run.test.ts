@@ -44,6 +44,7 @@ describe('write-validation step order', () => {
   it('runs the collected validators in the documented order', () => {
     expect(names(COLLECTED_STEPS)).toEqual([
       'validateSubscriptionContent',
+      'validateSaleStripForWrite',
       'validateIntegrationsForWrite',
       'validateSiteConfigurationForWrite',
       'validateCouponTypeFields',
