@@ -78,7 +78,32 @@ const OfferCountriesInput = React.forwardRef<
   }, [get]);
 
   const selected = React.useMemo(() => parseOfferCountriesValue(value), [value]);
-  const options = load.state === 'ready' ? load.options : [];
+  // MultiSelect retains selected option labels. Mount it only after the
+  // enabled list is known, so a temporary fallback cannot become a cached tag.
+  // A failed request says nothing about whether a saved country is enabled.
+  if (load.state !== 'ready') {
+    return (
+      <Field.Root name={name} id={name} error={error} hint={hint} required={required}>
+        <Field.Label action={labelAction}>{label}</Field.Label>
+        <div ref={forwardedRef} aria-busy={load.state === 'loading'}>
+          <Typography variant="pi" textColor="neutral600" tag="p" role="status">
+            {load.state === 'loading'
+              ? 'Loading countries…'
+              : 'Could not load the country list — reload the page to try again.'}
+          </Typography>
+          {selected.length > 0 ? (
+            <Typography variant="pi" textColor="neutral600" tag="p">
+              {`Saved countries: ${selected.join(', ')}`}
+            </Typography>
+          ) : null}
+        </div>
+        <Field.Hint />
+        <Field.Error />
+      </Field.Root>
+    );
+  }
+
+  const options = load.options;
   const byCode = new Map(options.map((option) => [option.code, option]));
   // A stored code missing from the enabled list (country disabled after
   // tagging) must still render as a removable tag, not silently vanish from
@@ -87,7 +112,7 @@ const OfferCountriesInput = React.forwardRef<
 
   // The feature is off (Country Setup csv empty) — say so instead of
   // rendering an empty dropdown that reads as a data problem.
-  if (load.state === 'ready' && options.length === 0 && selected.length === 0) {
+  if (options.length === 0 && selected.length === 0) {
     return (
       <Field.Root name={name} id={name} hint={hint} required={required}>
         <Field.Label action={labelAction}>{label}</Field.Label>
@@ -107,13 +132,8 @@ const OfferCountriesInput = React.forwardRef<
         <MultiSelect
           withTags
           value={selected}
-          disabled={disabled || load.state !== 'ready'}
-          loading={load.state === 'loading'}
-          placeholder={
-            load.state === 'loading'
-              ? 'Loading countries…'
-              : (placeholder ?? 'All countries (no restriction)')
-          }
+          disabled={disabled}
+          placeholder={placeholder ?? 'All countries (no restriction)'}
           onChange={(codes: string[]) =>
             onChange(name, serializeOfferCountriesValue(codes))
           }
@@ -132,11 +152,6 @@ const OfferCountriesInput = React.forwardRef<
           ))}
         </MultiSelect>
       </div>
-      {load.state === 'error' ? (
-        <Typography variant="pi" textColor="danger600" tag="p">
-          Could not load the country list — reload the page to try again.
-        </Typography>
-      ) : null}
       <Field.Hint />
       <Field.Error />
     </Field.Root>
