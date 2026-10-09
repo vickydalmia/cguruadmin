@@ -9,6 +9,7 @@ import { localizationPreview } from '../api/site-configuration/services/localiza
 // within one TTL, same as the public route caches.
 export type OfferContentLocalization = {
   locale: string;
+  currencyCode: string;
   currencySymbol: string;
   countryCode: string;
 };
@@ -17,6 +18,7 @@ export type OfferContentLocalization = {
 // site-configuration row is readable.
 const INDIA_DEFAULT: OfferContentLocalization = {
   locale: 'en-IN',
+  currencyCode: 'INR',
   currencySymbol: '₹',
   countryCode: 'IN',
 };
@@ -41,6 +43,7 @@ async function refresh(): Promise<void> {
       cached = {
         value: {
           locale: config.locale,
+          currencyCode: config.currencyCode,
           currencySymbol: preview.currencySymbol,
           countryCode: config.countryCode,
         },

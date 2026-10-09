@@ -51,6 +51,7 @@ import { ensureSectionLabels } from './bootstrap/content-manager-section-labels'
 import {
   ensureFullWidthEditFields,
   ensureNavigationIconPlacement,
+  ensureSaleStripControlPlacement,
 } from './bootstrap/content-manager-edit-widths';
 import {
   ensureOfferListStatusColumn,
@@ -280,6 +281,7 @@ export default {
     await ensureAdminRelationSearchFields(strapi);
     await ensureRelationTargetFieldReadability(strapi);
     await ensureNavigationIconPlacement(strapi);
+    await ensureSaleStripControlPlacement(strapi);
     await ensureComponentFieldDescriptions(strapi);
     await ensureFieldDescriptions(strapi);
     await ensureSingleTypeEntryTitles(strapi);

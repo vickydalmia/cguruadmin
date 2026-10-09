@@ -226,7 +226,7 @@ describe('validateOfferFields', () => {
 });
 
 describe('validateOfferFieldsForWrite', () => {
-  it('reads stored values only for touched offer labels', async () => {
+  it('reads monetary context without validating untouched labels', async () => {
     const findOne = vi.fn().mockResolvedValue({
       offerText: 'GET FLAT 50% OFF',
     });
@@ -245,7 +245,7 @@ describe('validateOfferFieldsForWrite', () => {
     expect(findOne).toHaveBeenCalledWith(
       expect.objectContaining({
         documentId: 'coupon-1',
-        fields: ['documentId', 'offerText'],
+        fields: ['documentId', 'offerText', 'cashbackText', 'bankOfferText', 'prepaidText', 'currencyCode', 'usesCurrencyAmounts'],
       }),
     );
   });
@@ -300,6 +300,7 @@ describe('validateOfferFieldsForWrite', () => {
           'prepaidText',
           'discount',
           'discountPrefix',
+          'currencyCode', 'usesCurrencyAmounts',
         ],
       }),
     );
@@ -324,7 +325,7 @@ describe('validateOfferFieldsForWrite', () => {
     ).resolves.toBeUndefined();
     expect(findOne).toHaveBeenCalledWith({
       documentId: 'deal-1',
-      fields: ['documentId', 'discountPrefix', 'discount'],
+      fields: ['documentId', 'cashbackText', 'bankOfferText', 'prepaidText', 'discount', 'discountPrefix', 'currencyCode', 'usesCurrencyAmounts'],
     });
   });
 
@@ -387,7 +388,7 @@ describe('validateOfferFieldsForWrite', () => {
     // Strict must have read every capped field, not just the touched ones.
     expect(findOne).toHaveBeenCalledWith(
       expect.objectContaining({
-        fields: ['documentId', 'offerText', 'cashbackText', 'bankOfferText', 'prepaidText'],
+        fields: ['documentId', 'offerText', 'cashbackText', 'bankOfferText', 'prepaidText', 'currencyCode', 'usesCurrencyAmounts'],
       }),
     );
   });

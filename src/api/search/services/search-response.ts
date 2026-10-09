@@ -4,7 +4,7 @@
 import { normaliseImageBackgroundColour } from "../../../constants/image-background";
 import { withAmazonAffiliateDisclosure } from "../../../utils/amazon-affiliate-disclosure";
 import { buildDealComputedContent } from "../../../utils/deal-computed-content";
-import { formatDealDiscount } from "../../../utils/deal-discount";
+import { formatPublicDealDiscount } from "../../../utils/offer-money-display";
 import { type EntityConfig } from "./search-config";
 
 function mediaAlt(
@@ -232,6 +232,7 @@ export function mapOffer(document: any, type: "coupon" | "deal") {
     storeName: ownerName,
     // Canonical csv selected from the deployment's enabled offer-country
     // registry. Null keeps older rows and single-country deployments additive.
+    currencyCode: cleanText(document?.currencyCode, 3),
     offerCountries: cleanText(document?.offerCountries, 128),
     // Product-deal cards must never disguise a store logo as product media.
     // Coupon records no longer own media, so their search result draws from
@@ -250,7 +251,7 @@ export function mapOffer(document: any, type: "coupon" | "deal") {
     discount:
       type === "deal"
         ? cleanText(
-            formatDealDiscount(document?.discount, document?.discountPrefix),
+            formatPublicDealDiscount(document ?? {}),
             80,
           )
         : null,
@@ -270,7 +271,7 @@ export function mapOffer(document: any, type: "coupon" | "deal") {
             typeof dealContent === "string" && dealContent.trim()
               ? dealContent
               : null,
-          computedContent: buildDealComputedContent(document ?? {}),
+          computedContent: buildDealComputedContent({ ...document, discount: formatPublicDealDiscount(document ?? {}) }),
         }
       : { couponId: numericOfferId(document?.id) }),
     owner:

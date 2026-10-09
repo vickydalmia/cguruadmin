@@ -105,6 +105,16 @@
           "localized": true
         }
       }
+    },
+    "saleStrip": {
+      "type": "component",
+      "component": "shared.sale-strip",
+      "repeatable": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     }
   }
 }

@@ -1,3 +1,5 @@
+import couponSchema from '../api/coupon/content-types/coupon/schema.json';
+import dealSchema from '../api/deal/content-types/deal/schema.json';
 import { describe, expect, it } from 'vitest';
 import globalSchema from '../api/global/content-types/global/schema.json';
 import {
@@ -66,4 +68,10 @@ describe('localized ISR shared-field change detection', () => {
     expect(sharedFieldSelection(model, { mystery: true }).unknown).toBe(true);
     expect(sharedFieldSnapshotsDiffer(null, {})).toBe(true);
   });
+});
+
+it.each([couponSchema, dealSchema])('invalidates every locale on offer currency changes', schema => {
+  const selection = sharedFieldSelection(schema, { currencyCode: 'SAR' });
+  expect(selection.scalars).toContain('currencyCode');
+  expect(sharedFieldSnapshotsDiffer({ currencyCode: 'AED' }, { currencyCode: 'SAR' })).toBe(true);
 });

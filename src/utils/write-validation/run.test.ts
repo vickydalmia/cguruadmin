@@ -30,6 +30,7 @@ const names = (steps: readonly { name: string }[]) => steps.map((s) => s.name);
 describe('write-validation step order', () => {
   it('runs the mutators in the documented order', () => {
     expect(names(MUTATOR_STEPS)).toEqual([
+      'normaliseOfferCurrencyForWrite',
       'normalizeIntegrations',
       'sanitizeRichtextData',
       'normaliseTextFields',
@@ -43,6 +44,7 @@ describe('write-validation step order', () => {
   it('runs the collected validators in the documented order', () => {
     expect(names(COLLECTED_STEPS)).toEqual([
       'validateSubscriptionContent',
+      'validateSaleStripForWrite',
       'validateIntegrationsForWrite',
       'validateSiteConfigurationForWrite',
       'validateCouponTypeFields',

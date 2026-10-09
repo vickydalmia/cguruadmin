@@ -1357,6 +1357,10 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    currencyCode: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 3;
+      }>;
     expiresAt: Schema.Attribute.DateTime;
     failedCount: Schema.Attribute.Integer &
       Schema.Attribute.SetMinMax<
@@ -1405,6 +1409,7 @@ export interface ApiCouponCoupon extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    usesCurrencyAmounts: Schema.Attribute.Boolean;
     workedCount: Schema.Attribute.Integer &
       Schema.Attribute.SetMinMax<
         {
@@ -1711,6 +1716,10 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    currencyCode: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 3;
+      }>;
     dealImage: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
     discount: Schema.Attribute.String;
     discountPrefix: Schema.Attribute.Enumeration<
@@ -1773,6 +1782,7 @@ export interface ApiDealDeal extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    usesCurrencyAmounts: Schema.Attribute.Boolean;
     workedCount: Schema.Attribute.Integer &
       Schema.Attribute.SetMinMax<
         {
@@ -2189,6 +2199,12 @@ export interface ApiGlobalGlobal extends Struct.SingleTypeSchema {
         };
       }>;
     publishedAt: Schema.Attribute.DateTime;
+    saleStrip: Schema.Attribute.Component<'shared.sale-strip', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
     sendyListId: Schema.Attribute.String &
       Schema.Attribute.Private &
       Schema.Attribute.SetPluginOptions<{
@@ -3439,6 +3455,8 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
           localized: true;
         };
       }>;
+    offerCardStyle: Schema.Attribute.Enumeration<['default', 'marketplace']> &
+      Schema.Attribute.DefaultTo<'default'>;
     orderedCoupons: Schema.Attribute.Relation<
       'manyToMany',
       'api::coupon.coupon'

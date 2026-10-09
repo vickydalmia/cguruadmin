@@ -20,7 +20,7 @@ import {
   withAmazonAffiliateDisclosure,
 } from './amazon-affiliate-disclosure';
 import { buildDealComputedContent } from './deal-computed-content';
-import { formatDealDiscount } from './deal-discount';
+import { formatPublicDealDiscount, offerAmountCurrency } from './offer-money-display';
 
 /** Split a stored offerText string ("EXTRA 18% OFF") into its render words. */
 export function splitOfferWords(value: string): string[] {
@@ -37,11 +37,12 @@ const BENEFIT_SUFFIX: Record<string, string> = Object.fromEntries(
  * amount-only rule, kept by the validator's grandfather) passes through
  * unchanged — appending would double the wording.
  */
-export function formatBenefitText(value: string, suffix: string): string {
+export function formatBenefitText(value: string, suffix: string, currencyCode?: unknown, usesCurrencyAmounts?: unknown): string {
   const trimmed = value.trim();
   if (!trimmed) return trimmed;
-  if (!isOfferAmount(trimmed)) return trimmed;
-  return `${normalizeOfferAmount(trimmed)} ${suffix}`;
+  currencyCode = offerAmountCurrency(trimmed, currencyCode, usesCurrencyAmounts);
+  if (!isOfferAmount(trimmed, currencyCode)) return trimmed;
+  return `${normalizeOfferAmount(trimmed, currencyCode)} ${suffix}`;
 }
 
 // A node carrying any of the Deal pricing scalars is a Deal payload — no other
@@ -74,13 +75,15 @@ export function arrayizeOfferText<T>(node: T): T {
         record[key] = formatBenefitText(
           value,
           BENEFIT_SUFFIX[key],
+          record.currencyCode,
+          record.usesCurrencyAmounts,
         );
       } else {
         arrayizeOfferText(value);
       }
     }
     if ('discountPrefix' in record) {
-      const formatted = formatDealDiscount(record.discount, record.discountPrefix);
+      const formatted = formatPublicDealDiscount(record);
       if (formatted !== null) record.discount = formatted;
       delete record.discountPrefix;
     }
@@ -88,6 +91,7 @@ export function arrayizeOfferText<T>(node: T): T {
       const computed = buildDealComputedContent(record);
       if (computed) record.computedContent = computed;
     }
+    delete record.usesCurrencyAmounts;
     if (AMAZON_AFFILIATE_DISCLOSURE_FIELD in record) {
       if ('content' in record) {
         const content = withAmazonAffiliateDisclosure(record);

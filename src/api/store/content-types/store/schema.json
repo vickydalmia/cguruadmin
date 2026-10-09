@@ -101,6 +101,11 @@
       "type": "boolean",
       "default": true
     },
+    "offerCardStyle": {
+      "type": "enumeration",
+      "enum": ["default", "marketplace"],
+      "default": "default"
+    },
     "isFestiveOffer": {
       "type": "boolean",
       "default": false

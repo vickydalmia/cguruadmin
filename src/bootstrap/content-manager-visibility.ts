@@ -15,8 +15,8 @@ const HIDE_FROM_EDIT: Record<string, string[]> = {
   // Hidden here BECAUSE the Taxonomies panel owns them — the panel builds its
   // sections from the same OFFER_TAXONOMY_FIELDS constant
   // (src/admin/features/taxonomy-panel/config.ts), keeping the pair in sync.
-  'api::deal.deal': [...OFFER_TAXONOMY_FIELDS],
-  'api::coupon.coupon': [...OFFER_TAXONOMY_FIELDS],
+  'api::deal.deal': [...OFFER_TAXONOMY_FIELDS, 'usesCurrencyAmounts'],
+  'api::coupon.coupon': [...OFFER_TAXONOMY_FIELDS, 'usesCurrencyAmounts'],
   // Offer membership is maintained from Coupon/Deal records. Entity editors
   // use the dedicated Top Pick and Ordered Coupon panels; Deals remain fully
   // automatic, so none of these raw relation inputs belongs in the edit form.
@@ -66,6 +66,7 @@ const HIDE_FROM_EDIT: Record<string, string[]> = {
 // Unlike HIDE_FROM_EDIT these stay in the LIST layout: lifecycle fields are
 // exactly the columns editors sort and filter offers by.
 const OFFER_PANEL_ONLY_FIELDS = [
+  'currencyCode',
   'contentStatus',
   'publishedOn',
   'scheduledAt',

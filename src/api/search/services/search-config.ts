@@ -59,6 +59,7 @@ export const COUPON_FIELDS = [
   "code",
   "couponType",
   "affiliateLink",
+  "usesCurrencyAmounts", "currencyCode",
   "offerCountries",
   // Affiliate-brand offers resolve the BRAND logo/owner in mapOffer.
   "isForAffiliateBrand",
@@ -74,6 +75,7 @@ export const DEAL_FIELDS = [
   "discount",
   "discountPrefix",
   "expiresAt",
+  "usesCurrencyAmounts", "currencyCode",
   "offerCountries",
   // Affiliate-brand offers resolve the BRAND logo/owner in mapOffer.
   "isForAffiliateBrand",

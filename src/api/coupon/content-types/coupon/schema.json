@@ -200,6 +200,14 @@
       "relation": "manyToMany",
       "target": "api::brand.brand",
       "inversedBy": "coupons"
+    },
+    "currencyCode": {
+      "type": "string",
+      "maxLength": 3,
+      "regex": "^[A-Z]{3}$"
+    },
+    "usesCurrencyAmounts": {
+      "type": "boolean"
     }
   }
 }

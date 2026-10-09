@@ -2,7 +2,7 @@ import type { Core } from '@strapi/strapi';
 import { brandRef, categoryRef, storeRef, isLiveOffer, hasSafeAffiliateLink, sanitizeOutput, NEWEST_FIRST, PUBLISHED_OFFER_FILTER } from '../../../utils/offer-visibility';
 
 export const FESTIVAL_CATEGORY_COUPON = {
-  fields: ['title', 'content', 'offerText', 'code', 'couponType', 'affiliateLink', 'checkoutMerchant', 'isForAffiliateBrand', 'expiresAt', 'contentStatus', 'publishedOn', 'publishedAt', 'cashbackText', 'bankOfferText', 'prepaidText', 'badge', 'offerCountries'],
+  fields: ['title', 'content', 'offerText', 'code', 'couponType', 'affiliateLink', 'checkoutMerchant', 'isForAffiliateBrand', 'expiresAt', 'contentStatus', 'publishedOn', 'publishedAt', 'cashbackText', 'bankOfferText', 'prepaidText', 'badge', 'usesCurrencyAmounts', 'currencyCode', 'offerCountries'],
   populate: { stores: storeRef, logoStore: storeRef, brands: brandRef, categories: categoryRef, banks: { fields: ['name', 'slug', 'logoAlt'], populate: { logo: true } }, uniqueCouponPool: { fields: ['name'] } },
 };
 export const FESTIVAL_CATEGORIES_POPULATE = {

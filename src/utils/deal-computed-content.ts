@@ -1,3 +1,4 @@
+import { isOfferCurrency } from './offer-currency';
 // Pre-calculated "Deal Details" template for Product Deals, sent to the UI as
 // `computedContent` alongside the editor-written `content`:
 //
@@ -29,10 +30,15 @@ function escapeHtml(value: string): string {
 function formatAmount(
   value: unknown,
   localization: OfferContentLocalization,
+  currencyCode?: unknown,
 ): string | null {
   if (value === null || value === undefined || value === '') return null;
   const amount = Number(value);
   if (!Number.isFinite(amount) || amount <= 0) return null;
+  if (isOfferCurrency(currencyCode)) {
+    const digits = new Intl.NumberFormat('en', { style: 'currency', currency: currencyCode }).resolvedOptions().maximumFractionDigits;
+    return `${currencyCode} ${new Intl.NumberFormat(localization.locale, { maximumFractionDigits: digits }).format(amount)}`;
+  }
   return `${localization.currencySymbol}${new Intl.NumberFormat(
     localization.locale,
     { maximumFractionDigits: 2 },
@@ -40,13 +46,14 @@ function formatAmount(
 }
 
 export function buildDealComputedContent(deal: {
+  currencyCode?: unknown;
   salePrice?: unknown;
   mrp?: unknown;
   discount?: unknown;
 }): string | null {
   const localization = currentOfferContentLocalization();
-  const price = formatAmount(deal.salePrice, localization);
-  const mrp = formatAmount(deal.mrp, localization);
+  const price = formatAmount(deal.salePrice, localization, deal.currencyCode);
+  const mrp = formatAmount(deal.mrp, localization, deal.currencyCode);
   // "MRP" is India's statutory retail term; other countries say "List Price".
   const mrpLabel = localization.countryCode === 'IN' ? 'MRP' : 'List Price';
   const discount =

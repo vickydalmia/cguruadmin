@@ -57,6 +57,7 @@ export const COUPON_FIELDS = [
   // Affiliate-brand offers render the BRAND logo in their identity slot.
   'isForAffiliateBrand',
   // Csv of offer-country registry codes — flag tags on the cards.
+  'usesCurrencyAmounts', 'currencyCode',
   'offerCountries',
   'expiresAt',
   'contentStatus',
@@ -213,6 +214,7 @@ export const FOOTER_POPULATE = {
 } as const;
 
 export const GLOBAL_POPULATE = {
+  saleStrip: { populate: { logo: true } },
   telegramCta: true,
   newsletter: true,
 } as const;
