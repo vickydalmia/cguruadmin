@@ -63,9 +63,9 @@ footer links. A gateway rollback requires restoring its old Sendy URL/list
 environment values. Rolling Strapi back requires restoring the pre-upgrade
 database backup because schema sync removes the retired component URL column.
 
-## Sale strip — homepage and stores
+## Sale strip — homepage and entities
 
-Global Settings → Sale strip — homepage and stores contains separate enable toggles and navy/orange color selections for each placement. The homepage strip sits between Top Offers and Top Deals; the store strip sits below Top Picks. Brands, categories and banks do not show the store placement. Both placements default to disabled. Existing store settings remain compatible.
+Global Settings → Sale strip — homepage and entities contains separate enable toggles and navy/orange color selections for each placement. The homepage strip sits between Top Offers and Top Deals; the entity strip sits below Top Picks on all store, brand, bank and category pages. Both placements default to disabled. The existing enabled and colorTheme fields control all four entity types; existing saved settings remain compatible.
 
 The logo, heading/highlight, description, three statistics and button are shared. A valid site path or HTTP(S) destination and complete text are required when either placement is enabled. Statistics are editorial values, not live counts. An empty logo field uses the bundled Great Savings Fest artwork; a selected image uses the CMS responsive media pipeline. Copy is localized per Global entry.
 

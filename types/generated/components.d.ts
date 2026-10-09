@@ -2906,7 +2906,7 @@ export interface SharedParagraph extends Struct.ComponentSchema {
 export interface SharedSaleStrip extends Struct.ComponentSchema {
   collectionName: 'components_shared_sale_strips';
   info: {
-    description: 'Shared campaign content with independent homepage and store visibility and colors. No offer relations.';
+    description: 'Shared campaign content with independent homepage and entity visibility and colors. No offer relations.';
     displayName: 'Sale strip';
   };
   attributes: {

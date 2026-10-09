@@ -21,10 +21,10 @@ import { AFFILIATE_OFFER_TOGGLE_FIELD } from '../constants/affiliate-offer';
 // Exported for hint-coverage.test.ts only.
 export const COMPONENT_FIELD_DESCRIPTIONS: Record<string, Record<string, string>> = {};
 COMPONENT_FIELD_DESCRIPTIONS['shared.sale-strip'] = {
-  colorTheme: 'Store strip color: navy blue or orange gradient. Independent of the homepage color.',
-  homepageEnabled: 'Show this strip between Top Offers and Top Deals on the homepage. Independent of store visibility.',
-  homepageColorTheme: 'Homepage strip color: navy blue or orange gradient. Independent of the store color.',
-  enabled: 'Enable the sale strip below Top Picks on all store pages. Independent of homepage visibility. Other entity types do not show it.',
+  colorTheme: 'Entity strip color: navy blue or orange gradient. Independent of the homepage color.',
+  homepageEnabled: 'Show this strip between Top Offers and Top Deals on the homepage. Independent of entity visibility.',
+  homepageColorTheme: 'Homepage strip color: navy blue or orange gradient. Independent of the entity color.',
+  enabled: 'Enable the sale strip below Top Picks on all store, brand, bank and category pages. Independent of homepage visibility.',
   logo: 'Optional square campaign logo. Leave empty to use the original Great Savings Fest artwork. Rendered at 88px on desktop and 64px on mobile.',
   logoAlt: 'Accessible description of the campaign logo.',
   highlight: 'Highlighted yellow text after the heading, for example LIVE!.',
@@ -49,7 +49,7 @@ COMPONENT_FIELD_DESCRIPTIONS['subscription.platforms'] = {
 // names. The API/storage key remains unchanged; this only controls the label
 // editors see in Content Manager.
 export const COMPONENT_FIELD_LABELS: Record<string, Record<string, string>> = {
-  'shared.sale-strip': { homepageEnabled: 'Enable sale strip on homepage', homepageColorTheme: 'Homepage color theme', colorTheme: 'Store color theme', enabled: 'Enable sale strip in stores', logoAlt: 'Logo alternative text', highlight: 'Highlighted heading text', ctaLabel: 'Button label', ctaUrl: 'Button destination' },
+  'shared.sale-strip': { homepageEnabled: 'Enable sale strip on homepage', homepageColorTheme: 'Homepage color theme', colorTheme: 'Entity color theme', enabled: 'Enable sale strip on all entities', logoAlt: 'Logo alternative text', highlight: 'Highlighted heading text', ctaLabel: 'Button label', ctaUrl: 'Button destination' },
   'home.hero-section': {
     products: 'Product/Offer',
   },
