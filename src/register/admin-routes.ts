@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { ADS_GENERATOR_ROUTE_PREFIX } from '../constants/ads-generator';
 import { CSV_EXPORT_ROUTE_PREFIX } from '../constants/csv-export';
 import { DATABASE_BACKUP_ROUTE_PREFIX } from '../constants/database-backup';
 
@@ -360,6 +361,22 @@ export function registerDatabaseBackupRoutes(strapi: Core.Strapi): void {
     ],
   } as any);
 }
+/**
+ * Google Ads generator: every call can spend OpenAI money, so it needs the
+ * assignable ads-generator.generate RBAC action (Settings → Roles).
+ */
+export function registerAdsGeneratorRoutes(strapi: Core.Strapi): void {
+  const policies = ['admin::isAuthenticatedAdmin', 'global::ads-generator-manage-only'];
+  strapi.server.routes({
+    type: 'admin',
+    prefix: ADS_GENERATOR_ROUTE_PREFIX,
+    routes: [
+      { method: 'GET', path: '/options', handler: 'api::ads-generator.ads-generator.options', config: { policies } },
+      { method: 'POST', path: '/generate', handler: 'api::ads-generator.ads-generator.generate', config: { policies } },
+    ],
+  } as any);
+}
+
 export function registerTelegramProcessingRoutes(strapi: Core.Strapi): void {
   const policies = ['admin::isAuthenticatedAdmin', 'global::super-admin-only'];
   strapi.server.routes({ type: 'admin', prefix: '/telegram-processing', routes: [

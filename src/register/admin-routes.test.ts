@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  registerAdsGeneratorRoutes,
   registerAdminRuntimeConfigRoutes,
   registerCountrySetupRoutes,
   registerDatabaseBackupRoutes,
@@ -150,6 +151,24 @@ describe('database backup routes', () => {
     ]);
     for (const route of registration.routes) {
       expect(route.config.policies).toEqual(['admin::isAuthenticatedAdmin', 'global::super-admin-only']);
+    }
+  });
+});
+
+describe('ads generator routes', () => {
+  it('keeps the paid generation endpoints on the admin router behind the ads-generator RBAC policy', () => {
+    const routes = vi.fn();
+    registerAdsGeneratorRoutes({ server: { routes } } as any);
+
+    const registration = routes.mock.calls[0][0];
+    expect(registration.type).toBe('admin');
+    expect(registration.prefix).toBe('/ads-generator');
+    expect(registration.routes.map((route: any) => `${route.method} ${route.path} → ${route.handler}`)).toEqual([
+      'GET /options → api::ads-generator.ads-generator.options',
+      'POST /generate → api::ads-generator.ads-generator.generate',
+    ]);
+    for (const route of registration.routes) {
+      expect(route.config.policies).toEqual(['admin::isAuthenticatedAdmin', 'global::ads-generator-manage-only']);
     }
   });
 });

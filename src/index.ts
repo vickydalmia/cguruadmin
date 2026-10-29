@@ -1,4 +1,5 @@
 import { WEBSITE_REFRESH_ACTION_ATTRIBUTES } from './api/website-refresh/controllers/website-refresh';
+import { ADS_GENERATOR_ACTION_ATTRIBUTES } from './constants/ads-generator';
 import { seedSubscriptionPage } from './api/subscription-page/services/seed-subscription-page';
 import { GLOBAL_SETTINGS_LABELS } from './constants/global-settings';
 import { installMigrationLockTimeout } from './register/migration-lock-timeout';
@@ -78,6 +79,7 @@ import {
 import { runDatabaseReconciliations } from './bootstrap/db-reconciliation';
 import { ensureTelegramPageSeed } from './bootstrap/telegram-page-seed';
 import {
+  registerAdsGeneratorRoutes,
   registerAdminRuntimeConfigRoutes,
   registerCsvExportRoutes,
   registerCountrySetupRoutes,
@@ -175,6 +177,7 @@ export default {
       TRANSLATION_ACTION_ATTRIBUTES,
       UI_DICTIONARY_ACTION_ATTRIBUTES,
       WEBSITE_REFRESH_ACTION_ATTRIBUTES,
+      ADS_GENERATOR_ACTION_ATTRIBUTES,
     ]);
 
     registerEntityCouponLayoutRoutes(strapi);
@@ -188,6 +191,7 @@ export default {
     registerWebsiteRefreshRoutes(strapi);
     registerDatabaseBackupRoutes(strapi);
     registerTelegramProcessingRoutes(strapi);
+    registerAdsGeneratorRoutes(strapi);
 
     // Document-service middlewares. Registration order = execution order:
     // the record-lock guard must run before the document-write pipeline
