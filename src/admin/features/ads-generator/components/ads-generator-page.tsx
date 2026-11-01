@@ -1,8 +1,9 @@
 import * as React from 'react';
 import { Box, Flex, Typography } from '@strapi/design-system';
 import { Layouts, Page, useFetchClient } from '@strapi/strapi/admin';
-import type { AdsGeneratorOptions, AdsGeneratorResult } from '../../../../constants/ads-generator';
-import { adsGeneratorApi, adsGeneratorError, EMPTY_FORM, type AdsGeneratorFailure } from '../api';
+import type { AdsGeneratorJob, AdsGeneratorOptions } from '../../../../constants/ads-generator';
+import { adsGeneratorApi, adsGeneratorError, EMPTY_FORM, progressLabel, type AdsGeneratorFailure } from '../api';
+import { useAdsGeneration } from '../use-ads-generation';
 import { AdsForm } from './ads-form';
 import { AdsResult } from './ads-result';
 
@@ -16,23 +17,16 @@ export default function AdsGeneratorPage() {
   const api = React.useMemo(() => adsGeneratorApi(client), [client.get, client.post]);
   const [options, setOptions] = React.useState<AdsGeneratorOptions | null>(null);
   const [form, setForm] = React.useState(EMPTY_FORM);
-  const [busy, setBusy] = React.useState(false);
-  const [failure, setFailure] = React.useState<AdsGeneratorFailure | null>(null);
-  const [result, setResult] = React.useState<AdsGeneratorResult | null>(null);
+  const [loadFailure, setLoadFailure] = React.useState<AdsGeneratorFailure | null>(null);
+  const generation = useAdsGeneration(api);
+  const failure = loadFailure ?? generation.failure;
 
   React.useEffect(() => {
     let active = true;
     api.options().then((value) => { if (active) setOptions(value); })
-      .catch((error) => { if (active) setFailure(adsGeneratorError(error)); });
+      .catch((error) => { if (active) setLoadFailure(adsGeneratorError(error)); });
     return () => { active = false; };
   }, [api]);
-
-  async function generate() {
-    setBusy(true); setFailure(null); setResult(null);
-    try { setResult(await api.generate(form)); }
-    catch (error) { setFailure(adsGeneratorError(error)); }
-    finally { setBusy(false); }
-  }
 
   if (failure?.forbidden) return <Page.NoPermissions />;
   if (!options && !failure) return <Page.Loading />;
@@ -54,17 +48,30 @@ export default function AdsGeneratorPage() {
           {failure && <FailureNotice failure={failure} />}
           {options && (
             <Box background="neutral0" padding={6} hasRadius shadow="filterShadow">
-              <AdsForm options={options} value={form} onChange={setForm} onSubmit={() => void generate()} busy={busy} />
+              <AdsForm options={options} value={form} onChange={setForm} onSubmit={() => void generation.start(form)} busy={generation.busy} />
             </Box>
           )}
-          {result && (
+          {generation.job?.status === 'running' && <ProgressNotice job={generation.job} />}
+          {generation.result && (
             <Box background="neutral0" padding={6} hasRadius shadow="filterShadow">
-              <AdsResult result={result} />
+              <AdsResult result={generation.result} />
             </Box>
           )}
         </Flex>
       </Layouts.Content>
     </Page.Main>
+  );
+}
+
+function ProgressNotice({ job }: { job: AdsGeneratorJob }) {
+  return (
+    <Box role="status" background="primary100" padding={4} hasRadius>
+      <Typography fontWeight="bold" textColor="primary700">{progressLabel(job)}</Typography>
+      <Typography tag="p" textColor="primary700">
+        {job.reattached ? 'A generation you started earlier is still running; showing it here. ' : ''}
+        This can take a few minutes. You can stay on this page or reload it; the result will appear here.
+      </Typography>
+    </Box>
   );
 }
 
