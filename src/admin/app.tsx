@@ -11,6 +11,7 @@ import { Earth } from '@strapi/icons';
 
 import { CHECKOUT_MERCHANT_CUSTOM_FIELD_NAME } from '../constants/checkout-merchant';
 import { OFFER_COUNTRIES_CUSTOM_FIELD_NAME } from '../constants/offer-countries';
+import { ADS_GENERATOR_ACTION } from '../constants/ads-generator';
 import RichTextEditor from './features/rich-text/rich-text-editor';
 import DateTimeInput from './components/date-time-input';
 import BooleanConfirmInput from './components/boolean-confirm-input';
@@ -240,6 +241,18 @@ export default {
         const page = await import(
           './features/database-backups/components/database-backups-page'
         );
+        return { default: page.default };
+      },
+    });
+    // Shown only to roles granted "Generate Google Ads" (Settings → Roles);
+    // global::ads-generator-manage-only on every endpoint enforces it.
+    app.addSettingsLink('global', {
+      id: 'ads-generator',
+      to: '/settings/ads-generator',
+      permissions: [{ action: ADS_GENERATOR_ACTION, subject: null }],
+      intlLabel: { id: 'ads-generator.settings.label', defaultMessage: 'Ads Generator' },
+      Component: async () => {
+        const page = await import('./features/ads-generator/components/ads-generator-page');
         return { default: page.default };
       },
     });
