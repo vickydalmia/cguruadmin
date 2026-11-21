@@ -1,11 +1,13 @@
 import * as React from 'react';
 import { Box, Flex, Typography } from '@strapi/design-system';
 import { Layouts, Page, useFetchClient } from '@strapi/strapi/admin';
-import type { AdsGeneratorJob, AdsGeneratorOptions } from '../../../../constants/ads-generator';
-import { adsGeneratorApi, adsGeneratorError, EMPTY_FORM, progressLabel, type AdsGeneratorFailure } from '../api';
-import { useAdsGeneration } from '../use-ads-generation';
+import { ADS_LLM_LIMITS, type AdsGeneratorJob, type AdsGeneratorOptions } from '../../../../constants/ads-generator';
+import { useGenerationJob } from '../../../utils/use-generation-job';
+import { adsGeneratorApi, adsGeneratorError, EMPTY_FORM, JOB_STORAGE_KEY, progressLabel, restoredForm, type AdsGeneratorFailure } from '../api';
 import { AdsForm } from './ads-form';
 import { AdsResult } from './ads-result';
+
+const GENERATION_SETTINGS = { storageKey: JOB_STORAGE_KEY, pollMs: ADS_LLM_LIMITS.jobPollMs, toFailure: adsGeneratorError };
 
 /**
  * Settings → Ads Generator. Access is the "Generate Google Ads" role
@@ -18,7 +20,7 @@ export default function AdsGeneratorPage() {
   const [options, setOptions] = React.useState<AdsGeneratorOptions | null>(null);
   const [form, setForm] = React.useState(EMPTY_FORM);
   const [loadFailure, setLoadFailure] = React.useState<AdsGeneratorFailure | null>(null);
-  const generation = useAdsGeneration(api);
+  const generation = useGenerationJob(api, GENERATION_SETTINGS);
   const failure = loadFailure ?? generation.failure;
 
   React.useEffect(() => {
@@ -27,6 +29,10 @@ export default function AdsGeneratorPage() {
       .catch((error) => { if (active) setLoadFailure(adsGeneratorError(error)); });
     return () => { active = false; };
   }, [api]);
+
+  React.useEffect(() => {
+    if (generation.restoredInput) setForm(restoredForm(generation.restoredInput));
+  }, [generation.restoredInput]);
 
   if (failure?.forbidden) return <Page.NoPermissions />;
   if (!options && !failure) return <Page.Loading />;

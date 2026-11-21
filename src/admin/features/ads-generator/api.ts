@@ -6,6 +6,10 @@ import {
   type AdsGeneratorOptions,
   type AdsGeneratorResult,
 } from '../../../constants/ads-generator';
+import {
+  generationFailure,
+  type GenerationFailure,
+} from '../../utils/generation-job';
 
 /** React-free request logic for Settings → Ads Generator. */
 
@@ -35,6 +39,14 @@ export const EMPTY_FORM: AdsGeneratorFormInput = {
   brandCategories: '',
 };
 
+/** Refills the form from a recovered job, keeping only known text fields. */
+export function restoredForm(input: unknown): AdsGeneratorFormInput {
+  const source = (input ?? {}) as Record<string, unknown>;
+  const form = { ...EMPTY_FORM } as Record<string, unknown>;
+  for (const key of Object.keys(EMPTY_FORM)) if (typeof source[key] === 'string') form[key] = source[key];
+  return form as AdsGeneratorFormInput;
+}
+
 export function adsGeneratorApi(client: Client) {
   return {
     async options(): Promise<AdsGeneratorOptions> {
@@ -44,36 +56,20 @@ export function adsGeneratorApi(client: Client) {
     async generate(form: AdsGeneratorFormInput): Promise<AdsGeneratorJob> {
       return (await client.post(GENERATE_PATH, form)).data;
     },
+    async latest(): Promise<AdsGeneratorJob | null> {
+      return (await client.get(`${ADS_GENERATOR_ROUTE_PREFIX}/jobs/latest`)).data.job;
+    },
     async job(id: string): Promise<AdsGeneratorJob> {
       return (await client.get(jobPath(id))).data;
     },
   };
 }
 
-export type AdsGeneratorFailure = { message: string; problems: string[]; forbidden: boolean };
+export type AdsGeneratorFailure = GenerationFailure;
 
 /** Server errors are `{ error, problems? }`; show both. */
 export function adsGeneratorError(error: unknown): AdsGeneratorFailure {
-  const value = error as { status?: number; message?: string; response?: { status?: number; data?: any } };
-  const status = value?.response?.status ?? value?.status;
-  const data = value?.response?.data;
-  const message = typeof data?.error === 'string'
-    ? data.error
-    : data?.error?.message ?? value?.message ?? 'The request failed. Try again.';
-  return {
-    message: status === 403 ? 'Your role needs the “Generate Google Ads” permission.' : message,
-    problems: Array.isArray(data?.problems) ? data.problems.map(String) : [],
-    forbidden: status === 403,
-  };
-}
-
-/** A failed job carries the same `{ message, problems }` the page already shows. */
-export function jobFailure(job: AdsGeneratorJob): AdsGeneratorFailure {
-  return {
-    message: job.error?.message ?? 'Ad generation failed. Try again.',
-    problems: job.error?.problems ?? [],
-    forbidden: false,
-  };
+  return generationFailure(error, 'Your role needs the “Generate Google Ads” permission.');
 }
 
 export function progressLabel(job: AdsGeneratorJob): string {
@@ -81,29 +77,8 @@ export function progressLabel(job: AdsGeneratorJob): string {
   return `Fixing the copy (OpenAI call ${job.attempt} of ${job.maxAttempts})…`;
 }
 
-/**
- * The running job's id survives a page reload in this tab, so the page can
- * reconnect to it. sessionStorage can be unavailable; that only loses the
- * reconnect, never the job.
- */
-const JOB_KEY = 'ads-generator.job-id';
-
-export function rememberJob(id: string | null): void {
-  try {
-    if (id) window.sessionStorage.setItem(JOB_KEY, id);
-    else window.sessionStorage.removeItem(JOB_KEY);
-  } catch {
-    // Storage blocked: nothing to remember.
-  }
-}
-
-export function rememberedJob(): string | null {
-  try {
-    return window.sessionStorage.getItem(JOB_KEY);
-  } catch {
-    return null;
-  }
-}
+/** sessionStorage key for the running job, so a reload can reconnect. */
+export const JOB_STORAGE_KEY = 'ads-generator.job-id';
 
 /** Saves the generated CSV through a temporary object URL. */
 export function downloadCsv(csv: AdsGeneratorResult['csv']): void {

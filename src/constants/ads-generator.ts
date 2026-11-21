@@ -3,13 +3,14 @@
  * one place, plus the request/response contract shared by the admin settings
  * page and the server module (`src/ads-generator/`).
  *
- * Import-free on purpose: this file is bundled into the admin panel. Values
+ * Bundled into the admin panel, so it imports types only. Values
  * marked "TBD" are placeholders until the business decisions are made; change
  * them here, nothing else needs to move.
  *
  * Mounted on the ADMIN router at `/ads-generator` (no `/api` segment) behind
  * `admin::isAuthenticatedAdmin` + `global::ads-generator-manage-only`.
  */
+import type { GenerationJob } from './ai-generation';
 
 export const ADS_GENERATOR_ROUTE_PREFIX = '/ads-generator';
 
@@ -357,17 +358,7 @@ export type AdsGeneratorResult = {
  * A background generation (POST /generate starts it, GET /jobs/:id polls it).
  * `attempt` counts OpenAI calls made so far, up to `maxAttempts` (1 + repairs).
  */
-export type AdsGeneratorJob = {
-  id: string;
-  status: 'running' | 'succeeded' | 'failed';
-  attempt: number;
-  maxAttempts: number;
-  startedAt: string;
-  /** True when the submit reattached to a job that was already running. */
-  reattached?: boolean;
-  result?: AdsGeneratorResult;
-  error?: { message: string; problems: string[] };
-};
+export type AdsGeneratorJob = GenerationJob<AdsGeneratorResult>;
 
 export type AdsGeneratorOptions = {
   configured: boolean;

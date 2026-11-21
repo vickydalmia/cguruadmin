@@ -20,6 +20,10 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     ctx.status = result.status;
     ctx.body = result.body;
   },
+  async latest(ctx: any) {
+    ctx.set('Cache-Control', 'private, no-store');
+    ctx.body = adsGeneratorService(strapi.log).latest(String(ctx.state.user.id));
+  },
   async job(ctx: any) {
     ctx.set('Cache-Control', 'private, no-store');
     const id = String(ctx.params.id ?? '');

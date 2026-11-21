@@ -1,16 +1,37 @@
 import { describe, expect, it } from 'vitest';
-import { AdsJobStore } from './job-store';
+import { JobStore } from './job-store';
 
 function store() {
   let now = Date.parse('2026-11-01T10:00:00Z');
   let next = 0;
-  const jobs = new AdsJobStore(30 * 60_000, () => now, () => `job-${(next += 1)}`);
+  const jobs = new JobStore<unknown>({ retentionMs: 30 * 60_000, maxAttempts: 3, now: () => now, newId: () => `job-${(next += 1)}` });
   return { jobs, advance: (ms: number) => { now += ms; } };
 }
 
 const RESULT = { cached: false } as any;
 
-describe('AdsJobStore', () => {
+describe('latest job and request identity', () => {
+  const store = () => new JobStore<string>({ retentionMs: 1000, maxAttempts: 3 });
+
+  it('recovers the running job, else the last finished one, for its owner only', () => {
+    const jobs = store();
+    const first = jobs.start('1', { requestKey: 'a', input: { brandName: 'Myntra' } });
+    expect(jobs.latestFor('1')?.id).toBe(first.id);
+    expect(jobs.latestFor('2')).toBeNull();
+    jobs.succeed(first.id, 'done');
+    expect(jobs.latestFor('1')).toMatchObject({ id: first.id, result: 'done', input: { brandName: 'Myntra' } });
+  });
+
+  it('tells the same request from a different one without exposing the key', () => {
+    const jobs = store();
+    const job = jobs.start('1', { requestKey: 'a' });
+    expect(jobs.isSameRequest(job.id, 'a')).toBe(true);
+    expect(jobs.isSameRequest(job.id, 'b')).toBe(false);
+    expect(job).not.toHaveProperty('requestKey');
+  });
+});
+
+describe('JobStore', () => {
   it('tracks a running job, its progress and its result', () => {
     const { jobs } = store();
     const job = jobs.start('1');

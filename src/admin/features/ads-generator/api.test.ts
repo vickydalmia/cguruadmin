@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { adsGeneratorApi, adsGeneratorError, EMPTY_FORM, GENERATE_PATH, jobFailure, jobPath, OPTIONS_PATH, progressLabel } from './api';
+import { adsGeneratorApi, adsGeneratorError, EMPTY_FORM, GENERATE_PATH, jobPath, OPTIONS_PATH, progressLabel } from './api';
 
 describe('ads generator admin api', () => {
   it('calls the admin routes', async () => {
@@ -22,11 +22,6 @@ describe('ads generator admin api', () => {
   it('explains a 403', () => {
     expect(adsGeneratorError({ response: { status: 403, data: { error: { message: 'Policy Failed' } } } }))
       .toEqual({ message: 'Your role needs the “Generate Google Ads” permission.', problems: [], forbidden: true });
-  });
-
-  it('turns a failed job into the notice the page shows', () => {
-    const job = { id: 'j', status: 'failed', attempt: 3, maxAttempts: 3, startedAt: '', error: { message: 'Still invalid.', problems: ['H1 too long'] } } as const;
-    expect(jobFailure(job)).toEqual({ message: 'Still invalid.', problems: ['H1 too long'], forbidden: false });
   });
 
   it('describes progress by OpenAI call', () => {

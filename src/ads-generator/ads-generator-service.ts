@@ -1,19 +1,21 @@
+import { JobStore } from '../ai-generation/job-store';
+import { UsageLimiter } from '../ai-generation/usage-limiter';
 import {
   ADS_ACCOUNT_CURRENCY,
+  ADS_LLM_LIMITS,
   ADS_FORM_LIMITS,
   ADS_PROMPT_VERSION,
   type AdsGeneratorJob,
+  type AdsGeneratorResult,
   type AdsGeneratorOptions,
 } from '../constants/ads-generator';
 import { readAdsDebugLogging, readAdsGeneratorConfig, readAdsUsageLimits, type AdsGeneratorConfig } from './config';
 import { failure, toFailure, type Failure } from './failure';
 import { parseAdsForm, type AdsForm } from './form';
 import { generateAds } from './generate-ads';
-import { AdsJobStore } from './job-store';
 import { createOpenAiCreativeModel, type CreativeModelCall } from './openai-client';
 import { checkRelevance } from './relevance-gate';
 import { ResultCache } from './result-cache';
-import { UsageLimiter } from './usage-limiter';
 
 /**
  * The request pipeline, in the order that keeps cost at zero for anything
@@ -40,7 +42,7 @@ export type AdsGeneratorDeps = {
   createModel: (config: AdsGeneratorConfig) => CreativeModelCall;
   limiter: UsageLimiter;
   cache: ResultCache;
-  jobs: AdsJobStore;
+  jobs: JobStore<AdsGeneratorResult>;
   log: Logger;
   /** Log full prompts and responses (ADS_GENERATOR_DEBUG_LOG=true). */
   debugLogging?: boolean;
@@ -94,21 +96,31 @@ export function createAdsGeneratorService(deps: AdsGeneratorDeps) {
         return reject(failure(503, 'Ad generation is not configured on this server (ADS_GENERATOR_OPENAI_API_KEY / ADS_GENERATOR_MODEL).'));
       }
 
-      // A second submit (double click, retry after a proxy timeout, another
-      // tab) joins the running job instead of failing or paying twice.
-      const running = deps.jobs.runningFor(userId);
-      if (running) return { status: 202, body: { ...running, reattached: true } };
-
       const cacheKey = ResultCache.key(form, deps.config.model);
+      const request = { requestKey: cacheKey, input: body };
+
+      // The same brief (double click, retry after a proxy timeout, another tab)
+      // joins the running job. A different brief must never receive its result.
+      const running = deps.jobs.runningFor(userId);
+      if (running) {
+        if (deps.jobs.isSameRequest(running.id, cacheKey)) return { status: 202, body: { ...running, reattached: true } };
+        return reject(failure(409, 'Another ad is still being generated. Wait for it to finish, then submit this brief.'));
+      }
+
       const cached = deps.cache.get(cacheKey);
-      if (cached) return { status: 200, body: deps.jobs.finished(userId, { ...cached, cached: true }) };
+      if (cached) return { status: 200, body: deps.jobs.finished(userId, { ...cached, cached: true }, request) };
 
       const slot = deps.limiter.acquire(userId);
       if ('message' in slot) return reject(failure(429, slot.message));
 
-      const job = deps.jobs.start(userId);
+      const job = deps.jobs.start(userId, request);
       void run(job.id, form, userId, cacheKey);
       return { status: 202, body: job };
+    },
+
+    /** The admin's running or last job, so any tab or reload can recover it. */
+    latest(userId: string): { job: AdsGeneratorJob | null } {
+      return { job: deps.jobs.latestFor(userId) };
     },
 
     job(id: string, userId: string): ServiceResponse {
@@ -128,11 +140,16 @@ export function adsGeneratorService(log: Logger) {
     createModel: createOpenAiCreativeModel,
     limiter: new UsageLimiter(readAdsUsageLimits()),
     cache: new ResultCache(),
-    jobs: new AdsJobStore(),
+    jobs: adsJobStore(),
     log,
     debugLogging: readAdsDebugLogging(),
   });
   return service;
+}
+
+/** One OpenAI call plus up to maxRepairAttempts repairs per job. */
+export function adsJobStore(): JobStore<AdsGeneratorResult> {
+  return new JobStore({ retentionMs: ADS_LLM_LIMITS.jobRetentionMs, maxAttempts: 1 + ADS_LLM_LIMITS.maxRepairAttempts });
 }
 
 function reject({ status, error, problems }: Failure): ServiceResponse {

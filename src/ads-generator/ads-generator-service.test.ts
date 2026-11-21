@@ -2,11 +2,10 @@ import { APICallError } from 'ai';
 import { describe, expect, it, vi } from 'vitest';
 import type { AdsGeneratorJob } from '../constants/ads-generator';
 import { formInput, validOutput } from './__fixtures__/ads-fixtures';
-import { createAdsGeneratorService, type ServiceResponse } from './ads-generator-service';
-import { AdsJobStore } from './job-store';
+import { UsageLimiter } from '../ai-generation/usage-limiter';
+import { adsJobStore, createAdsGeneratorService, type ServiceResponse } from './ads-generator-service';
 import { AdsModelIncompleteError, type CreativeModelCall } from './openai-client';
 import { ResultCache } from './result-cache';
-import { UsageLimiter } from './usage-limiter';
 
 const CONFIG = { apiKey: 'sk-test', model: 'test-model', reasoningEffort: 'low' as const, maxOutputTokens: 16000, timeoutMs: 180000 };
 
@@ -20,7 +19,7 @@ function setup(options: { configured?: boolean; call?: CreativeModelCall; perHou
     createModel: () => call,
     limiter: new UsageLimiter({ maxRequestsPerUserPerHour: options.perHour ?? 10, maxRequestsPerDay: 100 }),
     cache: new ResultCache(),
-    jobs: new AdsJobStore(),
+    jobs: adsJobStore(),
     log,
     debugLogging: options.debugLogging,
   });
@@ -28,6 +27,25 @@ function setup(options: { configured?: boolean; call?: CreativeModelCall; perHou
 }
 
 type Service = ReturnType<typeof setup>['service'];
+
+describe('reload and second-brief safety', () => {
+  it('refuses a different brief while one is running, and joins the same brief', () => {
+    const { service, call } = setup({ call: () => new Promise(() => undefined) });
+    const first = service.generate(formInput(), '1');
+    expect(first.status).toBe(202);
+    expect(service.generate(formInput(), '1').body).toMatchObject({ id: (first.body as AdsGeneratorJob).id, reattached: true });
+    expect(service.generate(formInput({ brandName: 'Nike', campaignName: 'Test Nike', offerDetails: 'Flat 20% off on Nike shoes.' }), '1').status).toBe(409);
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns the finished job and its form from latest', async () => {
+    const { service } = setup();
+    const input = formInput();
+    await finish(service, service.generate(input, '1'));
+    expect(service.latest('1').job).toMatchObject({ status: 'succeeded', input });
+    expect(service.latest('2').job).toBeNull();
+  });
+});
 
 /** Lets the background job run, then returns its final state. */
 async function finish(service: Service, response: ServiceResponse, userId = '1'): Promise<AdsGeneratorJob> {
@@ -66,7 +84,7 @@ describe('ads generator service', () => {
     const { call, release } = pendingCall();
     const { service } = setup({ call });
     const first = service.generate(formInput(), '1');
-    const second = service.generate(formInput({ campaignName: 'Other' }), '1');
+    const second = service.generate(formInput(), '1');
 
     expect(second).toEqual({ status: 202, body: { ...(first.body as AdsGeneratorJob), attempt: 1, reattached: true } });
     release();
