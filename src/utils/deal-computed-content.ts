@@ -39,7 +39,8 @@ function formatAmount(
     const digits = new Intl.NumberFormat('en', { style: 'currency', currency: currencyCode }).resolvedOptions().maximumFractionDigits;
     return `${currencyCode} ${new Intl.NumberFormat(localization.locale, { maximumFractionDigits: digits }).format(amount)}`;
   }
-  return `${localization.currencySymbol}${new Intl.NumberFormat(
+  const separator = /[A-Za-z.]$/u.test(localization.currencySymbol) ? ' ' : '';
+  return `${localization.currencySymbol}${separator}${new Intl.NumberFormat(
     localization.locale,
     { maximumFractionDigits: 2 },
   ).format(amount)}`;

@@ -263,6 +263,20 @@ describe('translateEntryLeaves', () => {
     );
   });
 
+  it('requires the approved Arabic Black Friday name without changing system prompts', async () => {
+    const users: string[] = [];
+    const complete = vi.fn(async ({ user }: any) => {
+      users.push(user);
+      return { text: JSON.stringify({ title: 'تخفيضات الجمعة السوداء' }), inputTokens: 1, outputTokens: 1, model: 'm' };
+    });
+    await translateEntryLeaves(strapi, { name: 'fake', complete }, CONFIG, LOCALE, [leaf('title', 'Black Friday Sale')]);
+    expect(users.length).toBeGreaterThan(0);
+    for (const user of users) {
+      expect(user).toContain('## Required campaign terms');
+      expect(user).toContain('الجمعة السوداء');
+    }
+  });
+
   it('accepts a writer that keeps every marker but ends the Arabic clause with the price', async () => {
     // The UAE backfill's dominant dead-letter: "from AED 749 onwards." became
     // "تبدأ من AED 749." and the restored-prose regexes read the sentence-final

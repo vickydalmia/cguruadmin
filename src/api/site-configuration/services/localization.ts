@@ -16,7 +16,12 @@ function currencySymbol(locale: string, currencyCode: string): string {
     currencyDisplay: 'narrowSymbol',
     maximumFractionDigits: 0,
   }).formatToParts(0);
-  return parts.find((part) => part.type === 'currency')?.value ?? currencyCode;
+  return displayCurrencySymbol(parts.find((part) => part.type === 'currency')?.value, currencyCode);
+}
+
+/** Newer ICU returns the Dirham sign (U+20C3), which site fonts cannot draw. */
+export function displayCurrencySymbol(symbol: string | undefined, currencyCode: string): string {
+  return !symbol || symbol.includes('\u20C3') ? currencyCode : symbol;
 }
 
 export function localizationPreview(

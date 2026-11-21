@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { localizationPreview, validateLocalization } from './localization';
+import { displayCurrencySymbol, localizationPreview, validateLocalization } from './localization';
 
 describe('country localization', () => {
   it('derives ISO and display currency values for India and the USA', () => {
@@ -32,4 +32,10 @@ describe('country localization', () => {
       validateLocalization({ locale: 'not_a_locale', currencyCode: 'USD', timezone: 'Mars/Base' }),
     ).toThrow();
   });
+});
+
+it('uses the currency code when ICU returns the Dirham sign', () => {
+  expect(displayCurrencySymbol('\u20C3', 'AED')).toBe('AED');
+  expect(displayCurrencySymbol('$', 'USD')).toBe('$');
+  expect(displayCurrencySymbol(undefined, 'SAR')).toBe('SAR');
 });
