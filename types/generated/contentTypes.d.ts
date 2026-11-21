@@ -869,6 +869,13 @@ export interface ApiBlackFridayPageBlackFridayPage
           localized: true;
         };
       }>;
+    filterDealsByBlackFriday: Schema.Attribute.Boolean &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.DefaultTo<false>;
     hero: Schema.Attribute.Component<'black-friday.hero', false> &
       Schema.Attribute.SetPluginOptions<{
         i18n: {

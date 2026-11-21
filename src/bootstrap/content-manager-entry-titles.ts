@@ -55,6 +55,10 @@ const COMPONENT_ENTRY_TITLES: Record<string, string> = {
   'telegram.latest-deals': 'heading',
   'telegram.favourite-stores': 'heading',
   'telegram.join-cta': 'heading',
+  // Relations cannot be row titles (see the note above), so these use their text fields.
+  'black-friday.hero-ticket': 'discountText',
+  'black-friday.brand-item': 'discountText',
+  'black-friday.featured-coupon': 'titleOverride',
   'festival.category-selection': 'labelOverride',
   'festival.explore-categories': 'heading',
   'festival.product-slide': 'titleOverride',

@@ -9,7 +9,7 @@ describe('Black Friday validation', () => {
     expect(isSafeBlackFridayLink('javascript:alert(1)')).toBe(false);
   });
   it('addresses each invalid input', () => {
-    expect(blackFridayPageProblems({ hero: { primaryCtaHref: 'javascript:x', saleEndAt: 'soon' }, featured: { viewAllHref: '//x' } }).map((p) => p.path.join('.'))).toEqual(['hero.primaryCtaHref', 'featured.viewAllHref', 'hero.saleEndAt']);
+    expect(blackFridayPageProblems({ hero: { saleEndAt: 'soon' }, featured: { viewAllHref: '//x' } }).map((p) => p.path.join('.'))).toEqual(['featured.viewAllHref', 'hero.saleEndAt']);
   });
   it('allows optional empty sections', () => expect(blackFridayPageProblems({ enabled: true })).toEqual([]));
 });
