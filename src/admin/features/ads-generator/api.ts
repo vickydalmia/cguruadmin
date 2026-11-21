@@ -15,7 +15,6 @@ import {
   generationFailure,
   type GenerationFailure,
 } from '../../utils/generation-job';
-import { buildZip } from './zip';
 
 /** React-free request logic for Settings → Ads Generator. */
 
@@ -153,13 +152,67 @@ export function downloadCsv(csv: AdsGeneratorResult['csv']): void {
   saveBlob(new Blob([csv.content], { type: 'text/csv;charset=utf-8' }), csv.filename);
 }
 
-/** Saves every successful campaign as its own CSV inside one ZIP. */
+/** One Google Ads upload: the shared header once, then each campaign's rows in form order. */
+export function combineCampaignCsv(runs: AdsCampaignRun[], date: Date = new Date()): AdsGeneratorResult['csv'] | null {
+  const files = runs.flatMap((run) => (run.result ? [downloadableCsv(run.result)] : []));
+  if (!files.length) return null;
+  const parts = files.map((file) => {
+    const content = file.content.replace(/^\uFEFF/, '');
+    const headerEnd = content.indexOf('\r\n');
+    if (headerEnd < 0) throw new Error(`Invalid campaign CSV: ${file.filename}`);
+    return { header: content.slice(0, headerEnd), body: content.slice(headerEnd + 2) };
+  });
+  if (parts.some((part) => part.header !== parts[0].header)) throw new Error('Campaign CSV headers do not match.');
+  return {
+    filename: `google-ads-campaigns-${date.toISOString().slice(0, 10)}.csv`,
+    content: `\uFEFF${parts[0].header}\r\n${parts.map((part) => part.body).join('')}`,
+    rows: files.reduce((total, file) => total + file.rows, 0),
+  };
+}
+
+/** Saves every successful campaign in one CSV. */
 export function downloadAllCsv(runs: AdsCampaignRun[]): void {
-  const files = runs.flatMap((run) => (run.result ? [{ name: downloadableCsv(run.result).filename, content: downloadableCsv(run.result).content }] : []));
-  if (!files.length) return;
-  const zip = buildZip(files);
-  const date = new Date().toISOString().slice(0, 10);
-  saveBlob(new Blob([zip.buffer as ArrayBuffer], { type: 'application/zip' }), `google-ads-campaigns-${date}.zip`);
+  const csv = combineCampaignCsv(runs);
+  if (csv) downloadCsv(csv);
+}
+
+const DOWNLOADED_STORAGE_KEY = 'ads-generator.downloaded';
+const DOWNLOADED_MEMORY_MAX = 200;
+
+/** The same brief in the same language keeps this id through retries and reloads. */
+export function downloadId(run: AdsCampaignRun): string {
+  return run.result ? `${run.key}:${downloadableCsv(run.result).filename}` : run.key;
+}
+
+export function remainingDownloads(ready: AdsCampaignRun[], downloaded: ReadonlySet<string>): AdsCampaignRun[] {
+  return ready.filter((run) => !downloaded.has(downloadId(run)));
+}
+
+export function downloadAllLabel(total: number, ready: number, remaining: number): string {
+  if (remaining === 0) return `Download all again (${ready} campaigns, 1 CSV)`;
+  if (remaining < ready) return `Download remaining (${remaining} ${remaining === 1 ? 'campaign' : 'campaigns'}, 1 CSV)`;
+  return ready === total ? `Download all (${total} campaigns, 1 CSV)` : `Download ${ready} of ${total} campaigns (1 CSV)`;
+}
+
+export function readDownloaded(): Set<string> {
+  try {
+    const stored: unknown = JSON.parse(window.sessionStorage.getItem(DOWNLOADED_STORAGE_KEY) ?? '[]');
+    return new Set(Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Remembers downloads for this tab; losing storage only means a campaign is offered again. */
+export function rememberDownloaded(runs: AdsCampaignRun[], current: ReadonlySet<string>): Set<string> {
+  const next = new Set([...current, ...runs.map(downloadId)]);
+  const kept = [...next].slice(-DOWNLOADED_MEMORY_MAX);
+  try {
+    window.sessionStorage.setItem(DOWNLOADED_STORAGE_KEY, JSON.stringify(kept));
+  } catch {
+    // Private browsing or a full quota: the in-page state still works.
+  }
+  return new Set(kept);
 }
 
 function saveBlob(blob: Blob, filename: string): void {

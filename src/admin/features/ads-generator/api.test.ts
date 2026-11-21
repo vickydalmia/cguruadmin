@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { adsGeneratorApi, adsGeneratorError, duplicateRow, EMPTY_FORM, GENERATE_PATH, jobPath, newRow, OPTIONS_PATH, progressLabel, downloadableCsv, restoredLanguage, restoredRows, retryRequest } from './api';
+import { adsGeneratorApi, adsGeneratorError, combineCampaignCsv, downloadAllLabel, downloadId, remainingDownloads, duplicateRow, EMPTY_FORM, GENERATE_PATH, jobPath, newRow, OPTIONS_PATH, progressLabel, downloadableCsv, restoredLanguage, restoredRows, retryRequest } from './api';
 
 describe('ads generator admin api', () => {
   it('calls the admin routes', async () => {
@@ -43,6 +43,40 @@ describe('ads generator admin api', () => {
     expect(downloadableCsv({ csv, arabic: { csv: ar } } as any)).toBe(ar);
     expect(restoredLanguage({ language: 'ar' })).toBe('ar');
     expect(restoredLanguage({})).toBe('en');
+  });
+
+  it('combines campaigns under one header in form order', () => {
+    const header = 'Row Type,Campaign,Negative keyword,Keyword or list';
+    const csv = (name: string, body: string, rows: number) => ({ filename: `${name}.csv`, content: `\uFEFF${header}\r\n${body}`, rows });
+    const run = (index: number, status: 'succeeded' | 'failed', result?: unknown) => ({ index, campaignName: String(index), key: String(index), status, attempt: 1, result }) as any;
+    const combined = combineCampaignCsv([
+      run(0, 'succeeded', { csv: csv('a', 'Campaign,A,,\r\n,A,Brand list,List\r\n', 2) }),
+      run(1, 'failed'),
+      run(2, 'succeeded', { csv: csv('b', 'Campaign,B,,\r\n', 1), arabic: { csv: csv('b-ar', 'Campaign,عربي,,\r\n', 1) } }),
+    ], new Date('2026-11-21T12:00:00Z'));
+    expect(combined).toEqual({
+      filename: 'google-ads-campaigns-2026-11-21.csv',
+      content: `\uFEFF${header}\r\nCampaign,A,,\r\n,A,Brand list,List\r\nCampaign,عربي,,\r\n`,
+      rows: 3,
+    });
+    expect(combined!.content.match(/\uFEFF/g)).toHaveLength(1);
+    expect(combineCampaignCsv([run(0, 'failed')])).toBeNull();
+    expect(() => combineCampaignCsv([
+      run(0, 'succeeded', { csv: csv('a', 'x\r\n', 1) }),
+      run(1, 'succeeded', { csv: { filename: 'b.csv', content: '\uFEFFOther\r\nx\r\n', rows: 1 } }),
+    ])).toThrow('headers do not match');
+  });
+
+  it('offers only campaigns that were not downloaded', () => {
+    const run = (key: string, filename = `${key}.csv`) => ({ index: 0, campaignName: key, key, status: 'succeeded', attempt: 1, result: { csv: { filename, content: '', rows: 1 } } }) as any;
+    const [a, b, c] = [run('a'), run('b'), run('c')];
+    const seen = new Set([downloadId(a), downloadId(b)]);
+    expect(remainingDownloads([a, b, c], seen)).toEqual([c]);
+    expect(remainingDownloads([run('a', 'a-ar.csv')], seen)).toHaveLength(1);
+    expect(downloadAllLabel(3, 3, 3)).toBe('Download all (3 campaigns, 1 CSV)');
+    expect(downloadAllLabel(3, 2, 2)).toBe('Download 2 of 3 campaigns (1 CSV)');
+    expect(downloadAllLabel(3, 3, 1)).toBe('Download remaining (1 campaign, 1 CSV)');
+    expect(downloadAllLabel(3, 3, 0)).toBe('Download all again (3 campaigns, 1 CSV)');
   });
 
   it('gives repeated copies unique names within the length limit', () => {
