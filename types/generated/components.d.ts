@@ -328,10 +328,6 @@ export interface BlackFridayHero extends Struct.ComponentSchema {
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 60;
       }>;
-    primaryCtaHref: Schema.Attribute.String &
-      Schema.Attribute.SetMinMaxLength<{
-        maxLength: 500;
-      }>;
     primaryCtaLabel: Schema.Attribute.String &
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 40;
@@ -340,10 +336,6 @@ export interface BlackFridayHero extends Struct.ComponentSchema {
     secondaryBagLabel: Schema.Attribute.String &
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 28;
-      }>;
-    secondaryCtaHref: Schema.Attribute.String &
-      Schema.Attribute.SetMinMaxLength<{
-        maxLength: 500;
       }>;
     secondaryCtaLabel: Schema.Attribute.String &
       Schema.Attribute.SetMinMaxLength<{

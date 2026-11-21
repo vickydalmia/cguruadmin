@@ -10,7 +10,8 @@ export const BLACK_FRIDAY_SECTION_LABELS: SectionLabel[] = [
   { attr: 'topBrands', label: '3 · Top brands', description: 'Add Stores or Brands in display order. Select one merchant per row. Discount text is shown exactly as entered.' },
   { attr: 'featured', label: '4 · Featured Coupons · Maximum 5', description: 'The first live Coupon is the large card and the next four are small cards. Code and no-code Coupons are supported. Product Deals belong in section 6.' },
   { attr: 'exploreCategories', label: '5 · Every deal, one place', description: 'Add categories in order. Optional Coupon selections keep editorial order; empty selections show the newest 24 live Coupons in that category.' },
-  { attr: 'productSection', label: '6 · Product Deals', description: 'Add category tabs to list live Product Deals. Each category shows its newest 24 live Deals, with filters and Load More.' },
+  { attr: 'productSection', label: '6 · Product Deals', description: 'Add category tabs. Each tab shows the newest 24 live Deals in that category, with filters and Load More.' },
+  { attr: 'filterDealsByBlackFriday', label: 'Only show Black Friday Deals', description: 'Off: each tab shows Deals from its category. On: each tab shows only Deals that are in its category AND the Black Friday category. Tabs with no matching Deals are hidden.' },
   { attr: 'faq', label: '7 · Frequently asked questions', description: 'Enable and add questions for this page. Empty or disabled hides this section.' },
   { attr: 'popularSearches', label: '8 · Popular searches', description: 'Select Stores, Brands, Categories or Banks to link below the FAQs.' },
 ];

@@ -14,3 +14,12 @@ it('does not load a disabled section or empty category selection',async()=>{
   for(const section of [null,{enabled:false},{}])await resolveFestivalDealListing({documents} as any,{},section,'en');
   expect(documents).not.toHaveBeenCalled();
 });
+it('can require a campaign category AND a selected category',async()=>{
+  const withCategories=(id:string,...categories:string[])=>({...deal(id),categories:categories.map(documentId=>({documentId,name:documentId}))});
+  const findMany=vi.fn().mockResolvedValueOnce([withCategories('both','black-friday','fashion'),withCategories('campaign-only','black-friday')]);
+  const strapi={documents:vi.fn(()=>({findMany})),contentType:vi.fn(),contentAPI:{sanitize:{output:vi.fn(async data=>data)}}};
+  const section:any={categories:[{category:{documentId:'fashion'}}]};
+  await resolveFestivalDealListing(strapi as any,{state:{}},section,'en',new Date(),'black-friday-coupons');
+  expect(findMany.mock.calls[0][0].filters.categories).toEqual({slug:{$eq:'black-friday-coupons'}});
+  expect(section.listingDeals.map((item:any)=>item.documentId)).toEqual(['both']);
+});

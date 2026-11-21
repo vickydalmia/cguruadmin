@@ -32,17 +32,9 @@
       "type": "string",
       "maxLength": 40
     },
-    "primaryCtaHref": {
-      "type": "string",
-      "maxLength": 500
-    },
     "secondaryCtaLabel": {
       "type": "string",
       "maxLength": 40
-    },
-    "secondaryCtaHref": {
-      "type": "string",
-      "maxLength": 500
     },
     "countdownLabel": {
       "type": "string",

@@ -8,7 +8,7 @@ import { hasSafeAffiliateLink, isLiveOffer, sanitizeOutput } from '../../../util
 import { attachStablePublicOfferIdsForRequest, requestedOfferTargetLocale } from '../../coupon/services/public-offer-ids';
 import { resolveFestivalCategories } from '../../festival-page/services/festival-categories';
 import { resolveFestivalDealListing } from '../../festival-page/services/festival-deal-listing';
-import { addCampaignCategoryRows, BLACK_FRIDAY_CAMPAIGN_CATEGORIES, BLACK_FRIDAY_POPULATE, curatedCategoryRows, limitAutomaticCoupons, limitListingDeals } from '../services/black-friday-content';
+import { addCampaignCategoryRows, BLACK_FRIDAY_CAMPAIGN_CATEGORIES, BLACK_FRIDAY_DEAL_CATEGORY_SLUG, BLACK_FRIDAY_POPULATE, curatedCategoryRows, limitAutomaticCoupons, limitListingDeals } from '../services/black-friday-content';
 
 const liveSafe = (offer: any, now: Date) => isLiveOffer(offer, now) && hasSafeAffiliateLink(offer?.affiliateLink);
 
@@ -27,7 +27,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       const curated = curatedCategoryRows(data.exploreCategories);
       await resolveFestivalCategories(strapi, ctx, data.exploreCategories, locale, now);
       limitAutomaticCoupons(data.exploreCategories, curated);
-      await resolveFestivalDealListing(strapi, ctx, data.productSection, locale, now);
+      await resolveFestivalDealListing(strapi, ctx, data.productSection, locale, now, data.filterDealsByBlackFriday === true ? BLACK_FRIDAY_DEAL_CATEGORY_SLUG : undefined);
       limitListingDeals(data.productSection);
     }
     arrayizeOfferText(data);

@@ -93,6 +93,15 @@
         }
       }
     },
+    "filterDealsByBlackFriday": {
+      "type": "boolean",
+      "default": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
     "faq": {
       "type": "component",
       "repeatable": false,

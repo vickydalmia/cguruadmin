@@ -20,6 +20,9 @@ export function blackFridayTemplateEnabled(row: { enabled?: boolean | null } | n
 /** Automatic listings ship in the page HTML, so each category keeps its newest offers only. */
 export const BLACK_FRIDAY_LISTING_LIMIT = 24;
 
+/** With filterDealsByBlackFriday on, Product Deals must also be in this category. */
+export const BLACK_FRIDAY_DEAL_CATEGORY_SLUG = 'black-friday-coupons';
+
 /** Quick-filter pills read these existing categories by their stable slugs. */
 export const BLACK_FRIDAY_CAMPAIGN_CATEGORIES = { 'black-friday-coupons': 'black-friday', 'cyber-monday-coupons': 'cyber-monday' } as const;
 

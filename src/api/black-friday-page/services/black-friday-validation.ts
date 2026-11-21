@@ -9,7 +9,6 @@ export function isSafeBlackFridayLink(value: unknown): boolean {
 }
 
 const LINK_FIELDS = [
-  ['hero', 'primaryCtaHref'], ['hero', 'secondaryCtaHref'],
   ['topBrands', 'viewAllHref'], ['featured', 'viewAllHref'],
 ] as const;
 
