@@ -1,25 +1,29 @@
+import { JobStore } from '../ai-generation/job-store';
+import { UsageLimiter } from '../ai-generation/usage-limiter';
 import {
   ADS_ACCOUNT_CURRENCY,
+  ADS_LLM_LIMITS,
   ADS_FORM_LIMITS,
   ADS_PROMPT_VERSION,
+  type AdsBatchResult,
+  type AdsCampaignRun,
   type AdsGeneratorJob,
+  type AdsGeneratorResult,
   type AdsGeneratorOptions,
 } from '../constants/ads-generator';
 import { readAdsDebugLogging, readAdsGeneratorConfig, readAdsUsageLimits, type AdsGeneratorConfig } from './config';
+import { isRetryRequest, mergeRetry, parseAdsBatch } from './batch';
 import { failure, toFailure, type Failure } from './failure';
-import { parseAdsForm, type AdsForm } from './form';
+import type { AdsForm } from './form';
 import { generateAds } from './generate-ads';
-import { AdsJobStore } from './job-store';
 import { createOpenAiCreativeModel, type CreativeModelCall } from './openai-client';
-import { checkRelevance } from './relevance-gate';
 import { ResultCache } from './result-cache';
-import { UsageLimiter } from './usage-limiter';
 
 /**
  * The request pipeline, in the order that keeps cost at zero for anything
  * that is not a valid, relevant, allowed brief:
- *   parse form → relevance gate → configured? → running job? → cache hit? →
- *   rate limit → background job (OpenAI).
+ *   parse batch → relevance gate → configured? → running job? → reuse paid
+ *   results → rate limit (one per campaign to generate) → background job.
  * The POST answers immediately (202 + job); the page polls GET /jobs/:id, so
  * no proxy timeout can cut a multi-minute generation.
  */
@@ -40,7 +44,7 @@ export type AdsGeneratorDeps = {
   createModel: (config: AdsGeneratorConfig) => CreativeModelCall;
   limiter: UsageLimiter;
   cache: ResultCache;
-  jobs: AdsJobStore;
+  jobs: JobStore<AdsBatchResult>;
   log: Logger;
   /** Log full prompts and responses (ADS_GENERATOR_DEBUG_LOG=true). */
   debugLogging?: boolean;
@@ -49,14 +53,17 @@ export type AdsGeneratorDeps = {
 export function createAdsGeneratorService(deps: AdsGeneratorDeps) {
   const model = deps.config ? deps.createModel(deps.config) : null;
 
-  /** Runs one generation to completion and records the outcome on the job. */
-  async function run(jobId: string, form: AdsForm, userId: string, cacheKey: string): Promise<void> {
+  /** Generates one campaign and records its outcome on its run. */
+  async function runCampaign(run: AdsCampaignRun, form: AdsForm, userId: string, jobId: string, publish: () => void): Promise<void> {
     const config = deps.config!;
+    run.status = 'running';
+    publish();
     try {
       const debug = deps.debugLogging ? (message: string) => deps.log.debug(message) : undefined;
-      const result = await generateAds(form, model!, debug, (attempt) => deps.jobs.progress(jobId, attempt));
-      deps.cache.set(cacheKey, result);
-      deps.jobs.succeed(jobId, { ...result, cached: false });
+      const result = await generateAds(form, model!, debug, (attempt) => { run.attempt = attempt; publish(); });
+      deps.cache.set(run.key, result);
+      run.result = { ...result, cached: false };
+      run.status = 'succeeded';
       deps.log.info(
         `[ads-generator] admin ${userId} generated ${form.adType} "${form.campaignName}" ` +
         `(${result.usage.calls} calls, ${result.usage.inputTokens}+${result.usage.outputTokens} tokens, ` +
@@ -64,10 +71,36 @@ export function createAdsGeneratorService(deps: AdsGeneratorDeps) {
       );
     } catch (error) {
       const failed = toFailure(error, deps.log, config);
+      run.error = { message: failed.error, problems: failed.problems ?? [] };
+      run.status = 'failed';
+    }
+    publish();
+  }
+
+  /** Works through the queued campaigns a few at a time; one failure never stops the rest. */
+  async function runBatch(jobId: string, runs: AdsCampaignRun[], forms: AdsForm[], userId: string): Promise<void> {
+    const publish = () => deps.jobs.update(jobId, { campaigns: runs.map((run) => ({ ...run })) });
+    const queue = runs.filter((run) => run.status === 'queued');
+    const worker = async () => {
+      for (let run = queue.shift(); run; run = queue.shift()) await runCampaign(run, forms[run.index], userId, jobId, publish);
+    };
+    try {
+      await Promise.all(Array.from({ length: Math.min(ADS_LLM_LIMITS.batchConcurrency, queue.length) }, worker));
+      deps.jobs.succeed(jobId, { campaigns: runs.map((run) => ({ ...run })) });
+    } catch (error) {
+      const failed = toFailure(error, deps.log, deps.config!);
       deps.jobs.fail(jobId, { message: failed.error, problems: failed.problems ?? [] });
     } finally {
       deps.limiter.release(userId);
     }
+  }
+
+  /** Already-paid results: the short cache, then the admin's previous run. */
+  function reusable(key: string, previous: AdsCampaignRun[]): AdsGeneratorResult | null {
+    const cached = deps.cache.get(key);
+    if (cached) return { ...cached, cached: true };
+    const earlier = previous.find((run) => run.key === key && run.status === 'succeeded')?.result;
+    return earlier ? { ...earlier, cached: true } : null;
   }
 
   return {
@@ -80,35 +113,71 @@ export function createAdsGeneratorService(deps: AdsGeneratorDeps) {
       };
     },
 
-    /** Validates synchronously, then starts (or reattaches to) a background job. */
+    /** Validates the whole batch, then starts (or reattaches to) a background job. */
     generate(body: unknown, userId: string): ServiceResponse {
-      const parsed = parseAdsForm(body);
-      // `in` narrowing: boolean discriminants do not narrow under `strict: false`.
-      if ('errors' in parsed) return reject(failure(400, 'Fix the form and try again.', parsed.errors));
-      const form = parsed.form;
+      let batch = body;
+      let retried: AdsCampaignRun[] | null = null;
+      if (isRetryRequest(body)) {
+        const merged = mergeRetry(deps.jobs.get(String(body.retryJobId), userId), body);
+        if ('error' in merged) return reject(failure(merged.status, merged.error));
+        batch = merged.body;
+        retried = merged.previous;
+      }
 
-      const irrelevant = checkRelevance(form);
-      if (irrelevant.length) return reject(failure(400, 'This request is not a valid ad brief.', irrelevant));
+      const parsed = parseAdsBatch(batch);
+      // `in` narrowing: boolean discriminants do not narrow under `strict: false`.
+      if ('errors' in parsed) return reject(failure(400, 'Fix the campaigns and try again.', parsed.errors));
+      const { forms } = parsed;
 
       if (!deps.config || !model) {
         return reject(failure(503, 'Ad generation is not configured on this server (ADS_GENERATOR_OPENAI_API_KEY / ADS_GENERATOR_MODEL).'));
       }
 
-      // A second submit (double click, retry after a proxy timeout, another
-      // tab) joins the running job instead of failing or paying twice.
+      const keys = forms.map((form) => ResultCache.key(form, deps.config!.model));
+      const request = { requestKey: keys.join(':'), input: { campaigns: (batch as { campaigns: unknown[] }).campaigns } };
+
+      // The same batch (double click, retry after a proxy timeout, another tab)
+      // joins the running job. A different batch must never receive its results.
       const running = deps.jobs.runningFor(userId);
-      if (running) return { status: 202, body: { ...running, reattached: true } };
+      if (running) {
+        if (deps.jobs.isSameRequest(running.id, request.requestKey)) return { status: 202, body: { ...running, reattached: true } };
+        return reject(failure(409, 'Another run is still generating. Wait for it to finish, then submit these campaigns.'));
+      }
 
-      const cacheKey = ResultCache.key(form, deps.config.model);
-      const cached = deps.cache.get(cacheKey);
-      if (cached) return { status: 200, body: deps.jobs.finished(userId, { ...cached, cached: true }) };
+      const previous = retried ?? deps.jobs.latestFor(userId)?.result?.campaigns ?? [];
+      const runs = forms.map((form, index): AdsCampaignRun => {
+        const result = reusable(keys[index], previous);
+        return {
+          index,
+          campaignName: form.campaignName,
+          key: keys[index],
+          status: result ? 'succeeded' : 'queued',
+          attempt: 0,
+          ...(result ? { result } : {}),
+        };
+      });
+      const toGenerate = runs.filter((run) => run.status === 'queued').length;
+      if (!toGenerate) return { status: 200, body: deps.jobs.finished(userId, { campaigns: runs }, request) };
 
-      const slot = deps.limiter.acquire(userId);
+      const slot = deps.limiter.acquire(userId, toGenerate);
       if ('message' in slot) return reject(failure(429, slot.message));
 
-      const job = deps.jobs.start(userId);
-      void run(job.id, form, userId, cacheKey);
-      return { status: 202, body: job };
+      const job = deps.jobs.start(userId, request);
+      deps.jobs.update(job.id, { campaigns: runs.map((run) => ({ ...run })) });
+      const started = deps.jobs.get(job.id, userId)!;
+      void runBatch(job.id, runs, forms, userId);
+      return { status: 202, body: started };
+    },
+
+    /** The admin's running or last job, so any tab or reload can recover it. */
+    latest(userId: string): { job: AdsGeneratorJob | null } {
+      return { job: deps.jobs.latestFor(userId) };
+    },
+
+    /** "New batch": the finished job is no longer recovered on load. */
+    dismiss(id: string, userId: string): { status: number; body: unknown } {
+      if (deps.jobs.dismiss(id, userId)) return { status: 200, body: { dismissed: true } };
+      return reject(failure(409, 'This run cannot be cleared. It may still be generating or no longer exist.'));
     },
 
     job(id: string, userId: string): ServiceResponse {
@@ -128,11 +197,16 @@ export function adsGeneratorService(log: Logger) {
     createModel: createOpenAiCreativeModel,
     limiter: new UsageLimiter(readAdsUsageLimits()),
     cache: new ResultCache(),
-    jobs: new AdsJobStore(),
+    jobs: adsJobStore(),
     log,
     debugLogging: readAdsDebugLogging(),
   });
   return service;
+}
+
+/** One OpenAI call plus up to maxRepairAttempts repairs per job. */
+export function adsJobStore(): JobStore<AdsBatchResult> {
+  return new JobStore({ retentionMs: ADS_LLM_LIMITS.jobRetentionMs, maxAttempts: 1 + ADS_LLM_LIMITS.maxRepairAttempts });
 }
 
 function reject({ status, error, problems }: Failure): ServiceResponse {

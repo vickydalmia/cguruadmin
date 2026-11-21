@@ -1,5 +1,5 @@
 import { ADS_LLM_LIMITS } from '../constants/ads-generator';
-import type { UsageLimits } from './usage-limiter';
+import type { UsageLimits } from '../ai-generation/usage-limiter';
 
 // Runtime secrets, model selection and the per-environment request limits.
 // Every validation limit lives in src/constants/ads-generator.ts; prompts

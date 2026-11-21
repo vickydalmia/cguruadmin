@@ -2,6 +2,7 @@ import { ADS_APPROVED_SITE_CLAIMS, ADS_TRUST_TERMS, type AdsAdType } from '../..
 import type { AdsForm } from '../form';
 import { EVERGREEN_REPAIR_TEMPLATE, EVERGREEN_SYSTEM_PROMPT, EVERGREEN_USER_TEMPLATE } from './evergreen-prompts';
 import { OFFER_REPAIR_TEMPLATE, OFFER_SYSTEM_PROMPT, OFFER_USER_TEMPLATE } from './offer-prompts';
+import { renderTemplate } from '../../ai-generation/render-template';
 
 // Picks the prompt set for the ad type and fills its {{placeholders}}.
 // renderTemplate() throws on a missing or unused value, so a template edit
@@ -46,17 +47,4 @@ export function renderRepair(adType: AdsAdType, problems: string[], previousAnsw
     problems: problems.map((problem) => `- ${problem}`).join('\n'),
     previous_answer: JSON.stringify(previousAnswer, null, 2),
   });
-}
-
-/** Replaces {{name}} placeholders; throws on a missing or unused value. */
-export function renderTemplate(template: string, values: Record<string, string>): string {
-  const used = new Set<string>();
-  const output = template.replace(/\{\{(\w+)\}\}/g, (_match, name: string) => {
-    if (!Object.prototype.hasOwnProperty.call(values, name)) throw new Error(`Prompt placeholder {{${name}}} has no value.`);
-    used.add(name);
-    return values[name];
-  });
-  const unused = Object.keys(values).filter((name) => !used.has(name));
-  if (unused.length) throw new Error(`Prompt values not used by the template: ${unused.join(', ')}.`);
-  return output;
 }

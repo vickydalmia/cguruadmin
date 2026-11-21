@@ -20,6 +20,22 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     ctx.status = result.status;
     ctx.body = result.body;
   },
+  async latest(ctx: any) {
+    ctx.set('Cache-Control', 'private, no-store');
+    ctx.body = adsGeneratorService(strapi.log).latest(String(ctx.state.user.id));
+  },
+  async dismiss(ctx: any) {
+    ctx.set('Cache-Control', 'private, no-store');
+    const id = String(ctx.params.id ?? '');
+    if (!JOB_ID.test(id)) {
+      ctx.status = 400;
+      ctx.body = { error: 'Invalid job id.' };
+      return;
+    }
+    const result = adsGeneratorService(strapi.log).dismiss(id, String(ctx.state.user.id));
+    ctx.status = result.status;
+    ctx.body = result.body;
+  },
   async job(ctx: any) {
     ctx.set('Cache-Control', 'private, no-store');
     const id = String(ctx.params.id ?? '');

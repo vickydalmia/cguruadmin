@@ -1,116 +1,81 @@
 import * as React from 'react';
-import {
-  Button, Field, Flex, Grid, SingleSelect, SingleSelectOption, Textarea, TextInput, Typography,
-} from '@strapi/design-system';
-import type { AdsGeneratorFormInput, AdsGeneratorOptions } from '../../../../constants/ads-generator';
+import { Box, Button, Flex, Typography } from '@strapi/design-system';
+import { Duplicate, Plus, Trash } from '@strapi/icons';
+import type { AdsGeneratorOptions } from '../../../../constants/ads-generator';
+import { duplicateRow, newRow, type CampaignRow } from '../api';
+import { AdsCampaignFields } from './ads-campaign-fields';
 
-/**
- * The team form. Plain text fields for this iteration; the server parses and
- * validates everything (src/ads-generator/form.ts), so pickers can replace
- * these inputs later without touching the API.
- */
-
-type FieldKey = keyof AdsGeneratorFormInput;
-
-/**
- * Suggested offer-details structure (30 Oct 2026 prompt revision). More,
- * specific facts are what turn filler into useful headlines. No "Source:"
- * line: links are rejected by the server's relevance gate.
- */
-const OFFER_DETAILS_PLACEHOLDER = [
-  'Primary offer: Up to 40% off on selected styles',
-  'Applies to: Shoes, ethnic wear',
-  'Code: STYLE10 (or: not supplied)',
-  'Conditions: Minimum order 999; new users only',
-  'Other offer: Extra 10% with HDFC cards (not stackable)',
-].join('\n');
-
-const AD_TYPE_CHOICES = [
-  { value: 'evergreen', label: 'Evergreen (recommended)', hint: 'Stays true on any day: no prices, codes or dates. Built from brand categories.' },
-  { value: 'offer', label: 'Offer-specific', hint: 'Names the current offer. Regenerate or pause the ads when the offer changes.' },
-];
-
-type FieldSpec = { key: FieldKey; label: string; hint: string; placeholder?: string; required?: boolean; multiline?: boolean; col: number };
-
-/** The one source field the chosen ad type uses (the server rejects the other). */
-function sourceField(options: AdsGeneratorOptions, adType: string): FieldSpec {
-  const { limits } = options;
-  if (adType === 'evergreen') {
-    return {
-      key: 'brandCategories', label: 'Brand categories', required: true, col: 12,
-      hint: `Comma-separated, up to ${limits.brandCategoriesMax}. What the brand sells; these fill the supporting headlines.`,
-      placeholder: 'Fashion, shoes, ethnic wear, beauty',
-    };
-  }
-  return {
-    key: 'offerDetails', label: 'Offer details', multiline: true, required: true, col: 12,
-    hint: `Up to ${limits.offerDetailsMax} characters. The ONLY source for numbers, codes, products and conditions in the ads. ` +
-      'Use one line per item; write "not supplied" for anything unknown. Keep flat / up to / extra exactly as the offer says. No links.',
-    placeholder: OFFER_DETAILS_PLACEHOLDER,
-  };
-}
-
-function fieldSpecs(options: AdsGeneratorOptions, adType: string): FieldSpec[] {
-  const { limits, currency } = options;
-  const device = `Optional. Percent, ${limits.deviceAdjustmentExclude} or ${limits.deviceAdjustmentMin} to ${limits.deviceAdjustmentMax}. Blank = not set, 0 = reset.`;
-  return [
-    { key: 'campaignName', label: 'Campaign name', hint: 'Exact Google Ads campaign name.', placeholder: 'Myntra | Search | IN', required: true, col: 6 },
-    { key: 'brandName', label: 'Brand name', hint: 'Full brand name; used in headline 1 and keywords.', placeholder: 'Myntra', required: true, col: 6 },
-    { key: 'landingPage', label: 'Landing page', hint: 'A store page on any CouponzGuru website (.com, .ae, usa.com, .sg, .my, .ph).', placeholder: 'https://www.couponzguru.com/myntra-coupons/', required: true, col: 12 },
-    { key: 'countries', label: 'Countries', hint: 'Comma-separated. USA / UAE / UK are expanded.', placeholder: 'India, UAE, USA', required: true, col: 6 },
-    { key: 'label', label: 'Label', hint: 'One campaign label.', placeholder: 'VK Label', required: true, col: 6 },
-    { key: 'dailyBudget', label: `Daily budget (${currency})`, hint: `${limits.dailyBudgetMin}–${limits.dailyBudgetMax}. One budget for all countries.`, placeholder: '5000', required: true, col: 6 },
-    { key: 'targetCpa', label: `Target CPA (${currency})`, hint: `${limits.targetCpaMin}–${limits.targetCpaMax}.`, placeholder: '15', required: true, col: 6 },
-    { key: 'mobileAdjustment', label: 'Mobile adjustment (%)', hint: device, placeholder: '-50', col: 4 },
-    { key: 'tabletAdjustment', label: 'Tablet adjustment (%)', hint: device, placeholder: '-60', col: 4 },
-    { key: 'desktopAdjustment', label: 'Desktop adjustment (%)', hint: device, placeholder: '0', col: 4 },
-    sourceField(options, adType),
-    { key: 'negativeKeywordLists', label: 'Negative keyword lists', hint: 'Optional. Comma-separated exact names of existing shared lists.', placeholder: 'Brand restricted', col: 12 },
-  ];
-}
-
-export function AdsForm({ options, value, onChange, onSubmit, busy }: {
+/** The campaign repeater: one open row at a time keeps a long batch readable. */
+export function AdsForm({ options, rows, onChange, onSubmit, onNewBatch, busy, recovering }: {
   options: AdsGeneratorOptions;
-  value: AdsGeneratorFormInput;
-  onChange: (next: AdsGeneratorFormInput) => void;
+  rows: CampaignRow[];
+  onChange: (next: CampaignRow[]) => void;
   onSubmit: () => void;
+  /** Clears every campaign and the output; asked to confirm first. */
+  onNewBatch: () => void;
   busy: boolean;
+  /** The last run is being recovered: edits would be overwritten. */
+  recovering: boolean;
 }) {
-  const set = (key: FieldKey) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-    onChange({ ...value, [key]: event.target.value });
-  // Switching type clears both source fields: each type accepts only its own.
-  const setAdType = (adType: string) => onChange({ ...value, adType, offerDetails: '', brandCategories: '' });
-  const choice = AD_TYPE_CHOICES.find((entry) => entry.value === value.adType);
+  const [confirming, setConfirming] = React.useState(false);
+  const [openId, setOpenId] = React.useState<string | null>(rows[0]?.id ?? null);
+  const max = options.limits.campaignsMax;
+  const full = rows.length >= max;
+  // A restored or removed row leaves a stale id: fall back to the first row.
+  const activeId = openId !== null && !rows.some((row) => row.id === openId) ? rows[0]?.id : openId;
+  const isOpen = (row: CampaignRow) => row.id === activeId;
+
+  const add = (row: CampaignRow, at = rows.length) => {
+    onChange([...rows.slice(0, at), row, ...rows.slice(at)]);
+    setOpenId(row.id);
+  };
+  const remove = (id: string) => onChange(rows.filter((row) => row.id !== id));
+  const update = (id: string, value: CampaignRow['value']) => onChange(rows.map((row) => (row.id === id ? { ...row, value } : row)));
 
   return (
     <form onSubmit={(event) => { event.preventDefault(); onSubmit(); }}>
-      <Flex direction="column" alignItems="stretch" gap={5}>
-        <Field.Root name="adType" hint={choice?.hint} required>
-          <Field.Label>Ad type</Field.Label>
-          <SingleSelect value={value.adType} onChange={(next: string | number) => setAdType(String(next))}>
-            {AD_TYPE_CHOICES.map((entry) => (
-              <SingleSelectOption key={entry.value} value={entry.value}>{entry.label}</SingleSelectOption>
-            ))}
-          </SingleSelect>
-          <Field.Hint />
-        </Field.Root>
-        <Grid.Root gap={5}>
-          {fieldSpecs(options, value.adType).map((spec) => (
-            <Grid.Item key={spec.key} col={spec.col} s={12} xs={12} direction="column" alignItems="stretch">
-              <Field.Root name={spec.key} hint={spec.hint} required={spec.required}>
-                <Field.Label>{spec.label}</Field.Label>
-                {spec.multiline
-                  ? <Textarea value={value[spec.key]} placeholder={spec.placeholder} onChange={set(spec.key)} />
-                  : <TextInput value={value[spec.key]} placeholder={spec.placeholder} onChange={set(spec.key)} />}
-                <Field.Hint />
-              </Field.Root>
-            </Grid.Item>
-          ))}
-        </Grid.Root>
-        <Flex gap={3} alignItems="center">
-          <Button type="submit" loading={busy} disabled={busy || !options.configured}>Generate ads</Button>
+      <Flex direction="column" alignItems="stretch" gap={4}>
+        {rows.map((row, index) => (
+          <Box key={row.id} borderColor="neutral200" hasRadius padding={4}>
+            <Flex justifyContent="space-between" alignItems="center" gap={3} wrap="wrap">
+              <Button type="button" variant="ghost" aria-expanded={isOpen(row)} onClick={() => setOpenId(isOpen(row) ? null : row.id)}>
+                Campaign {index + 1}{row.value.campaignName.trim() ? `: ${row.value.campaignName.trim()}` : ''}
+              </Button>
+              <Flex gap={2}>
+                <Button type="button" variant="tertiary" size="S" startIcon={<Duplicate />} disabled={busy || full} onClick={() => add(duplicateRow(row, rows), index + 1)}>
+                  Duplicate
+                </Button>
+                <Button type="button" variant="danger-light" size="S" startIcon={<Trash />} disabled={busy || rows.length === 1} onClick={() => remove(row.id)}>
+                  Remove
+                </Button>
+              </Flex>
+            </Flex>
+            {isOpen(row) && (
+              <Box paddingTop={4}>
+                <AdsCampaignFields options={options} value={row.value} disabled={recovering} onChange={(value) => update(row.id, value)} />
+              </Box>
+            )}
+          </Box>
+        ))}
+        <Box>
+          <Button type="button" variant="secondary" startIcon={<Plus />} disabled={busy || full} onClick={() => add(newRow())}>
+            Add campaign ({rows.length} of {max})
+          </Button>
+        </Box>
+        <Flex gap={3} alignItems="center" wrap="wrap">
+          <Button type="submit" loading={busy} disabled={busy || !options.configured}>
+            {rows.length > 1 ? `Generate ${rows.length} campaigns` : 'Generate ads'}
+          </Button>
+          {confirming ? (
+            <Flex gap={2}>
+              <Button type="button" variant="danger" onClick={() => { setConfirming(false); onNewBatch(); }}>Clear campaigns and results</Button>
+              <Button type="button" variant="tertiary" onClick={() => setConfirming(false)}>Cancel</Button>
+            </Flex>
+          ) : (
+            <Button type="button" variant="tertiary" disabled={busy} onClick={() => setConfirming(true)}>New batch</Button>
+          )}
           <Typography variant="pi" textColor="neutral600">
-            Creates one paused Search campaign CSV. Nothing is sent to Google Ads.
+            Creates one paused Search campaign CSV per campaign. Nothing is sent to Google Ads.
           </Typography>
         </Flex>
       </Flex>

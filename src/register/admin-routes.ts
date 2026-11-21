@@ -373,7 +373,9 @@ export function registerAdsGeneratorRoutes(strapi: Core.Strapi): void {
     routes: [
       { method: 'GET', path: '/options', handler: 'api::ads-generator.ads-generator.options', config: { policies } },
       { method: 'POST', path: '/generate', handler: 'api::ads-generator.ads-generator.generate', config: { policies } },
+      { method: 'GET', path: '/jobs/latest', handler: 'api::ads-generator.ads-generator.latest', config: { policies } },
       { method: 'GET', path: '/jobs/:id', handler: 'api::ads-generator.ads-generator.job', config: { policies } },
+      { method: 'POST', path: '/jobs/:id/dismiss', handler: 'api::ads-generator.ads-generator.dismiss', config: { policies } },
     ],
   } as any);
 }

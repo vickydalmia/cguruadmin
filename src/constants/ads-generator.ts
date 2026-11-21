@@ -3,13 +3,14 @@
  * one place, plus the request/response contract shared by the admin settings
  * page and the server module (`src/ads-generator/`).
  *
- * Import-free on purpose: this file is bundled into the admin panel. Values
+ * Bundled into the admin panel, so it imports types only. Values
  * marked "TBD" are placeholders until the business decisions are made; change
  * them here, nothing else needs to move.
  *
  * Mounted on the ADMIN router at `/ads-generator` (no `/api` segment) behind
  * `admin::isAuthenticatedAdmin` + `global::ads-generator-manage-only`.
  */
+import type { GenerationJob } from './ai-generation';
 
 export const ADS_GENERATOR_ROUTE_PREFIX = '/ads-generator';
 
@@ -65,6 +66,8 @@ export const ADS_ACCOUNT_CURRENCY = 'INR';
 
 // ── Form limits ──
 export const ADS_FORM_LIMITS = {
+  /** Campaigns in one generation run. Each one counts against the usage limits. */
+  campaignsMax: 10,
   campaignNameMax: 100,
   brandNameMax: 60,
   labelMax: 80,
@@ -138,7 +141,7 @@ export const ADS_LLM_LIMITS = {
   /** Repair calls after the first attempt fails validation (total calls = 1 + this). */
   maxRepairAttempts: 2,
   /** Per admin user, rolling hour. Default only: override with ADS_GENERATOR_MAX_REQUESTS_PER_USER_PER_HOUR. */
-  maxRequestsPerUserPerHour: 10,
+  maxRequestsPerUserPerHour: 30,
   /** Whole instance, per UTC day. Default only: override with ADS_GENERATOR_MAX_REQUESTS_PER_DAY. */
   maxRequestsPerDay: 100,
   /** Identical form within this window returns the cached result, no new call. */
@@ -147,6 +150,8 @@ export const ADS_LLM_LIMITS = {
   jobRetentionMs: 30 * 60_000,
   /** How often the settings page polls a running job. */
   jobPollMs: 3_000,
+  /** Campaigns of one batch generated at the same time. */
+  batchConcurrency: 3,
 } as const;
 
 // ── Creative rules (checked in code after the model answers) ──
@@ -353,21 +358,38 @@ export type AdsGeneratorResult = {
   csv: { filename: string; content: string; rows: number };
 };
 
-/**
- * A background generation (POST /generate starts it, GET /jobs/:id polls it).
- * `attempt` counts OpenAI calls made so far, up to `maxAttempts` (1 + repairs).
- */
-export type AdsGeneratorJob = {
-  id: string;
-  status: 'running' | 'succeeded' | 'failed';
+/** POST /generate body: one to ADS_FORM_LIMITS.campaignsMax campaigns. */
+export type AdsGeneratorBatchInput = { campaigns: AdsGeneratorFormInput[] };
+
+/** POST /generate body that reruns only a finished job's failed campaigns. */
+export type AdsGeneratorRetryInput = {
+  retryJobId: string;
+  replacements: { index: number; form: AdsGeneratorFormInput }[];
+};
+
+export type AdsGenerationRequest = AdsGeneratorBatchInput | AdsGeneratorRetryInput;
+
+/** One campaign's progress and outcome inside a batch. */
+export type AdsCampaignRun = {
+  index: number;
+  campaignName: string;
+  /** Identifies this exact brief, so a retry reuses it without a new OpenAI call. */
+  key: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  /** OpenAI calls made so far for this campaign. */
   attempt: number;
-  maxAttempts: number;
-  startedAt: string;
-  /** True when the submit reattached to a job that was already running. */
-  reattached?: boolean;
   result?: AdsGeneratorResult;
   error?: { message: string; problems: string[] };
 };
+
+export type AdsBatchResult = { campaigns: AdsCampaignRun[] };
+
+/**
+ * A background generation (POST /generate starts it, GET /jobs/:id polls it).
+ * `result` fills in while it runs. A finished job can hold both successful
+ * and failed campaigns; each campaign carries its own status.
+ */
+export type AdsGeneratorJob = GenerationJob<AdsBatchResult>;
 
 export type AdsGeneratorOptions = {
   configured: boolean;

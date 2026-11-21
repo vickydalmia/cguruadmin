@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { evergreenForm, parsedForm } from '../__fixtures__/ads-fixtures';
 import { EVERGREEN_SYSTEM_PROMPT } from './evergreen-prompts';
 import { OFFER_SYSTEM_PROMPT } from './offer-prompts';
-import { renderBrief, renderRepair, renderTemplate, systemPromptFor } from './render-prompts';
+import { renderTemplate } from '../../ai-generation/render-template';
+import { renderBrief, renderRepair, systemPromptFor } from './render-prompts';
 
 describe('render prompts', () => {
   it('picks the system prompt by ad type', () => {

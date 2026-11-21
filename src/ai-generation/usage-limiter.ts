@@ -1,9 +1,7 @@
-import { ADS_LLM_LIMITS } from '../constants/ads-generator';
-
 /**
  * In-memory request limits for paid generation: one in-flight request per
  * admin, a per-user hourly cap and an instance-wide daily cap (UTC day).
- * The caps come from env via readAdsUsageLimits() (./config.ts).
+ * Each feature owns one limiter with caps read from its own env vars.
  *
  * Memory only, by decision: nothing is stored in Strapi. A restart resets the
  * counters, so also set a hard monthly budget on the OpenAI project as the
@@ -24,27 +22,36 @@ export class UsageLimiter {
   private dayCount = 0;
 
   constructor(
-    private readonly limits: UsageLimits = ADS_LLM_LIMITS,
+    private readonly limits: UsageLimits,
     private readonly now: () => number = Date.now,
+    /** Names the work in messages, e.g. "ad-generation". */
+    private readonly label = 'ad-generation',
   ) {}
 
-  /** Reserves a slot or returns why not. Call release() when the request ends. */
-  acquire(userId: string): { ok: true } | { ok: false; message: string } {
+  /**
+   * Reserves a slot for `count` generations, all or none, or returns why not.
+   * Call release() when the request ends.
+   */
+  acquire(userId: string, count = 1): { ok: true } | { ok: false; message: string } {
     const now = this.now();
     this.rollDay(now);
     if (this.inFlight.has(userId)) {
       return { ok: false, message: 'A generation is already running for your account. Wait for it to finish.' };
     }
-    if (this.dayCount >= this.limits.maxRequestsPerDay) {
-      return { ok: false, message: 'The daily ad-generation limit is reached. Try again tomorrow (UTC).' };
+    if (this.dayCount + count > this.limits.maxRequestsPerDay) {
+      const left = Math.max(0, this.limits.maxRequestsPerDay - this.dayCount);
+      const detail = count > 1 ? ` ${left} left today; this run needs ${count}.` : '';
+      return { ok: false, message: `The daily ${this.label} limit is reached.${detail} Try again tomorrow (UTC).` };
     }
     const recent = (this.userRequests.get(userId) ?? []).filter((at) => now - at < HOUR_MS);
-    if (recent.length >= this.limits.maxRequestsPerUserPerHour) {
-      return { ok: false, message: `You can generate ${this.limits.maxRequestsPerUserPerHour} times per hour. Try again later.` };
+    if (recent.length + count > this.limits.maxRequestsPerUserPerHour) {
+      const left = Math.max(0, this.limits.maxRequestsPerUserPerHour - recent.length);
+      const detail = count > 1 ? ` ${left} left; this run needs ${count}.` : '';
+      return { ok: false, message: `You can generate ${this.limits.maxRequestsPerUserPerHour} times per hour.${detail} Try again later.` };
     }
-    recent.push(now);
+    for (let i = 0; i < count; i += 1) recent.push(now);
     this.userRequests.set(userId, recent);
-    this.dayCount += 1;
+    this.dayCount += count;
     this.inFlight.add(userId);
     return { ok: true };
   }
