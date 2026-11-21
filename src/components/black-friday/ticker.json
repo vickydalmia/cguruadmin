@@ -1,0 +1,22 @@
+{
+  "collectionName": "components_black_friday_tickers",
+  "info": {
+    "displayName": "Black Friday Ticker",
+    "icon": "star"
+  },
+  "options": {},
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "primaryItems": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "secondaryItems": {
+      "type": "string",
+      "maxLength": 160
+    }
+  }
+}

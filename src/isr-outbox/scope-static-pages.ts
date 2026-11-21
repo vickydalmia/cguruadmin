@@ -2,6 +2,7 @@
 // which fixed public slugs. One of the modules split out of scopes.ts,
 // which keeps the computeScope coordinator.
 
+import { BLACK_FRIDAY_PAGE_UID } from '../constants/black-friday-page';
 import { FESTIVAL_PAGE_UID } from '../constants/festival-page';
 
 export const CHROME_UIDS = new Set(['api::menu.menu', 'api::footer.footer', 'api::global.global']);
@@ -18,9 +19,10 @@ export const TELEGRAM_CONFIG_UID = 'api::telegram.telegram';
 /** Campaign singleton → the entity page template whose owner renders it. */
 export const CAMPAIGN_TEMPLATE_BY_PAGE_UID: Record<
   string,
-  'dealTemplate' | 'independenceDayTemplate' | 'festivalTemplate'
+  'dealTemplate' | 'independenceDayTemplate' | 'festivalTemplate' | 'blackFridayTemplate'
 > = {
   [FESTIVAL_PAGE_UID]: 'festivalTemplate',
+  [BLACK_FRIDAY_PAGE_UID]: 'blackFridayTemplate',
   [DOTD_PAGE_UID]: 'dealTemplate',
   [INDEPENDENCE_DAY_SALE_PAGE_UID]: 'independenceDayTemplate',
 };

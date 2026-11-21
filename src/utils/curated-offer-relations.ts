@@ -129,9 +129,16 @@ export async function curatedSourcePaths(
       (slug) => `/${slug}/`,
     );
   }
+  if (sourceUid.startsWith('black-friday.')) {
+    const { entityTemplateOwnerSlugs } = await import('../api/site-configuration/services/entity-template-owners');
+    return (await entityTemplateOwnerSlugs(strapi, 'blackFridayTemplate')).map((slug) => `/${slug}/`);
+  }
   if (['festival.offer-slide', 'festival.category-selection', 'festival.product-slide', 'festival.product-category'].includes(sourceUid)) {
     const { entityTemplateOwnerSlugs } = await import('../api/site-configuration/services/entity-template-owners');
-    return (await entityTemplateOwnerSlugs(strapi, 'festivalTemplate')).map((slug) => `/${slug}/`);
+    // Category and product rows are shared by the Festival and Black Friday pages.
+    const templates = sourceUid === 'festival.offer-slide' ? ['festivalTemplate'] as const : ['festivalTemplate', 'blackFridayTemplate'] as const;
+    const slugs = (await Promise.all(templates.map((template) => entityTemplateOwnerSlugs(strapi, template)))).flat();
+    return [...new Set(slugs)].map((slug) => `/${slug}/`);
   }
   if (sourceUid.startsWith('festival.')) {
     const { entityTemplateOwnerSlugs } = await import(

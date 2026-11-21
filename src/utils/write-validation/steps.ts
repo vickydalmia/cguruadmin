@@ -1,6 +1,8 @@
 import { validateSaleStripForWrite } from '../../api/global/services/sale-strip-validation';
 import { validateFestivalPage } from '../../api/festival-page/services/festival-validation';
 import { FESTIVAL_PAGE_UID } from '../../constants/festival-page';
+import { validateBlackFridayPage } from '../../api/black-friday-page/services/black-friday-validation';
+import { BLACK_FRIDAY_PAGE_UID } from '../../constants/black-friday-page';
 import { validateSubscriptionContent } from '../../api/subscription-page/services/subscription-validation';
 import { validateSubscriptionRoutes } from '../../api/subscription-page/services/subscription-route-validation';
 import { SUBSCRIPTION_PAGE_UID } from '../../api/subscription-page/services/subscription-route';
@@ -358,6 +360,12 @@ export const COLLECTED_STEPS: readonly ValidationStep[] = [
     actions: CREATE_UPDATE,
     applies: (uid) => uid === FESTIVAL_PAGE_UID,
     run: ({ strapi, data, locale }) => validateFestivalPage(strapi, data, locale),
+  },
+  {
+    name: 'validateBlackFridayPage',
+    actions: CREATE_UPDATE,
+    applies: (uid) => uid === BLACK_FRIDAY_PAGE_UID,
+    run: ({ data }) => validateBlackFridayPage(data),
   },
   {
     name: 'validateIndependenceDaySale',

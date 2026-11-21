@@ -1,0 +1,83 @@
+{
+  "collectionName": "components_black_friday_heros",
+  "info": {
+    "displayName": "Black Friday Hero",
+    "icon": "star"
+  },
+  "options": {},
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "eyebrow": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "titleLineOne": {
+      "type": "string",
+      "maxLength": 16,
+      "default": "BLACK"
+    },
+    "titleLineTwo": {
+      "type": "string",
+      "maxLength": 16,
+      "default": "FRIDAY"
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 180
+    },
+    "primaryCtaLabel": {
+      "type": "string",
+      "maxLength": 40
+    },
+    "primaryCtaHref": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "secondaryCtaLabel": {
+      "type": "string",
+      "maxLength": 40
+    },
+    "secondaryCtaHref": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "countdownLabel": {
+      "type": "string",
+      "maxLength": 40,
+      "default": "DEALS END IN"
+    },
+    "saleEndAt": {
+      "type": "datetime"
+    },
+    "bagLabel": {
+      "type": "string",
+      "maxLength": 10,
+      "default": "SALE"
+    },
+    "bagCaption": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "secondaryBagLabel": {
+      "type": "string",
+      "maxLength": 28
+    },
+    "verifiedLabel": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "verifiedValue": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "tickets": {
+      "type": "component",
+      "repeatable": true,
+      "component": "black-friday.hero-ticket",
+      "max": 3
+    }
+  }
+}

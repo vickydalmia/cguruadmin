@@ -766,7 +766,13 @@ export interface ApiBankBank extends Struct.CollectionTypeSchema {
       'api::coupon.coupon'
     >;
     pageTemplate: Schema.Attribute.Enumeration<
-      ['default', 'dealTemplate', 'independenceDayTemplate', 'festivalTemplate']
+      [
+        'default',
+        'dealTemplate',
+        'independenceDayTemplate',
+        'festivalTemplate',
+        'blackFridayTemplate',
+      ]
     > &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<'default'>;
@@ -811,6 +817,109 @@ export interface ApiBankBank extends Struct.CollectionTypeSchema {
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     websiteUrl: Schema.Attribute.String;
+  };
+}
+
+export interface ApiBlackFridayPageBlackFridayPage
+  extends Struct.SingleTypeSchema {
+  collectionName: 'black_friday_pages';
+  info: {
+    description: 'Black Friday design and content for its single Store, Brand, Category or Bank owner.';
+    displayName: 'Black Friday Template';
+    pluralName: 'black-friday-pages';
+    singularName: 'black-friday-page';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  pluginOptions: {
+    i18n: {
+      localized: true;
+    };
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    enabled: Schema.Attribute.Boolean &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.DefaultTo<false>;
+    exploreCategories: Schema.Attribute.Component<
+      'festival.explore-categories',
+      false
+    > &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    faq: Schema.Attribute.Component<'home.faq-block', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    featured: Schema.Attribute.Component<'black-friday.featured', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    hero: Schema.Attribute.Component<'black-friday.hero', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    locale: Schema.Attribute.String;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::black-friday-page.black-friday-page'
+    >;
+    popularSearches: Schema.Attribute.Component<
+      'home.popular-searches',
+      false
+    > &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    productSection: Schema.Attribute.Component<
+      'festival.product-section',
+      false
+    > &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    publishedAt: Schema.Attribute.DateTime;
+    ticker: Schema.Attribute.Component<'black-friday.ticker', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    topBrands: Schema.Attribute.Component<'black-friday.top-brands', false> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
   };
 }
 
@@ -903,7 +1012,13 @@ export interface ApiBrandBrand extends Struct.CollectionTypeSchema {
       'api::coupon.coupon'
     >;
     pageTemplate: Schema.Attribute.Enumeration<
-      ['default', 'dealTemplate', 'independenceDayTemplate', 'festivalTemplate']
+      [
+        'default',
+        'dealTemplate',
+        'independenceDayTemplate',
+        'festivalTemplate',
+        'blackFridayTemplate',
+      ]
     > &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<'default'>;
@@ -1140,7 +1255,13 @@ export interface ApiCategoryCategory extends Struct.CollectionTypeSchema {
       'api::coupon.coupon'
     >;
     pageTemplate: Schema.Attribute.Enumeration<
-      ['default', 'dealTemplate', 'independenceDayTemplate', 'festivalTemplate']
+      [
+        'default',
+        'dealTemplate',
+        'independenceDayTemplate',
+        'festivalTemplate',
+        'blackFridayTemplate',
+      ]
     > &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<'default'>;
@@ -3462,7 +3583,13 @@ export interface ApiStoreStore extends Struct.CollectionTypeSchema {
       'api::coupon.coupon'
     >;
     pageTemplate: Schema.Attribute.Enumeration<
-      ['default', 'dealTemplate', 'independenceDayTemplate', 'festivalTemplate']
+      [
+        'default',
+        'dealTemplate',
+        'independenceDayTemplate',
+        'festivalTemplate',
+        'blackFridayTemplate',
+      ]
     > &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<'default'>;
@@ -4779,6 +4906,7 @@ declare module '@strapi/strapi' {
       'api::about-page.about-page': ApiAboutPageAboutPage;
       'api::affiliate-disclosure-page.affiliate-disclosure-page': ApiAffiliateDisclosurePageAffiliateDisclosurePage;
       'api::bank.bank': ApiBankBank;
+      'api::black-friday-page.black-friday-page': ApiBlackFridayPageBlackFridayPage;
       'api::brand.brand': ApiBrandBrand;
       'api::career-page.career-page': ApiCareerPageCareerPage;
       'api::category.category': ApiCategoryCategory;
