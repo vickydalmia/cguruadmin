@@ -57,9 +57,10 @@ function localizationPreview(form: CountrySetup) {
     });
     return {
       currencyCode,
-      currencySymbol:
-        currency.formatToParts(0).find((part) => part.type === 'currency')
-          ?.value ?? currencyCode,
+      currencySymbol: (() => {
+        const symbol = currency.formatToParts(0).find((part) => part.type === 'currency')?.value;
+        return !symbol || symbol.includes('\u20C3') ? currencyCode : symbol;
+      })(),
       numberExample: number.format(1234567.89),
       dateExample: date.format(new Date(Date.UTC(2026, 0, 15, 12))),
     };

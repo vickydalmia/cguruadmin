@@ -81,6 +81,19 @@ function markerSection(): string {
   ].join('\n');
 }
 
+/**
+ * Campaign names are brand decisions. Kept in the USER message so adding one
+ * does not change the prompt fingerprint and re-translate the catalogue.
+ */
+function campaignTermsSection(locale: ContentLocale): string {
+  if (locale.code !== 'ar') return '';
+  return [
+    '## Required campaign terms',
+    '* Translate "Black Friday" as "الجمعة السوداء" in every field.',
+    '* Never use "الجمعة البيضاء" (White Friday) unless the English source says White Friday.',
+  ].join('\n');
+}
+
 function sourcePayload(leaves: readonly TranslatableLeaf[]): Record<string, string> {
   const payload: Record<string, string> = {};
   for (const leaf of leaves) payload[leaf.path] = leaf.value;
@@ -117,6 +130,7 @@ function writerMessage(
   return [
     contextSection(locale, context),
     markerSection(),
+    campaignTermsSection(locale),
     '## English source JSON',
     JSON.stringify(sourcePayload(leaves), null, 1),
     fieldNotesSection(leaves),
@@ -135,6 +149,7 @@ function editorMessage(
   return [
     contextSection(locale, context),
     markerSection(),
+    campaignTermsSection(locale),
     '## English source JSON',
     JSON.stringify(sourcePayload(leaves), null, 1),
     `## ${locale.name} draft JSON`,
