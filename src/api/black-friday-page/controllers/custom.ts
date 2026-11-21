@@ -8,7 +8,7 @@ import { hasSafeAffiliateLink, isLiveOffer, sanitizeOutput } from '../../../util
 import { attachStablePublicOfferIdsForRequest, requestedOfferTargetLocale } from '../../coupon/services/public-offer-ids';
 import { resolveFestivalCategories } from '../../festival-page/services/festival-categories';
 import { resolveFestivalDealListing } from '../../festival-page/services/festival-deal-listing';
-import { addCampaignCategoryRows, BLACK_FRIDAY_CAMPAIGN_CATEGORIES, BLACK_FRIDAY_DEAL_CATEGORY_SLUG, BLACK_FRIDAY_POPULATE, curatedCategoryRows, limitAutomaticCoupons, limitListingDeals } from '../services/black-friday-content';
+import { addCampaignCategoryRows, BLACK_FRIDAY_CAMPAIGN_CATEGORY_FILTERS, BLACK_FRIDAY_POPULATE, blackFridayDealCategorySlug, curatedCategoryRows, limitAutomaticCoupons, limitListingDeals, selectCampaignCategories } from '../services/black-friday-content';
 
 const liveSafe = (offer: any, now: Date) => isLiveOffer(offer, now) && hasSafeAffiliateLink(offer?.affiliateLink);
 
@@ -22,12 +22,15 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     if (Array.isArray(data.featured?.items)) data.featured.items = data.featured.items.filter((item: any) => liveSafe(item.coupon, now));
     if (Array.isArray(data.productSection?.items)) data.productSection.items = data.productSection.items.filter((item: any) => liveSafe(item.deal, now));
     if (data.enabled === true) {
-      const campaignCategories = await strapi.documents('api::category.category').findMany({ locale, ...categoryRef, filters: { slug: { $in: Object.keys(BLACK_FRIDAY_CAMPAIGN_CATEGORIES) } } } as any);
-      addCampaignCategoryRows(data.exploreCategories, await sanitizeOutput(strapi, ctx, 'api::category.category', campaignCategories));
+      const candidates = await strapi.documents('api::category.category').findMany({ locale, ...categoryRef, fields: [...categoryRef.fields, 'pageTemplate'], filters: BLACK_FRIDAY_CAMPAIGN_CATEGORY_FILTERS } as any);
+      const selected = selectCampaignCategories(candidates);
+      const publicCategories = await sanitizeOutput(strapi, ctx, 'api::category.category', selected.map(({ category }) => category));
+      const campaignCategories = selected.map(({ campaign }, index) => ({ campaign, category: publicCategories[index] }));
+      addCampaignCategoryRows(data.exploreCategories, campaignCategories);
       const curated = curatedCategoryRows(data.exploreCategories);
       await resolveFestivalCategories(strapi, ctx, data.exploreCategories, locale, now);
       limitAutomaticCoupons(data.exploreCategories, curated);
-      await resolveFestivalDealListing(strapi, ctx, data.productSection, locale, now, data.filterDealsByBlackFriday === true ? BLACK_FRIDAY_DEAL_CATEGORY_SLUG : undefined);
+      await resolveFestivalDealListing(strapi, ctx, data.productSection, locale, now, data.filterDealsByBlackFriday === true ? blackFridayDealCategorySlug(campaignCategories) : undefined);
       limitListingDeals(data.productSection);
     }
     arrayizeOfferText(data);

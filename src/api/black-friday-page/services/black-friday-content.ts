@@ -20,17 +20,49 @@ export function blackFridayTemplateEnabled(row: { enabled?: boolean | null } | n
 /** Automatic listings ship in the page HTML, so each category keeps its newest offers only. */
 export const BLACK_FRIDAY_LISTING_LIMIT = 24;
 
-/** With filterDealsByBlackFriday on, Product Deals must also be in this category. */
-export const BLACK_FRIDAY_DEAL_CATEGORY_SLUG = 'black-friday-coupons';
+const BLACK_FRIDAY_TEMPLATE = 'blackFridayTemplate';
+/** Country sites keep different slugs for the same seasonal categories, in match priority. */
+const CAMPAIGN_SLUGS = {
+  'black-friday': ['black-friday-coupons', 'blackfriday-coupons', 'black-friday', 'blackfriday'],
+  'cyber-monday': ['cyber-monday-coupons', 'cybermonday-coupons', 'cyber-monday', 'cybermonday'],
+} as const;
+type Campaign = keyof typeof CAMPAIGN_SLUGS;
+export type CampaignCategory = { campaign: Campaign; category: any };
 
-/** Quick-filter pills read these existing categories by their stable slugs. */
-export const BLACK_FRIDAY_CAMPAIGN_CATEGORIES = { 'black-friday-coupons': 'black-friday', 'cyber-monday-coupons': 'cyber-monday' } as const;
+export const BLACK_FRIDAY_CAMPAIGN_CATEGORY_FILTERS = {
+  $or: [
+    { pageTemplate: { $eq: BLACK_FRIDAY_TEMPLATE } },
+    { slug: { $in: Object.values(CAMPAIGN_SLUGS).flat() } },
+  ],
+};
 
-export function addCampaignCategoryRows(section: any, categories: any[]): void {
+const bySlug = (categories: any[], campaign: Campaign) => CAMPAIGN_SLUGS[campaign]
+  .map((slug) => categories.find((category) => category?.slug === slug))
+  .find(Boolean);
+
+/** The category using this template is Black Friday; known slugs cover a template assigned elsewhere. */
+export function selectCampaignCategories(categories: any[]): CampaignCategory[] {
+  const cyberMonday = bySlug(categories, 'cyber-monday');
+  const assigned = categories.find((category) => category?.pageTemplate === BLACK_FRIDAY_TEMPLATE && category !== cyberMonday);
+  const blackFriday = assigned ?? bySlug(categories, 'black-friday');
+  return [
+    ...(blackFriday ? [{ campaign: 'black-friday' as const, category: blackFriday }] : []),
+    ...(cyberMonday ? [{ campaign: 'cyber-monday' as const, category: cyberMonday }] : []),
+  ].map(({ campaign, category }) => {
+    const { pageTemplate: _pageTemplate, ...publicCategory } = category;
+    return { campaign, category: publicCategory };
+  });
+}
+
+/** With filterDealsByBlackFriday on, no resolved category means no Deals, never every Deal. */
+export function blackFridayDealCategorySlug(categories: CampaignCategory[]): string {
+  return categories.find(({ campaign }) => campaign === 'black-friday')?.category?.slug ?? CAMPAIGN_SLUGS['black-friday'][0];
+}
+
+export function addCampaignCategoryRows(section: any, categories: CampaignCategory[]): void {
   if (!section || section.enabled === false || !Array.isArray(section.categories)) return;
-  for (const category of categories) {
-    const campaign = BLACK_FRIDAY_CAMPAIGN_CATEGORIES[category?.slug as keyof typeof BLACK_FRIDAY_CAMPAIGN_CATEGORIES];
-    if (!campaign || !category.documentId) continue;
+  for (const { campaign, category } of categories) {
+    if (!category?.documentId) continue;
     const existing = section.categories.find((row: any) => row.category?.documentId === category.documentId);
     if (existing) existing.campaign = campaign;
     else section.categories.push({ category, coupons: [], campaign, campaignOnly: true });
