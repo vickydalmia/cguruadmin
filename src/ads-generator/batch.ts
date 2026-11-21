@@ -3,6 +3,7 @@ import {
   type AdsCampaignRun,
   type AdsGeneratorJob,
   type AdsGeneratorRetryInput,
+  type AdsLanguage,
 } from '../constants/ads-generator';
 import { parseAdsForm, type AdsForm } from './form';
 import { checkRelevance } from './relevance-gate';
@@ -12,14 +13,14 @@ import { checkRelevance } from './relevance-gate';
  * problem with the campaign it belongs to.
  */
 
-export type ParsedAdsBatch = { ok: true; forms: AdsForm[] } | { ok: false; errors: string[] };
+export type ParsedAdsBatch = { ok: true; forms: AdsForm[]; language: AdsLanguage } | { ok: false; errors: string[] };
 
 export function isRetryRequest(body: unknown): body is AdsGeneratorRetryInput {
   return Boolean(body) && typeof body === 'object' && 'retryJobId' in (body as object);
 }
 
 export type MergedRetry =
-  | { body: { campaigns: unknown[] }; previous: AdsCampaignRun[] }
+  | { body: { campaigns: unknown[]; language?: unknown }; previous: AdsCampaignRun[] }
   | { status: number; error: string };
 
 /**
@@ -30,7 +31,8 @@ export function mergeRetry(job: AdsGeneratorJob | null, retry: AdsGeneratorRetry
   if (!job) return { status: 404, error: 'This generation is no longer available (it expired or the server restarted). Generate again.' };
   if (job.status === 'running') return { status: 409, error: 'This run is still generating. Wait for it to finish.' };
   const runs = job.result?.campaigns ?? [];
-  const campaigns = [...(((job.input as { campaigns?: unknown[] } | undefined)?.campaigns) ?? [])];
+  const input = job.input as { campaigns?: unknown[]; language?: unknown } | undefined;
+  const campaigns = [...(input?.campaigns ?? [])];
   const replacements = Array.isArray(retry.replacements) ? retry.replacements : [];
   const indexes = replacements.map((entry) => entry?.index);
   const valid = replacements.length > 0
@@ -38,11 +40,13 @@ export function mergeRetry(job: AdsGeneratorJob | null, retry: AdsGeneratorRetry
     && indexes.every((index) => Number.isInteger(index) && runs[index]?.status === 'failed');
   if (!valid || campaigns.length !== runs.length) return { status: 400, error: 'Only failed campaigns can be retried.' };
   for (const { index, form } of replacements) campaigns[index] = form;
-  return { body: { campaigns }, previous: runs };
+  return { body: { campaigns, ...(input?.language === undefined ? {} : { language: input.language }) }, previous: runs };
 }
 
 export function parseAdsBatch(body: unknown): ParsedAdsBatch {
   const campaigns = (body as { campaigns?: unknown } | null)?.campaigns;
+  const language = (body as { language?: unknown } | null)?.language ?? 'en';
+  if (language !== 'en' && language !== 'ar') return { ok: false, errors: ['Language must be English or Arabic.'] };
   if (!Array.isArray(campaigns) || campaigns.length === 0) return { ok: false, errors: ['Add at least one campaign.'] };
   if (campaigns.length > ADS_FORM_LIMITS.campaignsMax) {
     return { ok: false, errors: [`Generate up to ${ADS_FORM_LIMITS.campaignsMax} campaigns at once.`] };
@@ -65,5 +69,5 @@ export function parseAdsBatch(body: unknown): ParsedAdsBatch {
     else names.set(name, index);
     forms.push(parsed.form);
   });
-  return errors.length ? { ok: false, errors } : { ok: true, forms };
+  return errors.length ? { ok: false, errors } : { ok: true, forms, language };
 }

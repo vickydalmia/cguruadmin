@@ -5,6 +5,7 @@ import {
   type AdsCampaignRun,
   type AdsGenerationRequest,
   type AdsGeneratorRetryInput,
+  type AdsLanguage,
   type AdsGeneratorFormInput,
   type AdsGeneratorJob,
   type AdsGeneratorOptions,
@@ -80,6 +81,15 @@ export function retryRequest(job: AdsGeneratorJob, rows: CampaignRow[], submitte
   return { retryJobId: job.id, replacements };
 }
 
+export function restoredLanguage(input: unknown): AdsLanguage {
+  return (input as { language?: unknown } | null)?.language === 'ar' ? 'ar' : 'en';
+}
+
+/** The file to download: the Arabic CSV when Arabic was requested. */
+export function downloadableCsv(result: AdsGeneratorResult): AdsGeneratorResult['csv'] {
+  return result.arabic?.csv ?? result.csv;
+}
+
 /** Rebuilds the repeater from a recovered job. */
 export function restoredRows(input: unknown): CampaignRow[] | null {
   const campaigns = (input as { campaigns?: unknown } | null)?.campaigns;
@@ -125,6 +135,7 @@ export function adsGeneratorError(error: unknown): AdsGeneratorFailure {
 
 export function progressLabel(job: AdsGeneratorJob): string {
   const runs = job.result?.campaigns ?? [];
+  if (runs.length === 1 && runs[0].phase === 'arabic') return 'Translating to Arabic…';
   if (runs.length > 1) {
     const done = runs.filter((run) => run.status === 'succeeded' || run.status === 'failed').length;
     return `Generated ${done} of ${runs.length} campaigns…`;
@@ -144,7 +155,7 @@ export function downloadCsv(csv: AdsGeneratorResult['csv']): void {
 
 /** Saves every successful campaign as its own CSV inside one ZIP. */
 export function downloadAllCsv(runs: AdsCampaignRun[]): void {
-  const files = runs.flatMap((run) => (run.result ? [{ name: run.result.csv.filename, content: run.result.csv.content }] : []));
+  const files = runs.flatMap((run) => (run.result ? [{ name: downloadableCsv(run.result).filename, content: downloadableCsv(run.result).content }] : []));
   if (!files.length) return;
   const zip = buildZip(files);
   const date = new Date().toISOString().slice(0, 10);

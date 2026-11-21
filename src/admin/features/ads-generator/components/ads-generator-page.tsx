@@ -3,7 +3,7 @@ import { Box, Flex, Typography } from '@strapi/design-system';
 import { Layouts, Page, useFetchClient } from '@strapi/strapi/admin';
 import { ADS_LLM_LIMITS, type AdsGeneratorJob, type AdsGeneratorOptions } from '../../../../constants/ads-generator';
 import { useGenerationJob } from '../../../utils/use-generation-job';
-import { adsGeneratorApi, adsGeneratorError, JOB_STORAGE_KEY, newRow, progressLabel, restoredRows, retryRequest, type AdsGeneratorFailure, type CampaignRow } from '../api';
+import { adsGeneratorApi, adsGeneratorError, JOB_STORAGE_KEY, newRow, progressLabel, restoredLanguage, restoredRows, retryRequest, type AdsGeneratorFailure, type CampaignRow } from '../api';
 import { AdsForm } from './ads-form';
 import { AdsBatchResult } from './ads-batch-result';
 
@@ -19,6 +19,7 @@ export default function AdsGeneratorPage() {
   const api = React.useMemo(() => adsGeneratorApi(client), [client.get, client.post]);
   const [options, setOptions] = React.useState<AdsGeneratorOptions | null>(null);
   const [rows, setRows] = React.useState<CampaignRow[]>(() => [newRow()]);
+  const [arabic, setArabic] = React.useState(false);
   // Which row produced each campaign of the current job, for retrying with fixes.
   const [submittedIds, setSubmittedIds] = React.useState<string[]>([]);
   const [loadFailure, setLoadFailure] = React.useState<AdsGeneratorFailure | null>(null);
@@ -36,11 +37,15 @@ export default function AdsGeneratorPage() {
     const restored = restoredRows(generation.restoredInput);
     if (!restored) return;
     setRows(restored);
+    setArabic(restoredLanguage(generation.restoredInput) === 'ar');
     setSubmittedIds(restored.map((row) => row.id));
   }, [generation.restoredInput]);
 
   const submit = async () => {
-    const accepted = await generation.start({ campaigns: rows.map((row) => row.value) });
+    const accepted = await generation.start({
+      campaigns: rows.map((row) => row.value),
+      ...(arabic ? { language: 'ar' as const } : {}),
+    });
     if (accepted) setSubmittedIds(rows.map((row) => row.id));
   };
   const retry = () => {
@@ -49,9 +54,11 @@ export default function AdsGeneratorPage() {
   const newBatch = async () => {
     if (!(await generation.reset())) return;
     setRows([newRow()]);
+    setArabic(false);
     setSubmittedIds([]);
   };
   const runs = generation.job?.result?.campaigns ?? [];
+  const languageChanged = Boolean(generation.job) && (restoredLanguage(generation.job?.input) === 'ar') !== arabic;
 
   if (failure?.forbidden) return <Page.NoPermissions />;
   if (!options && !failure) return <Page.Loading />;
@@ -73,13 +80,13 @@ export default function AdsGeneratorPage() {
           {failure && <FailureNotice failure={failure} />}
           {options && (
             <Box background="neutral0" padding={6} hasRadius shadow="filterShadow">
-              <AdsForm options={options} rows={rows} onChange={setRows} onSubmit={() => void submit()} onNewBatch={() => void newBatch()} busy={generation.busy} recovering={generation.recovering} />
+              <AdsForm options={options} rows={rows} arabic={arabic} onArabicChange={setArabic} onChange={setRows} onSubmit={() => void submit()} onNewBatch={() => void newBatch()} busy={generation.busy} recovering={generation.recovering} />
             </Box>
           )}
           {generation.job?.status === 'running' && <ProgressNotice job={generation.job} />}
           {runs.length > 0 && (
             <Box background="neutral0" padding={6} hasRadius shadow="filterShadow">
-              <AdsBatchResult runs={runs} busy={generation.busy} onRetry={retry} />
+              <AdsBatchResult runs={runs} busy={generation.busy} languageChanged={languageChanged} onRetry={retry} />
             </Box>
           )}
         </Flex>

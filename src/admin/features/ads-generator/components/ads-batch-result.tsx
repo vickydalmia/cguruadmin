@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Badge, Box, Button, Flex, Typography } from '@strapi/design-system';
 import { Download } from '@strapi/icons';
 import type { AdsCampaignRun } from '../../../../constants/ads-generator';
-import { downloadAllCsv, downloadCsv } from '../api';
+import { downloadAllCsv, downloadableCsv, downloadCsv } from '../api';
 import { AdsResult } from './ads-result';
 
 const STATUS_LABEL: Record<AdsCampaignRun['status'], string> = {
@@ -13,7 +13,13 @@ const STATUS_LABEL: Record<AdsCampaignRun['status'], string> = {
 };
 
 /** Every campaign's outcome, with the ZIP download and a retry for failures. */
-export function AdsBatchResult({ runs, busy, onRetry }: { runs: AdsCampaignRun[]; busy: boolean; onRetry: () => void }) {
+export function AdsBatchResult({ runs, busy, languageChanged, onRetry }: {
+  runs: AdsCampaignRun[];
+  busy: boolean;
+  /** The Arabic checkbox no longer matches this run, so a retry would use the wrong language. */
+  languageChanged: boolean;
+  onRetry: () => void;
+}) {
   const [openKey, setOpenKey] = React.useState<string | null>(null);
   const ready = runs.filter((run) => run.status === 'succeeded');
   const failed = runs.filter((run) => run.status === 'failed');
@@ -24,7 +30,7 @@ export function AdsBatchResult({ runs, busy, onRetry }: { runs: AdsCampaignRun[]
         <Typography variant="beta" tag="h2">{ready.length} of {runs.length} ready</Typography>
         <Flex gap={2} wrap="wrap">
           {failed.length > 0 && !busy && (
-            <Button variant="secondary" onClick={onRetry}>Retry failed ({failed.length})</Button>
+            <Button variant="secondary" disabled={languageChanged} onClick={onRetry}>Retry failed ({failed.length})</Button>
           )}
           {runs.length > 1 && (
             <Button startIcon={<Download />} disabled={!ready.length} onClick={() => downloadAllCsv(ready)}>
@@ -33,20 +39,25 @@ export function AdsBatchResult({ runs, busy, onRetry }: { runs: AdsCampaignRun[]
           )}
         </Flex>
       </Flex>
+      {languageChanged && (
+        <Typography textColor="warning600">
+          The language changed since this run. Press Generate to create these campaigns in the selected language.
+        </Typography>
+      )}
       {runs.map((run) => (
         <Box key={run.key} borderColor="neutral200" hasRadius padding={4}>
           <Flex justifyContent="space-between" alignItems="center" wrap="wrap" gap={3}>
             <Flex gap={2} wrap="wrap">
               <Typography fontWeight="bold">{run.index + 1}. {run.campaignName}</Typography>
-              <Badge>{STATUS_LABEL[run.status]}</Badge>
+              <Badge>{run.status === 'running' && run.phase === 'arabic' ? 'Translating' : STATUS_LABEL[run.status]}</Badge>
             </Flex>
             {run.result && (
               <Flex gap={2}>
                 <Button variant="tertiary" size="S" aria-expanded={openKey === run.key} onClick={() => setOpenKey(openKey === run.key ? null : run.key)}>
                   {openKey === run.key ? 'Hide ads' : 'Review ads'}
                 </Button>
-                <Button size="S" startIcon={<Download />} onClick={() => downloadCsv(run.result!.csv)}>
-                  CSV ({run.result.csv.rows} rows)
+                <Button size="S" startIcon={<Download />} onClick={() => downloadCsv(downloadableCsv(run.result!))}>
+                  {run.result.arabic ? 'Arabic CSV' : 'CSV'} ({downloadableCsv(run.result).rows} rows)
                 </Button>
               </Flex>
             )}

@@ -2,12 +2,14 @@ import { JobStore } from '../ai-generation/job-store';
 import { UsageLimiter } from '../ai-generation/usage-limiter';
 import {
   ADS_ACCOUNT_CURRENCY,
+  ADS_ARABIC_PROMPT_VERSION,
   ADS_LLM_LIMITS,
   ADS_FORM_LIMITS,
   ADS_PROMPT_VERSION,
   type AdsBatchResult,
   type AdsCampaignRun,
   type AdsGeneratorJob,
+  type AdsLanguage,
   type AdsGeneratorResult,
   type AdsGeneratorOptions,
 } from '../constants/ads-generator';
@@ -16,6 +18,7 @@ import { isRetryRequest, mergeRetry, parseAdsBatch } from './batch';
 import { failure, toFailure, type Failure } from './failure';
 import type { AdsForm } from './form';
 import { generateAds } from './generate-ads';
+import { translateAds } from './translate-ads';
 import { createOpenAiCreativeModel, type CreativeModelCall } from './openai-client';
 import { ResultCache } from './result-cache';
 
@@ -54,21 +57,42 @@ export function createAdsGeneratorService(deps: AdsGeneratorDeps) {
   const model = deps.config ? deps.createModel(deps.config) : null;
 
   /** Generates one campaign and records its outcome on its run. */
-  async function runCampaign(run: AdsCampaignRun, form: AdsForm, userId: string, jobId: string, publish: () => void): Promise<void> {
+  async function runCampaign(
+    run: AdsCampaignRun, form: AdsForm, language: AdsLanguage, previous: AdsCampaignRun[],
+    userId: string, jobId: string, publish: () => void,
+  ): Promise<void> {
     const config = deps.config!;
     run.status = 'running';
     publish();
     try {
       const debug = deps.debugLogging ? (message: string) => deps.log.debug(message) : undefined;
-      const result = await generateAds(form, model!, debug, (attempt) => { run.attempt = attempt; publish(); });
-      deps.cache.set(run.key, result);
-      run.result = { ...result, cached: false };
+      const onAttempt = (attempt: number) => { run.attempt = attempt; publish(); };
+      // English is always written and validated first; Arabic only translates it.
+      let english = paidEnglish(run.englishKey!, previous);
+      if (!english) {
+        run.phase = 'english';
+        english = await generateAds(form, model!, debug, onAttempt);
+        deps.cache.set(run.englishKey!, english);
+        deps.log.info(
+          `[ads-generator] admin ${userId} generated ${form.adType} "${form.campaignName}" ` +
+          `(${english.usage.calls} calls, ${english.usage.inputTokens}+${english.usage.outputTokens} tokens, ` +
+          `${english.model}, effort ${config.reasoningEffort}, prompt ${english.promptVersion}, job ${jobId})`,
+        );
+      }
+      if (language === 'ar') {
+        run.english = english;
+        run.phase = 'arabic';
+        run.attempt = 0;
+        publish();
+        const arabic = await translateAds(form, english, model!, debug, onAttempt);
+        const translated = { ...english, arabic };
+        deps.cache.set(run.key, translated);
+        run.result = { ...translated, cached: false };
+        delete run.english;
+      } else {
+        run.result = { ...english, cached: false };
+      }
       run.status = 'succeeded';
-      deps.log.info(
-        `[ads-generator] admin ${userId} generated ${form.adType} "${form.campaignName}" ` +
-        `(${result.usage.calls} calls, ${result.usage.inputTokens}+${result.usage.outputTokens} tokens, ` +
-        `${result.model}, effort ${config.reasoningEffort}, prompt ${result.promptVersion}, job ${jobId})`,
-      );
     } catch (error) {
       const failed = toFailure(error, deps.log, config);
       run.error = { message: failed.error, problems: failed.problems ?? [] };
@@ -78,11 +102,13 @@ export function createAdsGeneratorService(deps: AdsGeneratorDeps) {
   }
 
   /** Works through the queued campaigns a few at a time; one failure never stops the rest. */
-  async function runBatch(jobId: string, runs: AdsCampaignRun[], forms: AdsForm[], userId: string): Promise<void> {
+  async function runBatch(
+    jobId: string, runs: AdsCampaignRun[], forms: AdsForm[], language: AdsLanguage, previous: AdsCampaignRun[], userId: string,
+  ): Promise<void> {
     const publish = () => deps.jobs.update(jobId, { campaigns: runs.map((run) => ({ ...run })) });
     const queue = runs.filter((run) => run.status === 'queued');
     const worker = async () => {
-      for (let run = queue.shift(); run; run = queue.shift()) await runCampaign(run, forms[run.index], userId, jobId, publish);
+      for (let run = queue.shift(); run; run = queue.shift()) await runCampaign(run, forms[run.index], language, previous, userId, jobId, publish);
     };
     try {
       await Promise.all(Array.from({ length: Math.min(ADS_LLM_LIMITS.batchConcurrency, queue.length) }, worker));
@@ -101,6 +127,21 @@ export function createAdsGeneratorService(deps: AdsGeneratorDeps) {
     if (cached) return { ...cached, cached: true };
     const earlier = previous.find((run) => run.key === key && run.status === 'succeeded')?.result;
     return earlier ? { ...earlier, cached: true } : null;
+  }
+
+  /** Validated English already paid for, including from a failed translation. */
+  function paidEnglish(key: string, previous: AdsCampaignRun[]): Omit<AdsGeneratorResult, 'cached'> | null {
+    const cached = deps.cache.get(key);
+    if (cached) return cached;
+    for (const run of previous) {
+      if ((run.englishKey ?? run.key) !== key) continue;
+      if (run.english) return run.english;
+      if (run.result) {
+        const { arabic: _arabic, cached: _cached, ...english } = run.result;
+        return english;
+      }
+    }
+    return null;
   }
 
   return {
@@ -127,14 +168,18 @@ export function createAdsGeneratorService(deps: AdsGeneratorDeps) {
       const parsed = parseAdsBatch(batch);
       // `in` narrowing: boolean discriminants do not narrow under `strict: false`.
       if ('errors' in parsed) return reject(failure(400, 'Fix the campaigns and try again.', parsed.errors));
-      const { forms } = parsed;
+      const { forms, language } = parsed;
 
       if (!deps.config || !model) {
         return reject(failure(503, 'Ad generation is not configured on this server (ADS_GENERATOR_OPENAI_API_KEY / ADS_GENERATOR_MODEL).'));
       }
 
-      const keys = forms.map((form) => ResultCache.key(form, deps.config!.model));
-      const request = { requestKey: keys.join(':'), input: { campaigns: (batch as { campaigns: unknown[] }).campaigns } };
+      const englishKeys = forms.map((form) => ResultCache.key(form, deps.config!.model));
+      const keys = language === 'ar' ? englishKeys.map((key) => `${key}:ar:${ADS_ARABIC_PROMPT_VERSION}`) : englishKeys;
+      const request = {
+        requestKey: keys.join('|'),
+        input: { campaigns: (batch as { campaigns: unknown[] }).campaigns, ...(language === 'ar' ? { language } : {}) },
+      };
 
       // The same batch (double click, retry after a proxy timeout, another tab)
       // joins the running job. A different batch must never receive its results.
@@ -151,13 +196,16 @@ export function createAdsGeneratorService(deps: AdsGeneratorDeps) {
           index,
           campaignName: form.campaignName,
           key: keys[index],
+          englishKey: englishKeys[index],
           status: result ? 'succeeded' : 'queued',
           attempt: 0,
           ...(result ? { result } : {}),
         };
       });
-      const toGenerate = runs.filter((run) => run.status === 'queued').length;
-      if (!toGenerate) return { status: 200, body: deps.jobs.finished(userId, { campaigns: runs }, request) };
+      const queued = runs.filter((run) => run.status === 'queued');
+      // One generation per campaign. An Arabic campaign's English and translation count once.
+      const toGenerate = queued.length;
+      if (!queued.length) return { status: 200, body: deps.jobs.finished(userId, { campaigns: runs }, request) };
 
       const slot = deps.limiter.acquire(userId, toGenerate);
       if ('message' in slot) return reject(failure(429, slot.message));
@@ -165,7 +213,7 @@ export function createAdsGeneratorService(deps: AdsGeneratorDeps) {
       const job = deps.jobs.start(userId, request);
       deps.jobs.update(job.id, { campaigns: runs.map((run) => ({ ...run })) });
       const started = deps.jobs.get(job.id, userId)!;
-      void runBatch(job.id, runs, forms, userId);
+      void runBatch(job.id, runs, forms, language, previous, userId);
       return { status: 202, body: started };
     },
 

@@ -31,6 +31,7 @@ export const ADS_GENERATOR_ACTION_ATTRIBUTES = {
 
 /** Bump whenever the system prompt, user prompt template or output shape changes. */
 export const ADS_PROMPT_VERSION = 'ads-v8';
+export const ADS_ARABIC_PROMPT_VERSION = 'ads-ar-v1';
 
 /**
  * Two ways to write copy, chosen per campaign in the form:
@@ -270,6 +271,42 @@ export const ADS_NON_STACKING_TERMS = [
   'not combinable', 'not valid with other', 'cannot be clubbed', 'not clubbable',
 ] as const;
 
+/**
+ * Arabic wording the English rules also forbid. Written in normalized spelling
+ * (see normalizeArabic) and matched as whole words with common prefixes. Blocking.
+ */
+export const ADS_ARABIC_BANNED_PHRASES = [
+  'مضمون', 'ضمان', 'نضمن', 'افضل سعر', 'افضل الاسعار', 'اقل سعر', 'اقل الاسعار', 'ارخص', 'ارخص سعر', 'ارخص الاسعار',
+  'رقم 1', 'رقم واحد', 'الاول في', 'لفتره محدوده', 'لوقت محدود', 'عرض محدود', 'سارع', 'سارعوا', 'سارعي', 'بادر', 'بادروا',
+  'لا تفوت', 'لا تفوتوا', 'لا تفوتي', 'ينتهي قريبا', 'ينتهي اليوم', 'اليوم فقط', 'فقط اليوم', 'الان فقط', 'اخر فرصه', 'فرصه اخيره',
+] as const;
+
+/** Arabic equivalents of ADS_EVERGREEN_BLOCKED_TERMS (same normalized whole-word match). */
+export const ADS_ARABIC_EVERGREEN_BLOCKED_TERMS = [
+  'رمضان', 'عيد', 'الفطر', 'الاضحي', 'الجمعه البيضاء', 'الجمعه السوداء', 'بلاك فرايدي', 'الاثنين الالكتروني', 'سايبر مانداي',
+  'راس السنه', 'السنه الجديده', 'كريسماس', 'ديوالي', 'اليوم الوطني', 'موسم', 'موسمي', 'تصفيه', 'الليله', 'غدا',
+  'هذا الاسبوع', 'نهايه الاسبوع', 'هذا الشهر', 'الان', 'ينتهي', 'تنتهي', 'اخر يوم', 'كاش باك', 'استرداد نقدي',
+  'توصيل مجاني', 'شحن مجاني', 'مستخدمين جدد', 'العملاء الجدد', 'اول طلب',
+] as const;
+
+/** Spelled-out numbers: figures must stay in digits unless the English line words them too. */
+export const ADS_ARABIC_NUMBER_WORDS = [
+  'اثنين', 'ثلاث', 'اربع', 'خمس', 'ست', 'سبع', 'ثمان', 'تسع', 'عشر', 'عشرين', 'ثلاثين', 'اربعين', 'خمسين', 'ستين', 'سبعين',
+  'ثمانين', 'تسعين', 'مئه', 'مائه', 'بالمئه', 'بالمائه', 'الف', 'نصف', 'ربع',
+] as const;
+
+/** Claims a translation may only make when its English line states them. */
+export const ADS_ARABIC_CLAIM_EVIDENCE = [
+  { arabic: ['توصيل مجاني', 'شحن مجاني', 'مجانا', 'مجاني', 'هديه'], english: /\b(free|gift)\b/i },
+  { arabic: ['كاش باك', 'استرداد نقدي'], english: /\bcash\s?back\b/i },
+] as const;
+
+export const ADS_ARABIC_MANUAL_STEPS = [
+  'Have an Arabic speaker review the ad copy before enabling the campaign.',
+  'Set the campaign language to Arabic in Google Ads before enabling it.',
+  'Keywords stay in English. Add Arabic keywords in Google Ads if you want to match Arabic searches.',
+] as const;
+
 // ── Fixed campaign values written by the CSV builder ──
 export const ADS_KEYWORD_SUFFIXES = [
   'coupon',
@@ -345,6 +382,16 @@ export type AdsGeneratorFormInput = {
 
 export type GeneratedAd = { headlines: string[]; descriptions: string[] };
 
+/** The Arabic translation of a validated English result. */
+export type AdsArabicVersion = {
+  promptVersion: string;
+  ads: GeneratedAd[];
+  warnings: string[];
+  manualSteps: string[];
+  usage: { calls: number; inputTokens: number; outputTokens: number };
+  csv: { filename: string; content: string; rows: number };
+};
+
 export type AdsGeneratorResult = {
   adType: AdsAdType;
   promptVersion: string;
@@ -356,10 +403,18 @@ export type AdsGeneratorResult = {
   manualSteps: string[];
   usage: { calls: number; inputTokens: number; outputTokens: number };
   csv: { filename: string; content: string; rows: number };
+  /** Present when Arabic was requested; its CSV is the one to download. */
+  arabic?: AdsArabicVersion;
 };
 
 /** POST /generate body: one to ADS_FORM_LIMITS.campaignsMax campaigns. */
-export type AdsGeneratorBatchInput = { campaigns: AdsGeneratorFormInput[] };
+export type AdsLanguage = 'en' | 'ar';
+
+export type AdsGeneratorBatchInput = {
+  campaigns: AdsGeneratorFormInput[];
+  /** 'ar': write and validate English first, then translate it for the download. */
+  language?: AdsLanguage;
+};
 
 /** POST /generate body that reruns only a finished job's failed campaigns. */
 export type AdsGeneratorRetryInput = {
@@ -375,6 +430,11 @@ export type AdsCampaignRun = {
   campaignName: string;
   /** Identifies this exact brief, so a retry reuses it without a new OpenAI call. */
   key: string;
+  /** The English step's key, so a failed translation never pays for English again. */
+  englishKey?: string;
+  /** Validated English kept while, or after, its translation fails. */
+  english?: Omit<AdsGeneratorResult, 'cached'>;
+  phase?: 'english' | 'arabic';
   status: 'queued' | 'running' | 'succeeded' | 'failed';
   /** OpenAI calls made so far for this campaign. */
   attempt: number;
