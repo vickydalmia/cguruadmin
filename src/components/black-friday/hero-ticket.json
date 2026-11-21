@@ -1,0 +1,24 @@
+{
+  "collectionName": "components_black_friday_hero_tickets",
+  "info": {
+    "displayName": "Black Friday Hero Ticket",
+    "icon": "star"
+  },
+  "options": {},
+  "attributes": {
+    "store": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::store.store"
+    },
+    "brand": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::brand.brand"
+    },
+    "discountText": {
+      "type": "string",
+      "maxLength": 12
+    }
+  }
+}

@@ -40,6 +40,8 @@ export async function generateAds(
   form: AdsForm,
   callModel: CreativeModelCall,
   debug: DebugLog = () => {},
+  /** Called before each OpenAI call with its 1-based number (job progress). */
+  onAttempt: (attempt: number) => void = () => {},
 ): Promise<Omit<AdsGeneratorResult, 'cached'>> {
   const system = systemPromptFor(form.adType);
   const brief = renderBrief(form);
@@ -52,6 +54,7 @@ export async function generateAds(
   let usable: { output: AdsModelOutput; editorial: string[] } | null = null;
 
   for (let attempt = 0; attempt <= ADS_LLM_LIMITS.maxRepairAttempts; attempt += 1) {
+    onAttempt(attempt + 1);
     debug(`[ads-generator] attempt ${attempt + 1} prompt:\n${prompt}`);
     const response = await callModel({ system, prompt });
     debug(`[ads-generator] attempt ${attempt + 1} response: ${JSON.stringify(response.output)}`);

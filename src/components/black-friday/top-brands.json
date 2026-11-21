@@ -1,0 +1,39 @@
+{
+  "collectionName": "components_black_friday_top_brandss",
+  "info": {
+    "displayName": "Black Friday Top Brands",
+    "icon": "star"
+  },
+  "options": {},
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "eyebrow": {
+      "type": "string",
+      "maxLength": 40
+    },
+    "heading": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "headingAccent": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "viewAllLabel": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "viewAllHref": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "items": {
+      "type": "component",
+      "repeatable": true,
+      "component": "black-friday.brand-item"
+    }
+  }
+}

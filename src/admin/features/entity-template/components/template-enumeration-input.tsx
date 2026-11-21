@@ -16,6 +16,7 @@ const PAGE_TEMPLATE_LABELS: Record<string, string> = {
   dealTemplate: 'Deal Template',
   independenceDayTemplate: 'Independence Day Template',
   festivalTemplate: 'Festival Template',
+  blackFridayTemplate: 'Black Friday Template',
 };
 
 // Keep Strapi's native field state, accessibility, focus and validation. Only

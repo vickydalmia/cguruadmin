@@ -143,6 +143,10 @@ export const ADS_LLM_LIMITS = {
   maxRequestsPerDay: 100,
   /** Identical form within this window returns the cached result, no new call. */
   resultCacheMs: 10 * 60_000,
+  /** Finished background jobs stay readable this long (in memory). */
+  jobRetentionMs: 30 * 60_000,
+  /** How often the settings page polls a running job. */
+  jobPollMs: 3_000,
 } as const;
 
 // ── Creative rules (checked in code after the model answers) ──
@@ -347,6 +351,22 @@ export type AdsGeneratorResult = {
   manualSteps: string[];
   usage: { calls: number; inputTokens: number; outputTokens: number };
   csv: { filename: string; content: string; rows: number };
+};
+
+/**
+ * A background generation (POST /generate starts it, GET /jobs/:id polls it).
+ * `attempt` counts OpenAI calls made so far, up to `maxAttempts` (1 + repairs).
+ */
+export type AdsGeneratorJob = {
+  id: string;
+  status: 'running' | 'succeeded' | 'failed';
+  attempt: number;
+  maxAttempts: number;
+  startedAt: string;
+  /** True when the submit reattached to a job that was already running. */
+  reattached?: boolean;
+  result?: AdsGeneratorResult;
+  error?: { message: string; problems: string[] };
 };
 
 export type AdsGeneratorOptions = {

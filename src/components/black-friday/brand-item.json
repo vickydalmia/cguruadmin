@@ -1,0 +1,33 @@
+{
+  "collectionName": "components_black_friday_brand_items",
+  "info": {
+    "displayName": "Black Friday Brand",
+    "icon": "star"
+  },
+  "options": {},
+  "attributes": {
+    "store": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::store.store"
+    },
+    "brand": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::brand.brand"
+    },
+    "discountText": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "isHot": {
+      "type": "boolean",
+      "default": false
+    },
+    "ctaLabel": {
+      "type": "string",
+      "maxLength": 24,
+      "default": "Shop now"
+    }
+  }
+}

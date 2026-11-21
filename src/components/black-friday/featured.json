@@ -1,0 +1,44 @@
+{
+  "collectionName": "components_black_friday_featureds",
+  "info": {
+    "displayName": "Black Friday Featured",
+    "icon": "star"
+  },
+  "options": {},
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "eyebrow": {
+      "type": "string",
+      "maxLength": 40
+    },
+    "heading": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "headingAccent": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "viewAllLabel": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "viewAllHref": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "heroBadge": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "items": {
+      "type": "component",
+      "repeatable": true,
+      "component": "black-friday.featured-coupon",
+      "max": 5
+    }
+  }
+}
