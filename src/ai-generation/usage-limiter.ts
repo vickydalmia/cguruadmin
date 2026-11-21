@@ -28,23 +28,30 @@ export class UsageLimiter {
     private readonly label = 'ad-generation',
   ) {}
 
-  /** Reserves a slot or returns why not. Call release() when the request ends. */
-  acquire(userId: string): { ok: true } | { ok: false; message: string } {
+  /**
+   * Reserves a slot for `count` generations, all or none, or returns why not.
+   * Call release() when the request ends.
+   */
+  acquire(userId: string, count = 1): { ok: true } | { ok: false; message: string } {
     const now = this.now();
     this.rollDay(now);
     if (this.inFlight.has(userId)) {
       return { ok: false, message: 'A generation is already running for your account. Wait for it to finish.' };
     }
-    if (this.dayCount >= this.limits.maxRequestsPerDay) {
-      return { ok: false, message: `The daily ${this.label} limit is reached. Try again tomorrow (UTC).` };
+    if (this.dayCount + count > this.limits.maxRequestsPerDay) {
+      const left = Math.max(0, this.limits.maxRequestsPerDay - this.dayCount);
+      const detail = count > 1 ? ` ${left} left today; this run needs ${count}.` : '';
+      return { ok: false, message: `The daily ${this.label} limit is reached.${detail} Try again tomorrow (UTC).` };
     }
     const recent = (this.userRequests.get(userId) ?? []).filter((at) => now - at < HOUR_MS);
-    if (recent.length >= this.limits.maxRequestsPerUserPerHour) {
-      return { ok: false, message: `You can generate ${this.limits.maxRequestsPerUserPerHour} times per hour. Try again later.` };
+    if (recent.length + count > this.limits.maxRequestsPerUserPerHour) {
+      const left = Math.max(0, this.limits.maxRequestsPerUserPerHour - recent.length);
+      const detail = count > 1 ? ` ${left} left; this run needs ${count}.` : '';
+      return { ok: false, message: `You can generate ${this.limits.maxRequestsPerUserPerHour} times per hour.${detail} Try again later.` };
     }
-    recent.push(now);
+    for (let i = 0; i < count; i += 1) recent.push(now);
     this.userRequests.set(userId, recent);
-    this.dayCount += 1;
+    this.dayCount += count;
     this.inFlight.add(userId);
     return { ok: true };
   }

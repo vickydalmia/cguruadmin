@@ -27,7 +27,7 @@ describe('readAdsUsageLimits', () => {
   });
 
   it('falls back to the defaults for blank, zero, negative or non-integer values', () => {
-    const defaults = { maxRequestsPerUserPerHour: 10, maxRequestsPerDay: 100 };
+    const defaults = { maxRequestsPerUserPerHour: 30, maxRequestsPerDay: 100 };
     expect(readAdsUsageLimits({})).toEqual(defaults);
     for (const value of ['', '0', '-5', '2.5', 'ten']) {
       expect(readAdsUsageLimits({

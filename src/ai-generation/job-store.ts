@@ -12,7 +12,7 @@ import type { GenerationJob } from '../constants/ai-generation';
  * the same request reattaches to it, and a different one is refused.
  */
 
-type JobRecord<TResult> = GenerationJob<TResult> & { userId: string; finishedAtMs: number | null; requestKey?: string };
+type JobRecord<TResult> = GenerationJob<TResult> & { userId: string; finishedAtMs: number | null; requestKey?: string; dismissed?: boolean };
 
 /** What was asked for: the key tells a retry from a different brief. */
 export type JobRequest = { requestKey?: string; input?: unknown };
@@ -55,7 +55,7 @@ export class JobStore<TResult> {
     const running = this.runningFor(userId);
     if (running) return running;
     let latest: JobRecord<TResult> | null = null;
-    for (const job of this.jobs.values()) if (job.userId === userId) latest = job;
+    for (const job of this.jobs.values()) if (job.userId === userId && !job.dismissed) latest = job;
     return latest ? view(latest) : null;
   }
 
@@ -88,12 +88,26 @@ export class JobStore<TResult> {
     if (job?.status === 'running') job.attempt = attempt;
   }
 
+  /** Publishes partial output while the job is still running. */
+  update(id: string, result: TResult): void {
+    const job = this.jobs.get(id);
+    if (job?.status === 'running') job.result = result;
+  }
+
   succeed(id: string, result: TResult): void {
     this.finish(id, (job) => { job.status = 'succeeded'; job.result = result; });
   }
 
   fail(id: string, error: { message: string; problems: string[] }): void {
     this.finish(id, (job) => { job.status = 'failed'; job.error = error; });
+  }
+
+  /** Stops a finished job being recovered on load. False if it is missing or running. */
+  dismiss(id: string, userId: string): boolean {
+    const job = this.jobs.get(id);
+    if (!job || job.userId !== userId || job.status === 'running') return false;
+    job.dismissed = true;
+    return true;
   }
 
   /** Only the admin who started a job may read it; anything else looks missing. */
@@ -119,6 +133,6 @@ export class JobStore<TResult> {
 }
 
 function view<TResult>(job: JobRecord<TResult>): GenerationJob<TResult> {
-  const { userId: _userId, finishedAtMs: _finishedAtMs, requestKey: _requestKey, ...rest } = job;
+  const { userId: _userId, finishedAtMs: _finishedAtMs, requestKey: _requestKey, dismissed: _dismissed, ...rest } = job;
   return { ...rest };
 }

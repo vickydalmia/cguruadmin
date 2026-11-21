@@ -13,6 +13,8 @@ export type GenerationJobApi<TForm, TResult> = {
   generate(form: TForm): Promise<GenerationJob<TResult>>;
   job(id: string): Promise<GenerationJob<TResult>>;
   latest(): Promise<GenerationJob<TResult> | null>;
+  /** Stops a finished job being recovered on the next load. */
+  dismiss?(id: string): Promise<unknown>;
 };
 
 export type GenerationJobSettings = {
@@ -121,10 +123,12 @@ export function useGenerationJob<TForm, TResult>(
     return () => { active = false; clearTimeout(timer); };
   }, [api, job, running, retry, settle, storageKey, pollMs, toFailure]);
 
-  const start = React.useCallback(async (form: TForm) => {
-    setStarting(true); setFailure(null); setJob(null);
+  /** Resolves true once the server accepts. A refused submit keeps the current output. */
+  const start = React.useCallback(async (form: TForm): Promise<boolean> => {
+    setStarting(true); setFailure(null);
     try {
       settle(await api.generate(form));
+      return true;
     } catch (error) {
       setFailure(toFailure(error));
       if (isConflictError(error)) {
@@ -132,17 +136,34 @@ export function useGenerationJob<TForm, TResult>(
         const current = await api.latest().catch(() => null);
         if (current?.status === 'running') settle(current);
       }
+      return false;
     } finally {
       setStarting(false);
     }
   }, [api, settle, toFailure]);
+
+  /** Clears the finished output here and for later page loads. */
+  const reset = React.useCallback(async (): Promise<boolean> => {
+    setFailure(null);
+    try {
+      if (job && api.dismiss) await api.dismiss(job.id);
+    } catch (error) {
+      setFailure(toFailure(error));
+      return false;
+    }
+    rememberJob(storageKey, null);
+    setJob(null);
+    return true;
+  }, [api, job, storageKey, toFailure]);
 
   return {
     job,
     failure,
     busy: starting || reconnecting || running,
     result: job?.status === 'succeeded' ? job.result ?? null : null,
+    recovering: reconnecting,
     restoredInput,
     start,
+    reset,
   };
 }

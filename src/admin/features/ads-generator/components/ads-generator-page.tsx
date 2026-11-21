@@ -3,9 +3,9 @@ import { Box, Flex, Typography } from '@strapi/design-system';
 import { Layouts, Page, useFetchClient } from '@strapi/strapi/admin';
 import { ADS_LLM_LIMITS, type AdsGeneratorJob, type AdsGeneratorOptions } from '../../../../constants/ads-generator';
 import { useGenerationJob } from '../../../utils/use-generation-job';
-import { adsGeneratorApi, adsGeneratorError, EMPTY_FORM, JOB_STORAGE_KEY, progressLabel, restoredForm, type AdsGeneratorFailure } from '../api';
+import { adsGeneratorApi, adsGeneratorError, JOB_STORAGE_KEY, newRow, progressLabel, restoredRows, retryRequest, type AdsGeneratorFailure, type CampaignRow } from '../api';
 import { AdsForm } from './ads-form';
-import { AdsResult } from './ads-result';
+import { AdsBatchResult } from './ads-batch-result';
 
 const GENERATION_SETTINGS = { storageKey: JOB_STORAGE_KEY, pollMs: ADS_LLM_LIMITS.jobPollMs, toFailure: adsGeneratorError };
 
@@ -18,7 +18,9 @@ export default function AdsGeneratorPage() {
   const client = useFetchClient();
   const api = React.useMemo(() => adsGeneratorApi(client), [client.get, client.post]);
   const [options, setOptions] = React.useState<AdsGeneratorOptions | null>(null);
-  const [form, setForm] = React.useState(EMPTY_FORM);
+  const [rows, setRows] = React.useState<CampaignRow[]>(() => [newRow()]);
+  // Which row produced each campaign of the current job, for retrying with fixes.
+  const [submittedIds, setSubmittedIds] = React.useState<string[]>([]);
   const [loadFailure, setLoadFailure] = React.useState<AdsGeneratorFailure | null>(null);
   const generation = useGenerationJob(api, GENERATION_SETTINGS);
   const failure = loadFailure ?? generation.failure;
@@ -31,8 +33,25 @@ export default function AdsGeneratorPage() {
   }, [api]);
 
   React.useEffect(() => {
-    if (generation.restoredInput) setForm(restoredForm(generation.restoredInput));
+    const restored = restoredRows(generation.restoredInput);
+    if (!restored) return;
+    setRows(restored);
+    setSubmittedIds(restored.map((row) => row.id));
   }, [generation.restoredInput]);
+
+  const submit = async () => {
+    const accepted = await generation.start({ campaigns: rows.map((row) => row.value) });
+    if (accepted) setSubmittedIds(rows.map((row) => row.id));
+  };
+  const retry = () => {
+    if (generation.job) void generation.start(retryRequest(generation.job, rows, submittedIds));
+  };
+  const newBatch = async () => {
+    if (!(await generation.reset())) return;
+    setRows([newRow()]);
+    setSubmittedIds([]);
+  };
+  const runs = generation.job?.result?.campaigns ?? [];
 
   if (failure?.forbidden) return <Page.NoPermissions />;
   if (!options && !failure) return <Page.Loading />;
@@ -42,7 +61,7 @@ export default function AdsGeneratorPage() {
       <Page.Title>Ads Generator</Page.Title>
       <Layouts.Header
         title="Ads Generator"
-        subtitle="Generate a Google Ads Search campaign upload CSV for one brand."
+        subtitle="Generate Google Ads Search campaign upload CSVs, up to 10 campaigns at once."
       />
       <Layouts.Content>
         <Flex direction="column" alignItems="stretch" gap={6}>
@@ -54,13 +73,13 @@ export default function AdsGeneratorPage() {
           {failure && <FailureNotice failure={failure} />}
           {options && (
             <Box background="neutral0" padding={6} hasRadius shadow="filterShadow">
-              <AdsForm options={options} value={form} onChange={setForm} onSubmit={() => void generation.start(form)} busy={generation.busy} />
+              <AdsForm options={options} rows={rows} onChange={setRows} onSubmit={() => void submit()} onNewBatch={() => void newBatch()} busy={generation.busy} recovering={generation.recovering} />
             </Box>
           )}
           {generation.job?.status === 'running' && <ProgressNotice job={generation.job} />}
-          {generation.result && (
+          {runs.length > 0 && (
             <Box background="neutral0" padding={6} hasRadius shadow="filterShadow">
-              <AdsResult result={generation.result} />
+              <AdsBatchResult runs={runs} busy={generation.busy} onRetry={retry} />
             </Box>
           )}
         </Flex>

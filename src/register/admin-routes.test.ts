@@ -168,6 +168,7 @@ describe('ads generator routes', () => {
       'POST /generate → api::ads-generator.ads-generator.generate',
       'GET /jobs/latest → api::ads-generator.ads-generator.latest',
       'GET /jobs/:id → api::ads-generator.ads-generator.job',
+      'POST /jobs/:id/dismiss → api::ads-generator.ads-generator.dismiss',
     ]);
     for (const route of registration.routes) {
       expect(route.config.policies).toEqual(['admin::isAuthenticatedAdmin', 'global::ads-generator-manage-only']);

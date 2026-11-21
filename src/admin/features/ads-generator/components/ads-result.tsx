@@ -1,14 +1,12 @@
 import * as React from 'react';
-import { Badge, Box, Button, Flex, Typography } from '@strapi/design-system';
-import { Download } from '@strapi/icons';
+import { Badge, Box, Flex, Typography } from '@strapi/design-system';
 import type { AdsGeneratorResult, GeneratedAd } from '../../../../constants/ads-generator';
-import { downloadCsv } from '../api';
 
-/** Review screen: warnings and manual steps first, then the copy, then the download. */
+/** One campaign's review: warnings and manual steps first, then the copy. */
 export function AdsResult({ result }: { result: AdsGeneratorResult }) {
   return (
     <Flex direction="column" alignItems="stretch" gap={5}>
-      <Flex justifyContent="space-between" alignItems="center" wrap="wrap" gap={3}>
+      <Flex alignItems="center" wrap="wrap" gap={3}>
         <Flex gap={2} wrap="wrap">
           <Badge>{result.adType === 'evergreen' ? 'Evergreen' : 'Offer-specific'}</Badge>
           <Badge>{result.model}</Badge>
@@ -16,9 +14,6 @@ export function AdsResult({ result }: { result: AdsGeneratorResult }) {
           <Badge>{result.cached ? 'cached result' : `${result.usage.calls} OpenAI call(s)`}</Badge>
           <Badge>{result.usage.inputTokens + result.usage.outputTokens} tokens</Badge>
         </Flex>
-        <Button startIcon={<Download />} onClick={() => downloadCsv(result.csv)}>
-          Download CSV ({result.csv.rows} rows)
-        </Button>
       </Flex>
 
       <Notes title="Before you enable the campaign" items={result.manualSteps} />
