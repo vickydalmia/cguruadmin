@@ -1,0 +1,117 @@
+{
+  "kind": "singleType",
+  "collectionName": "black_friday_pages",
+  "info": {
+    "singularName": "black-friday-page",
+    "pluralName": "black-friday-pages",
+    "displayName": "Black Friday Template",
+    "description": "Black Friday design and content for its single Store, Brand, Category or Bank owner."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
+  },
+  "attributes": {
+    "enabled": {
+      "type": "boolean",
+      "default": false,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "title": {
+      "type": "string",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "hero": {
+      "type": "component",
+      "repeatable": false,
+      "component": "black-friday.hero",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "ticker": {
+      "type": "component",
+      "repeatable": false,
+      "component": "black-friday.ticker",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "topBrands": {
+      "type": "component",
+      "repeatable": false,
+      "component": "black-friday.top-brands",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "featured": {
+      "type": "component",
+      "repeatable": false,
+      "component": "black-friday.featured",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "exploreCategories": {
+      "type": "component",
+      "repeatable": false,
+      "component": "festival.explore-categories",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "productSection": {
+      "type": "component",
+      "repeatable": false,
+      "component": "festival.product-section",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "faq": {
+      "type": "component",
+      "repeatable": false,
+      "component": "home.faq-block",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "popularSearches": {
+      "type": "component",
+      "repeatable": false,
+      "component": "home.popular-searches",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    }
+  }
+}

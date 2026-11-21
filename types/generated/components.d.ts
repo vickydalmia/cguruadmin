@@ -206,6 +206,244 @@ export interface AboutTrust extends Struct.ComponentSchema {
   };
 }
 
+export interface BlackFridayBrandItem extends Struct.ComponentSchema {
+  collectionName: 'components_black_friday_brand_items';
+  info: {
+    displayName: 'Black Friday Brand';
+    icon: 'star';
+  };
+  attributes: {
+    brand: Schema.Attribute.Relation<'oneToOne', 'api::brand.brand'>;
+    ctaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 24;
+      }> &
+      Schema.Attribute.DefaultTo<'Shop now'>;
+    discountText: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 32;
+      }>;
+    isHot: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    store: Schema.Attribute.Relation<'oneToOne', 'api::store.store'>;
+  };
+}
+
+export interface BlackFridayFeatured extends Struct.ComponentSchema {
+  collectionName: 'components_black_friday_featureds';
+  info: {
+    displayName: 'Black Friday Featured';
+    icon: 'star';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    headingAccent: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    heroBadge: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 32;
+      }>;
+    items: Schema.Attribute.Component<'black-friday.featured-coupon', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 5;
+        },
+        number
+      >;
+    viewAllHref: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }>;
+    viewAllLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 32;
+      }>;
+  };
+}
+
+export interface BlackFridayFeaturedCoupon extends Struct.ComponentSchema {
+  collectionName: 'components_black_friday_featured_coupons';
+  info: {
+    displayName: 'Black Friday Featured Coupon';
+    icon: 'star';
+  };
+  attributes: {
+    badge: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 24;
+      }>;
+    coupon: Schema.Attribute.Relation<'oneToOne', 'api::coupon.coupon'>;
+    discountOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 24;
+      }>;
+    imageOverride: Schema.Attribute.Media<'images'>;
+    proofText: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    titleOverride: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 120;
+      }>;
+  };
+}
+
+export interface BlackFridayHero extends Struct.ComponentSchema {
+  collectionName: 'components_black_friday_heros';
+  info: {
+    displayName: 'Black Friday Hero';
+    icon: 'star';
+  };
+  attributes: {
+    bagCaption: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 32;
+      }>;
+    bagLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 10;
+      }> &
+      Schema.Attribute.DefaultTo<'SALE'>;
+    countdownLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }> &
+      Schema.Attribute.DefaultTo<'DEALS END IN'>;
+    description: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 180;
+      }>;
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    primaryCtaHref: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }>;
+    primaryCtaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    saleEndAt: Schema.Attribute.DateTime;
+    secondaryBagLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 28;
+      }>;
+    secondaryCtaHref: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }>;
+    secondaryCtaLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    tickets: Schema.Attribute.Component<'black-friday.hero-ticket', true> &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 3;
+        },
+        number
+      >;
+    titleLineOne: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 16;
+      }> &
+      Schema.Attribute.DefaultTo<'BLACK'>;
+    titleLineTwo: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 16;
+      }> &
+      Schema.Attribute.DefaultTo<'FRIDAY'>;
+    verifiedLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 32;
+      }>;
+    verifiedValue: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 32;
+      }>;
+  };
+}
+
+export interface BlackFridayHeroTicket extends Struct.ComponentSchema {
+  collectionName: 'components_black_friday_hero_tickets';
+  info: {
+    displayName: 'Black Friday Hero Ticket';
+    icon: 'star';
+  };
+  attributes: {
+    brand: Schema.Attribute.Relation<'oneToOne', 'api::brand.brand'>;
+    discountText: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 12;
+      }>;
+    store: Schema.Attribute.Relation<'oneToOne', 'api::store.store'>;
+  };
+}
+
+export interface BlackFridayTicker extends Struct.ComponentSchema {
+  collectionName: 'components_black_friday_tickers';
+  info: {
+    displayName: 'Black Friday Ticker';
+    icon: 'star';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    primaryItems: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+    secondaryItems: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 160;
+      }>;
+  };
+}
+
+export interface BlackFridayTopBrands extends Struct.ComponentSchema {
+  collectionName: 'components_black_friday_top_brandss';
+  info: {
+    displayName: 'Black Friday Top Brands';
+    icon: 'star';
+  };
+  attributes: {
+    enabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    eyebrow: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+    heading: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    headingAccent: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    items: Schema.Attribute.Component<'black-friday.brand-item', true>;
+    viewAllHref: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }>;
+    viewAllLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 32;
+      }>;
+  };
+}
+
 export interface CareerBenefitCard extends Struct.ComponentSchema {
   collectionName: 'components_career_benefit_cards';
   info: {
@@ -3715,6 +3953,13 @@ declare module '@strapi/strapi' {
       'about.our-story': AboutOurStory;
       'about.press': AboutPress;
       'about.trust': AboutTrust;
+      'black-friday.brand-item': BlackFridayBrandItem;
+      'black-friday.featured': BlackFridayFeatured;
+      'black-friday.featured-coupon': BlackFridayFeaturedCoupon;
+      'black-friday.hero': BlackFridayHero;
+      'black-friday.hero-ticket': BlackFridayHeroTicket;
+      'black-friday.ticker': BlackFridayTicker;
+      'black-friday.top-brands': BlackFridayTopBrands;
       'career.benefit-card': CareerBenefitCard;
       'career.hero': CareerHero;
       'career.hero-highlight': CareerHeroHighlight;

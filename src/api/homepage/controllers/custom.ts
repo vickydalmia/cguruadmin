@@ -1,3 +1,4 @@
+import { blackFridayTemplateEnabled } from '../../black-friday-page/services/black-friday-content';
 import { FESTIVAL_POPULATE, festivalTemplateEnabled } from '../../festival-page/services/festival-content';
 import { subscriptionRouteMetadata } from '../../subscription-page/services/subscription-route';
 import { telegramRouteMetadata } from '../../telegram-page/services/telegram-route';
@@ -187,6 +188,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       }) : Promise.resolve([]),
       Promise.all([
         ['festival', 'festivalTemplate', 'api::festival-page.festival-page'],
+        ['blackFriday', 'blackFridayTemplate', 'api::black-friday-page.black-friday-page'],
         ['dealOfTheDay', 'dealTemplate', 'api::deal-of-the-day-page.deal-of-the-day-page'],
         ['independenceDaySale', 'independenceDayTemplate', 'api::independence-day-sale-page.independence-day-sale-page'],
       ].map(async ([featureKey, pageTemplate, uid]) => {
@@ -195,11 +197,11 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
           findEntityTemplateOwners(strapi, pageTemplate as any, locale),
           strapi.documents(uid as any).findFirst({
             locale,
-            fields: ['documentId', 'updatedAt', ...(featureKey === 'festival' ? ['enabled'] : [])] as any,
-            populate: (featureKey === 'festival' ? FESTIVAL_POPULATE : { seo: { fields: ['noIndex'] } }) as any,
+            fields: ['documentId', 'updatedAt', ...(featureKey === 'festival' || featureKey === 'blackFriday' ? ['enabled'] : [])] as any,
+            ...(featureKey === 'blackFriday' ? {} : { populate: (featureKey === 'festival' ? FESTIVAL_POPULATE : { seo: { fields: ['noIndex'] } }) as any }),
           }),
         ]);
-        if (featureKey === 'festival' ? !festivalTemplateEnabled(singleton) : !singleton) return [];
+        if (featureKey === 'festival' ? !festivalTemplateEnabled(singleton) : featureKey === 'blackFriday' ? !blackFridayTemplateEnabled(singleton) : !singleton) return [];
         // Only the first (authoritative) owner renders the campaign template —
         // any accidental duplicate falls back to its generic entity page, so
         // it must not inherit the singleton's route metadata.

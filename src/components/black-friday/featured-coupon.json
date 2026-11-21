@@ -1,0 +1,38 @@
+{
+  "collectionName": "components_black_friday_featured_coupons",
+  "info": {
+    "displayName": "Black Friday Featured Coupon",
+    "icon": "star"
+  },
+  "options": {},
+  "attributes": {
+    "coupon": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::coupon.coupon"
+    },
+    "imageOverride": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": [
+        "images"
+      ]
+    },
+    "discountOverride": {
+      "type": "string",
+      "maxLength": 24
+    },
+    "titleOverride": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "badge": {
+      "type": "string",
+      "maxLength": 24
+    },
+    "proofText": {
+      "type": "string",
+      "maxLength": 40
+    }
+  }
+}
