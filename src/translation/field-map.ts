@@ -63,6 +63,7 @@ const COPY_ONLY_SUBFIELDS = new Set([
   'linkOverride',
   'preSaleCtaHref',
   'liveCtaHref',
+  'viewAllHref',
   'canonicalUrl',
   'targetId',
   'anchorId',

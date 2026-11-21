@@ -146,6 +146,19 @@ const ENTRY = {
 };
 
 describe('collectTranslatableLeaves', () => {
+  it('copies Black Friday View All links without translating them', () => {
+    const strapi = {
+      getModel: (uid: string) => ({
+        'api::black-friday-page.black-friday-page': {
+          attributes: { topBrands: { type: 'component', component: 'black-friday.top-brands', pluginOptions: { i18n: { localized: true } } } },
+        },
+        'black-friday.top-brands': { attributes: { heading: { type: 'string' }, viewAllHref: { type: 'string' } } },
+      } as Record<string, any>)[uid],
+    } as any;
+    const entry = { topBrands: { heading: 'Shop top brands', viewAllHref: '/stores/' } };
+    expect(collectTranslatableLeaves(strapi, 'api::black-friday-page.black-friday-page', entry).map((leaf) => leaf.path)).toEqual(['topBrands.heading']);
+  });
+
   it('collects localized text (with budgets), walks components, skips copy-only subfields', () => {
     const leaves = collectTranslatableLeaves(fakeStrapi(), 'api::store.store', ENTRY);
     const byPath = new Map(leaves.map((leaf) => [leaf.path, leaf]));
