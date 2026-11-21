@@ -22,6 +22,7 @@ const SINGLETON_TEMPLATES = new Set<EntityPageTemplate>([
   'dealTemplate',
   'independenceDayTemplate',
   'festivalTemplate',
+  'blackFridayTemplate',
 ]);
 
 export function isEntityTemplateUid(uid: string): boolean {

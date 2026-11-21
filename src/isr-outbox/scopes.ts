@@ -9,6 +9,7 @@ import { toRouteSlug } from '../utils/route-normalization';
 import { entityDealPageSlug } from '../api/entity-deal-page/services/entity-deal-route';
 import { DEFAULT_CONTENT_LOCALE } from '../constants/content-locales';
 import { DOCUMENT_WRITE_ACTIONS } from '../constants/document-write';
+import { BLACK_FRIDAY_PAGE_UID } from '../constants/black-friday-page';
 import { FESTIVAL_PAGE_UID } from '../constants/festival-page';
 import {
   ABOUT_PAGE_SLUG,
@@ -141,6 +142,13 @@ export async function computeScope(
   if (uid === FESTIVAL_PAGE_UID) {
     return {
       slugs: await entityTemplateOwnerSlugs(strapi, 'festivalTemplate'),
+      sitemap: true,
+      refreshScopes: ['routes'],
+    };
+  }
+  if (uid === BLACK_FRIDAY_PAGE_UID) {
+    return {
+      slugs: await entityTemplateOwnerSlugs(strapi, 'blackFridayTemplate'),
       sitemap: true,
       refreshScopes: ['routes'],
     };
@@ -356,7 +364,8 @@ export async function computeScope(
           ).flat()
         : [];
     const festivalOwnerSlugs = await entityTemplateOwnerSlugs(strapi, 'festivalTemplate');
-    const slugs = [...new Set([slug, ...campaignOwnerSlugs, ...festivalOwnerSlugs])];
+    const blackFridayOwnerSlugs = await entityTemplateOwnerSlugs(strapi, 'blackFridayTemplate');
+    const slugs = [...new Set([slug, ...campaignOwnerSlugs, ...festivalOwnerSlugs, ...blackFridayOwnerSlugs])];
     const routeMetadataChanged =
       data
       && typeof data === 'object'

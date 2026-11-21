@@ -1,3 +1,4 @@
+import { blackFridayTemplateEnabled } from '../../black-friday-page/services/black-friday-content';
 import { FESTIVAL_POPULATE, festivalTemplateEnabled } from '../../festival-page/services/festival-content';
 import type { Core } from '@strapi/strapi';
 import {
@@ -41,8 +42,14 @@ async function singletonReady(
   feature: FeatureDefinition,
 ): Promise<{ ready: boolean; reason?: string; activationEnabled?: boolean }> {
   const row: any = await strapi.documents(feature.sourceUid as any).findFirst({
-    populate: (feature.key === 'festival' ? FESTIVAL_POPULATE : '*') as any,
+    ...(feature.key === 'blackFriday' ? {} : { populate: (feature.key === 'festival' ? FESTIVAL_POPULATE : '*') as any }),
   });
+
+  if (feature.key === 'blackFriday') {
+    const activationEnabled = blackFridayTemplateEnabled(row);
+    return { ready: true, activationEnabled,
+      ...(!activationEnabled ? { reason: 'Enable the Black Friday template in its settings.' } : {}) };
+  }
 
   if (feature.key === 'festival') {
     return { ready: true, activationEnabled: festivalTemplateEnabled(row),

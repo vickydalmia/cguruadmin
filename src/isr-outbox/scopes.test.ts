@@ -5,11 +5,13 @@ import { isRedirectNoteOnlyChange } from './scopes';
 function strapiWithFindOne(
   findOne: (args: any) => Promise<any>,
   findMany: (uid: string, args: any) => Promise<any[]> = async () => [],
+  blackFridayOwners: (uid: string) => any[] = () => [],
 ) {
   return {
     documents: (uid: string) => ({
       findOne,
       findMany: (args: any) => {
+        if (args?.filters?.pageTemplate === 'blackFridayTemplate') return Promise.resolve(blackFridayOwners(uid));
         if (args?.filters?.pageTemplate === 'dealTemplate') {
           return Promise.resolve([
             {
@@ -18,6 +20,7 @@ function strapiWithFindOne(
             },
           ]);
         }
+        
         if (args?.filters?.pageTemplate === 'independenceDayTemplate') {
           return Promise.resolve([
             {
@@ -42,6 +45,14 @@ describe('preDeleteScope failure escalation', () => {
         : []);
     await expect(computeScope(strapi, 'api::festival-page.festival-page', 'update', 'settings'))
       .resolves.toEqual({ slugs: ['seasonal-specials'], sitemap: true, refreshScopes: ['routes'] });
+  });
+
+  it('targets only the Black Friday owner when its settings change', async () => {
+    const { computeScope } = await import('./scopes');
+    const strapi = strapiWithFindOne(async () => null, async () => [], (uid) =>
+      uid === 'api::store.store' ? [{ documentId: 'black-friday-owner', slug: 'black-friday-sale' }] : []);
+    await expect(computeScope(strapi, 'api::black-friday-page.black-friday-page', 'update', 'settings'))
+      .resolves.toEqual({ slugs: ['black-friday-sale'], sitemap: true, refreshScopes: ['routes'] });
   });
 
   it('refreshes Festival when a source Coupon changes or is deleted', async () => {

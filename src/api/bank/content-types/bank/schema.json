@@ -31,7 +31,8 @@
         "default",
         "dealTemplate",
         "independenceDayTemplate",
-        "festivalTemplate"
+        "festivalTemplate",
+        "blackFridayTemplate"
       ],
       "default": "default",
       "required": true
