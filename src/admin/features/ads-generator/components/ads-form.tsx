@@ -1,14 +1,16 @@
 import * as React from 'react';
-import { Box, Button, Flex, Typography } from '@strapi/design-system';
+import { Box, Button, Checkbox, Flex, Typography } from '@strapi/design-system';
 import { Duplicate, Plus, Trash } from '@strapi/icons';
 import type { AdsGeneratorOptions } from '../../../../constants/ads-generator';
 import { duplicateRow, newRow, type CampaignRow } from '../api';
 import { AdsCampaignFields } from './ads-campaign-fields';
 
 /** The campaign repeater: one open row at a time keeps a long batch readable. */
-export function AdsForm({ options, rows, onChange, onSubmit, onNewBatch, busy, recovering }: {
+export function AdsForm({ options, rows, arabic, onArabicChange, onChange, onSubmit, onNewBatch, busy, recovering }: {
   options: AdsGeneratorOptions;
   rows: CampaignRow[];
+  arabic: boolean;
+  onArabicChange: (next: boolean) => void;
   onChange: (next: CampaignRow[]) => void;
   onSubmit: () => void;
   /** Clears every campaign and the output; asked to confirm first. */
@@ -35,6 +37,14 @@ export function AdsForm({ options, rows, onChange, onSubmit, onNewBatch, busy, r
   return (
     <form onSubmit={(event) => { event.preventDefault(); onSubmit(); }}>
       <Flex direction="column" alignItems="stretch" gap={4}>
+        <Box>
+          <Checkbox checked={arabic} disabled={busy} onCheckedChange={(next: boolean | 'indeterminate') => onArabicChange(next === true)}>
+            Download in Arabic
+          </Checkbox>
+          <Typography variant="pi" textColor="neutral600">
+            Ads are written and checked in English first, then translated.
+          </Typography>
+        </Box>
         {rows.map((row, index) => (
           <Box key={row.id} borderColor="neutral200" hasRadius padding={4}>
             <Flex justifyContent="space-between" alignItems="center" gap={3} wrap="wrap">

@@ -216,6 +216,14 @@ describe('ads generator service', () => {
     expect(service.latest('1').job).toBeNull();
   });
 
+  it('does not bring back an older run after the latest is dismissed', async () => {
+    const { service } = setup();
+    await finish(service, service.generate(batch(formInput()), '1'));
+    const latest = await finish(service, service.generate(batch(formInput({ campaignName: 'Second' })), '1'));
+    service.dismiss(latest.id, '1');
+    expect(service.latest('1').job).toBeNull();
+  });
+
   it('counts each campaign against the limit, all or none', () => {
     const { service, call } = setup({ perHour: 1 });
     expect(service.generate(batch(formInput(), formInput({ campaignName: 'Second' })), '1').status).toBe(429);

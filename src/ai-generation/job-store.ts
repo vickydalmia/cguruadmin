@@ -55,8 +55,9 @@ export class JobStore<TResult> {
     const running = this.runningFor(userId);
     if (running) return running;
     let latest: JobRecord<TResult> | null = null;
-    for (const job of this.jobs.values()) if (job.userId === userId && !job.dismissed) latest = job;
-    return latest ? view(latest) : null;
+    for (const job of this.jobs.values()) if (job.userId === userId) latest = job;
+    // A dismissed latest job means "start fresh": older runs must not come back.
+    return latest && !latest.dismissed ? view(latest) : null;
   }
 
   start(userId: string, request: JobRequest = {}): GenerationJob<TResult> {

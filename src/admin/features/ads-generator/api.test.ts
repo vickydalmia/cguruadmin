@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { adsGeneratorApi, adsGeneratorError, duplicateRow, EMPTY_FORM, GENERATE_PATH, jobPath, newRow, OPTIONS_PATH, progressLabel, restoredRows, retryRequest } from './api';
+import { adsGeneratorApi, adsGeneratorError, duplicateRow, EMPTY_FORM, GENERATE_PATH, jobPath, newRow, OPTIONS_PATH, progressLabel, downloadableCsv, restoredLanguage, restoredRows, retryRequest } from './api';
 
 describe('ads generator admin api', () => {
   it('calls the admin routes', async () => {
@@ -34,6 +34,15 @@ describe('ads generator admin api', () => {
     const run = (status: 'running' | 'succeeded' | 'failed', index: number) => ({ index, campaignName: String(index), key: String(index), status, attempt: 1 });
     expect(progressLabel({ id: 'j', status: 'running', attempt: 0, maxAttempts: 3, startedAt: '', result: { campaigns: [run('succeeded', 0), run('failed', 1), run('running', 2)] } }))
       .toBe('Generated 2 of 3 campaigns…');
+  });
+
+  it('downloads the Arabic CSV when there is one and restores the language', () => {
+    const csv = { filename: 'a.csv', content: 'en', rows: 1 };
+    const ar = { filename: 'a-ar.csv', content: 'ar', rows: 1 };
+    expect(downloadableCsv({ csv } as any)).toBe(csv);
+    expect(downloadableCsv({ csv, arabic: { csv: ar } } as any)).toBe(ar);
+    expect(restoredLanguage({ language: 'ar' })).toBe('ar');
+    expect(restoredLanguage({})).toBe('en');
   });
 
   it('gives repeated copies unique names within the length limit', () => {

@@ -16,15 +16,19 @@ export function AdsResult({ result }: { result: AdsGeneratorResult }) {
         </Flex>
       </Flex>
 
-      <Notes title="Before you enable the campaign" items={result.manualSteps} />
+      <Notes title="Before you enable the campaign" items={[...(result.arabic?.manualSteps ?? []), ...result.manualSteps]} />
       {result.warnings.length > 0 && <Notes title="Warnings" items={result.warnings} tone="warning600" />}
+      {(result.arabic?.warnings.length ?? 0) > 0 && <Notes title="Arabic warnings" items={result.arabic!.warnings} tone="warning600" />}
 
       <Box>
         <Typography variant="delta" tag="h3">Keywords (phrase match)</Typography>
         <Typography>{result.keywords.join(' · ')}</Typography>
       </Box>
 
-      {result.ads.map((ad, index) => <AdCopy key={index} title={`Ad ${index + 1}`} ad={ad} />)}
+      {result.arabic?.ads.map((ad, index) => (
+        <Box key={index} dir="rtl" lang="ar"><AdCopy title={`Arabic ad ${index + 1} (this is the download)`} ad={ad} /></Box>
+      ))}
+      {result.ads.map((ad, index) => <AdCopy key={index} title={result.arabic ? `English source ${index + 1}` : `Ad ${index + 1}`} ad={ad} />)}
     </Flex>
   );
 }
