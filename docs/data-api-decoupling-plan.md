@@ -31,7 +31,7 @@ Astro SSR → strapi-render :1338 (unchanged — render-path decoupling is out o
 
 ## Phase A — Prerequisites (cguruadmin + operator)
 
-### A1. C-1 indexes (audit `AUDIT-2026-07-29.md:345`, "Do first")
+### A1. C-1 indexes (do first)
 New reconciler in `cguruadmin/database/` following the existing `runOptionalDdl` graceful-degradation pattern (`database/search-index-migration.js:27-77` — savepoints, 42501/55P03 handling, `CREATE INDEX CONCURRENTLY` outside txn with `lock_timeout`/`statement_timeout` guards). Indexes on `coupons` and `deals`:
 - partial `(published_on DESC, published_at DESC) WHERE content_status = 'published'`
 - `(content_status, expires_at)`
@@ -87,7 +87,7 @@ Single SQL read against `coupons|deals` + `_lnk` joins for owner name (stores→
 - Swap at the three seams only; all caching/limiting/validation machinery untouched. Shadow mode: serve the Strapi result, fire-and-forget the data-api call, log a structured diff (path, mismatch fields, latency pair) — never affects the response.
 - Redirect seam: `RedirectService` gets the map origin from config instead of hardcoded `astroOrigin`.
 
-### C2. H-11 secret split (audit `AUDIT-2026-07-29.md:1209`)
+### C2. H-11 secret split
 - Retire the resolver-bearer usage of `ISR_ADMIN_SECRET` (`server.ts:212` `strapiToken: config.adminSecret`) once `REDEEM_UPSTREAM=data-api`.
 - Split remaining domains: `ISR_GATEWAY_ADMIN_SECRET` (Strapi outbox → gateway `/revalidate` + `/internal/isr/*`) distinct from Strapi's own deploy/search-status secret. Both repos' env examples updated; cguruadmin outbox runtime (`src/isr-outbox/runtime.ts:12-35`) reads the new var name (keep old name as fallback for one release).
 - Bind the control plane to a second Fastify listener on the VPC private IP only (audit recommendation): `/revalidate` and `/internal/isr/*` move off the public listener so they are unreachable via CloudFront. Add a failed-bearer rate-limit bucket as defense in depth.
