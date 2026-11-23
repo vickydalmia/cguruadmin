@@ -48,6 +48,7 @@ import {
   type DroppedSelection,
 } from './entity-coupon-layout-eligibility';
 import { couponLayoutInvalidation } from './entity-coupon-layout-invalidation';
+import { entityTemplateOwnerSlugs } from '../../site-configuration/services/entity-template-owners';
 
 
 export const ENTITY_COUPON_LAYOUT_ACTION =
@@ -282,6 +283,10 @@ export function createEntityCouponLayoutService({
         config,
         entity.slug,
       );
+      // The Black Friday template renders each category's saved Coupon order.
+      const templateOwnerPaths = config.uid === 'api::category.category'
+        ? (await entityTemplateOwnerSlugs(strapi, 'blackFridayTemplate')).map((slug) => `/${slug}/`)
+        : [];
       if (pagePaths.length === 0) {
         strapi.log.warn(
           `[coupon-layout] ${config.uid} ${entityDocumentId} has an unroutable slug `
@@ -341,7 +346,7 @@ export function createEntityCouponLayoutService({
             eventKey,
             // `sitemap` because the write bumps `updated_at`, which is the
             // value the sitemap publishes as lastmod for this entity.
-            payload: { paths: pagePaths, scopes: ['sitemap'] },
+            payload: { paths: [...new Set([...pagePaths, ...templateOwnerPaths])], scopes: ['sitemap'] },
             reason: `${config.uid} coupon layout update`,
           });
           // Curated relations changed at the Query Engine layer, which the
