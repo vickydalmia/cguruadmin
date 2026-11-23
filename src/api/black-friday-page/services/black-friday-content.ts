@@ -1,5 +1,6 @@
 import { FESTIVAL_CATEGORIES_POPULATE, FESTIVAL_CATEGORY_COUPON } from '../../festival-page/services/festival-categories';
 import { brandRef, categoryRef, dealRef, PUBLISHED_OFFER_FILTER, storeRef } from '../../../utils/offer-visibility';
+import { ORDERED_COUPON_LIMIT } from '../../../api/entity-coupon-layout/services/entity-coupon-layout-parse';
 
 export const BLACK_FRIDAY_POPULATE = {
   hero: { populate: { tickets: { populate: { store: storeRef, brand: brandRef } } } },
@@ -71,6 +72,44 @@ export function addCampaignCategoryRows(section: any, categories: CampaignCatego
 
 export function curatedCategoryRows(section: any): Set<unknown> {
   return new Set((section?.categories ?? []).filter((row: any) => row?.coupons?.length));
+}
+
+const TOP_PICK_LIMIT = 4;
+const documentIds = (rows: unknown, limit: number): string[] => (Array.isArray(rows) ? rows : [])
+  .map((row: any) => row?.documentId)
+  .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)
+  .slice(0, limit);
+
+/** Each automatic category's saved page order: Top Picks, then Ordered Coupons. */
+export async function loadCategoryCouponOrders(strapi: any, section: any, curated: ReadonlySet<unknown>, locale: string): Promise<Map<string, string[]>> {
+  const ids = [...new Set<string>((section?.categories ?? [])
+    .filter((row: any) => !curated.has(row))
+    .map((row: any) => row?.category?.documentId)
+    .filter(Boolean))];
+  if (!ids.length) return new Map();
+  const categories = await strapi.documents('api::category.category').findMany({
+    locale,
+    filters: { documentId: { $in: ids } },
+    fields: ['documentId'],
+    populate: { topPickCoupons: { fields: ['documentId'] }, orderedCoupons: { fields: ['documentId'] } },
+    limit: ids.length,
+  });
+  return new Map((categories ?? []).map((category: any) => [category.documentId, [
+    ...documentIds(category.topPickCoupons, TOP_PICK_LIMIT),
+    ...documentIds(category.orderedCoupons, ORDERED_COUPON_LIMIT),
+  ]]));
+}
+
+/** Saved coupons lead in their saved order; the remaining coupons stay newest first. */
+export function applyCategoryCouponOrders(section: any, curated: ReadonlySet<unknown>, orders: ReadonlyMap<string, readonly string[]>): void {
+  for (const row of section?.categories ?? []) {
+    const order = orders.get(row?.category?.documentId);
+    if (curated.has(row) || !order?.length || !Array.isArray(row.coupons)) continue;
+    const byId = new Map(row.coupons.map((coupon: any) => [coupon.documentId, coupon]));
+    const lead = [...new Set(order)].flatMap((id) => (byId.has(id) ? [byId.get(id)] : []));
+    const leading = new Set(lead);
+    row.coupons = [...lead, ...row.coupons.filter((coupon: any) => !leading.has(coupon))];
+  }
 }
 
 export function limitAutomaticCoupons(section: any, curated: ReadonlySet<unknown>, limit = BLACK_FRIDAY_LISTING_LIMIT): void {
