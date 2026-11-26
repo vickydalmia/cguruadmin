@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { addCampaignCategoryRows, applyCategoryCouponOrders, blackFridayDealCategorySlug, curatedCategoryRows, limitAutomaticCoupons, limitListingDeals, loadCategoryCouponOrders, selectCampaignCategories } from './black-friday-content';
+import { addCampaignCategoryRows, applyCategoryCouponOrders, blackFridayDealCategorySlug, curatedCategoryRows, limitListingDeals, loadCategoryCouponOrders, selectCampaignCategories } from './black-friday-content';
 
 const offers = (count: number) => Array.from({ length: count }, (_, index) => ({ documentId: `offer-${index}` }));
 
@@ -27,23 +27,12 @@ describe('Black Friday campaign categories', () => {
 });
 
 describe('Black Friday listing limits', () => {
-  it('limits automatic categories and keeps editor selections complete', () => {
-    const curatedRow = { coupons: offers(5) };
-    const automaticRow: any = { coupons: [] };
-    const section = { categories: [curatedRow, automaticRow] };
-    const curated = curatedCategoryRows(section);
-    automaticRow.coupons = offers(5);
-    curatedRow.coupons = offers(5);
-    limitAutomaticCoupons(section, curated, 2);
-    expect([curatedRow.coupons.length, automaticRow.coupons.length]).toEqual([5, 2]);
-  });
-  it('keeps the saved category order before the 24-coupon limit', () => {
+  it('keeps every automatic Coupon after applying the saved order', () => {
     const row: any = { category: { documentId: 'bf' }, coupons: offers(30) };
     const section = { categories: [row] };
     applyCategoryCouponOrders(section, new Set(), new Map([['bf', ['offer-29', 'missing', 'offer-5', 'offer-29']]]));
-    limitAutomaticCoupons(section, new Set(), 24);
     expect(row.coupons.slice(0, 3).map((coupon: any) => coupon.documentId)).toEqual(['offer-29', 'offer-5', 'offer-0']);
-    expect(row.coupons).toHaveLength(24);
+    expect(row.coupons).toHaveLength(30);
   });
   it('does not override coupons picked in the template', () => {
     const row: any = { category: { documentId: 'bf' }, coupons: offers(3) };

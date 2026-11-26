@@ -18,7 +18,7 @@ export function blackFridayTemplateEnabled(row: { enabled?: boolean | null } | n
   return row?.enabled === true;
 }
 
-/** Automatic listings ship in the page HTML, so each category keeps its newest offers only. */
+/** Product Deal listings ship in the page HTML, so each category keeps its newest Deals only. */
 export const BLACK_FRIDAY_LISTING_LIMIT = 24;
 
 const BLACK_FRIDAY_TEMPLATE = 'blackFridayTemplate';
@@ -109,12 +109,6 @@ export function applyCategoryCouponOrders(section: any, curated: ReadonlySet<unk
     const lead = [...new Set(order)].flatMap((id) => (byId.has(id) ? [byId.get(id)] : []));
     const leading = new Set(lead);
     row.coupons = [...lead, ...row.coupons.filter((coupon: any) => !leading.has(coupon))];
-  }
-}
-
-export function limitAutomaticCoupons(section: any, curated: ReadonlySet<unknown>, limit = BLACK_FRIDAY_LISTING_LIMIT): void {
-  for (const row of section?.categories ?? []) {
-    if (!curated.has(row) && Array.isArray(row.coupons)) row.coupons = row.coupons.slice(0, limit);
   }
 }
 
