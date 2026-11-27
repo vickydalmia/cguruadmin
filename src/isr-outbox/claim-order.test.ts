@@ -1,6 +1,6 @@
 import knexFactory, { type Knex } from 'knex';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { IsrOutboxStore } from './store';
+import { IsrOutboxStore, SKIPPED_ONLY_RETRY_LIMIT } from './store';
 
 describe('outbox claim scheduling and repair', () => {
   let db: Knex;
@@ -61,4 +61,59 @@ describe('outbox claim scheduling and repair', () => {
     expect(after.status).toBe('processing');
     expect(after.lock_token).toBeTruthy();
   });
+
+  it('repairs a long-stuck store update so its next delivery can converge', async () => {
+    const paths = ['/', '/sitemap_index.xml', '/flipkart-coupons/', '/coupon/3/', '/coupon/3167/', '/deal/453/', '/festival-test/'];
+    await insert(1, 10000, {
+      reason: 'api::store.store update',
+      attempt_count: 10843,
+      last_error: 'gateway skipped 3 path(s): /coupon/3167/, /deal/453/, /festival-test/',
+      payload: JSON.stringify({ paths, scopes: ['sitemap'] }),
+    });
+    const claimed = await store.claim();
+    expect(claimed).toMatchObject({ state: 'event', event: { attemptCount: 10843, payload: { paths, optionalPaths: ['/coupon/3167/', '/deal/453/'] } } });
+    expect(JSON.parse((await db('isr_outbox').first()).payload).optionalPaths).toEqual(['/coupon/3167/', '/deal/453/']);
+  });
+
+  async function claimAndFail(attemptCount: number, error: string, eventKey = 'a820deae-ee88-422f-b29b-54655d6b95a6') {
+    await insert(1, 10000, { event_key: eventKey, reason: 'api::store.store update', attempt_count: attemptCount, payload: JSON.stringify({ paths: ['/', '/festival-test/'] }) });
+    const claimed = await store.claim();
+    if (claimed?.state !== 'event') throw new Error('expected a claimed event');
+    return { claimed: claimed.event, retry: await store.scheduleRetry(claimed.event, error) };
+  }
+
+  it('retires a skipped-only delivery once the retry limit is reached', async () => {
+    const error = 'gateway skipped 1 path(s): /festival-test/';
+    const { retry } = await claimAndFail(SKIPPED_ONLY_RETRY_LIMIT - 1, error);
+    expect(retry).toEqual({ owned: true, attemptCount: SKIPPED_ONLY_RETRY_LIMIT, delayMs: 0, retired: true });
+    const row = await db('isr_outbox').first();
+    expect(row).toMatchObject({ status: 'failed', attempt_count: SKIPPED_ONLY_RETRY_LIMIT, lock_token: null, last_error: error });
+    expect(row.invalid_at).toBeTruthy();
+    expect(await store.claim()).toBeNull();
+  });
+
+  it('keeps retrying a skipped-only delivery below the limit', async () => {
+    const { retry } = await claimAndFail(SKIPPED_ONLY_RETRY_LIMIT - 2, 'gateway skipped 1 path(s): /festival-test/');
+    expect(retry).toMatchObject({ owned: true, attemptCount: SKIPPED_ONLY_RETRY_LIMIT - 1 });
+    expect(retry.retired).toBeUndefined();
+    expect(await db('isr_outbox').first()).toMatchObject({ status: 'pending' });
+  });
+
+  it.each(['translation-isr:ar', 'telegram-feed:page'])(
+    'never retires a coalescing row whose count is inherited from merged work (%s)',
+    async (eventKey) => {
+      const { retry } = await claimAndFail(SKIPPED_ONLY_RETRY_LIMIT + 5, 'gateway skipped 1 path(s): /festival-test/', eventKey);
+      expect(retry.retired).toBeUndefined();
+      expect(await db('isr_outbox').first()).toMatchObject({ status: 'pending' });
+    },
+  );
+
+  it.each(['gateway returned 503: unavailable', 'fetch failed', 'gateway returned 401'])(
+    'never retires a recoverable failure, however old (%s)',
+    async (error) => {
+      const { retry } = await claimAndFail(50_000, error);
+      expect(retry.retired).toBeUndefined();
+      expect(await db('isr_outbox').first()).toMatchObject({ status: 'pending', attempt_count: 50_001 });
+    },
+  );
 });

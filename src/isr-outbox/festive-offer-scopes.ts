@@ -159,8 +159,12 @@ export async function festiveMerchantScope(
     const isDeal = offerUid === 'api::deal.deal';
     for (const offer of offers) {
       const numericId = Number(offer?.id);
+      // The scan matches every offer naming this merchant, including
+      // expired, scheduled, and draft ones whose detail pages are not routes.
+      // Optional: live pages still render, absent ones no longer fail the
+      // whole command (which re-ran this fan-out every retry, forever).
       if (Number.isSafeInteger(numericId) && numericId > 0) {
-        slugs.add(`${isDeal ? 'deal' : 'coupon'}/${numericId}`);
+        optionalSlugs.add(`${isDeal ? 'deal' : 'coupon'}/${numericId}`);
       }
       if (typeof offer?.documentId === 'string') {
         (isDeal ? dealIds : couponIds).push(offer.documentId);

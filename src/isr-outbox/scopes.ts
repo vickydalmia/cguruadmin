@@ -347,7 +347,10 @@ export async function computeScope(
       if (festiveScope.full) return festiveScope;
       // Nobody checks out with this merchant: nothing festive renders, so
       // only the narrow entity scope below applies.
-      if (!festiveScope.slugs?.length) festiveScope = null;
+      // Offer detail pages are optional slugs, so count both lists.
+      if (!festiveScope.slugs?.length && !festiveScope.optionalSlugs?.length) {
+        festiveScope = null;
+      }
     }
 
     // The deal landing page bakes store pill labels/logos and category tab

@@ -69,7 +69,13 @@ export async function offerRelationScope(
   const numericId = Number(doc.id);
   if (!Number.isSafeInteger(numericId) || numericId <= 0) return null;
   const detailKind = uid === 'api::coupon.coupon' ? 'coupon' : 'deal';
-  const slugs = new Set<string>([`${detailKind}/${numericId}`]);
+  // The offer's own detail page is a route only while the offer is public:
+  // saving a draft, scheduled, or expired offer, or deleting one, leaves it
+  // absent. Required, that absence failed delivery forever. Optional, the
+  // gateway still renders it when live and accepts its absence only after an
+  // inventory refresh. The pages that LIST the offer stay required.
+  const slugs = new Set<string>();
+  const optionalSlugs = new Set<string>([`${detailKind}/${numericId}`]);
   const entitySlugs = new Set<string>();
   const entityDealSlugs = new Set<string>();
   for (const [field, kind] of RELATION_KINDS) {
@@ -120,9 +126,11 @@ export async function offerRelationScope(
   }
   for (const slug of entitySlugs) slugs.add(slug);
 
+  for (const slug of entityDealSlugs) optionalSlugs.add(slug);
+
   return {
     slugs: [...slugs],
-    optionalSlugs: [...entityDealSlugs],
+    optionalSlugs: [...optionalSlugs],
   };
 }
 

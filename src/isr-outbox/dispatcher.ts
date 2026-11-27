@@ -69,7 +69,7 @@ export interface OutboxDeliveryStore {
   scheduleRetry(
     event: IsrOutboxEvent,
     error: string,
-  ): Promise<{ owned: boolean; attemptCount: number; delayMs: number }>;
+  ): Promise<{ owned: boolean; attemptCount: number; delayMs: number; retired?: true }>;
 }
 
 /** Per-row gateway key: UUID-stable across retries, unique across DB restores. */
@@ -176,6 +176,8 @@ export async function dispatchOne(
           error: Error;
           attemptCount: number;
           delayMs: number;
+          /** Moved to `failed`: it will not be attempted again. */
+          retired?: true;
         },
   ) => void = () => undefined,
 ): Promise<boolean> {
@@ -447,7 +449,17 @@ export class IsrOutboxDispatcher {
               phase: result.phase,
             });
           }
-          if (result.state === 'retry') {
+          if (result.state === 'retry' && result.retired) {
+            logIsrOutbox(this.strapi, 'error', 'isr.outbox.delivery_retired', {
+              outboxId: result.event.id,
+              eventKey: result.event.eventKey,
+              reason: result.event.reason,
+              payload: outboxPayloadSummary(result.event.payload),
+              attemptCount: result.attemptCount,
+              error: result.error.message,
+              alert: true,
+            });
+          } else if (result.state === 'retry') {
             const level =
               result.attemptCount >= this.config.alertAfterAttempts
                 ? 'error'
