@@ -79,7 +79,8 @@ describe('preDeleteScope failure escalation', () => {
     await expect(
       preDeleteScope(strapi, 'api::coupon.coupon', 'doc1', 'update'),
     ).resolves.toEqual({
-      slugs: ['coupon/41', 'amazon', 'independence-day-sale-coupons'],
+      slugs: ['amazon', 'independence-day-sale-coupons'],
+      optionalSlugs: ['coupon/41'],
       homepage: true,
       sitemap: true,
       refreshScopes: ['routes'],
@@ -179,12 +180,11 @@ describe('deal-of-the-day landing page scope', () => {
       computeScope(strapi, 'api::deal.deal', 'update', 'doc1'),
     ).resolves.toEqual({
       slugs: [
-        'deal/42',
         'amazon',
         'independence-day-sale-coupons',
         'deal-of-the-day',
       ],
-      optionalSlugs: ['amazon-india-deals'],
+      optionalSlugs: ['deal/42', 'amazon-india-deals'],
       homepage: true,
       sitemap: true,
       refreshScopes: ['routes'],
@@ -203,7 +203,8 @@ describe('deal-of-the-day landing page scope', () => {
     await expect(
       computeScope(strapi, 'api::deal.deal', 'update', 'doc1'),
     ).resolves.toEqual({
-      slugs: ['deal/42', 'independence-day-sale-coupons', 'deal-of-the-day'],
+      slugs: ['independence-day-sale-coupons', 'deal-of-the-day'],
+      optionalSlugs: ['deal/42'],
       homepage: true,
       sitemap: true,
       refreshScopes: ['routes'],
@@ -216,7 +217,8 @@ describe('deal-of-the-day landing page scope', () => {
     await expect(
       computeScope(strapi, 'api::coupon.coupon', 'update', 'doc1'),
     ).resolves.toEqual({
-      slugs: ['coupon/42', 'amazon', 'independence-day-sale-coupons'],
+      slugs: ['amazon', 'independence-day-sale-coupons'],
+      optionalSlugs: ['coupon/42'],
       homepage: true,
       sitemap: true,
       refreshScopes: ['routes'],
@@ -235,7 +237,8 @@ describe('deal-of-the-day landing page scope', () => {
     await expect(
       computeScope(strapi, 'api::coupon.coupon', 'create', 'coupon-new'),
     ).resolves.toEqual({
-      slugs: ['coupon/73', 'independence-day-sale-coupons'],
+      slugs: ['independence-day-sale-coupons'],
+      optionalSlugs: ['coupon/73'],
       homepage: true,
       sitemap: true,
       refreshScopes: ['routes'],
@@ -279,11 +282,11 @@ describe('deal-of-the-day landing page scope', () => {
       ),
     ).resolves.toEqual({
       slugs: [
-        'coupon/77',
         'amazon',
         'electronics',
         'independence-day-sale-coupons',
       ],
+      optionalSlugs: ['coupon/77'],
       homepage: true,
       sitemap: true,
       refreshScopes: ['routes'],
@@ -320,13 +323,12 @@ describe('deal-of-the-day landing page scope', () => {
       computeScope(strapi, 'api::deal.deal', 'update', 'deal-1'),
     ).resolves.toEqual({
       slugs: [
-        'deal/88',
         'samsung',
         'hdfc',
         'independence-day-sale-coupons',
         'deal-of-the-day',
       ],
-      optionalSlugs: ['samsung-mobile-deals', 'hdfc-bank-deals'],
+      optionalSlugs: ['deal/88', 'samsung-mobile-deals', 'hdfc-bank-deals'],
       homepage: true,
       sitemap: true,
       refreshScopes: ['routes'],
@@ -354,7 +356,8 @@ describe('deal-of-the-day landing page scope', () => {
         'delete',
       ),
     ).resolves.toEqual({
-      slugs: ['coupon/91', 'hdfc', 'independence-day-sale-coupons'],
+      slugs: ['hdfc', 'independence-day-sale-coupons'],
+      optionalSlugs: ['coupon/91'],
       homepage: true,
       sitemap: true,
       refreshScopes: ['routes'],
@@ -367,12 +370,11 @@ describe('deal-of-the-day landing page scope', () => {
       preDeleteScope(strapi, 'api::deal.deal', 'doc1', 'update'),
     ).resolves.toEqual({
       slugs: [
-        'deal/42',
         'amazon',
         'independence-day-sale-coupons',
         'deal-of-the-day',
       ],
-      optionalSlugs: ['amazon-india-deals'],
+      optionalSlugs: ['deal/42', 'amazon-india-deals'],
       homepage: true,
       sitemap: true,
       refreshScopes: ['routes'],
@@ -432,12 +434,10 @@ describe('festive offer scope', () => {
         'flipkart',
         'deal-of-the-day',
         'independence-day-sale-coupons',
-        'coupon/11',
         'amazon-coupons',
-        'deal/7',
         'nike',
       ],
-      optionalSlugs: ['flipkart-deals', 'nike-deals'],
+      optionalSlugs: ['flipkart-deals', 'coupon/11', 'deal/7', 'nike-deals'],
     });
   });
 
@@ -588,9 +588,8 @@ describe('festive offer scope', () => {
         'flipkart',
         'deal-of-the-day',
         'independence-day-sale-coupons',
-        'coupon/3',
       ],
-      optionalSlugs: ['flipkart-deals'],
+      optionalSlugs: ['flipkart-deals', 'coupon/3'],
       refreshScopes: ['routes'],
     });
   });

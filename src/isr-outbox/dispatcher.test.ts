@@ -381,6 +381,19 @@ describe('dispatchOne', () => {
     });
   });
 
+  it('reports a delivery the store retired so it is logged as final', async () => {
+    const error = 'gateway skipped 1 path(s): /festival-test/';
+    const store = {
+      claim: vi.fn(async () => ({ state: 'event' as const, event })),
+      markDelivered: vi.fn(),
+      scheduleRetry: vi.fn(async () => ({ owned: true, attemptCount: 20, delayMs: 0, retired: true as const })),
+    };
+    const results: any[] = [];
+    await dispatchOne(store, vi.fn(async () => { throw new Error(error); }), (result) => results.push(result));
+    expect(results[0]).toMatchObject({ state: 'retry', attemptCount: 20, delayMs: 0, retired: true });
+    expect(results[0].error.message).toBe(error);
+  });
+
   it('does nothing when no event can be claimed', async () => {
     const store = {
       claim: vi.fn(async () => null),
@@ -437,4 +450,30 @@ it('delivers manual commands through the versioned capability endpoint', async (
     gatewayUrl: 'http://gateway.test', adminSecret: 'secret', requestTimeoutMs: 1000,
   }, fetchImpl as any);
   expect(fetchImpl.mock.calls[0][0]).toBe('http://gateway.test/internal/isr/manual-refresh');
+});
+
+it('logs a retired skipped-only delivery as a final alert, not another retry', async () => {
+  const error = vi.fn();
+  const warn = vi.fn();
+  const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ paths: [], skippedPaths: ['/festival-test/'] }), { status: 202 }));
+  const dispatcher = new IsrOutboxDispatcher(
+    { log: { error, warn, info: vi.fn() } } as any,
+    {
+      gatewayUrl: 'http://gateway.test', adminSecret: 'test-secret', pollMs: 2_000, batchSize: 1,
+      requestTimeoutMs: 90_000, leaseMs: 120_000, maxBackoffMs: 300_000, alertAfterAttempts: 5,
+      backlogAlertMs: 1_800_000, retentionDays: 30, maxPaths: 5_000, maxPayloadBytes: 900_000,
+    },
+    fetchImpl as any,
+  );
+  (dispatcher as any).nextCleanupAt = Number.MAX_SAFE_INTEGER;
+  (dispatcher as any).nextBacklogCheckAt = Number.MAX_SAFE_INTEGER;
+  (dispatcher as any).store = {
+    claim: vi.fn(async () => ({ state: 'event' as const, event: { ...event, attemptCount: 19 } })),
+    markDelivered: vi.fn(),
+    scheduleRetry: vi.fn(async () => ({ owned: true, attemptCount: 20, delayMs: 0, retired: true as const })),
+  };
+  await (dispatcher as any).drain();
+  const lines = [...error.mock.calls, ...warn.mock.calls].map(([line]) => String(line));
+  expect(lines.some((line) => line.includes('isr.outbox.delivery_retired') && line.includes('/festival-test/'))).toBe(true);
+  expect(lines.some((line) => line.includes('isr.outbox.delivery_failed'))).toBe(false);
 });

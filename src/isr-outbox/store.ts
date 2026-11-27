@@ -6,7 +6,7 @@ import type {
   IsrOutboxPayload,
 } from './types';
 import { readOutboxPayloadBounds } from './config';
-import { reconcileDeletedOfferRetry } from './deleted-offer-retry';
+import { reconcileSkippedOfferRetry } from './skipped-offer-retry';
 import {
   boundOutboxPayload,
   hasOutboxWork,
@@ -18,6 +18,24 @@ import {
 } from '../utils/database-dialect';
 
 export const ISR_OUTBOX_TABLE = 'isr_outbox';
+
+/**
+ * A delivery whose only failure is "gateway skipped N path(s)" can never
+ * converge by retrying: the gateway already refreshed its route inventory and
+ * still has no such route, and it accepted every other page in the command.
+ * Retire it after roughly an hour (1s doubling to the 5-minute backoff cap)
+ * instead of re-running the full fan-out every five minutes indefinitely.
+ */
+export const SKIPPED_ONLY_RETRY_LIMIT = 20;
+const SKIPPED_ONLY_ERROR = /^gateway skipped [1-9]\d* path\(s\):/;
+/**
+ * Only per-write rows (random UUID keys) are retired. Logical keys
+ * (`translation-isr:<locale>`, `telegram-feed:page`, …) absorb later writes and
+ * inherit the max attempt count on merge, so their count does not measure how
+ * long THIS work has been failing; retiring them could drop fresh work after
+ * a single attempt.
+ */
+const PER_WRITE_EVENT_KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Translation-wave debounce: slide by this much per merge … */
 const TRANSLATION_DEBOUNCE_MS = 500;
@@ -267,7 +285,7 @@ export class IsrOutboxStore {
         };
       }
       const lockToken = randomUUID();
-      const repaired = reconcileDeletedOfferRetry(payload, row.reason, row.last_error);
+      const repaired = reconcileSkippedOfferRetry(payload, row.last_error);
       await trx(ISR_OUTBOX_TABLE)
         .where({ id: row.id })
         .update({
@@ -311,16 +329,25 @@ export class IsrOutboxStore {
   async scheduleRetry(
     event: IsrOutboxEvent,
     error: string,
-  ): Promise<{ owned: boolean; attemptCount: number; delayMs: number }> {
+  ): Promise<{ owned: boolean; attemptCount: number; delayMs: number; retired?: true }> {
     const attemptCount = event.attemptCount + 1;
     // Manual commands must not poison content delivery or later deployment
     // gates. Preserve the failed command for diagnosis and an explicit retry.
-    if (event.payload.manualRefresh && (attemptCount >= 12 || /gateway returned (400|401|403|404|413)\b/.test(error))) {
+    // Skipped-only failures of a per-write row are retired the same way once
+    // retrying has had ample time to cover inventory lag.
+    const undeliverableManual =
+      event.payload.manualRefresh
+      && (attemptCount >= 12 || /gateway returned (400|401|403|404|413)\b/.test(error));
+    const exhaustedSkippedOnly =
+      attemptCount >= SKIPPED_ONLY_RETRY_LIMIT
+      && SKIPPED_ONLY_ERROR.test(error)
+      && PER_WRITE_EVENT_KEY.test(event.eventKey);
+    if (undeliverableManual || exhaustedSkippedOnly) {
       const updated = await this.strapi.db.connection(ISR_OUTBOX_TABLE)
         .where({ id: event.id, status: 'processing', lock_token: event.lockToken })
         .update({ status: 'failed', attempt_count: attemptCount, invalid_at: new Date(),
           locked_at: null, lock_token: null, last_error: error.slice(0, 4000) });
-      return { owned: Number(updated) === 1, attemptCount, delayMs: 0 };
+      return { owned: Number(updated) === 1, attemptCount, delayMs: 0, retired: true };
     }
     const delayMs = Math.min(
       this.maxBackoffMs,
